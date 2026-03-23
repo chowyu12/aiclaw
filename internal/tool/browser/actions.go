@@ -51,7 +51,7 @@ func (bm *browserManager) actionNavigate(reqCtx context.Context, p browserParams
 	extCtx, extCancel := context.WithDeadline(tabCtx, extDL)
 	defer extCancel()
 
-	bm.updateTabInfo(extCtx)
+	bm.updateTabInfo(extCtx, tabID)
 
 	var title string
 	_ = chromedp.Run(extCtx, chromedp.Title(&title))
@@ -152,7 +152,8 @@ func (bm *browserManager) actionEvaluate(reqCtx context.Context, p browserParams
 		return "", err
 	}
 
-	runCtx, cancel := mergedActionContextMax(tabCtx, reqCtx, 10*time.Second)
+	// innerText / 大 DOM 的 evaluate 可能较慢，与 snapshot 等一致使用默认交互窗口（原 10s 易误判为 context canceled）
+	runCtx, cancel := mergedActionContextMax(tabCtx, reqCtx, defaultInteractionDeadline)
 	defer cancel()
 
 	var evalResult any
@@ -225,6 +226,10 @@ func (bm *browserManager) actionClick(reqCtx context.Context, p browserParams) (
 	if err != nil {
 		return "", err
 	}
+	tabID, err := bm.effectiveTabID(p.TargetID)
+	if err != nil {
+		return "", err
+	}
 	runCtx, runCancel := mergedActionContext(tabCtx, reqCtx)
 	defer runCancel()
 
@@ -278,7 +283,7 @@ func (bm *browserManager) actionClick(reqCtx context.Context, p browserParams) (
 	}
 
 	time.Sleep(300 * time.Millisecond)
-	bm.updateTabInfo(runCtx)
+	bm.updateTabInfo(runCtx, tabID)
 
 	var currentURL string
 	_ = chromedp.Run(runCtx, chromedp.Location(&currentURL))
@@ -361,13 +366,17 @@ func (bm *browserManager) actionType(reqCtx context.Context, p browserParams) (s
 	}
 
 	if p.Submit {
+		tabID, tabErr := bm.effectiveTabID(p.TargetID)
+		if tabErr != nil {
+			return "", tabErr
+		}
 		subTo, subCancel := context.WithTimeout(runCtx, 8*time.Second)
 		if err := chromedp.Run(subTo, chromedp.SendKeys(sel, "\r", chromedp.ByQuery)); err != nil {
 			log.WithError(err).Warn("[Browser] submit (Enter) failed")
 		}
 		subCancel()
 		time.Sleep(500 * time.Millisecond)
-		bm.updateTabInfo(runCtx)
+		bm.updateTabInfo(runCtx, tabID)
 	}
 
 	return browserJSON("ok", true), nil
@@ -569,10 +578,16 @@ func (bm *browserManager) actionUpload(reqCtx context.Context, p browserParams) 
 		return "", fmt.Errorf("paths is required for upload")
 	}
 
+	resolvedPaths := make([]string, 0, len(p.Paths))
 	for _, path := range p.Paths {
-		if _, statErr := os.Stat(path); statErr != nil {
+		resolved, pathErr := resolveBrowserUploadPath(path)
+		if pathErr != nil {
+			return "", pathErr
+		}
+		if _, statErr := os.Stat(resolved); statErr != nil {
 			return "", fmt.Errorf("file not found: %s", path)
 		}
+		resolvedPaths = append(resolvedPaths, resolved)
 	}
 
 	tabCtx, err := bm.getTabCtx(p.TargetID)
@@ -582,14 +597,14 @@ func (bm *browserManager) actionUpload(reqCtx context.Context, p browserParams) 
 	runCtx, runCancel := mergedActionContext(tabCtx, reqCtx)
 	defer runCancel()
 
-	if err := chromedp.Run(runCtx, chromedp.SetUploadFiles(sel, p.Paths, chromedp.ByQuery)); err != nil {
+	if err := chromedp.Run(runCtx, chromedp.SetUploadFiles(sel, resolvedPaths, chromedp.ByQuery)); err != nil {
 		return "", fmt.Errorf("upload: %w", err)
 	}
 
 	changeJS := fmt.Sprintf(`(function(){var el=document.querySelector(%q);if(el)el.dispatchEvent(new Event('change',{bubbles:true}))})()`, sel)
 	_ = chromedp.Run(runCtx, chromedp.Evaluate(changeJS, nil))
 
-	return browserJSON("ok", true, "uploaded", len(p.Paths)), nil
+	return browserJSON("ok", true, "uploaded", len(resolvedPaths)), nil
 }
 
 func (bm *browserManager) actionWait(reqCtx context.Context, p browserParams) (string, error) {
@@ -599,7 +614,14 @@ func (bm *browserManager) actionWait(reqCtx context.Context, p browserParams) (s
 	}
 
 	if p.WaitTime > 0 {
-		time.Sleep(time.Duration(p.WaitTime) * time.Millisecond)
+		d := time.Duration(p.WaitTime) * time.Millisecond
+		t := time.NewTimer(d)
+		defer t.Stop()
+		select {
+		case <-reqCtx.Done():
+			return "", fmt.Errorf("wait: %w", reqCtx.Err())
+		case <-t.C:
+		}
 		return browserJSON("ok", true, "waited_ms", p.WaitTime), nil
 	}
 
@@ -1061,13 +1083,17 @@ func (bm *browserManager) actionBack(reqCtx context.Context, p browserParams) (s
 	if err != nil {
 		return "", err
 	}
+	tabID, err := bm.effectiveTabID(p.TargetID)
+	if err != nil {
+		return "", err
+	}
 	runCtx, runCancel := mergedActionContext(tabCtx, reqCtx)
 	defer runCancel()
 	if err := chromedp.Run(runCtx, chromedp.NavigateBack()); err != nil {
 		return "", fmt.Errorf("back: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	bm.updateTabInfo(runCtx)
+	bm.updateTabInfo(runCtx, tabID)
 
 	var currentURL string
 	_ = chromedp.Run(runCtx, chromedp.Location(&currentURL))
@@ -1079,13 +1105,17 @@ func (bm *browserManager) actionForward(reqCtx context.Context, p browserParams)
 	if err != nil {
 		return "", err
 	}
+	tabID, err := bm.effectiveTabID(p.TargetID)
+	if err != nil {
+		return "", err
+	}
 	runCtx, runCancel := mergedActionContext(tabCtx, reqCtx)
 	defer runCancel()
 	if err := chromedp.Run(runCtx, chromedp.NavigateForward()); err != nil {
 		return "", fmt.Errorf("forward: %w", err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	bm.updateTabInfo(runCtx)
+	bm.updateTabInfo(runCtx, tabID)
 
 	var currentURL string
 	_ = chromedp.Run(runCtx, chromedp.Location(&currentURL))
@@ -1097,13 +1127,17 @@ func (bm *browserManager) actionReload(reqCtx context.Context, p browserParams) 
 	if err != nil {
 		return "", err
 	}
+	tabID, err := bm.effectiveTabID(p.TargetID)
+	if err != nil {
+		return "", err
+	}
 	runCtx, runCancel := mergedActionContext(tabCtx, reqCtx)
 	defer runCancel()
 	if err := chromedp.Run(runCtx, chromedp.Reload()); err != nil {
 		return "", fmt.Errorf("reload: %w", err)
 	}
 	_ = chromedp.Run(runCtx, chromedp.WaitReady("body", chromedp.ByQuery))
-	bm.updateTabInfo(runCtx)
+	bm.updateTabInfo(runCtx, tabID)
 
 	var currentURL string
 	_ = chromedp.Run(runCtx, chromedp.Location(&currentURL))

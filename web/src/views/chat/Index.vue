@@ -5,7 +5,9 @@
       <div class="aside-header">
         <div class="aside-brand">
           <span class="aside-brand-dot" />
-          <span class="aside-title">会话</span>
+          <span class="aside-title" :class="{ 'aside-title--agent': !!defaultAgent }" :title="defaultAgent ? currentAgentName : undefined">
+            {{ defaultAgent ? currentAgentName : '会话' }}
+          </span>
         </div>
         <el-button class="aside-new-btn" circle size="small" @click="newConversation" :disabled="!selectedAgentUUID" title="新对话">
           <el-icon><Plus /></el-icon>
@@ -20,8 +22,7 @@
               <el-icon :size="22"><Cpu /></el-icon>
             </div>
             <div class="agent-info">
-              <div class="agent-name">{{ defaultAgent.name }}</div>
-              <div class="agent-model">{{ defaultAgent.model_name }}</div>
+              <div class="agent-model agent-model--solo">{{ defaultAgent.model_name }}</div>
             </div>
             <router-link to="/settings" class="settings-link">
               <el-icon :size="14"><Setting /></el-icon>
@@ -732,6 +733,8 @@ function truncateText(text: string, maxLen: number): string {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
+  flex: 1;
 }
 .aside-brand-dot {
   width: 8px;
@@ -746,6 +749,15 @@ function truncateText(text: string, maxLen: number): string {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--chat-aside-title);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.aside-title--agent {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-size: 15px;
 }
 .aside-new-btn {
   background: var(--chat-aside-btn-bg) !important;
@@ -834,14 +846,6 @@ function truncateText(text: string, maxLen: number): string {
   min-width: 0;
   flex: 1;
 }
-.agent-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--chat-agent-name);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .agent-model {
   font-size: 11px;
   color: var(--chat-agent-model);
@@ -849,6 +853,11 @@ function truncateText(text: string, maxLen: number): string {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.agent-model--solo {
+  margin-top: 0;
+  font-size: 12px;
+  font-weight: 500;
 }
 .aside-divider {
   padding: 6px 6px 8px;

@@ -53,6 +53,8 @@ const router = createRouter({
         { path: '', redirect: '/chat' },
         { path: 'chat', name: 'Chat', component: () => import('../views/chat/Index.vue') },
         { path: 'settings', name: 'Settings', component: () => import('../views/settings/Index.vue') },
+        { path: 'mcp', name: 'Mcp', component: () => import('../views/mcp/Index.vue') },
+        { path: 'skill', name: 'Skill', component: () => import('../views/skill/Index.vue') },
         { path: 'providers', name: 'Providers', component: () => import('../views/provider/Index.vue') },
         { path: 'tools', name: 'Tools', component: () => import('../views/tool/Index.vue') },
         { path: 'tools/create', name: 'ToolCreate', component: () => import('../views/tool/Form.vue') },

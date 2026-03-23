@@ -3,10 +3,17 @@
     <el-aside :width="isCollapse ? '64px' : '220px'" class="app-aside">
       <div class="aside-inner">
         <div class="logo">
-          <div class="logo-brand" :class="{ 'logo-brand--collapsed': isCollapse }">
+          <div
+            class="logo-brand"
+            :class="{ 'logo-brand--collapsed': isCollapse }"
+          >
             <AiclawLogo :compact="isCollapse" size="md" />
           </div>
-          <el-icon class="collapse-btn" :size="20" @click="isCollapse = !isCollapse">
+          <el-icon
+            class="collapse-btn"
+            :size="20"
+            @click="isCollapse = !isCollapse"
+          >
             <Fold v-if="!isCollapse" />
             <Expand v-else />
           </el-icon>
@@ -24,21 +31,29 @@
             <el-icon><ChatDotRound /></el-icon>
             <template #title>对话</template>
           </el-menu-item>
-          <el-menu-item index="/settings">
-            <el-icon><Setting /></el-icon>
-            <template #title>设置</template>
-          </el-menu-item>
-          <el-menu-item index="/providers">
-            <el-icon><Connection /></el-icon>
-            <template #title>模型供应商</template>
+          <el-menu-item index="/skill">
+            <el-icon><Reading /></el-icon>
+            <template #title>技能</template>
           </el-menu-item>
           <el-menu-item index="/tools">
             <el-icon><SetUp /></el-icon>
             <template #title>工具</template>
           </el-menu-item>
+          <el-menu-item index="/providers">
+            <el-icon><Connection /></el-icon>
+            <template #title>模型</template>
+          </el-menu-item>
+          <el-menu-item index="/mcp">
+            <el-icon><Link /></el-icon>
+            <template #title>MCP</template>
+          </el-menu-item>
+          <el-menu-item index="/settings">
+            <el-icon><Setting /></el-icon>
+            <template #title>设置</template>
+          </el-menu-item>
           <el-menu-item index="/logs">
             <el-icon><Document /></el-icon>
-            <template #title>执行日志</template>
+            <template #title>日志</template>
           </el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
@@ -66,9 +81,18 @@
             </div>
           </div>
           <div v-else class="sidebar-theme-collapsed">
-            <el-tooltip :content="themeStore.mode === 'dark' ? '切换浅色' : '切换深色'" placement="right">
-              <button type="button" class="theme-icon-btn single" @click="themeStore.toggleMode()">
-                <el-icon v-if="themeStore.mode === 'dark'" :size="18"><Sunny /></el-icon>
+            <el-tooltip
+              :content="themeStore.mode === 'dark' ? '切换浅色' : '切换深色'"
+              placement="right"
+            >
+              <button
+                type="button"
+                class="theme-icon-btn single"
+                @click="themeStore.toggleMode()"
+              >
+                <el-icon v-if="themeStore.mode === 'dark'" :size="18"
+                  ><Sunny
+                /></el-icon>
                 <el-icon v-else :size="18"><Moon /></el-icon>
               </button>
             </el-tooltip>
@@ -76,12 +100,19 @@
           <template v-if="!isCollapse">
             <div class="sidebar-user-line">
               <span class="username">Web 已登录</span>
-              <el-button text type="danger" size="small" @click="handleLogout">退出</el-button>
+              <el-button text type="danger" size="small" @click="handleLogout"
+                >退出</el-button
+              >
             </div>
           </template>
           <template v-else>
             <el-tooltip content="退出登录" placement="right">
-              <el-button class="sidebar-logout-icon" text type="danger" @click="handleLogout">
+              <el-button
+                class="sidebar-logout-icon"
+                text
+                type="danger"
+                @click="handleLogout"
+              >
                 <el-icon :size="18"><SwitchButton /></el-icon>
               </el-button>
             </el-tooltip>
@@ -98,33 +129,41 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
-import { useThemeStore } from '@/stores/theme'
-import AiclawLogo from '@/components/brand/AiclawLogo.vue'
+import { ref, computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { useAuthStore } from "@/stores/auth";
+import { useThemeStore } from "@/stores/theme";
+import AiclawLogo from "@/components/brand/AiclawLogo.vue";
 
-const route = useRoute()
-const router = useRouter()
-const authStore = useAuthStore()
-const themeStore = useThemeStore()
-const isCollapse = ref(false)
+const route = useRoute();
+const router = useRouter();
+const authStore = useAuthStore();
+const themeStore = useThemeStore();
+const isCollapse = ref(false);
 
 const activeMenu = computed(() => {
-  const p = route.path
-  if (p === '/' || p === '') return '/chat'
-  return p
-})
+  const p = route.path;
+  if (p === "/" || p === "") return "/chat";
+  return p;
+});
 
 function handleLogout() {
-  authStore.logout()
-  router.push('/login')
+  authStore.logout();
+  router.push("/login");
 }
 </script>
 
 <style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-html, body, #app { height: 100%; }
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  height: 100%;
+}
 </style>
 
 <style scoped>
@@ -221,7 +260,9 @@ html, body, #app { height: 100%; }
   cursor: pointer;
   background: transparent;
   color: var(--aic-theme-btn-color);
-  transition: color 0.15s, background 0.15s;
+  transition:
+    color 0.15s,
+    background 0.15s;
 }
 .theme-icon-btn:hover {
   color: var(--aic-sidebar-icon-hover);

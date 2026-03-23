@@ -56,10 +56,10 @@ type browserParams struct {
 	Clear  bool   `json:"clear"`
 
 	// Cookie management
-	Operation   string `json:"operation"`
-	CookieName  string `json:"cookie_name"`
-	CookieValue string `json:"cookie_value"`
-	CookieURL   string `json:"cookie_url"`
+	Operation    string `json:"operation"`
+	CookieName   string `json:"cookie_name"`
+	CookieValue  string `json:"cookie_value"`
+	CookieURL    string `json:"cookie_url"`
 	CookieDomain string `json:"cookie_domain"`
 
 	// Storage management
@@ -601,14 +601,19 @@ func (bm *browserManager) tempFilePath(ext string) string {
 	return filepath.Join(bm.tmpDir, fmt.Sprintf("browser_%s%s", uuid.New().String()[:8], ext))
 }
 
-func (bm *browserManager) updateTabInfo(runCtx context.Context) {
+// updateTabInfo 用 runCtx 对应 Tab 的当前 URL/标题更新 tabs 映射。tabID 为空时使用 activeTab（仅作兜底）。
+func (bm *browserManager) updateTabInfo(runCtx context.Context, tabID string) {
 	var currentURL, title string
 	_ = chromedp.Run(runCtx, chromedp.Location(&currentURL))
 	_ = chromedp.Run(runCtx, chromedp.Title(&title))
 
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
-	if tab, ok := bm.tabs[bm.activeTab]; ok {
+	id := tabID
+	if id == "" {
+		id = bm.activeTab
+	}
+	if tab, ok := bm.tabs[id]; ok {
 		if currentURL != "" {
 			tab.url = currentURL
 		}
@@ -616,6 +621,31 @@ func (bm *browserManager) updateTabInfo(runCtx context.Context) {
 			tab.title = title
 		}
 	}
+}
+
+// resolveBrowserUploadPath 将路径解析为绝对路径，并限制在 workspace.Root() 之下（未初始化 workspace 时仅做 Clean/Abs，供测试等场景）。
+func resolveBrowserUploadPath(path string) (string, error) {
+	clean, err := filepath.Abs(filepath.Clean(path))
+	if err != nil {
+		return "", fmt.Errorf("invalid upload path: %w", err)
+	}
+	root := workspace.Root()
+	if root == "" {
+		return clean, nil
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", fmt.Errorf("workspace root: %w", err)
+	}
+	rootAbs = filepath.Clean(rootAbs)
+	rel, err := filepath.Rel(rootAbs, clean)
+	if err != nil {
+		return "", fmt.Errorf("upload path must be under workspace: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("upload path must be under workspace root")
+	}
+	return clean, nil
 }
 
 func isURLSafe(rawURL string) error {

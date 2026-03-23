@@ -2,7 +2,7 @@
   <div class="aic-page">
     <div class="aic-page-head">
       <h1 class="aic-title">执行日志</h1>
-      <p class="aic-sub">按会话查看对话与执行步骤，支持展开消息与步骤详情。</p>
+      <p class="aic-sub">按会话查看对话与执行步骤；工具消息与「仅发起工具调用、无正文」的中间轮次 Agent 不在时间线展示，详情见最终回复下的「执行步骤」。</p>
     </div>
     <div class="aic-page-body">
     <el-card class="aic-card" shadow="never">
@@ -30,15 +30,16 @@
           <template #default="{ row }">
             <div class="expand-content" v-loading="row._loading">
               <div v-if="!row._messages || row._messages.length === 0" class="empty-msg">暂无消息记录</div>
+              <div v-else-if="timelineMessages(row).length === 0" class="empty-msg">暂无对话消息（工具结果请在 Agent 消息的「执行步骤」中查看）</div>
               <div v-else class="message-timeline">
-                <div v-for="msg in row._messages" :key="msg.id" class="msg-item">
+                <div v-for="msg in timelineMessages(row)" :key="msg.id" class="msg-item">
                   <div class="msg-header">
                     <el-tag :type="msg.role === 'user' ? '' : msg.role === 'assistant' ? 'success' : 'info'" size="small" effect="dark">
                       {{ roleLabel(msg.role) }}
                     </el-tag>
                     <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
                   </div>
-                  <div class="msg-body">
+                  <div v-if="(msg.content ?? '').trim()" class="msg-body">
                     <pre class="msg-content">{{ truncate(msg.content, 800) }}</pre>
                   </div>
 
@@ -228,6 +229,23 @@ async function handleDelete(id: number) {
   } catch {
     ElMessage.error('删除失败')
   }
+}
+
+/**
+ * 时间线展示规则：
+ * - 不展示 role=tool（工具输出在执行步骤里）
+ * - 不展示无正文的 assistant（多轮工具调用时中间几轮只有 tool_calls、无 content，步骤挂在最终那条 assistant 上）
+ */
+function timelineMessages(row: ConvRow): MsgRow[] {
+  if (!row._messages?.length) return []
+  return row._messages.filter(m => {
+    if (m.role === 'tool') return false
+    if (m.role === 'assistant' && !(m.content ?? '').trim()) {
+      // 若该条已单独挂了执行步骤（例如以后按轮次落库），仍展示为「仅步骤」卡片
+      return !!(m.steps && m.steps.length > 0)
+    }
+    return true
+  })
 }
 
 function roleLabel(role: string) {

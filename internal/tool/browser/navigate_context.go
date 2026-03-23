@@ -24,7 +24,7 @@ const (
 	interactionDeadlineCap     = 180 * time.Second
 
 	// 分阶段超时：避免 SendKeys/Click 在错误 ref 上占满整段交互截止时间。
-	interactionWaitVisibleTimeout = 12 * time.Second
+	interactionWaitVisibleTimeout  = 12 * time.Second
 	interactionPointerPhaseTimeout = 24 * time.Second
 )
 
@@ -65,9 +65,14 @@ func navigateMergedDeadline(reqCtx context.Context, rawURL string) (deadline tim
 		postExtract = heavyPostExtract
 	}
 
-	deadline = time.Now().Add(navMax)
+	now := time.Now()
+	deadline = now.Add(navMax)
 	if d, ok := reqCtx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
+	}
+	// 与 mergedActionContextMax 一致：避免 WithDeadline(parent, 已过期时间) 导致导航立刻 context canceled。
+	if !deadline.After(now) {
+		deadline = now.Add(navMax)
 	}
 	return deadline, bodyWait, postExtract
 }
@@ -89,11 +94,26 @@ func mergedActionContextMax(tabCtx, reqCtx context.Context, maxDur time.Duration
 	if maxDur > interactionDeadlineCap {
 		maxDur = interactionDeadlineCap
 	}
-	deadline := time.Now().Add(maxDur)
+	now := time.Now()
+	deadline := now.Add(maxDur)
 	if d, ok := reqCtx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	return context.WithDeadline(tabCtx, deadline)
+	// WithDeadline(parent, 已过期时间) 会得到「立即可取消」的 ctx，chromedp 会立刻报 context canceled。
+	if !deadline.After(now) {
+		deadline = now.Add(maxDur)
+	}
+	ctx, cancel := context.WithDeadline(tabCtx, deadline)
+	// 请求/Agent 在动作中途取消时，结束 chromedp.Run。
+	if reqCtx.Err() != nil {
+		cancel()
+		return ctx, func() {}
+	}
+	stop := context.AfterFunc(reqCtx, cancel)
+	return ctx, func() {
+		stop()
+		cancel()
+	}
 }
 
 // runChromedpNavigate 使用与 reqCtx 合并后的截止时间执行 Navigate + body WaitReady（短等待策略由 URL 主机名决定）。
