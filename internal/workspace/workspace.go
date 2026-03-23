@@ -11,11 +11,12 @@ var root string
 
 type ctxKey struct{}
 
-func WithAgentUUID(ctx context.Context, uuid string) context.Context {
-	return context.WithValue(ctx, ctxKey{}, uuid)
+// WithWorkdirScope 将工作区子目录名（当前即单例 Agent 的 UUID）注入 context，供 sandbox/tmp 等工具解析。
+func WithWorkdirScope(ctx context.Context, scopeID string) context.Context {
+	return context.WithValue(ctx, ctxKey{}, scopeID)
 }
 
-func AgentUUIDFromContext(ctx context.Context) string {
+func WorkdirScopeFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(ctxKey{}).(string); ok {
 		return v
 	}
@@ -147,18 +148,18 @@ func AgentTmp(uuid string) string {
 	return filepath.Join(d, "tmp")
 }
 
-// AgentSandboxFromCtx 从 context 中提取 agent UUID 并返回对应 sandbox 目录。
+// AgentSandboxFromCtx 从 context 中的 WorkdirScope 返回对应 sandbox 目录。
 func AgentSandboxFromCtx(ctx context.Context) string {
-	if uuid := AgentUUIDFromContext(ctx); uuid != "" {
-		return AgentSandbox(uuid)
+	if id := WorkdirScopeFromContext(ctx); id != "" {
+		return AgentSandbox(id)
 	}
 	return Sandbox()
 }
 
-// AgentTmpFromCtx 从 context 中提取 agent UUID 并返回对应 tmp 目录。
+// AgentTmpFromCtx 从 context 中的 WorkdirScope 返回对应 tmp 目录。
 func AgentTmpFromCtx(ctx context.Context) string {
-	if uuid := AgentUUIDFromContext(ctx); uuid != "" {
-		return AgentTmp(uuid)
+	if id := WorkdirScopeFromContext(ctx); id != "" {
+		return AgentTmp(id)
 	}
 	return Tmp()
 }

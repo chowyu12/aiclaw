@@ -7,18 +7,19 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 const (
-	defaultWSURL           = "wss://openws.work.weixin.qq.com"
-	defaultReconnectDelay  = 1000
-	reconnectMaxDelay      = 30000
-	maxMissedPong          = 2
-	replyAckTimeout        = 5000
-	maxReplyQueueSize      = 100
+	defaultWSURL          = "wss://openws.work.weixin.qq.com"
+	defaultReconnectDelay = 1000
+	reconnectMaxDelay     = 30000
+	maxMissedPong         = 2
+	replyAckTimeout       = 5000
+	maxReplyQueueSize     = 100
 )
 
 type replyQueueItem struct {
@@ -50,6 +51,9 @@ type WsConnectionManager struct {
 
 	reconnectAttempts int
 	missedPongCount   int
+
+	// authOK 在收到 SUBSCRIBE 成功回包后置 1；断线、重连拨号开始时置 0。企微侧通常在认证完成前不会稳定下发用户消息。
+	authOK atomic.Uint32
 
 	heartbeatTimer *time.Timer
 
@@ -118,6 +122,7 @@ func (m *WsConnectionManager) Connect() {
 }
 
 func (m *WsConnectionManager) dialAndRun() {
+	m.authOK.Store(0)
 	dialer := websocket.Dialer{}
 	ws, _, err := dialer.Dial(m.wsURL, nil)
 	if err != nil {
@@ -192,6 +197,7 @@ func (m *WsConnectionManager) handleIncoming(data []byte) {
 
 func (m *WsConnectionManager) handleAuthResponse(frame *WsFrame) {
 	if frame.ErrCode != 0 {
+		m.authOK.Store(0)
 		m.logger.Error(fmt.Sprintf("Authentication failed: errcode=%d, errmsg=%s", frame.ErrCode, frame.ErrMsg))
 		if m.OnError != nil {
 			m.OnError(fmt.Errorf("authentication failed: %s (code: %d)", frame.ErrMsg, frame.ErrCode))
@@ -199,6 +205,7 @@ func (m *WsConnectionManager) handleAuthResponse(frame *WsFrame) {
 		return
 	}
 	m.logger.Info("Authentication successful")
+	m.authOK.Store(1)
 	m.startHeartbeat()
 	if m.OnAuthenticated != nil {
 		m.OnAuthenticated()
@@ -215,6 +222,7 @@ func (m *WsConnectionManager) handleHeartbeatResponse(frame *WsFrame) {
 }
 
 func (m *WsConnectionManager) handleClose(reason string) {
+	m.authOK.Store(0)
 	m.stopHeartbeat()
 	m.clearPendingMessages("WebSocket connection closed (" + reason + ")")
 	if m.OnDisconnected != nil {
@@ -516,6 +524,7 @@ func (m *WsConnectionManager) clearPendingMessages(reason string) {
 // Disconnect 断开连接。
 func (m *WsConnectionManager) Disconnect() {
 	m.isManualClose = true
+	m.authOK.Store(0)
 	m.cancel()
 	m.stopHeartbeat()
 	m.clearPendingMessages("Connection manually closed")
@@ -529,4 +538,9 @@ func (m *WsConnectionManager) Disconnect() {
 // IsConnected 是否已连接（存在底层 conn）。
 func (m *WsConnectionManager) IsConnected() bool {
 	return m.ws != nil
+}
+
+// IsAuthenticated 是否已完成 SUBSCRIBE（订阅/认证）成功；此前企微通常不会稳定推送用户消息。
+func (m *WsConnectionManager) IsAuthenticated() bool {
+	return m.authOK.Load() == 1
 }

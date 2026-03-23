@@ -11,9 +11,11 @@ import (
 // Inbound 归一化后的入站消息（一次 Webhook 可能为 nil，例如仅 URL 校验）。
 type Inbound struct {
 	ThreadKey string
-	SenderID  string
-	Text      string
-	RawMeta   map[string]any
+	// ThreadKeyAliases 与 ThreadKey 指向同一线程的其它查找键（如企微先只有 user、后带上 chatid），用于合并为同一会话。
+	ThreadKeyAliases []string
+	SenderID         string
+	Text             string
+	RawMeta          map[string]any
 	// ReplyWith 若设置，Bridge 优先用它回包（如企微智能机器人 WebSocket），不再调用 WebhookAdapter.Reply。
 	ReplyWith func(ctx context.Context, text string) error
 }

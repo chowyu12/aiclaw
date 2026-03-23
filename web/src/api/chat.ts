@@ -11,7 +11,6 @@ export interface ChatFile {
 }
 
 export interface ChatRequest {
-  agent_id: string
   conversation_id?: string
   user_id?: string
   message: string
@@ -51,8 +50,11 @@ export interface ExecutionStep {
     tool_name?: string
     skill_name?: string
     skill_tools?: string[]
-    agent_uuid?: string
-    agent_name?: string
+    channel_id?: number
+    channel_uuid?: string
+    channel_type?: string
+    channel_thread_key?: string
+    channel_sender_id?: string
   }
   created_at: string
   _expanded?: boolean

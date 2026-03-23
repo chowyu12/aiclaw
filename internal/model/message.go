@@ -67,8 +67,21 @@ type StepMetadata struct {
 	ToolName    string   `json:"tool_name,omitzero"`
 	SkillName   string   `json:"skill_name,omitzero"`
 	SkillTools  []string `json:"skill_tools,omitzero"`
-	AgentUUID   string   `json:"agent_uuid,omitzero"`
-	AgentName   string   `json:"agent_name,omitzero"`
+	// 以下字段由渠道 Bridge 注入，写入执行步骤 metadata，便于控制台「执行日志」追溯来源。
+	ChannelID        int64  `json:"channel_id,omitzero"`
+	ChannelUUID      string `json:"channel_uuid,omitzero"`
+	ChannelType      string `json:"channel_type,omitzero"`
+	ChannelThreadKey string `json:"channel_thread_key,omitzero"`
+	ChannelSenderID  string `json:"channel_sender_id,omitzero"`
+}
+
+// ChannelExecTrace 标记请求来自第三方渠道（仅服务端内存传递，不参与 ChatRequest 的 JSON）。
+type ChannelExecTrace struct {
+	ID        int64
+	UUID      string
+	Type      string
+	ThreadKey string
+	SenderID  string
 }
 
 type ChatFileType string
@@ -96,12 +109,13 @@ type ChatFile struct {
 }
 
 type ChatRequest struct {
-	AgentID        string     `json:"agent_id"`
 	ConversationID string     `json:"conversation_id,omitzero"`
 	UserID         string     `json:"user_id"`
 	Message        string     `json:"message"`
 	Stream         bool       `json:"stream"`
 	Files          []ChatFile `json:"files,omitzero"`
+	// ExecChannel 由渠道 Bridge 设置；HTTP API 解码时忽略，避免客户端伪造。
+	ExecChannel *ChannelExecTrace `json:"-"`
 }
 
 type ChatResponse struct {

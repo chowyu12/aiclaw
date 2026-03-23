@@ -30,16 +30,24 @@ func (dingTalkAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, _ htt
 	if text == "" {
 		return jsonOK(), nil
 	}
-	conv := firstString(root, "conversationId", "conversation_id", "chatId", "chatid")
-	staff := firstString(root, "senderStaffId", "senderNick", "userId", "userid")
-	if conv == "" {
-		conv = staff
+	convID := strings.TrimSpace(firstString(root, "conversationId", "conversation_id", "chatId", "chatid"))
+	staff := strings.TrimSpace(firstString(root, "senderStaffId", "senderNick", "userId", "userid"))
+	thread := convID
+	if thread == "" {
+		thread = staff
 	}
-	thread := conv
 	if thread == "" {
 		thread = "dingtalk:" + ch.UUID
 	}
-	return jsonOK(), &Inbound{ThreadKey: thread, SenderID: staff, Text: text, RawMeta: root}
+	var aliases []string
+	if convID != "" && staff != "" && convID != staff {
+		if thread == convID {
+			aliases = append(aliases, staff)
+		} else {
+			aliases = append(aliases, convID)
+		}
+	}
+	return jsonOK(), &Inbound{ThreadKey: thread, ThreadKeyAliases: aliases, SenderID: staff, Text: text, RawMeta: root}
 }
 
 func dingTalkExtractText(m map[string]any) string {

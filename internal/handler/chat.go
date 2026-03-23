@@ -36,9 +36,6 @@ func fillIdentity(r *http.Request, req *model.ChatRequest) {
 	if id == nil {
 		return
 	}
-	if id.IsAgentToken() && req.AgentID == "" {
-		req.AgentID = id.AgentUUID
-	}
 	if req.UserID == "" && id.IsWebSession() {
 		req.UserID = auth.DefaultChatUserID
 	}
@@ -51,13 +48,9 @@ func (h *ChatHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fillIdentity(r, &req)
-	if req.AgentID == "" {
-		if a, err := agentpkg.TryLoadAgent(r.Context(), h.store); err == nil {
-			req.AgentID = a.UUID
-		} else {
-			httputil.BadRequest(w, "agent_id is required and no agent configured: add a model provider in settings first")
-			return
-		}
+	if _, err := agentpkg.TryLoadAgent(r.Context(), h.store); err != nil {
+		httputil.BadRequest(w, "no agent configured: add a model provider in settings first")
+		return
 	}
 	if req.Message == "" {
 		httputil.BadRequest(w, "message is required")
@@ -87,13 +80,9 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fillIdentity(r, &req)
-	if req.AgentID == "" {
-		if a, err := agentpkg.TryLoadAgent(r.Context(), h.store); err == nil {
-			req.AgentID = a.UUID
-		} else {
-			httputil.BadRequest(w, "agent_id is required and no agent configured: add a model provider in settings first")
-			return
-		}
+	if _, err := agentpkg.TryLoadAgent(r.Context(), h.store); err != nil {
+		httputil.BadRequest(w, "no agent configured: add a model provider in settings first")
+		return
 	}
 	if req.Message == "" {
 		httputil.BadRequest(w, "message is required")

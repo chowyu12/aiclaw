@@ -206,13 +206,11 @@ func TestTruncateLog(t *testing.T) {
 
 func TestExecute_Simple(t *testing.T) {
 	s := newMockStore()
-	agent, _ := seedAgent(t, s)
+	_, _ = seedAgent(t, s)
 	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{textResp("你好世界")}}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
-	result, err := exec.Execute(t.Context(), model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "hello",
-	})
+	result, err := exec.Execute(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -230,14 +228,14 @@ func TestExecute_Simple(t *testing.T) {
 	}
 }
 
-func TestExecute_AgentNotFound(t *testing.T) {
+func TestExecute_AgentNotInitialized(t *testing.T) {
 	s := newMockStore()
+	t.Cleanup(ClearTestAgent)
+	ClearTestAgent()
 	mockLLM := &mockLLMProvider{}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
-	_, err := exec.Execute(t.Context(), model.ChatRequest{
-		AgentID: "nonexistent", UserID: "u1", Message: "hello",
-	})
+	_, err := exec.Execute(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -255,9 +253,7 @@ func TestExecute_ProviderNotFound(t *testing.T) {
 	mockLLM := &mockLLMProvider{}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
-	_, err := exec.Execute(ctx, model.ChatRequest{
-		AgentID: "orphan", UserID: "u1", Message: "hello",
-	})
+	_, err := exec.Execute(ctx, model.ChatRequest{UserID: "u1", Message: "hello"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -274,9 +270,7 @@ func TestExecute_LLMError(t *testing.T) {
 	}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
-	_, err := exec.Execute(t.Context(), model.ChatRequest{
-		AgentID: "test-agent", UserID: "u1", Message: "hello",
-	})
+	_, err := exec.Execute(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"})
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -304,7 +298,7 @@ func TestExecute_WithToolCall(t *testing.T) {
 	exec := newTestExecutor(s, registry, mockLLM)
 
 	result, err := exec.Execute(t.Context(), model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "测试工具",
+		UserID: "u1", Message: "测试工具",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -383,7 +377,7 @@ func TestExecute_WithMultipleToolCalls(t *testing.T) {
 	exec := newTestExecutor(s, registry, mockLLM)
 
 	result, err := exec.Execute(t.Context(), model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "调用两个工具",
+		UserID: "u1", Message: "调用两个工具",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -422,7 +416,7 @@ func TestExecute_ToolCallError(t *testing.T) {
 	exec := newTestExecutor(s, registry, mockLLM)
 
 	result, err := exec.Execute(t.Context(), model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "试试工具",
+		UserID: "u1", Message: "试试工具",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -456,7 +450,7 @@ func TestExecute_ToolNotFoundByLLM(t *testing.T) {
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
 	result, err := exec.Execute(t.Context(), model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "test",
+		UserID: "u1", Message: "test",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -482,14 +476,14 @@ func TestExecute_WithSkills(t *testing.T) {
 	}
 
 	s := newMockStore()
-	agent, _ := seedAgent(t, s)
+	_, _ = seedAgent(t, s)
 	ctx := t.Context()
 
 	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{textResp("translated content")}}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
 	result, err := exec.Execute(ctx, model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "translate this",
+		UserID: "u1", Message: "translate this",
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -512,7 +506,7 @@ func TestExecute_WithSkills(t *testing.T) {
 
 func TestExecute_ConversationReuse(t *testing.T) {
 	s := newMockStore()
-	agent, _ := seedAgent(t, s)
+	_, _ = seedAgent(t, s)
 	mockLLM := &mockLLMProvider{
 		responses: []openai.ChatCompletionResponse{
 			textResp("first response"),
@@ -523,7 +517,7 @@ func TestExecute_ConversationReuse(t *testing.T) {
 	ctx := t.Context()
 
 	r1, err := exec.Execute(ctx, model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "第一条消息",
+		UserID: "u1", Message: "第一条消息",
 	})
 	if err != nil {
 		t.Fatalf("first call: %v", err)
@@ -531,7 +525,7 @@ func TestExecute_ConversationReuse(t *testing.T) {
 	convID := r1.ConversationID
 
 	r2, err := exec.Execute(ctx, model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "第二条消息",
+		UserID: "u1", Message: "第二条消息",
 		ConversationID: convID,
 	})
 	if err != nil {
@@ -558,13 +552,13 @@ func TestExecute_ConversationReuse(t *testing.T) {
 
 func TestExecuteStream_Simple(t *testing.T) {
 	s := newMockStore()
-	agent, _ := seedAgent(t, s)
+	_, _ = seedAgent(t, s)
 	mockLLM := &mockLLMProvider{streamContent: "这是流式响应内容"}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
 	var chunks []model.StreamChunk
 	err := exec.ExecuteStream(t.Context(), model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "hello",
+		UserID: "u1", Message: "hello",
 	}, func(chunk model.StreamChunk) error {
 		chunks = append(chunks, chunk)
 		return nil
@@ -597,7 +591,7 @@ func TestExecuteStream_LLMError(t *testing.T) {
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
 	err := exec.ExecuteStream(t.Context(), model.ChatRequest{
-		AgentID: "test-agent", UserID: "u1", Message: "hello",
+		UserID: "u1", Message: "hello",
 	}, func(_ model.StreamChunk) error { return nil })
 	if err == nil {
 		t.Fatal("expected error")
@@ -627,7 +621,7 @@ func TestExecuteStream_WithTools(t *testing.T) {
 
 	var chunks []model.StreamChunk
 	err := exec.ExecuteStream(t.Context(), model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "stream with tool",
+		UserID: "u1", Message: "stream with tool",
 	}, func(chunk model.StreamChunk) error {
 		chunks = append(chunks, chunk)
 		return nil
@@ -1059,7 +1053,7 @@ func TestExecute_MultiRoundToolCalls(t *testing.T) {
 	ctx := t.Context()
 
 	r1, err := exec.Execute(ctx, model.ChatRequest{
-		AgentID: agent.UUID, UserID: "u1", Message: "北京天气",
+		UserID: "u1", Message: "北京天气",
 	})
 	if err != nil {
 		t.Fatalf("round 1: %v", err)
@@ -1069,7 +1063,6 @@ func TestExecute_MultiRoundToolCalls(t *testing.T) {
 	}
 
 	r2, err := exec.Execute(ctx, model.ChatRequest{
-		AgentID:        agent.UUID,
 		UserID:         "u1",
 		Message:        "翻译一下天气",
 		ConversationID: r1.ConversationID,

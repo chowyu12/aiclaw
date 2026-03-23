@@ -9,7 +9,7 @@
             {{ defaultAgent ? currentAgentName : '会话' }}
           </span>
         </div>
-        <el-button class="aside-new-btn" circle size="small" @click="newConversation" :disabled="!selectedAgentUUID" title="新对话">
+        <el-button class="aside-new-btn" circle size="small" @click="newConversation" :disabled="!defaultAgent" title="新对话">
           <el-icon><Plus /></el-icon>
         </el-button>
       </div>
@@ -82,13 +82,13 @@
           <div class="empty-desc" style="margin-top: 12px">加载会话中...</div>
         </div>
         <!-- 空状态 -->
-        <div v-else-if="!selectedAgentUUID || messages.length === 0" class="empty-state">
+        <div v-else-if="!defaultAgent || messages.length === 0" class="empty-state">
           <div class="empty-glow" />
           <div class="empty-icon-wrap">
             <el-icon :size="36"><ChatDotRound /></el-icon>
           </div>
-          <div class="empty-title">{{ !selectedAgentUUID ? '请先完成 Agent 配置' : '新对话' }}</div>
-          <div class="empty-desc" v-if="selectedAgentUUID">
+          <div class="empty-title">{{ !defaultAgent ? '请先完成 Agent 配置' : '新对话' }}</div>
+          <div class="empty-desc" v-if="defaultAgent">
             在下方输入消息，与 <strong>{{ currentAgentName }}</strong> 开始交流
           </div>
           <div class="empty-hint" v-else>在侧栏进入设置，绑定模型供应商与参数</div>
@@ -172,6 +172,11 @@
                             <pre class="detail-code detail-code--err">{{ step.error }}</pre>
                           </template>
                           <div class="detail-meta" v-if="step.metadata">
+                            <span v-if="step.metadata.channel_type" class="step-channel">
+                              渠道 {{ step.metadata.channel_type }}<template v-if="step.metadata.channel_id"> #{{ step.metadata.channel_id }}</template>
+                              <template v-if="step.metadata.channel_thread_key"> · {{ step.metadata.channel_thread_key }}</template>
+                              <template v-if="step.metadata.channel_sender_id"> · {{ step.metadata.channel_sender_id }}</template>
+                            </span>
                             <span v-if="step.metadata.provider">{{ step.metadata.provider }}</span>
                             <span v-if="step.metadata.model">{{ step.metadata.model }}</span>
                             <span v-if="step.metadata.skill_name">Skill: {{ step.metadata.skill_name }}</span>
@@ -223,6 +228,11 @@
                         <pre class="detail-code detail-code--err">{{ step.error }}</pre>
                       </template>
                       <div class="detail-meta" v-if="step.metadata">
+                        <span v-if="step.metadata.channel_type" class="step-channel">
+                          渠道 {{ step.metadata.channel_type }}<template v-if="step.metadata.channel_id"> #{{ step.metadata.channel_id }}</template>
+                          <template v-if="step.metadata.channel_thread_key"> · {{ step.metadata.channel_thread_key }}</template>
+                          <template v-if="step.metadata.channel_sender_id"> · {{ step.metadata.channel_sender_id }}</template>
+                        </span>
                         <span v-if="step.metadata.provider">{{ step.metadata.provider }}</span>
                         <span v-if="step.metadata.model">{{ step.metadata.model }}</span>
                         <span v-if="step.metadata.skill_name">Skill: {{ step.metadata.skill_name }}</span>
@@ -250,7 +260,7 @@
       </div>
 
       <!-- 输入区域 -->
-      <div class="input-area" :class="{ disabled: !selectedAgentUUID }">
+      <div class="input-area" :class="{ disabled: !defaultAgent }">
         <!-- 附件预览条 -->
         <div v-if="pendingFiles.length > 0 || pendingURLs.length > 0" class="attach-bar">
           <div v-for="(f, idx) in pendingFiles" :key="f.uuid" class="attach-chip">
@@ -283,19 +293,19 @@
         <!-- 输入框 -->
         <div class="composer">
           <div class="composer-tools">
-            <label class="tool-btn" :class="{ off: !selectedAgentUUID || streaming || uploading }" title="上传文件">
+            <label class="tool-btn" :class="{ off: !defaultAgent || streaming || uploading }" title="上传文件">
               <el-icon :size="18"><UploadFilled /></el-icon>
               <input
                 type="file" multiple style="display:none"
                 accept=".txt,.md,.json,.csv,.xml,.yaml,.yml,.log,.pdf,.docx,.doc,.xlsx,.xls,.png,.jpg,.jpeg,.gif,.webp"
-                :disabled="!selectedAgentUUID || streaming || uploading"
+                :disabled="!defaultAgent || streaming || uploading"
                 @change="handleFileUpload"
               />
             </label>
             <button
               class="tool-btn"
-              :class="{ off: !selectedAgentUUID || streaming, active: showURLInput }"
-              :disabled="!selectedAgentUUID || streaming"
+              :class="{ off: !defaultAgent || streaming, active: showURLInput }"
+              :disabled="!defaultAgent || streaming"
               @click="showURLInput = !showURLInput"
               title="添加 URL"
             >
@@ -308,7 +318,7 @@
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 5 }"
               placeholder="输入消息，Enter 发送，Shift + Enter 换行"
-              :disabled="!selectedAgentUUID || streaming"
+              :disabled="!defaultAgent || streaming"
               @keydown="handleKeydown"
               resize="none"
             />
@@ -324,8 +334,8 @@
           <button
             v-else
             class="send-btn"
-            :class="{ ready: selectedAgentUUID && inputMessage.trim() }"
-            :disabled="!selectedAgentUUID || !inputMessage.trim()"
+            :class="{ ready: defaultAgent && inputMessage.trim() }"
+            :disabled="!defaultAgent || !inputMessage.trim()"
             @click="sendMessage"
           >
             <el-icon><Promotion /></el-icon>
@@ -355,7 +365,6 @@ const _streaming = ref(false)
 const _streamingContent = ref('')
 const _pendingSteps = ref<ExecutionStep[]>([])
 const _conversationId = ref('')
-const _selectedAgentUUID = ref('')
 const _activeConvId = ref<number>(0)
 let _streamController: AbortController | null = null
 </script>
@@ -378,7 +387,6 @@ const streaming = _streaming
 const streamingContent = _streamingContent
 const pendingSteps = _pendingSteps
 const conversationId = _conversationId
-const selectedAgentUUID = _selectedAgentUUID
 const activeConvId = _activeConvId
 
 const defaultAgent = ref<Agent | null>(null)
@@ -403,17 +411,11 @@ onMounted(async () => {
     const a = res.data as Agent
     if (a?.uuid) {
       defaultAgent.value = a
-      if (!selectedAgentUUID.value || selectedAgentUUID.value !== a.uuid) {
-        if (streaming.value) stopGeneration()
-        selectedAgentUUID.value = a.uuid
-        resetChat()
-      }
       loadConversations()
       scrollToBottom()
     }
   } catch {
     defaultAgent.value = null
-    selectedAgentUUID.value = ''
   }
 })
 
@@ -603,7 +605,7 @@ function scrollToBottom() {
 
 function sendMessage() {
   const text = inputMessage.value.trim()
-  if (!text || !selectedAgentUUID.value) return
+  if (!text || !defaultAgent.value) return
 
   const chatFiles: ChatFile[] = [
     ...pendingFiles.value.map(f => ({ type: f.file_type as ChatFile['type'], transfer_method: 'local_file' as const, upload_file_id: f.uuid })),
@@ -627,7 +629,7 @@ function sendMessage() {
   scrollToBottom()
 
   _streamController = streamChat(
-    { agent_id: selectedAgentUUID.value, conversation_id: conversationId.value, message: text, user_id: 'default', files: chatFiles.length > 0 ? chatFiles : undefined },
+    { conversation_id: conversationId.value, message: text, user_id: 'default', files: chatFiles.length > 0 ? chatFiles : undefined },
     (chunk: StreamChunk) => {
       if (chunk.conversation_id) conversationId.value = chunk.conversation_id
       if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }

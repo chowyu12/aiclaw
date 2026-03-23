@@ -267,7 +267,7 @@ make deps             # 整理 Go 依赖
 
 ### Agent Token（后端调用）
 
-每个 Agent 创建时会自动生成一个 `ag-` 前缀的 API Token，后端服务可以直接用这个 Token 调用 chat 接口，无需使用 Web 控制台令牌。Token 可在 Agent 编辑页面查看、复制和重置。
+系统为唯一的 Agent 自动生成 `ag-` 前缀的 API Token，后端服务可用该 Token 调用 chat 接口（与 Web 控制台的 `web_token` 不同）。Token 可在设置 / Agent 页面查看、复制和重置。
 
 **阻塞式调用**
 
@@ -278,7 +278,7 @@ curl -X POST http://localhost:8080/api/v1/chat/completions \
   -d '{"message": "今天天气怎么样？", "user_id": "backend-service"}'
 ```
 
-使用 Agent Token 时无需传 `agent_id`，系统会自动匹配。
+请求体中无需也不支持 `agent_id` 字段，始终使用当前唯一的 Agent 配置。
 
 **流式调用（SSE）**
 
