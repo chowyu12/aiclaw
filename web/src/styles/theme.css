@@ -1,0 +1,437 @@
+/**
+ * AIClaw 主题：html[data-theme="dark"|"light"] + html.dark（Element Plus 暗色组件变量）
+ */
+
+/* ========== 暗色（默认）========== */
+html {
+  color-scheme: dark;
+
+  /* 布局 — AppLayout（扁平主工作区，接近 OpenClaw Control UI 观感） */
+  --aic-app-main-bg: #0c0c0f;
+  --aic-sidebar-bg: #0f0f12;
+  --aic-sidebar-border: rgba(255, 255, 255, 0.06);
+  --aic-sidebar-logo-text: #f9fafb;
+  --aic-sidebar-icon: #94a3b8;
+  --aic-sidebar-icon-hover: #22d3ee;
+  --aic-sidebar-muted: #64748b;
+  --aic-menu-bg: #0f0f12;
+  --aic-menu-text: #9ca3af;
+  --aic-menu-active: #22d3ee;
+
+  /* 主题切换条 */
+  --aic-theme-btn-bg: transparent;
+  --aic-theme-btn-color: #64748b;
+  --aic-theme-btn-active-bg: rgba(34, 211, 238, 0.12);
+  --aic-theme-btn-active-color: #22d3ee;
+  --aic-theme-btn-border: rgba(255, 255, 255, 0.08);
+
+  /* 页面壳 aic-page */
+  --aic-page-max-width: 1180px; /* 保留变量；管理页在 AppLayout 内已全宽 */
+  --aic-page-head-bg: #0c0c0f;
+  --aic-page-head-border: rgba(255, 255, 255, 0.06);
+  --aic-title-color: #f1f5f9;
+  --aic-sub-color: #94a3b8;
+  --aic-sub-code-bg: rgba(255, 255, 255, 0.08);
+  --aic-sub-code-color: #e2e8f0;
+
+  /* 卡片（扁平，与对话主区一致） */
+  --aic-card-bg: rgba(252, 252, 253, 0.98);
+  --aic-card-border: rgba(255, 255, 255, 0.12);
+  --aic-card-shadow: none;
+  --aic-card-header-border: rgba(15, 23, 42, 0.06);
+  --aic-card-title-color: #0f172a;
+
+  /* 设置 tabs */
+  --aic-tabs-header-bg: rgba(15, 23, 42, 0.45);
+  --aic-tabs-header-border: rgba(255, 255, 255, 0.08);
+  --aic-tabs-item: #94a3b8;
+  --aic-tabs-item-hover: #e2e8f0;
+  --aic-tabs-active: #22d3ee;
+  --aic-tabs-active-bg: rgba(34, 211, 238, 0.1);
+  --aic-tabs-content-bg: rgba(252, 252, 253, 0.98);
+  --aic-tabs-content-border: rgba(255, 255, 255, 0.1);
+
+  --aic-pagination-text: #64748b;
+
+  /* 登录 / 向导页 */
+  --aic-login-page-bg: #0a0c10;
+  --aic-login-bg:
+    radial-gradient(ellipse 80% 60% at 50% -20%, rgba(34, 211, 238, 0.18), transparent 55%),
+    radial-gradient(ellipse 60% 50% at 100% 50%, rgba(99, 102, 241, 0.12), transparent 50%),
+    linear-gradient(165deg, #12151c 0%, #0e1118 45%, #080a0e 100%);
+  --aic-login-card-bg: rgba(252, 252, 253, 0.97);
+  --aic-login-card-border: rgba(255, 255, 255, 0.12);
+  --aic-login-card-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 24px 48px -12px rgba(0, 0, 0, 0.45);
+  --aic-login-brand-title: #0f172a;
+  --aic-login-tagline: #64748b;
+  --aic-login-hint: #64748b;
+  --aic-login-code-bg: #f1f5f9;
+  --aic-login-code-color: #0f172a;
+
+  /* 对话页（整页铺满主区域，无外层嵌套卡片） */
+  --chat-page-bg: #0c0c0f;
+  --chat-main-bg: #0c0c0f;
+  --chat-main-head-bg: #0c0c0f;
+  --chat-main-head-border: rgba(255, 255, 255, 0.06);
+  --chat-main-title-color: #fafafa;
+  --chat-main-sub-color: #a1a1aa;
+  --chat-main-sub-muted: #71717a;
+  --chat-aside-bg: #09090b;
+  --chat-aside-border: rgba(255, 255, 255, 0.06);
+  --chat-aside-header-border: rgba(255, 255, 255, 0.06);
+  --chat-aside-title: #94a3b8;
+  --chat-aside-accent: #22d3ee;
+  --chat-aside-btn-bg: rgba(34, 211, 238, 0.12);
+  --chat-aside-btn-border: rgba(34, 211, 238, 0.25);
+  --chat-aside-btn-hover-bg: rgba(34, 211, 238, 0.22);
+  --chat-agent-card-bg: linear-gradient(135deg, rgba(34, 211, 238, 0.08) 0%, rgba(99, 102, 241, 0.1) 100%);
+  --chat-agent-card-border: rgba(34, 211, 238, 0.2);
+  --chat-empty-border: rgba(255, 255, 255, 0.12);
+  --chat-empty-text: #64748b;
+  --chat-link: #22d3ee;
+  --chat-settings-link-bg: rgba(255, 255, 255, 0.06);
+  --chat-settings-link-hover: rgba(34, 211, 238, 0.15);
+  --chat-agent-name: #f1f5f9;
+  --chat-agent-model: #94a3b8;
+  --chat-divider-label: #475569;
+  --chat-conv-hover: rgba(255, 255, 255, 0.04);
+  --chat-conv-active-bg: rgba(34, 211, 238, 0.1);
+  --chat-conv-active-border: rgba(34, 211, 238, 0.25);
+  --chat-conv-icon: #64748b;
+  --chat-conv-icon-active: #22d3ee;
+  --chat-conv-title: #e2e8f0;
+  --chat-conv-time: #64748b;
+  --chat-conv-del: #475569;
+  --chat-conv-del-hover: #f87171;
+  --chat-scrollbar-thumb: rgba(148, 163, 184, 0.5);
+
+  /* 对话内：工具/LLM 执行步骤与流式时间线（扁平、随主题） */
+  --chat-step-toggle-bg: rgba(255, 255, 255, 0.06);
+  --chat-step-toggle-hover: rgba(255, 255, 255, 0.1);
+  --chat-step-toggle-text: #94a3b8;
+  --chat-step-toggle-text-hover: #e2e8f0;
+  --chat-step-line: rgba(255, 255, 255, 0.12);
+  --chat-step-title: #f4f4f5;
+  --chat-step-muted: #71717a;
+  --chat-step-label: #a1a1aa;
+  --chat-step-code-bg: rgba(255, 255, 255, 0.04);
+  --chat-step-code-border: rgba(255, 255, 255, 0.1);
+  --chat-step-code-text: #d4d4d8;
+  --chat-step-err-bg: rgba(239, 68, 68, 0.1);
+  --chat-step-err-border: rgba(248, 113, 113, 0.35);
+  --chat-step-err-text: #fca5a5;
+  --chat-wf-rail: rgba(255, 255, 255, 0.14);
+  --chat-wf-row-hover: rgba(255, 255, 255, 0.05);
+}
+
+/* ========== 亮色（偏暖灰 + 靛青强调，层次更柔和）========== */
+html[data-theme='light'] {
+  color-scheme: light;
+
+  /* Element Plus 主色：靛青，比默认蓝更耐看 */
+  --el-color-primary: #4f46e5;
+  --el-color-primary-light-3: #7c73e8;
+  --el-color-primary-light-5: #a5a0ef;
+  --el-color-primary-light-7: #cecaf7;
+  --el-color-primary-light-8: #ddd9fa;
+  --el-color-primary-light-9: #eceafd;
+  --el-color-primary-dark-2: #3f37d8;
+
+  --aic-app-main-bg: #fafafa;
+  --aic-sidebar-bg: #f4f4f5;
+  --aic-sidebar-border: rgba(28, 25, 23, 0.07);
+  --aic-sidebar-logo-text: #1c1917;
+  --aic-sidebar-icon: #78716c;
+  --aic-sidebar-icon-hover: #4f46e5;
+  --aic-sidebar-muted: #78716c;
+  --aic-menu-bg: #fafafa;
+  --aic-menu-text: #57534e;
+  --aic-menu-active: #4f46e5;
+  /* 侧栏项 hover / 选中：浅紫底，避免 EP 变量在亮色下出现近黑背景 */
+  --aic-menu-hover-bg: rgba(79, 70, 229, 0.09);
+  --aic-menu-active-bg: rgba(79, 70, 229, 0.14);
+
+  --aic-theme-btn-color: #78716c;
+  --aic-theme-btn-active-bg: rgba(79, 70, 229, 0.1);
+  --aic-theme-btn-active-color: #4f46e5;
+  --aic-theme-btn-border: rgba(28, 25, 23, 0.08);
+
+  --aic-page-head-bg: #fafafa;
+  --aic-page-head-border: rgba(28, 25, 23, 0.08);
+  --aic-title-color: #1c1917;
+  --aic-sub-color: #57534e;
+  --aic-sub-code-bg: #f5f5f4;
+  --aic-sub-code-color: #44403c;
+
+  --aic-card-bg: #ffffff;
+  --aic-card-border: rgba(28, 25, 23, 0.07);
+  --aic-card-shadow: none;
+  --aic-card-header-border: rgba(28, 25, 23, 0.06);
+  --aic-card-title-color: #1c1917;
+
+  --aic-tabs-header-bg: #f5f5f4;
+  --aic-tabs-header-border: rgba(28, 25, 23, 0.08);
+  --aic-tabs-item: #78716c;
+  --aic-tabs-item-hover: #44403c;
+  --aic-tabs-active: #4f46e5;
+  --aic-tabs-active-bg: #ffffff;
+  --aic-tabs-content-bg: #ffffff;
+  --aic-tabs-content-border: rgba(28, 25, 23, 0.07);
+
+  --aic-pagination-text: #78716c;
+
+  --aic-login-page-bg: #fafaf9;
+  --aic-login-bg:
+    radial-gradient(ellipse 75% 55% at 50% -15%, rgba(79, 70, 229, 0.12), transparent 55%),
+    radial-gradient(ellipse 55% 45% at 100% 40%, rgba(14, 165, 233, 0.08), transparent 50%),
+    linear-gradient(165deg, #ffffff 0%, #fafaf9 50%, #f5f5f4 100%);
+  --aic-login-card-bg: #ffffff;
+  --aic-login-card-border: rgba(28, 25, 23, 0.07);
+  --aic-login-card-shadow:
+    0 1px 2px rgba(28, 25, 23, 0.04),
+    0 12px 40px -12px rgba(28, 25, 23, 0.1);
+  --aic-login-brand-title: #1c1917;
+  --aic-login-tagline: #78716c;
+  --aic-login-hint: #78716c;
+  --aic-login-code-bg: #f5f5f4;
+  --aic-login-code-color: #1c1917;
+
+  --chat-page-bg: #fafafa;
+  --chat-main-bg: #fafafa;
+  --chat-main-head-bg: #fafafa;
+  --chat-main-head-border: rgba(28, 25, 23, 0.08);
+  --chat-main-title-color: #18181b;
+  --chat-main-sub-color: #52525b;
+  --chat-main-sub-muted: #a1a1aa;
+  --chat-aside-bg: #f4f4f5;
+  --chat-aside-border: rgba(28, 25, 23, 0.08);
+  --chat-aside-header-border: rgba(28, 25, 23, 0.07);
+  --chat-aside-title: #78716c;
+  --chat-aside-accent: #4f46e5;
+  --chat-aside-btn-bg: rgba(79, 70, 229, 0.08);
+  --chat-aside-btn-border: rgba(79, 70, 229, 0.22);
+  --chat-aside-btn-hover-bg: rgba(79, 70, 229, 0.14);
+  --chat-agent-card-bg: linear-gradient(135deg, rgba(79, 70, 229, 0.06) 0%, rgba(14, 165, 233, 0.06) 100%);
+  --chat-agent-card-border: rgba(79, 70, 229, 0.18);
+  --chat-empty-border: rgba(28, 25, 23, 0.1);
+  --chat-empty-text: #78716c;
+  --chat-link: #4f46e5;
+  --chat-settings-link-bg: rgba(28, 25, 23, 0.04);
+  --chat-settings-link-hover: rgba(79, 70, 229, 0.1);
+  --chat-agent-name: #1c1917;
+  --chat-agent-model: #78716c;
+  --chat-divider-label: #a8a29e;
+  --chat-conv-hover: rgba(28, 25, 23, 0.04);
+  --chat-conv-active-bg: rgba(79, 70, 229, 0.08);
+  --chat-conv-active-border: rgba(79, 70, 229, 0.25);
+  --chat-conv-icon: #a8a29e;
+  --chat-conv-icon-active: #4f46e5;
+  --chat-conv-title: #292524;
+  --chat-conv-time: #78716c;
+  --chat-conv-del: #a8a29e;
+  --chat-conv-del-hover: #dc2626;
+  --chat-scrollbar-thumb: rgba(120, 113, 108, 0.35);
+
+  --chat-step-toggle-bg: #f4f4f5;
+  --chat-step-toggle-hover: #e7e5e4;
+  --chat-step-toggle-text: #57534e;
+  --chat-step-toggle-text-hover: #1c1917;
+  --chat-step-line: #d6d3d1;
+  --chat-step-title: #18181b;
+  --chat-step-muted: #78716c;
+  --chat-step-label: #57534e;
+  --chat-step-code-bg: #fafaf9;
+  --chat-step-code-border: rgba(28, 25, 23, 0.1);
+  --chat-step-code-text: #44403c;
+  --chat-step-err-bg: #fef2f2;
+  --chat-step-err-border: #fecaca;
+  --chat-step-err-text: #b91c1c;
+  --chat-wf-rail: rgba(28, 25, 23, 0.12);
+  --chat-wf-row-hover: rgba(28, 25, 23, 0.05);
+}
+
+/* 亮色：左侧导航 hover / 当前路由 — 强制浅色底（覆盖 Element Plus menu 变量） */
+html[data-theme='light'] .app-aside .el-menu {
+  --el-menu-bg-color: var(--aic-menu-bg);
+  --el-menu-text-color: var(--aic-menu-text);
+  --el-menu-hover-text-color: var(--aic-menu-active);
+  --el-menu-hover-bg-color: var(--aic-menu-hover-bg);
+  --el-menu-active-color: var(--aic-menu-active);
+}
+
+html[data-theme='light'] .app-aside .el-menu-item:not(.is-disabled):hover,
+html[data-theme='light'] .app-aside .el-menu-item:not(.is-disabled):focus-visible {
+  background-color: var(--aic-menu-hover-bg) !important;
+  color: var(--aic-menu-active) !important;
+}
+
+html[data-theme='light'] .app-aside .el-menu-item.is-active {
+  background-color: var(--aic-menu-active-bg) !important;
+  color: var(--aic-menu-active) !important;
+}
+
+html[data-theme='light'] .app-aside .el-menu-item.is-active:hover {
+  background-color: var(--aic-menu-active-bg) !important;
+}
+
+html[data-theme='light'] .app-aside .el-menu-item:hover .el-icon,
+html[data-theme='light'] .app-aside .el-menu-item.is-active .el-icon,
+html[data-theme='light'] .app-aside .el-menu-item:focus-visible .el-icon {
+  color: inherit;
+}
+
+/* —— 页面壳（AppLayout 内由 .app-main 拉满全宽；登录等独立页仍可自行限制宽度）—— */
+.aic-page {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+.aic-page-head {
+  margin-bottom: 16px;
+}
+
+.aic-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--aic-title-color);
+}
+
+.aic-sub {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--aic-sub-color);
+  max-width: 100%;
+}
+
+.aic-sub code {
+  font-size: 12px;
+  background: var(--aic-sub-code-bg);
+  color: var(--aic-sub-code-color);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+/* —— 内容卡片 —— */
+.aic-card.el-card {
+  border-radius: 10px;
+  border: 1px solid var(--aic-card-border);
+  background: var(--aic-card-bg);
+  box-shadow: var(--aic-card-shadow);
+  overflow: hidden;
+}
+
+.aic-card .el-card__header {
+  border-bottom: 1px solid var(--aic-card-header-border);
+}
+
+.aic-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.aic-card-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--aic-card-title-color);
+}
+
+/* —— 设置页 border-card 标签 —— */
+.aic-tabs.el-tabs--border-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.aic-tabs.el-tabs--border-card > .el-tabs__header {
+  background: var(--aic-tabs-header-bg);
+  border: 1px solid var(--aic-tabs-header-border);
+  border-radius: 0;
+  margin: 0;
+}
+
+.aic-tabs.el-tabs--border-card .el-tabs__item {
+  color: var(--aic-tabs-item) !important;
+  border: none !important;
+}
+
+.aic-tabs.el-tabs--border-card .el-tabs__item:hover {
+  color: var(--aic-tabs-item-hover) !important;
+}
+
+.aic-tabs.el-tabs--border-card .el-tabs__item.is-active {
+  color: var(--aic-tabs-active) !important;
+  background: var(--aic-tabs-active-bg) !important;
+}
+
+.aic-tabs.el-tabs--border-card > .el-tabs__content {
+  padding: 20px;
+  border: 1px solid var(--aic-tabs-content-border);
+  border-top: none;
+  border-radius: 0;
+  background: var(--aic-tabs-content-bg);
+}
+
+/* 亮色：标签栏顶对齐全宽 */
+html[data-theme='light'] .aic-tabs.el-tabs--border-card > .el-tabs__header {
+  padding: 8px 8px 0;
+  border-radius: 0;
+}
+
+html[data-theme='light'] .aic-tabs.el-tabs--border-card .el-tabs__nav-wrap::after {
+  display: none;
+}
+
+html[data-theme='light'] .aic-tabs.el-tabs--border-card .el-tabs__item {
+  border-radius: 10px 10px 0 0 !important;
+  margin-right: 2px;
+  padding: 0 18px !important;
+  height: 40px !important;
+  line-height: 40px !important;
+  transition: color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+html[data-theme='light'] .aic-tabs.el-tabs--border-card .el-tabs__item.is-active {
+  box-shadow: 0 -1px 0 0 rgba(255, 255, 255, 1) inset, 0 1px 3px rgba(28, 25, 23, 0.06) !important;
+}
+
+/* 亮色：管理区内表单控件圆角与描边 */
+html[data-theme='light'] .aic-page .el-input__wrapper,
+html[data-theme='light'] .aic-page .el-select__wrapper {
+  border-radius: 10px;
+}
+
+html[data-theme='light'] .aic-page .el-textarea__inner {
+  border-radius: 12px;
+}
+
+html[data-theme='light'] .aic-page .el-slider {
+  --el-slider-button-size: 16px;
+}
+
+html[data-theme='light'] .aic-tabs.el-tabs--border-card > .el-tabs__content {
+  border-radius: 0;
+}
+
+/* 无 Tabs 的列表页：卡片圆角与全宽布局一致 */
+html[data-theme='light'] .aic-page .aic-card.el-card {
+  border-radius: 10px;
+}
+
+/* —— 弹窗 —— */
+.el-dialog {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.aic-page .el-pagination {
+  --el-pagination-text-color: var(--aic-pagination-text);
+  --el-pagination-button-color: var(--aic-pagination-text);
+}
