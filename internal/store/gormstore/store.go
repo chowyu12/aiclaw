@@ -65,6 +65,8 @@ func autoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&model.Provider{},
 		&model.Tool{},
+		&model.Channel{},
+		&model.ChannelThread{},
 		&model.MCPServer{},
 		&model.Conversation{},
 		&model.Message{},

@@ -47,6 +47,10 @@
             <el-icon><Link /></el-icon>
             <template #title>MCP</template>
           </el-menu-item>
+          <el-menu-item index="/channels">
+            <el-icon><Share /></el-icon>
+            <template #title>渠道</template>
+          </el-menu-item>
           <el-menu-item index="/settings">
             <el-icon><Setting /></el-icon>
             <template #title>设置</template>

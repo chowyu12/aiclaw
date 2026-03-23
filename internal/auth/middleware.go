@@ -102,6 +102,9 @@ func isPublic(path string) bool {
 	if !strings.HasPrefix(path, "/api/") {
 		return true
 	}
+	if strings.HasPrefix(path, "/api/v1/webhooks/") {
+		return true
+	}
 	return path == "/api/v1/auth/login" ||
 		strings.HasPrefix(path, "/api/v1/setup/")
 }

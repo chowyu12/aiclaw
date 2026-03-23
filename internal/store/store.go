@@ -9,10 +9,27 @@ import (
 type Store interface {
 	ProviderStore
 	ToolStore
+	ChannelStore
+	ChannelThreadStore
 	ConversationStore
 	FileStore
 	MCPServerStore
 	Close() error
+}
+
+type ChannelStore interface {
+	CreateChannel(ctx context.Context, c *model.Channel) error
+	GetChannel(ctx context.Context, id int64) (*model.Channel, error)
+	GetChannelByUUID(ctx context.Context, uuid string) (*model.Channel, error)
+	ListChannels(ctx context.Context, q model.ListQuery) ([]*model.Channel, int64, error)
+	UpdateChannel(ctx context.Context, id int64, req model.UpdateChannelReq) error
+	DeleteChannel(ctx context.Context, id int64) error
+}
+
+// ChannelThreadStore 渠道侧线程与会话 UUID 映射。
+type ChannelThreadStore interface {
+	GetChannelThread(ctx context.Context, channelID int64, threadKey string) (*model.ChannelThread, error)
+	UpsertChannelThread(ctx context.Context, channelID int64, threadKey, conversationUUID string) error
 }
 
 // MCPServerStore 运行时 MCP 服务列表（与设置页「MCP」同步）。
