@@ -17,8 +17,7 @@ const toolExecutionWall = 5 * time.Minute
 
 func toolCallContext(parent context.Context) (ctx context.Context, done func()) {
 	toolCtx, toolCancel := context.WithTimeout(context.Background(), toolExecutionWall)
-	// 若父 ctx 在注册 AfterFunc 前已结束，AfterFunc 会立刻执行 toolCancel，子 ctx 在进 Handler 前就被关掉，
-	// 再与 chromedp 合并时易出现「秒失败 / context canceled」。
+	// 父 ctx 已结束（HTTP/SSE 断开、Agent 超时等）：不把独立 wall 传给工具，避免在客户端已断时仍执行 browser 等重操作。
 	if parent.Err() != nil {
 		toolCancel()
 		return parent, func() {}

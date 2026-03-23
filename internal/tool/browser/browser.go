@@ -188,6 +188,11 @@ func Handler(ctx context.Context, args string) (string, error) {
 		return bm.closeBrowser()
 	}
 
+	// 请求 context 已取消（如 HTTP/SSE 断开）时绝不启动 Chrome，避免 ensureStarted 在无人消费结果时拉起进程。
+	if err := ctx.Err(); err != nil {
+		return "", fmt.Errorf("browser: %w", err)
+	}
+
 	if err := bm.ensureStarted(); err != nil {
 		return "", fmt.Errorf("start browser: %w", err)
 	}
