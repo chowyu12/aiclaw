@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="AIClaw">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#6366f1"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="#0c0c0f"/>
+  <g transform="translate(8, 8)" fill="none">
+    <path d="M6 34 C6 16 12 8 22 6" stroke="url(#g)" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M14 34 C14 18 20 10 30 8" stroke="url(#g)" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M22 34 C22 20 28 12 38 10" stroke="url(#g)" stroke-width="3.5" stroke-linecap="round"/>
+  </g>
+</svg>

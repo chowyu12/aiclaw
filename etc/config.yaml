@@ -1,0 +1,27 @@
+server:
+  host: 0.0.0.0
+  port: 8080
+database:
+  driver: sqlite
+  dsn: ~/.aiclaw/aiclaw.db
+  max_open_conns: 25
+  max_idle_conns: 10
+log:
+  level: info
+auth:
+  web_token: web-xxxx
+# 单例 Agent：与进程内存同步，保存在本文件 agent 段（控制台保存会写回 config.yaml）。
+# MCP 列表存数据库（控制台 MCP 页保存后立即持久化；对话执行时每次从库读取）。
+# 修改本文件后会自动热加载（日志、浏览器工具、auth.web_token、agent 等；数据库连接需重启生效）。
+# provider_id 为 0 时，启动或首次请求会尽量绑定数据库里第一个模型供应商。
+# agent:
+#   name: Assistant
+#   model_name: gpt-4o
+#   temperature: 0.7
+#   provider_id: 0
+upload:
+  dir: ~/.aiclaw/uploads
+  max_size: 20971520
+browser:
+  visible: true
+  cdp_endpoint: http://127.0.0.1:9222
