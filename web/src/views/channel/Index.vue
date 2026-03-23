@@ -555,7 +555,6 @@ function buildConfigPayload(): Record<string, unknown> | null {
     set("verification_token");
     set("encrypt_key");
   }
-  delete out.agent_id;
   return out;
 }
 

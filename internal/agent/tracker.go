@@ -14,6 +14,7 @@ type StepTracker struct {
 	store          store.ConversationStore
 	conversationID int64
 	messageID      int64
+	channelTrace   *model.ChannelExecTrace
 
 	mu        sync.Mutex
 	stepOrder int
@@ -39,12 +40,38 @@ func (t *StepTracker) SetMessageID(id int64) {
 	t.store.UpdateStepsMessageID(context.Background(), t.conversationID, id)
 }
 
+// SetChannelTrace 在首轮 RecordStep 之前调用；之后所有步骤 metadata 会附带渠道追溯字段。
+func (t *StepTracker) SetChannelTrace(tr *model.ChannelExecTrace) {
+	t.mu.Lock()
+	t.channelTrace = tr
+	t.mu.Unlock()
+}
+
+func (t *StepTracker) enrichMeta(meta *model.StepMetadata) *model.StepMetadata {
+	t.mu.Lock()
+	tr := t.channelTrace
+	t.mu.Unlock()
+	if tr == nil {
+		return meta
+	}
+	if meta == nil {
+		meta = &model.StepMetadata{}
+	}
+	meta.ChannelID = tr.ID
+	meta.ChannelUUID = tr.UUID
+	meta.ChannelType = tr.Type
+	meta.ChannelThreadKey = tr.ThreadKey
+	meta.ChannelSenderID = tr.SenderID
+	return meta
+}
+
 func (t *StepTracker) RecordStep(ctx context.Context, stepType model.StepType, name, input, output string, status model.StepStatus, stepErr string, duration time.Duration, tokensUsed int, meta *model.StepMetadata) *model.ExecutionStep {
 	t.mu.Lock()
 	t.stepOrder++
 	order := t.stepOrder
 	t.mu.Unlock()
 
+	meta = t.enrichMeta(meta)
 	var metaJSON model.JSON
 	if meta != nil {
 		data, _ := json.Marshal(meta)

@@ -79,6 +79,7 @@ func (w *wecomRuntimeDriver) Refresh(ctx context.Context, all []*model.Channel, 
 
 	for id, rec := range want {
 		if r, ok := wecomRun[id]; ok && r.botID == rec.botID && r.secret == rec.secret {
+			// 仅依据 TCP 连通判断复用；认证完成前有窗口收不到推送，见 OnAuthenticated 日志。
 			if r.client != nil && r.client.IsConnected() {
 				if r.chLive != nil {
 					r.chLive.Store(rec.ch)
@@ -95,7 +96,7 @@ func (w *wecomRuntimeDriver) Refresh(ctx context.Context, all []*model.Channel, 
 			continue
 		}
 		wecomRun[id] = &wecomRunner{botID: rec.botID, secret: rec.secret, client: cli, chLive: holder}
-		log.WithField("channel_id", id).Info("[wecom] 智能机器人 WebSocket 已连接")
+		log.WithField("channel_id", id).Info("[wecom] 已发起智能机器人 WebSocket 连接（异步拨号与订阅），认证成功后将打印「长连接已就绪」")
 	}
 }
 
@@ -165,16 +166,19 @@ func (*wecomRuntimeDriver) connectClient(bridge *Bridge, ch *model.Channel, botI
 		dispatch(frame, &msg.BaseMessage, text, extra)
 	})
 
+	// Connect() 仅异步拨号；日志若写「已连接」会误导：须等 SUBSCRIBE 成功后才算真正可收消息。
+	client.OnAuthenticated(func() {
+		log.WithField("channel_id", ch.ID).Info("[wecom] 长连接已就绪（订阅/认证成功），可接收用户消息")
+	})
+	client.OnReconnecting(func(n int) {
+		log.WithFields(log.Fields{"channel_id": ch.ID, "attempt": n}).Warn("[wecom] WebSocket 正在重连，此期间可能收不到消息")
+	})
+	client.OnError(func(err error) {
+		log.WithError(err).WithField("channel_id", ch.ID).Error("[wecom] WebSocket 错误")
+	})
+
 	client.Connect()
 	return client, chLive
-}
-
-func wecomThreadKey(chatID, userID string) string {
-	t := strings.TrimSpace(chatID)
-	if t != "" {
-		return t
-	}
-	return strings.TrimSpace(userID)
 }
 
 func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel], client *wecomaibot.WSClient, frame *wecomaibot.WsFrame, base *wecomaibot.BaseMessage, userText string, extra map[string]any) {
@@ -186,7 +190,20 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 	if text == "" {
 		return
 	}
-	thread := wecomThreadKey(base.ChatID, base.From.UserID)
+	c := strings.TrimSpace(base.ChatID)
+	u := strings.TrimSpace(base.From.UserID)
+	thread := c
+	if thread == "" {
+		thread = u
+	}
+	var aliases []string
+	if c != "" && u != "" && c != u {
+		if thread == c {
+			aliases = append(aliases, u)
+		} else {
+			aliases = append(aliases, c)
+		}
+	}
 	meta := map[string]any{
 		"msgid":   base.MsgID,
 		"msgtype": base.MsgType,
@@ -195,10 +212,11 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 		meta[k] = v
 	}
 	in := &Inbound{
-		ThreadKey: thread,
-		SenderID:  base.From.UserID,
-		Text:      text,
-		RawMeta:   meta,
+		ThreadKey:        thread,
+		ThreadKeyAliases: aliases,
+		SenderID:         base.From.UserID,
+		Text:             text,
+		RawMeta:          meta,
 		ReplyWith: func(ctx context.Context, reply string) error {
 			streamID := fmt.Sprintf("stream_%s", frame.Headers.ReqID)
 			_, err := client.ReplyStream(frame, streamID, reply, true, nil, nil)

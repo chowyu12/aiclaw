@@ -13,8 +13,7 @@ const (
 
 // Identity 请求身份：Web 控制台会话或 Agent API Token。
 type Identity struct {
-	Kind      Kind
-	AgentUUID string
+	Kind Kind
 }
 
 func (id *Identity) IsWebSession() bool {

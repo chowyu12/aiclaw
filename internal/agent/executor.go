@@ -107,7 +107,7 @@ func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*Execute
 	}
 	defer ec.closeMCP()
 
-	ctx = workspace.WithAgentUUID(ctx, ec.ag.UUID)
+	ctx = workspace.WithWorkdirScope(ctx, ec.ag.UUID)
 
 	ec.l.WithField("user", req.UserID).Info("[Execute] >> start")
 	if body, err := json.Marshal(req); err == nil {
@@ -124,7 +124,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 	}
 	defer ec.closeMCP()
 
-	ctx = workspace.WithAgentUUID(ctx, ec.ag.UUID)
+	ctx = workspace.WithWorkdirScope(ctx, ec.ag.UUID)
 
 	ec.l.WithField("user", req.UserID).Info("[Execute] >> start (stream)")
 
@@ -148,11 +148,6 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 		log.WithError(err).Error("[Execute] load agent config failed")
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
-	if req.AgentID != "" && req.AgentID != ag.UUID {
-		log.WithFields(log.Fields{"want": ag.UUID, "got": req.AgentID}).Error("[Execute] agent uuid mismatch")
-		return nil, fmt.Errorf("agent not found")
-	}
-
 	prov, err := e.store.GetProvider(ctx, ag.ProviderID)
 	if err != nil {
 		log.WithFields(log.Fields{"agent": ag.Name, "provider_id": ag.ProviderID}).WithError(err).Error("[Execute] provider not found")
@@ -190,6 +185,9 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 	}
 
 	tracker := NewStepTracker(e.store, conv.ID)
+	if req.ExecChannel != nil {
+		tracker.SetChannelTrace(req.ExecChannel)
+	}
 
 	mcpServers, err := e.store.ListMCPServers(ctx)
 	if err != nil {

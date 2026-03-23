@@ -91,6 +91,12 @@
                               </div>
 
                               <div v-if="step.metadata" class="step-meta-row">
+                                <span v-if="step.metadata.channel_type">
+                                  <el-icon size="12"><ChatDotRound /></el-icon>
+                                  渠道 {{ step.metadata.channel_type }}<template v-if="step.metadata.channel_id"> #{{ step.metadata.channel_id }}</template>
+                                  <template v-if="step.metadata.channel_thread_key"> · {{ step.metadata.channel_thread_key }}</template>
+                                  <template v-if="step.metadata.channel_sender_id"> · {{ step.metadata.channel_sender_id }}</template>
+                                </span>
                                 <span v-if="step.metadata.provider">
                                   <el-icon size="12"><Connection /></el-icon> {{ step.metadata.provider }}
                                 </span>

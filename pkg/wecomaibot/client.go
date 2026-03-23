@@ -33,10 +33,10 @@ type WSClient struct {
 	onEventTemplateCardEvent eventHandlerFunc
 	onEventFeedbackEvent     eventHandlerFunc
 
-	userOnAuth connectionHandlerFunc
-	onDisconnected  disconnectHandlerFunc
-	onReconnecting  reconnectHandlerFunc
-	onError         errorHandlerFunc
+	userOnAuth     connectionHandlerFunc
+	onDisconnected disconnectHandlerFunc
+	onReconnecting reconnectHandlerFunc
+	onError        errorHandlerFunc
 
 	started bool
 	mu      sync.RWMutex
@@ -142,6 +142,16 @@ func (c *WSClient) Disconnect() {
 // IsConnected 是否已连接。
 func (c *WSClient) IsConnected() bool {
 	return c.wsManager.IsConnected()
+}
+
+// IsAuthenticated 是否已完成开放平台 SUBSCRIBE 认证（与 IsConnected 不同：先 TCP 再认证）。
+func (c *WSClient) IsAuthenticated() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if !c.started {
+		return false
+	}
+	return c.wsManager.IsAuthenticated()
 }
 
 // OnMessageText 文本消息。

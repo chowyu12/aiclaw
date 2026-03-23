@@ -75,14 +75,10 @@ func authenticate(cfg Config, ctx context.Context, tokenStr string) (*Identity, 
 }
 
 func authenticateAgentToken(resolver TokenResolver, ctx context.Context, token string) (*Identity, error) {
-	ag, err := resolver.GetAgentByToken(ctx, token)
-	if err != nil {
+	if _, err := resolver.GetAgentByToken(ctx, token); err != nil {
 		return nil, errors.New("invalid agent token")
 	}
-	return &Identity{
-		Kind:      KindAgentToken,
-		AgentUUID: ag.UUID,
-	}, nil
+	return &Identity{Kind: KindAgentToken}, nil
 }
 
 func authorize(id *Identity, method, path string) error {

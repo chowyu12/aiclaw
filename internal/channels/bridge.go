@@ -4,16 +4,24 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/chowyu12/aiclaw/internal/agent"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
 )
+
+const channelLogTextRunes = 500
+
+// 同一 (channel, 线程) 并发首包时合并为一次「建会话 + 写映射」，避免多条 channel_threads / 多个 Conversation。
+var channelThreadFlight singleflight.Group
 
 // Bridge 将入站消息映射为会话并调用 Executor，再通过适配器 Reply（参考 goclaw 的 bus 串联思路）。
 type Bridge struct {
@@ -40,6 +48,16 @@ func (b *Bridge) HandleInboundAsync(parent context.Context, ch *model.Channel, i
 	if text == "" {
 		return
 	}
+	log.WithFields(log.Fields{
+		"channel_id":    ch.ID,
+		"channel_uuid":  ch.UUID,
+		"channel_type":  string(ch.ChannelType),
+		"thread_key":    strings.TrimSpace(in.ThreadKey),
+		"thread_lookup": strings.Join(threadLookupKeys(in), " | "),
+		"sender_id":     strings.TrimSpace(in.SenderID),
+		"message":       truncateRunes(text, channelLogTextRunes),
+		"message_runes": utf8.RuneCountInString(text),
+	}).Info("[Channel] inbound")
 	cc := ConfigFromModel(ch)
 	go b.runReply(parent, ch, cc, in, ad, text)
 }
@@ -55,25 +73,57 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 
 	convUUID, err := b.ensureThreadConversation(ctx, ch, in)
 	if err != nil {
-		log.WithError(err).WithField("channel_id", ch.ID).Error("[Channel] ensure conversation failed")
+		log.WithError(err).WithFields(log.Fields{
+			"channel_id":   ch.ID,
+			"channel_type": string(ch.ChannelType),
+			"thread_key":   strings.TrimSpace(in.ThreadKey),
+			"sender_id":    strings.TrimSpace(in.SenderID),
+			"message":      truncateRunes(userText, channelLogTextRunes),
+		}).Error("[Channel] ensure conversation failed")
 		return
 	}
 
 	req := model.ChatRequest{
-		AgentID:        "",
 		ConversationID: convUUID,
 		UserID:         channelUserID(ch, in),
 		Message:        userText,
+		ExecChannel: &model.ChannelExecTrace{
+			ID:        ch.ID,
+			UUID:      ch.UUID,
+			Type:      string(ch.ChannelType),
+			ThreadKey: strings.TrimSpace(in.ThreadKey),
+			SenderID:  strings.TrimSpace(in.SenderID),
+		},
 	}
 	res, err := b.executor.Execute(ctx, req)
 	if err != nil {
-		log.WithError(err).WithField("channel_id", ch.ID).Error("[Channel] executor failed")
+		log.WithError(err).WithFields(log.Fields{
+			"channel_id":        ch.ID,
+			"channel_type":      string(ch.ChannelType),
+			"conversation_uuid": convUUID,
+			"message":           truncateRunes(userText, channelLogTextRunes),
+		}).Error("[Channel] executor failed")
 		_ = b.sendChannelReply(ctx, ad, cc, in, "处理失败，请稍后重试。")
 		return
 	}
 	if err := b.sendChannelReply(ctx, ad, cc, in, res.Content); err != nil {
-		log.WithError(err).WithField("channel_id", ch.ID).Warn("[Channel] reply failed")
+		log.WithError(err).WithFields(log.Fields{
+			"channel_id":        ch.ID,
+			"conversation_uuid": convUUID,
+			"reply":             truncateRunes(res.Content, channelLogTextRunes),
+		}).Warn("[Channel] reply failed")
+		return
 	}
+	log.WithFields(log.Fields{
+		"channel_id":         ch.ID,
+		"channel_uuid":       ch.UUID,
+		"channel_type":       string(ch.ChannelType),
+		"conversation_uuid":  convUUID,
+		"reply":              truncateRunes(res.Content, channelLogTextRunes),
+		"reply_runes":        utf8.RuneCountInString(res.Content),
+		"user_message":       truncateRunes(userText, channelLogTextRunes),
+		"user_message_runes": utf8.RuneCountInString(userText),
+	}).Info("[Channel] reply ok")
 }
 
 func (b *Bridge) sendChannelReply(ctx context.Context, ad WebhookDriver, cc ChannelConfig, in *Inbound, text string) error {
@@ -83,20 +133,70 @@ func (b *Bridge) sendChannelReply(ctx context.Context, ad WebhookDriver, cc Chan
 	return ad.Reply(ctx, cc, in, text)
 }
 
+func threadLookupKeys(in *Inbound) []string {
+	var out []string
+	seen := make(map[string]bool)
+	add := func(s string) {
+		s = strings.TrimSpace(s)
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	add(in.ThreadKey)
+	for _, a := range in.ThreadKeyAliases {
+		add(a)
+	}
+	add(in.SenderID)
+	if len(out) == 0 {
+		return []string{"default"}
+	}
+	return out
+}
+
+func threadFlightKey(channelID int64, keys []string) string {
+	dup := append([]string(nil), keys...)
+	slices.Sort(dup)
+	return fmt.Sprintf("%d\x1f%s", channelID, strings.Join(dup, "\x1f"))
+}
+
+func (b *Bridge) bindThreadKeys(ctx context.Context, channelID int64, keys []string, convUUID string) error {
+	for _, k := range keys {
+		if err := b.store.UpsertChannelThread(ctx, channelID, k, convUUID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (b *Bridge) ensureThreadConversation(ctx context.Context, ch *model.Channel, in *Inbound) (string, error) {
-	key := strings.TrimSpace(in.ThreadKey)
-	if key == "" {
-		key = strings.TrimSpace(in.SenderID)
-	}
-	if key == "" {
-		key = "default"
-	}
-	row, err := b.store.GetChannelThread(ctx, ch.ID, key)
-	if err == nil && row != nil {
-		return row.ConversationUUID, nil
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	keys := threadLookupKeys(in)
+	fk := threadFlightKey(ch.ID, keys)
+	v, err, _ := channelThreadFlight.Do(fk, func() (any, error) {
+		return b.ensureThreadConversationBody(ctx, ch, in, keys)
+	})
+	if err != nil {
 		return "", err
+	}
+	return v.(string), nil
+}
+
+func (b *Bridge) ensureThreadConversationBody(ctx context.Context, ch *model.Channel, in *Inbound, keys []string) (string, error) {
+	for _, k := range keys {
+		row, err := b.store.GetChannelThread(ctx, ch.ID, k)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return "", err
+			}
+			continue
+		}
+		if strings.TrimSpace(row.ConversationUUID) != "" {
+			if err := b.bindThreadKeys(ctx, ch.ID, keys, row.ConversationUUID); err != nil {
+				return "", err
+			}
+			return row.ConversationUUID, nil
+		}
 	}
 	title := truncateRunes(strings.TrimSpace(in.Text), 80)
 	if title == "" {
@@ -109,7 +209,7 @@ func (b *Bridge) ensureThreadConversation(ctx context.Context, ch *model.Channel
 	if err := b.store.CreateConversation(ctx, conv); err != nil {
 		return "", err
 	}
-	if err := b.store.UpsertChannelThread(ctx, ch.ID, key, conv.UUID); err != nil {
+	if err := b.bindThreadKeys(ctx, ch.ID, keys, conv.UUID); err != nil {
 		return "", err
 	}
 	return conv.UUID, nil
