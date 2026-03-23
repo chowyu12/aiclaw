@@ -1,0 +1,532 @@
+<template>
+  <div class="aic-page">
+    <div class="aic-page-head">
+      <h1 class="aic-title">渠道 Channel</h1>
+      <p class="aic-sub">
+        企业微信「智能机器人」仅需在配置中填写 <strong>Bot ID</strong> 与 <strong>Secret</strong>，服务通过 WebSocket 长连接收消息（实现见仓库内
+        <a href="https://github.com/chowyu12/aiclaw/tree/main/pkg/wecomaibot" target="_blank" rel="noopener noreferrer">pkg/wecomaibot</a>，
+        官方说明 <a href="https://developer.work.weixin.qq.com/document/path/101463" target="_blank" rel="noopener noreferrer">101463</a>）。
+        其他渠道将 Webhook URL 配到各平台即可。
+      </p>
+    </div>
+    <div class="aic-page-body">
+      <el-card class="aic-card" shadow="never">
+        <template #header>
+          <div class="aic-card-header">
+            <span class="aic-card-title">渠道列表</span>
+            <div>
+              <el-input
+                v-model="keyword"
+                placeholder="搜索名称/描述"
+                clearable
+                style="width: 200px; margin-right: 12px;"
+                @clear="loadData"
+                @keyup.enter="loadData"
+              >
+                <template #prefix><el-icon><Search /></el-icon></template>
+              </el-input>
+              <el-button type="primary" @click="openCreate">
+                <el-icon><Plus /></el-icon> 新增渠道
+              </el-button>
+            </div>
+          </div>
+        </template>
+
+        <el-table :data="list" v-loading="loading" stripe>
+          <el-table-column prop="id" label="ID" width="70" />
+          <el-table-column prop="name" label="名称" width="140" show-overflow-tooltip />
+          <el-table-column label="类型" width="120">
+            <template #default="{ row }">
+              <el-tag size="small" type="info">{{ typeLabel(row.channel_type) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="enabled" label="状态" width="80" align="center">
+            <template #default="{ row }">
+              <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="Webhook / 接入" min-width="200">
+            <template #default="{ row }">
+              <template v-if="row.channel_type === 'wecom'">
+                <span class="webhook-muted">WebSocket 长连接</span>
+                <el-tooltip content="HTTP 入口仅作校验/探测；业务消息走 WS" placement="top">
+                  <code class="webhook-snippet webhook-secondary">{{ webhookURL(row.uuid) }}</code>
+                </el-tooltip>
+              </template>
+              <template v-else>
+                <code class="webhook-snippet">{{ webhookURL(row.uuid) }}</code>
+                <el-button link type="primary" size="small" @click="copyText(webhookURL(row.uuid))">复制</el-button>
+              </template>
+            </template>
+          </el-table-column>
+          <el-table-column prop="updated_at" label="更新时间" width="170" show-overflow-tooltip />
+          <el-table-column label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+              <el-popconfirm title="确定删除该渠道？" @confirm="handleDelete(row.id)">
+                <template #reference>
+                  <el-button link type="danger">删除</el-button>
+                </template>
+              </el-popconfirm>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[10, 20, 50]"
+          layout="total, sizes, prev, pager, next"
+          style="margin-top: 16px; justify-content: flex-end;"
+          @size-change="loadData"
+          @current-change="loadData"
+        />
+      </el-card>
+    </div>
+
+    <el-dialog v-model="dialogVisible" :title="isEdit ? '编辑渠道' : '新增渠道'" width="720px" destroy-on-close @closed="resetForm">
+      <el-form :model="form" label-width="150px" class="channel-form">
+        <el-form-item label="名称" required>
+          <el-input v-model="form.name" placeholder="便于识别的名称" />
+        </el-form-item>
+        <el-form-item label="类型" required>
+          <el-select v-model="form.channel_type" style="width: 100%" :disabled="isEdit" placeholder="选择平台">
+            <el-option v-for="opt in typeOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="启用">
+          <el-switch v-model="form.enabled" />
+        </el-form-item>
+        <el-form-item v-if="needsWebhookTokenField" label="Webhook 密钥">
+          <el-input v-model="form.webhook_token" type="password" show-password placeholder="可选；POST 回调须带 X-Webhook-Token 或 ?token=" />
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input v-model="form.description" type="textarea" :rows="2" placeholder="备注" />
+        </el-form-item>
+
+        <el-divider content-position="left">平台配置</el-divider>
+
+        <el-alert v-if="form.channel_type === 'wecom'" type="info" :closable="false" show-icon class="config-hint">
+          <template #title>企业微信智能机器人（WebSocket）</template>
+          <div class="hint-lines">
+            保存并启用后，服务端会自动连接企微开放平台。无需配置本页 Webhook URL。代码路径：
+            <a href="https://github.com/chowyu12/aiclaw/tree/main/pkg/wecomaibot" target="_blank" rel="noopener noreferrer">pkg/wecomaibot</a>。
+          </div>
+        </el-alert>
+
+        <template v-if="form.channel_type === 'wecom'">
+          <el-form-item label="Bot ID" required>
+            <el-input v-model="cfg.bot_id" placeholder="智能机器人 Bot ID" clearable />
+          </el-form-item>
+          <el-form-item label="Secret" required>
+            <el-input v-model="cfg.secret" type="password" show-password placeholder="智能机器人 Secret" clearable />
+          </el-form-item>
+        </template>
+
+        <template v-else-if="form.channel_type === 'whatsapp'">
+          <el-form-item label="Verify Token">
+            <el-input
+              v-model="cfg.verify_token"
+              type="password"
+              show-password
+              placeholder="与 Meta 控制台 Webhook 校验 token 一致（config.verify_token）"
+              clearable
+            />
+          </el-form-item>
+          <el-alert type="info" :closable="false" show-icon class="config-hint">
+            <template #title>后端当前仅读取 verify_token</template>
+            <div class="hint-lines">Phone Number ID、Graph API Token 等请在「附加 JSON」中自行扩展（适配器未使用则不会生效）。</div>
+          </el-alert>
+        </template>
+
+        <template v-else-if="form.channel_type === 'telegram'">
+          <el-form-item label="Bot Token" required>
+            <el-input v-model="cfg.bot_token" type="password" show-password placeholder="BotFather 下发的 token，写入 config.bot_token" clearable />
+          </el-form-item>
+        </template>
+
+        <template v-else-if="form.channel_type === 'feishu'">
+          <el-alert type="info" :closable="false" show-icon class="config-hint">
+            <template #title>飞书事件与发消息（oapi-sdk-go/v3）</template>
+            <div class="hint-lines">
+              在开放平台配置事件订阅请求网址为本页 Webhook URL；加密开启时需填写 Encrypt Key。机器人需具备接收消息与发送消息权限。
+            </div>
+          </el-alert>
+          <el-form-item label="App ID" required>
+            <el-input v-model="cfg.app_id" placeholder="应用凭证 App ID" clearable />
+          </el-form-item>
+          <el-form-item label="App Secret" required>
+            <el-input v-model="cfg.app_secret" type="password" show-password placeholder="应用凭证 App Secret" clearable />
+          </el-form-item>
+          <el-form-item label="Verification Token" required>
+            <el-input v-model="cfg.verification_token" placeholder="事件订阅 Verification Token" clearable />
+          </el-form-item>
+          <el-form-item label="Encrypt Key">
+            <el-input
+              v-model="cfg.encrypt_key"
+              type="password"
+              show-password
+              placeholder="事件加密密钥（启用加密时必填，否则无法解密与验签）"
+              clearable
+            />
+          </el-form-item>
+        </template>
+
+        <template v-else>
+          <el-alert type="warning" :closable="false" show-icon class="config-hint">
+            <template #title>暂无专用配置项</template>
+            <div class="hint-lines">
+              当前后端对该类型<strong>不读取</strong> <code>config</code> 内凭证字段，仅需将上方 Webhook URL 配到第三方；回复能力需在服务端扩展。
+              若有自定义键可写在下方「附加 JSON」。
+            </div>
+          </el-alert>
+        </template>
+
+        <el-collapse class="extras-collapse">
+          <el-collapse-item title="附加配置（可选，JSON）" name="extras">
+            <el-input v-model="configExtrasStr" type="textarea" :rows="5" placeholder="{}" class="mono" />
+            <p class="extras-tip">合并进 config；与上方已展示字段同名的键以表单为准。无特殊需求可留空 <code>{}</code>。</p>
+          </el-collapse-item>
+        </el-collapse>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitForm">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, watch, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
+import { channelApi, type Channel, type ChannelType } from '@/api/channel'
+
+const list = ref<Channel[]>([])
+const loading = ref(false)
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(20)
+const keyword = ref('')
+
+const dialogVisible = ref(false)
+const isEdit = ref(false)
+const editId = ref(0)
+const saving = ref(false)
+
+/**
+ * 与 internal/channels 实际读取的 config 键一致（未列出的类型当前不读 config）。
+ * @see internal/channels 各适配器
+ */
+const CONFIG_KEYS_BY_TYPE: Record<ChannelType, readonly string[]> = {
+  wecom: ['bot_id', 'secret'],
+  whatsapp: ['verify_token', 'hub_verify_token'],
+  telegram: ['bot_token', 'token'],
+  feishu: ['app_id', 'app_secret', 'verification_token', 'encrypt_key'],
+  wechat_kf: [],
+  dingtalk: [],
+}
+
+const CFG_SHAPE = {
+  bot_id: '',
+  secret: '',
+  verify_token: '',
+  bot_token: '',
+  app_id: '',
+  app_secret: '',
+  verification_token: '',
+  encrypt_key: '',
+} as const
+
+type CfgKey = keyof typeof CFG_SHAPE
+
+function emptyCfg(): Record<CfgKey, string> {
+  return { ...CFG_SHAPE }
+}
+
+const cfg = reactive(emptyCfg())
+const configExtrasStr = ref('{}')
+
+function configKeysForType(t: ChannelType): Set<string> {
+  return new Set(CONFIG_KEYS_BY_TYPE[t] || [])
+}
+
+/** 企微走 WebSocket，业务入站不经 HTTP，一般不需要 Webhook 密钥。 */
+const needsWebhookTokenField = computed(() => form.channel_type !== 'wecom')
+
+function loadConfigIntoForm(raw: Record<string, unknown> | null | undefined, channelType: ChannelType) {
+  const base = raw && typeof raw === 'object' && !Array.isArray(raw) ? { ...raw } : {}
+  const shown = configKeysForType(channelType)
+  const extras: Record<string, unknown> = {}
+  Object.assign(cfg, emptyCfg())
+
+  for (const [k, v] of Object.entries(base)) {
+    if (!shown.has(k)) {
+      extras[k] = v
+      continue
+    }
+    const s = v === null || v === undefined ? '' : String(v)
+    if (channelType === 'whatsapp' && k === 'hub_verify_token') {
+      if (!base.verify_token) {
+        cfg.verify_token = s
+      } else {
+        extras.hub_verify_token = v
+      }
+      continue
+    }
+    if (channelType === 'telegram' && k === 'token') {
+      if (!base.bot_token) {
+        cfg.bot_token = s
+      } else {
+        extras.token = v
+      }
+      continue
+    }
+    ;(cfg as Record<string, string>)[k] = s
+  }
+
+  configExtrasStr.value = Object.keys(extras).length > 0 ? JSON.stringify(extras, null, 2) : '{}'
+}
+
+const typeOptions: { value: ChannelType; label: string }[] = [
+  { value: 'wecom', label: '企业微信 · 智能机器人' },
+  { value: 'wechat_kf', label: '微信客服 wechat_kf' },
+  { value: 'feishu', label: '飞书 feishu' },
+  { value: 'dingtalk', label: '钉钉 dingtalk' },
+  { value: 'whatsapp', label: 'WhatsApp' },
+  { value: 'telegram', label: 'Telegram' },
+]
+
+const form = reactive({
+  name: '',
+  channel_type: 'wecom' as ChannelType,
+  enabled: true,
+  webhook_token: '',
+  description: '',
+})
+
+watch(
+  () => form.channel_type,
+  (t) => {
+    if (!dialogVisible.value || isEdit.value) return
+    loadConfigIntoForm({}, t)
+  },
+)
+
+function typeLabel(t: string) {
+  const o = typeOptions.find((x) => x.value === t)
+  return o?.label ?? t
+}
+
+function webhookURL(uuid: string) {
+  const base = `${window.location.origin}/api/v1/webhooks/channels/${uuid}`
+  return base
+}
+
+function copyText(s: string) {
+  navigator.clipboard.writeText(s).then(() => ElMessage.success('已复制'))
+}
+
+async function loadData() {
+  loading.value = true
+  try {
+    const res: any = await channelApi.list({ page: page.value, page_size: pageSize.value, keyword: keyword.value })
+    list.value = res.data?.list || []
+    total.value = res.data?.total || 0
+  } finally {
+    loading.value = false
+  }
+}
+
+function resetForm() {
+  form.name = ''
+  form.channel_type = 'wecom'
+  form.enabled = true
+  form.webhook_token = ''
+  form.description = ''
+  loadConfigIntoForm({}, 'wecom')
+  editId.value = 0
+}
+
+function openCreate() {
+  isEdit.value = false
+  resetForm()
+  dialogVisible.value = true
+}
+
+function openEdit(row: Channel) {
+  isEdit.value = true
+  editId.value = row.id
+  form.name = row.name
+  form.channel_type = row.channel_type
+  form.enabled = row.enabled
+  form.webhook_token = row.webhook_token || ''
+  form.description = row.description || ''
+  loadConfigIntoForm((row.config as Record<string, unknown>) || {}, row.channel_type)
+  dialogVisible.value = true
+}
+
+function buildConfigPayload(): Record<string, unknown> | null {
+  let extras: Record<string, unknown> = {}
+  const rawExtra = configExtrasStr.value.trim()
+  if (rawExtra !== '' && rawExtra !== '{}') {
+    try {
+      const p = JSON.parse(configExtrasStr.value || '{}')
+      if (p !== null && typeof p === 'object' && !Array.isArray(p)) {
+        extras = p as Record<string, unknown>
+      } else {
+        ElMessage.error('附加配置须为 JSON 对象')
+        return null
+      }
+    } catch {
+      ElMessage.error('附加配置 JSON 无效')
+      return null
+    }
+  }
+
+  const out: Record<string, unknown> = { ...extras }
+  const t = form.channel_type
+  if (t === 'wecom') {
+    const bid = cfg.bot_id.trim()
+    const sec = cfg.secret.trim()
+    if (bid) {
+      out.bot_id = bid
+    }
+    if (sec) {
+      out.secret = sec
+    }
+  } else if (t === 'whatsapp') {
+    const vt = cfg.verify_token.trim()
+    if (vt) {
+      out.verify_token = vt
+    }
+    delete out.hub_verify_token
+  } else if (t === 'telegram') {
+    const tok = cfg.bot_token.trim()
+    if (tok) {
+      out.bot_token = tok
+    }
+    delete out.token
+  } else if (t === 'feishu') {
+    const set = (k: keyof typeof CFG_SHAPE) => {
+      const v = String(cfg[k] ?? '').trim()
+      if (v) {
+        out[k] = v
+      }
+    }
+    set('app_id')
+    set('app_secret')
+    set('verification_token')
+    set('encrypt_key')
+  }
+  delete out.agent_id
+  return out
+}
+
+async function submitForm() {
+  if (!form.name.trim()) {
+    ElMessage.warning('请填写名称')
+    return
+  }
+  if (form.channel_type === 'telegram' && !cfg.bot_token.trim()) {
+    ElMessage.warning('Telegram 请填写 Bot Token')
+    return
+  }
+  if (form.channel_type === 'wecom' && (!cfg.bot_id.trim() || !cfg.secret.trim())) {
+    ElMessage.warning('企业微信请填写 Bot ID 与 Secret')
+    return
+  }
+  if (
+    form.channel_type === 'feishu' &&
+    (!cfg.app_id.trim() || !cfg.app_secret.trim() || !cfg.verification_token.trim())
+  ) {
+    ElMessage.warning('飞书请填写 App ID、App Secret 与 Verification Token')
+    return
+  }
+  const config = buildConfigPayload()
+  if (config === null) return
+
+  saving.value = true
+  try {
+    if (isEdit.value) {
+      await channelApi.update(editId.value, {
+        name: form.name,
+        enabled: form.enabled,
+        webhook_token: form.webhook_token,
+        description: form.description,
+        config,
+      })
+      ElMessage.success('已更新')
+    } else {
+      await channelApi.create({
+        name: form.name,
+        channel_type: form.channel_type,
+        enabled: form.enabled,
+        webhook_token: form.webhook_token,
+        description: form.description,
+        config,
+      })
+      ElMessage.success('已创建')
+    }
+    dialogVisible.value = false
+    await loadData()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function handleDelete(id: number) {
+  try {
+    await channelApi.delete(id)
+    ElMessage.success('已删除')
+    loadData()
+  } catch {
+    /* el message from interceptor */
+  }
+}
+
+onMounted(() => loadData())
+</script>
+
+<style scoped>
+.webhook-snippet {
+  font-size: 11px;
+  word-break: break-all;
+  color: var(--el-text-color-secondary);
+}
+.webhook-muted {
+  display: block;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-bottom: 4px;
+}
+.webhook-secondary {
+  display: block;
+  margin-top: 2px;
+  opacity: 0.85;
+}
+.config-hint {
+  margin-bottom: 12px;
+}
+.hint-lines {
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.channel-form :deep(.el-divider) {
+  margin: 8px 0 16px;
+}
+.extras-collapse {
+  margin-top: 8px;
+}
+.extras-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin: 8px 0 0;
+}
+.mono :deep(.el-textarea__inner) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+</style>

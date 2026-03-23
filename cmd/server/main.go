@@ -15,6 +15,7 @@ import (
 
 	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
 	"github.com/chowyu12/aiclaw/internal/auth"
+	"github.com/chowyu12/aiclaw/internal/channels"
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/seed"
 	"github.com/chowyu12/aiclaw/internal/server"
@@ -102,6 +103,9 @@ func main() {
 	registry := agentpkg.NewToolRegistry()
 	executor := agentpkg.NewExecutor(store, registry)
 
+	channels.InitChannelRuntimes(store, executor)
+	defer channels.StopChannelRuntimes()
+
 	mux := http.NewServeMux()
 	server.RegisterAPIRoutes(mux, server.APIParams{
 		Store:              store,
@@ -109,6 +113,7 @@ func main() {
 		DatabaseConfigured: !cfg.NeedsDatabaseSetup(),
 		Upload:             cfg.Upload,
 	})
+	channels.RefreshChannelRuntimes(context.Background())
 	server.MountEmbeddedFrontend(mux)
 
 	authCfg := auth.Config{

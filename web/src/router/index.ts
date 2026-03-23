@@ -60,6 +60,7 @@ const router = createRouter({
         { path: 'tools/create', name: 'ToolCreate', component: () => import('../views/tool/Form.vue') },
         { path: 'tools/:id/edit', name: 'ToolEdit', component: () => import('../views/tool/Form.vue') },
         { path: 'logs', name: 'Logs', component: () => import('../views/log/Index.vue') },
+        { path: 'channels', name: 'Channels', component: () => import('../views/channel/Index.vue') },
       ],
     },
   ],

@@ -103,6 +103,30 @@ func (s *mockStore) ListTools(_ context.Context, _ model.ListQuery) ([]*model.To
 func (s *mockStore) UpdateTool(_ context.Context, _ int64, _ model.UpdateToolReq) error { return nil }
 func (s *mockStore) DeleteTool(_ context.Context, _ int64) error                        { return nil }
 
+func (s *mockStore) CreateChannel(_ context.Context, c *model.Channel) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c.ID = s.nextID()
+	if c.UUID == "" {
+		c.UUID = fmt.Sprintf("ch-%d", c.ID)
+	}
+	return nil
+}
+func (s *mockStore) GetChannel(_ context.Context, id int64) (*model.Channel, error) { return nil, sql.ErrNoRows }
+func (s *mockStore) GetChannelByUUID(_ context.Context, uuid string) (*model.Channel, error) {
+	return nil, sql.ErrNoRows
+}
+func (s *mockStore) ListChannels(_ context.Context, _ model.ListQuery) ([]*model.Channel, int64, error) {
+	return nil, 0, nil
+}
+func (s *mockStore) UpdateChannel(_ context.Context, _ int64, _ model.UpdateChannelReq) error { return nil }
+func (s *mockStore) DeleteChannel(_ context.Context, _ int64) error                           { return nil }
+
+func (s *mockStore) GetChannelThread(_ context.Context, _ int64, _ string) (*model.ChannelThread, error) {
+	return nil, sql.ErrNoRows
+}
+func (s *mockStore) UpsertChannelThread(_ context.Context, _ int64, _, _ string) error { return nil }
+
 func (s *mockStore) CreateConversation(_ context.Context, c *model.Conversation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
