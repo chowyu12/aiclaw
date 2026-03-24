@@ -1,6 +1,14 @@
 # AiClaw
 
-基于 Go + Vue 3 构建的 AI Agent 管理与执行平台，支持多模型供应商接入、工具调用、技能编排和多轮对话。
+基于 Go + Vue 3 构建的 AI Agent 管理与执行平台，当前采用**单例 Agent**架构，支持多模型供应商接入、工具调用、技能编排和多轮对话。
+
+## 项目现状（2026-03）
+
+- **单例 Agent 模式**：运行时只有一个可热更新的 Agent 配置（持久化在 `config.yaml` + 数据库）。
+- **启动编排解耦**：服务入口由 `cmd/server/main.go` 精简为参数解析，启动流程集中在 `internal/bootstrap`。
+- **Workspace 目录**：默认根目录为 `~/.aiclaw`，技能目录为 `~/.aiclaw/skills`。
+- **Browser 工具稳定性增强**：增加 CDP 生命周期归因与自动恢复，日志可见 `canceled_by` 等字段。
+- **Exec 工具兼容性增强**：移除 PTY 依赖，启动失败返回 `exit_code=-1`，支持 shell 候选回退与 `~/` 工作目录展开。
 
 ## 核心优势
 
@@ -41,8 +49,8 @@
 
 ### Agent 管理
 
-- Agent 增删改查，支持设置名称、UUID、系统提示词、模型参数（温度、最大 token 等）
-- 每个 Agent 可关联多个工具（Tools）、技能（Skills）和 MCP 服务
+- 当前为单例 Agent 配置（创建后长期复用），支持修改名称、UUID、系统提示词、模型参数（温度、最大 token 等）
+- Agent 可关联多个工具（Tools）、技能（Skills）和 MCP 服务
 - 支持工具优先执行策略，Agent 自动判断是否需要调用工具（Function Calling）
 
 ### 模型供应商
@@ -63,7 +71,7 @@
 | `grep`             | 按正则表达式搜索文件内容                                        |
 | `find`             | 按 glob 模式查找文件                                            |
 | `ls`               | 列出目录内容                                                    |
-| `exec`             | 运行 Shell 命令，支持 PTY（适配需要 TTY 的命令行工具）          |
+| `exec`             | 运行 Shell 命令（无 PTY），支持 shell 回退、`working_dir` 与超时控制 |
 | `process`          | 管理后台命令会话（启动、列出、读取输出、终止）                  |
 | `web_fetch`        | 抓取 URL 并提取可读内容，自动回退浏览器渲染                     |
 | `browser`          | 浏览器自动化：33 种操作（导航、截图、快照、交互、监控、仿真等） |
@@ -79,7 +87,7 @@
 ### 技能系统
 
 - 采用 OpenClaw 标准格式，每个技能是一个独立目录（`SKILL.md` + `manifest.json` + 可执行代码）
-- 技能来自 Workspace 下 `skills/` 目录扫描（将技能目录放入该文件夹即可；设置页可刷新列表）
+- 技能来自 Workspace 下 `~/.aiclaw/skills/` 目录扫描（将技能目录放入该文件夹即可；设置页可刷新列表）
 - 技能可在 `manifest.json` 中声明工具定义（parameters），Agent 执行时自动注册为可调用工具
 - 支持可执行技能（`index.js` / `index.py`），通过子进程运行工具逻辑
 - 纯指令技能将 `SKILL.md` 内容注入 System Prompt，引导 LLM 按指令推理
