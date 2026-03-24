@@ -13,16 +13,16 @@ export function applyDomTheme(mode: ThemeMode) {
 export function readInitialThemeMode(): ThemeMode {
   try {
     const raw = localStorage.getItem('aiclaw-theme')
-    if (raw == null) return 'dark'
+    if (raw == null) return 'light'
     const v = JSON.parse(raw) as string
     return v === 'light' ? 'light' : 'dark'
   } catch {
-    return 'dark'
+    return 'light'
   }
 }
 
 export const useThemeStore = defineStore('theme', () => {
-  const mode = useStorage<ThemeMode>('aiclaw-theme', 'dark')
+  const mode = useStorage<ThemeMode>('aiclaw-theme', 'light')
 
   watch(mode, (m) => applyDomTheme(m), { immediate: true })
 

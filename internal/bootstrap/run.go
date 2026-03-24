@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -86,6 +88,7 @@ func Run(opts Options) {
 	}
 
 	auth.SetWebToken(cfg.Auth.WebToken)
+	log.WithField("url", webConsoleURL(cfg.Server.Host, cfg.Server.Port, cfg.Auth.WebToken)).Info("open web console with token")
 
 	store, err := gormstore.New(cfg.Database)
 	if err != nil {
@@ -188,4 +191,13 @@ func startConfigHotReload(cfgPath string) {
 		return
 	}
 	log.WithField("path", abs).Info("config hot reload enabled")
+}
+
+func webConsoleURL(host string, port int, token string) string {
+	h := strings.TrimSpace(host)
+	switch h {
+	case "", "0.0.0.0", "::", "[::]":
+		h = "localhost"
+	}
+	return fmt.Sprintf("http://%s:%d/?token=%s", h, port, url.QueryEscape(strings.TrimSpace(token)))
 }

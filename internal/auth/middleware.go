@@ -32,7 +32,7 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 				return
 			}
 
-			tokenStr := extractBearer(r)
+			tokenStr := extractToken(r)
 			if tokenStr == "" {
 				httputil.Unauthorized(w, "missing token")
 				return
@@ -55,12 +55,15 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 	}
 }
 
-func extractBearer(r *http.Request) string {
+func extractToken(r *http.Request) string {
 	v := r.Header.Get("Authorization")
-	if v == "" {
-		return ""
+	if strings.HasPrefix(v, "Bearer ") {
+		return strings.TrimSpace(strings.TrimPrefix(v, "Bearer "))
 	}
-	return strings.TrimPrefix(v, "Bearer ")
+	if v != "" {
+		return strings.TrimSpace(v)
+	}
+	return strings.TrimSpace(r.URL.Query().Get("token"))
 }
 
 func authenticate(cfg Config, ctx context.Context, tokenStr string) (*Identity, error) {

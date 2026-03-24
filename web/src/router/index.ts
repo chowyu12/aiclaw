@@ -67,6 +67,21 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  const authStore = useAuthStore()
+  const queryToken = typeof to.query.token === 'string' ? to.query.token.trim() : ''
+  if (queryToken) {
+    authStore.setToken(queryToken)
+    resetTokenVerified()
+
+    const { token: _token, ...restQuery } = to.query
+    return {
+      path: to.path,
+      query: restQuery,
+      hash: to.hash,
+      replace: true,
+    }
+  }
+
   const status = await checkSetupStatus()
 
   if (!status.database_configured && to.path !== '/setup/database') {
@@ -77,7 +92,7 @@ router.beforeEach(async (to) => {
     return '/login'
   }
 
-  const token = localStorage.getItem('token')
+  const token = authStore.token || localStorage.getItem('token')
   if (!to.meta.public && !token) {
     return '/login'
   }
