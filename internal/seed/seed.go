@@ -136,14 +136,14 @@ description: Turns natural-language scheduling needs into Linux cron jobs using 
 ## 工作流程
 
 1. **理解需求**：确认要做什么、多久执行一次、在哪个时区
-2. **编写脚本并调度**：用 cron 工具的 `schedule` 动作，传入 `expression` + `content`（脚本内容）+ `name`（脚本名）一步完成
-3. **确认结果**：用 cron 工具的 `list` 动作展示当前所有定时任务，让用户确认
-4. **提醒类需求**：若用户只想设置提醒/闹钟，用 cron 工具的 `add_event` 动作创建唤醒事件
+2. **编写脚本并调度**：用 cron 工具的 'schedule' 动作，传入 'expression' + 'content'（脚本内容）+ 'name'（脚本名）一步完成
+3. **确认结果**：用 cron 工具的 'list' 动作展示当前所有定时任务，让用户确认
+4. **提醒类需求**：若用户只想设置提醒/闹钟，用 cron 工具的 'add_event' 动作创建唤醒事件
 
 ## 脚本编写规范
 
-- 开头加 `set -eo pipefail`，遇到错误立即停止
-- 关键操作前后加 `echo` 打印进度日志（带时间戳）
+- 开头加 'set -eo pipefail'，遇到错误立即停止
+- 关键操作前后加 'echo' 打印进度日志（带时间戳）
 - 涉及文件操作时先检查路径是否存在
 - 涉及清理/删除操作时加安全校验（路径非空、非根目录等）
 - 需要的环境变量在脚本顶部用变量声明
@@ -155,14 +155,14 @@ description: Turns natural-language scheduling needs into Linux cron jobs using 
 
 - 脚本路径
 - Cron 表达式及含义
-- 如何查看/修改/删除该定时任务（`cron list` / `cron remove`）
+- 如何查看/修改/删除该定时任务（'cron list' / 'cron remove'）
 
 ## 安全原则
 
-- 不要执行 `rm -rf /` 等危险命令
+- 不要执行 'rm -rf /' 等危险命令
 - 清理任务要限定明确的目录范围
 - 涉及数据库操作建议先备份
-- 建议用户开启 `log_output` 以便排查问题
+- 建议用户开启 'log_output' 以便排查问题
 `,
 		},
 		{
@@ -184,28 +184,28 @@ description: Diagnoses and resolves Linux system issues using shell commands, lo
 
 ### 系统概览
 
-- exec: `uname -a && uptime`（系统版本和运行时间）
-- exec: `free -h`（内存使用）
-- exec: `df -h`（磁盘使用）
-- exec: `top -bn1 | head -20`（CPU 和进程概览）
+- exec: 'uname -a && uptime'（系统版本和运行时间）
+- exec: 'free -h'（内存使用）
+- exec: 'df -h'（磁盘使用）
+- exec: 'top -bn1 | head -20'（CPU 和进程概览）
 
 ### 进程排查
 
-- exec: `ps aux --sort=-%mem | head -20`（内存占用 Top）
-- exec: `ps aux --sort=-%cpu | head -20`（CPU 占用 Top）
-- exec: `lsof -i :端口号`（端口占用排查）
-- exec: `netstat -tlnp` 或 `ss -tlnp`（监听端口列表）
+- exec: 'ps aux --sort=-%mem | head -20'（内存占用 Top）
+- exec: 'ps aux --sort=-%cpu | head -20'（CPU 占用 Top）
+- exec: 'lsof -i :端口号'（端口占用排查）
+- exec: 'netstat -tlnp' 或 'ss -tlnp'（监听端口列表）
 
 ### 日志分析
 
 - grep: 在日志文件中搜索 error/fatal/panic 等关键词
 - read: 读取关键日志文件的最后若干行（tail 效果）
-- exec: `journalctl -u 服务名 --since "1 hour ago"`（systemd 服务日志）
+- exec: 'journalctl -u 服务名 --since "1 hour ago"'（systemd 服务日志）
 
 ### 服务管理
 
-- exec: `systemctl status 服务名`（服务状态）
-- process: 启动后台监控命令（如 `tail -f`）
+- exec: 'systemctl status 服务名'（服务状态）
+- process: 启动后台监控命令（如 'tail -f'）
 
 ## 工作原则
 
@@ -213,7 +213,7 @@ description: Diagnoses and resolves Linux system issues using shell commands, lo
 2. **最小影响**：优先选择影响最小的修复手段
 3. **操作确认**：执行任何修改操作前先告知用户具体命令和影响
 4. **留痕记录**：重要操作用 write 工具记录操作日志
-5. **安全兜底**：修改配置前建议先备份（`cp 原文件 原文件.bak`）
+5. **安全兜底**：修改配置前建议先备份（'cp 原文件 原文件.bak'）
 `,
 		},
 		{
