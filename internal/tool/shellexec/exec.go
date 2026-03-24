@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/workspace"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -63,6 +64,9 @@ func Handler(ctx context.Context, args string) (string, error) {
 	log.WithFields(log.Fields{"command": p.Command, "timeout": timeout}).Info("[exec] >> run")
 
 	workDir := resolveWorkingDir(p.WorkingDir)
+	if workDir == "" {
+		workDir = workspace.Root()
+	}
 	output, exitCode, err := runWithShellFallback(ctx, p.Command, workDir)
 
 	r := truncate(output, maxOutput)

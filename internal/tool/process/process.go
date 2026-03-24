@@ -7,19 +7,22 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/workspace"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
 type processParams struct {
-	Action    string `json:"action"`
-	SessionID string `json:"session_id"`
-	Command   string `json:"command"`
+	Action     string `json:"action"`
+	SessionID  string `json:"session_id"`
+	Command    string `json:"command"`
+	WorkingDir string `json:"working_dir"`
 }
 
 type session struct {
@@ -49,7 +52,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 
 	switch p.Action {
 	case "start":
-		return startSession(p.Command)
+		return startSession(p.Command, p.WorkingDir)
 	case "list":
 		return listSessions()
 	case "read":
@@ -61,7 +64,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 	}
 }
 
-func startSession(command string) (string, error) {
+func startSession(command, workingDir string) (string, error) {
 	if command == "" {
 		return "", fmt.Errorf("command is required for start")
 	}
@@ -69,6 +72,13 @@ func startSession(command string) (string, error) {
 	shell := findShell()
 	cmd := exec.Command(shell, "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	dir := resolveWorkingDir(workingDir)
+	if dir == "" {
+		dir = workspace.Root()
+	}
+	if dir != "" {
+		cmd.Dir = dir
+	}
 
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -198,4 +208,23 @@ func findShell() string {
 		}
 	}
 	return "/bin/sh"
+}
+
+func resolveWorkingDir(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	if dir == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return dir
+	}
+	if strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(dir, "~/"))
+		}
+	}
+	return dir
 }
