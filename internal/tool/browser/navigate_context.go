@@ -2,11 +2,13 @@ package browser
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -119,14 +121,47 @@ func mergedActionContextMax(tabCtx, reqCtx context.Context, maxDur time.Duration
 	}
 }
 
-// runChromedpNavigate 使用与 reqCtx 合并后的截止时间执行 Navigate + body WaitReady（短等待策略由 URL 主机名决定）。
+// loadWaitTimeout 是等待 load 事件的上限；超过后如果 DOM 已就绪则视为导航成功。
+// chromedp.Navigate 会阻塞到 Page.loadEventFired，资源密集型网站（长连接/流媒体/广告）
+// 可能永远不会触发该事件，从而耗尽整个工具超时。
+const (
+	defaultLoadWait = 25 * time.Second
+	heavyLoadWait   = 10 * time.Second
+	domProbeTimeout = 5 * time.Second
+)
+
+// runChromedpNavigate 分两阶段执行导航：
+//  1. 用较短超时尝试完整 load（chromedp.Navigate 等待 loadEventFired）；
+//  2. 若 load 超时，探测 DOM 是否已可用——若 body ready 则视为成功（页面可交互，仅残留资源未加载）。
 func runChromedpNavigate(tabCtx, reqCtx context.Context, rawURL string) error {
 	deadline, bodyWait, _ := navigateMergedDeadline(reqCtx, rawURL)
-	navCtx, cancel := context.WithDeadline(tabCtx, deadline)
-	defer cancel()
-	if err := chromedp.Run(navCtx, chromedp.Navigate(rawURL)); err != nil {
-		return err
+
+	host := hostFromRawURL(rawURL)
+	loadWait := defaultLoadWait
+	if isHeavyDynamicSite(host) {
+		loadWait = heavyLoadWait
 	}
+
+	navDL := minTime(time.Now().Add(loadWait), deadline)
+	navCtx, navCancel := context.WithDeadline(tabCtx, navDL)
+	err := chromedp.Run(navCtx, chromedp.Navigate(rawURL))
+	navCancel()
+
+	if err != nil {
+		if !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		// load 事件未在 loadWait 内触发——探测页面是否已部分可用。
+		probeCtx, probeCancel := context.WithTimeout(tabCtx, domProbeTimeout)
+		probeErr := chromedp.Run(probeCtx, chromedp.WaitReady("body", chromedp.ByQuery))
+		probeCancel()
+		if probeErr != nil {
+			return err
+		}
+		log.WithFields(log.Fields{"url": rawURL, "load_wait": loadWait}).
+			Debug("[Browser] navigate: load event timed out but DOM is ready, continuing")
+	}
+
 	bodyDL := minTime(time.Now().Add(bodyWait), deadline)
 	if !bodyDL.After(time.Now()) {
 		return nil

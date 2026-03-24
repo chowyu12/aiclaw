@@ -45,17 +45,6 @@ request.interceptors.response.use(
 
 export default request
 
-export interface ApiResponse<T = any> {
-  code: number
-  message: string
-  data: T
-}
-
-export interface PageData<T = any> {
-  list: T[]
-  total: number
-}
-
 export interface ListQuery {
   page: number
   page_size: number

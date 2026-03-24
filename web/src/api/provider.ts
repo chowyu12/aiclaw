@@ -23,7 +23,6 @@ export interface CreateProviderReq {
 
 export const providerApi = {
   list: (params: ListQuery) => request.get('/providers', { params }),
-  get: (id: number) => request.get(`/providers/${id}`),
   create: (data: CreateProviderReq) => request.post('/providers', data),
   update: (id: number, data: Partial<CreateProviderReq>) => request.put(`/providers/${id}`, data),
   delete: (id: number) => request.delete(`/providers/${id}`),

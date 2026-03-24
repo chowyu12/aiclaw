@@ -5,13 +5,13 @@ import (
 	"net/http"
 )
 
-type Response struct {
+type response struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    any    `json:"data,omitzero"`
 }
 
-type PageData struct {
+type pageData struct {
 	List  any   `json:"list"`
 	Total int64 `json:"total"`
 }
@@ -23,15 +23,15 @@ func JSON(w http.ResponseWriter, code int, data any) {
 }
 
 func OK(w http.ResponseWriter, data any) {
-	JSON(w, http.StatusOK, Response{Code: 0, Message: "ok", Data: data})
+	JSON(w, http.StatusOK, response{Code: 0, Message: "ok", Data: data})
 }
 
 func OKList(w http.ResponseWriter, list any, total int64) {
-	JSON(w, http.StatusOK, Response{Code: 0, Message: "ok", Data: PageData{List: list, Total: total}})
+	JSON(w, http.StatusOK, response{Code: 0, Message: "ok", Data: pageData{List: list, Total: total}})
 }
 
 func Error(w http.ResponseWriter, httpCode int, msg string) {
-	JSON(w, httpCode, Response{Code: -1, Message: msg})
+	JSON(w, httpCode, response{Code: -1, Message: msg})
 }
 
 func BadRequest(w http.ResponseWriter, msg string) {

@@ -51,24 +51,3 @@ func (s *MCPServer) GetHeaders() map[string]string {
 	return m
 }
 
-type CreateMCPServerReq struct {
-	Name        string       `json:"name"`
-	Description string       `json:"description"`
-	Transport   MCPTransport `json:"transport"`
-	Endpoint    string       `json:"endpoint"`
-	Args        JSON         `json:"args,omitzero"`
-	Env         JSON         `json:"env,omitzero"`
-	Headers     JSON         `json:"headers,omitzero"`
-	Enabled     *bool        `json:"enabled,omitzero"`
-}
-
-type UpdateMCPServerReq struct {
-	Name        *string       `json:"name,omitzero"`
-	Description *string       `json:"description,omitzero"`
-	Transport   *MCPTransport `json:"transport,omitzero"`
-	Endpoint    *string       `json:"endpoint,omitzero"`
-	Args        JSON          `json:"args,omitzero"`
-	Env         JSON          `json:"env,omitzero"`
-	Headers     JSON          `json:"headers,omitzero"`
-	Enabled     *bool         `json:"enabled,omitzero"`
-}

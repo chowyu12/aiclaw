@@ -32,40 +32,6 @@ type Skill struct {
 	Tools []Tool `json:"tools,omitzero" gorm:"-"`
 }
 
-type CreateSkillReq struct {
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	Instruction string      `json:"instruction"`
-	Source      SkillSource `json:"source,omitzero"`
-	Slug        string      `json:"slug,omitzero"`
-	Version     string      `json:"version,omitzero"`
-	Author      string      `json:"author,omitzero"`
-	DirName     string      `json:"dir_name,omitzero"`
-	MainFile    string      `json:"main_file,omitzero"`
-	Config      JSON        `json:"config,omitzero"`
-	Permissions JSON        `json:"permissions,omitzero"`
-	ToolDefs    JSON        `json:"tool_defs,omitzero"`
-	Enabled     *bool       `json:"enabled,omitzero"`
-	ToolIDs     []int64     `json:"tool_ids,omitzero"`
-}
-
-type UpdateSkillReq struct {
-	Name        *string      `json:"name,omitzero"`
-	Description *string      `json:"description,omitzero"`
-	Instruction *string      `json:"instruction,omitzero"`
-	Source      *SkillSource `json:"source,omitzero"`
-	Slug        *string      `json:"slug,omitzero"`
-	Version     *string      `json:"version,omitzero"`
-	Author      *string      `json:"author,omitzero"`
-	DirName     *string      `json:"dir_name,omitzero"`
-	MainFile    *string      `json:"main_file,omitzero"`
-	Config      JSON         `json:"config,omitzero"`
-	Permissions JSON         `json:"permissions,omitzero"`
-	ToolDefs    JSON         `json:"tool_defs,omitzero"`
-	Enabled     *bool        `json:"enabled,omitzero"`
-	ToolIDs     []int64      `json:"tool_ids,omitzero"`
-}
-
 type SkillManifestTool struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`

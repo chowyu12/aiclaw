@@ -15,7 +15,7 @@ const (
 	ChannelTelegram ChannelType = "telegram"  // Telegram Bot
 )
 
-var ValidChannelTypes = map[ChannelType]struct{}{
+var validChannelTypes = map[ChannelType]struct{}{
 	ChannelWeCom:    {},
 	ChannelWeChatKF: {},
 	ChannelFeishu:   {},
@@ -25,7 +25,7 @@ var ValidChannelTypes = map[ChannelType]struct{}{
 }
 
 func IsValidChannelType(t ChannelType) bool {
-	_, ok := ValidChannelTypes[t]
+	_, ok := validChannelTypes[t]
 	return ok
 }
 

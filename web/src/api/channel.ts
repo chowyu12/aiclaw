@@ -59,7 +59,6 @@ export interface ChannelMessage {
 
 export const channelApi = {
   list: (params: ListQuery) => request.get('/channels', { params }),
-  get: (id: number) => request.get(`/channels/${id}`),
   setEnabled: (id: number, enabled: boolean) => request.patch(`/channels/${id}/enabled`, { enabled }),
   conversations: (id: number, params: ListQuery & { thread_key?: string; sender_id?: string }) =>
     request.get(`/channels/${id}/conversations`, { params }),
