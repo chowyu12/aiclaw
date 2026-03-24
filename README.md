@@ -341,9 +341,152 @@ curl -X POST http://localhost:8080/api/v1/chat/completions \
 
 ## 部署
 
+### 编译
+
 项目支持单文件部署，构建后的二进制文件已包含前端静态资源：
 
 ```bash
+# 安装前端依赖 + 构建前端 + 编译 Go 二进制
 make all
-./bin/aiclaw
+
+# 产物在 bin/ 目录
+ls -lh bin/aiclaw
+```
+
+也可分步构建：
+
+```bash
+# 仅构建前端
+make build-frontend
+
+# 仅编译后端（需先构建前端）
+make build
+
+# 交叉编译示例
+GOOS=linux GOARCH=amd64 go build -o bin/aiclaw-linux-amd64 cmd/server/main.go
+GOOS=windows GOARCH=amd64 go build -o bin/aiclaw-windows-amd64.exe cmd/server/main.go
+GOOS=darwin GOARCH=arm64 go build -o bin/aiclaw-darwin-arm64 cmd/server/main.go
+```
+
+部署时只需将编译产物和配置文件拷贝到目标机器：
+
+```bash
+scp bin/aiclaw user@server:/opt/aiclaw/
+scp etc/config.yaml user@server:/opt/aiclaw/etc/
+```
+
+### 后台运行与开机自启
+
+#### Linux（systemd）
+
+创建服务文件 `/etc/systemd/system/aiclaw.service`：
+
+```ini
+[Unit]
+Description=AiClaw AI Agent Platform
+After=network.target
+
+[Service]
+Type=simple
+User=aiclaw
+WorkingDirectory=/opt/aiclaw
+ExecStart=/opt/aiclaw/aiclaw
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+# 启用并启动
+sudo systemctl daemon-reload
+sudo systemctl enable aiclaw
+sudo systemctl start aiclaw
+
+# 查看状态 / 日志
+sudo systemctl status aiclaw
+sudo journalctl -u aiclaw -f
+```
+
+#### macOS（launchd）
+
+创建 `~/Library/LaunchAgents/com.aiclaw.plist`：
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.aiclaw</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/aiclaw</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/usr/local/bin</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/aiclaw.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/aiclaw.stderr.log</string>
+</dict>
+</plist>
+```
+
+```bash
+# 加载并启动
+launchctl load ~/Library/LaunchAgents/com.aiclaw.plist
+
+# 停止并卸载
+launchctl unload ~/Library/LaunchAgents/com.aiclaw.plist
+
+# 查看日志
+tail -f /tmp/aiclaw.stdout.log
+```
+
+#### Windows（服务 / 计划任务）
+
+**方式一：NSSM 注册为 Windows 服务（推荐）**
+
+下载 [NSSM](https://nssm.cc/)，然后：
+
+```powershell
+# 安装服务
+nssm install AiClaw C:\aiclaw\aiclaw.exe
+nssm set AiClaw AppDirectory C:\aiclaw
+nssm set AiClaw DisplayName "AiClaw AI Agent Platform"
+nssm set AiClaw Start SERVICE_AUTO_START
+
+# 启动 / 停止 / 查看状态
+nssm start AiClaw
+nssm stop AiClaw
+nssm status AiClaw
+```
+
+**方式二：计划任务（开机自启）**
+
+```powershell
+# 创建开机启动任务
+schtasks /create /tn "AiClaw" /tr "C:\aiclaw\aiclaw.exe" /sc onstart /ru SYSTEM
+
+# 删除任务
+schtasks /delete /tn "AiClaw" /f
+```
+
+#### Docker
+
+```bash
+docker run -d \
+  --name aiclaw \
+  --restart unless-stopped \
+  -p 8080:8080 \
+  -v ~/.aiclaw:/root/.aiclaw \
+  aiclaw:latest
 ```
