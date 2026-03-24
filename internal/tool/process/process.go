@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/workspace"
@@ -69,9 +68,8 @@ func startSession(command, workingDir string) (string, error) {
 		return "", fmt.Errorf("command is required for start")
 	}
 
-	shell := findShell()
-	cmd := exec.Command(shell, "-c", command)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd := buildCommand(command)
+	setProcAttr(cmd)
 	dir := resolveWorkingDir(workingDir)
 	if dir == "" {
 		dir = workspace.Root()
@@ -191,23 +189,9 @@ func killSession(id string) (string, error) {
 		return fmt.Sprintf("Session %s already exited (code=%d)", s.ID, s.ExitCode), nil
 	}
 
-	if err := syscall.Kill(-s.cmd.Process.Pid, syscall.SIGTERM); err != nil {
-		syscall.Kill(-s.cmd.Process.Pid, syscall.SIGKILL)
-	}
+	killProcessGroup(s.cmd)
 
 	return fmt.Sprintf("Session %s (pid=%d) killed", s.ID, s.PID), nil
-}
-
-func findShell() string {
-	if sh := os.Getenv("SHELL"); sh != "" {
-		return sh
-	}
-	for _, s := range []string{"/bin/bash", "/bin/zsh", "/bin/sh"} {
-		if _, err := os.Stat(s); err == nil {
-			return s
-		}
-	}
-	return "/bin/sh"
 }
 
 func resolveWorkingDir(dir string) string {
