@@ -11,6 +11,7 @@
           <span class="aic-card-title">会话记录</span>
           <div class="filter-bar">
             <el-input v-model="filterUserId" placeholder="用户 ID" clearable style="width: 150px;" @clear="loadData" @keyup.enter="loadData" />
+            <el-input v-model="filterUserPrefix" placeholder="用户前缀（如 channel:xxx:）" clearable style="width: 240px;" @clear="loadData" @keyup.enter="loadData" />
             <el-button @click="loadData">
               <el-icon><Search /></el-icon> 查询
             </el-button>
@@ -169,6 +170,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { chatApi, type Conversation, type Message, type ExecutionStep } from '../../api/chat'
 import { agentApi, type Agent } from '../../api/agent'
+import { useRoute } from 'vue-router'
 
 interface ConvRow extends Conversation {
   _loading?: boolean
@@ -185,7 +187,9 @@ const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const filterUserId = ref('')
+const filterUserPrefix = ref('')
 const expandedRows = ref<number[]>([])
+const route = useRoute()
 
 onMounted(async () => {
   try {
@@ -193,6 +197,12 @@ onMounted(async () => {
     defaultAgent.value = res.data || null
   } catch {
     defaultAgent.value = null
+  }
+  if (typeof route.query.user_id === 'string') {
+    filterUserId.value = route.query.user_id
+  }
+  if (typeof route.query.user_prefix === 'string') {
+    filterUserPrefix.value = route.query.user_prefix
   }
   loadData()
 })
@@ -203,6 +213,7 @@ async function loadData() {
   try {
     const params: any = { page: page.value, page_size: pageSize.value }
     if (filterUserId.value) params.user_id = filterUserId.value
+    if (filterUserPrefix.value) params.user_prefix = filterUserPrefix.value
     const res: any = await chatApi.conversations(params)
     conversations.value = (res.data?.list || []).map((c: Conversation) => reactive({ ...c, _loading: false, _messages: undefined }))
     total.value = res.data?.total || 0
@@ -312,17 +323,17 @@ function formatTime(t: string) {
 }
 .empty-msg {
   text-align: center;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   padding: 20px;
 }
 
 .message-timeline {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 .msg-item {
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -331,12 +342,12 @@ function formatTime(t: string) {
   align-items: center;
   gap: 8px;
   padding: 8px 14px;
-  background: #fafafa;
-  border-bottom: 1px solid #f0f0f0;
+  background: var(--el-fill-color-lighter);
+  border-bottom: 1px solid var(--el-border-color-extra-light);
 }
 .msg-time {
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-left: auto;
 }
 .msg-body {
@@ -348,14 +359,13 @@ function formatTime(t: string) {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: #303133;
+  color: var(--el-text-color-primary);
   max-height: 300px;
   overflow-y: auto;
 }
 
 .steps-section {
-  border-top: 1px solid #f0f0f0;
+  border-top: 1px solid var(--el-border-color-extra-light);
 }
 .steps-header {
   display: flex;
@@ -364,19 +374,19 @@ function formatTime(t: string) {
   padding: 8px 14px;
   cursor: pointer;
   font-size: 13px;
-  color: #606266;
-  transition: background-color 0.2s;
+  color: var(--el-text-color-regular);
+  transition: background-color 0.15s;
 }
 .steps-header:hover {
-  background: #f5f7fa;
+  background: var(--el-fill-color-light);
 }
 .steps-summary {
   margin-left: auto;
   font-size: 12px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
 }
 .arrow {
-  transition: transform 0.3s;
+  transition: transform 0.2s;
   margin-left: 4px;
 }
 .arrow.expanded {
@@ -384,12 +394,12 @@ function formatTime(t: string) {
 }
 .steps-body {
   padding: 16px 20px 8px;
-  background: #fafbfc;
+  background: var(--el-fill-color-lighter);
 }
 
 .step-card {
-  background: #fff;
-  border: 1px solid #ebeef5;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
   border-radius: 6px;
   padding: 12px 14px;
 }
@@ -402,7 +412,7 @@ function formatTime(t: string) {
 .step-name {
   font-size: 13px;
   font-weight: 500;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 
 .step-block {
@@ -411,38 +421,38 @@ function formatTime(t: string) {
 .step-block-label {
   font-size: 12px;
   font-weight: 500;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-bottom: 2px;
 }
 .error-label {
-  color: #f56c6c;
+  color: var(--el-color-danger);
 }
 .step-block-code {
-  background: #f5f7fa;
-  border: 1px solid #ebeef5;
-  border-radius: 4px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
   padding: 8px 10px;
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 200px;
   overflow-y: auto;
-  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
-  color: #303133;
+  color: var(--el-text-color-primary);
 }
 .error-code {
-  background: #fef0f0;
-  border-color: #fde2e2;
-  color: #f56c6c;
+  background: var(--el-color-danger-light-9);
+  border-color: var(--el-color-danger-light-8);
+  color: var(--el-color-danger);
 }
 
 .step-meta-row {
   display: flex;
   gap: 16px;
   font-size: 11px;
-  color: #909399;
+  color: var(--el-text-color-secondary);
   margin-top: 4px;
 }
 .step-meta-row span {
@@ -452,7 +462,7 @@ function formatTime(t: string) {
 }
 
 .slide-enter-active, .slide-leave-active {
-  transition: all 0.3s ease;
+  transition: all 0.25s ease;
   max-height: 3000px;
   overflow: hidden;
 }

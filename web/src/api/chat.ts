@@ -96,7 +96,7 @@ export interface Message {
 }
 
 export const chatApi = {
-  conversations: (params: ListQuery & { user_id?: string }) =>
+  conversations: (params: ListQuery & { user_id?: string; user_prefix?: string }) =>
     request.get('/conversations', { params }),
   messages: (id: number, limit?: number, withSteps?: boolean) =>
     request.get(`/conversations/${id}/messages`, { params: { limit, with_steps: withSteps ? 'true' : undefined } }),

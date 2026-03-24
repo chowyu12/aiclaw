@@ -37,3 +37,23 @@ func (s *GormStore) UpsertChannelThread(ctx context.Context, channelID int64, th
 	row.ConversationUUID = conversationUUID
 	return s.db.WithContext(ctx).Save(&row).Error
 }
+
+func (s *GormStore) ListChannelThreads(ctx context.Context, channelID int64) ([]model.ChannelThread, error) {
+	var rows []model.ChannelThread
+	if err := s.db.WithContext(ctx).
+		Where("channel_id = ?", channelID).
+		Order("updated_at DESC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (s *GormStore) DeleteChannelThreadsByConversation(ctx context.Context, channelID int64, conversationUUID string) error {
+	if conversationUUID == "" {
+		return nil
+	}
+	return s.db.WithContext(ctx).
+		Where("channel_id = ? AND conversation_uuid = ?", channelID, conversationUUID).
+		Delete(&model.ChannelThread{}).Error
+}

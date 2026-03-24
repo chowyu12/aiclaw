@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
 	"github.com/chowyu12/aiclaw/internal/auth"
@@ -111,10 +112,38 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 func (h *ChatHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
 	q := ParseListQuery(r)
 	userID := r.URL.Query().Get("user_id")
+	userPrefix := strings.TrimSpace(r.URL.Query().Get("user_prefix"))
 	if userID == "" {
 		if id := auth.IdentityFromContext(r.Context()); id != nil && id.IsWebSession() {
 			userID = auth.DefaultChatUserID
 		}
+	}
+	if userPrefix != "" {
+		allQ := q
+		allQ.Page = 1
+		allQ.PageSize = 10000
+		all, _, err := h.store.ListConversations(r.Context(), "", allQ)
+		if err != nil {
+			httputil.InternalError(w, err.Error())
+			return
+		}
+		filtered := make([]*model.Conversation, 0, len(all))
+		for _, c := range all {
+			if c != nil && strings.HasPrefix(c.UserID, userPrefix) {
+				filtered = append(filtered, c)
+			}
+		}
+		total := int64(len(filtered))
+		page := max(q.Page, 1)
+		pageSize := max(q.PageSize, 1)
+		offset := (page - 1) * pageSize
+		if offset >= len(filtered) {
+			httputil.OKList(w, []*model.Conversation{}, total)
+			return
+		}
+		end := min(offset+pageSize, len(filtered))
+		httputil.OKList(w, filtered[offset:end], total)
+		return
 	}
 	list, total, err := h.store.ListConversations(r.Context(), userID, q)
 	if err != nil {

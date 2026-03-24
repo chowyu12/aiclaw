@@ -27,11 +27,13 @@ var WsCmd = struct {
 type MessageType string
 
 const (
-	MessageTypeText  MessageType = "text"
-	MessageTypeImage MessageType = "image"
-	MessageTypeMixed MessageType = "mixed"
-	MessageTypeVoice MessageType = "voice"
-	MessageTypeFile  MessageType = "file"
+	MessageTypeText   MessageType = "text"
+	MessageTypeImage  MessageType = "image"
+	MessageTypeMixed  MessageType = "mixed"
+	MessageTypeVoice  MessageType = "voice"
+	MessageTypeFile   MessageType = "file"
+	MessageTypeVideo  MessageType = "video"
+	MessageTypeStream MessageType = "stream"
 )
 
 // EventType 事件 eventtype。
@@ -67,10 +69,29 @@ type TextContent struct {
 	Content string `json:"content"`
 }
 
-// ImageContent 图片。
+// ImageContent 图片（url 为 AES-256-CBC 加密的临时下载链接，密钥同回调 AESKey）。
 type ImageContent struct {
-	URL    string `json:"url"`
-	AesKey string `json:"aeskey"`
+	URL string `json:"url"`
+}
+
+// VoiceContent 语音（服务端已转文本）。
+type VoiceContent struct {
+	Content string `json:"content"`
+}
+
+// FileContent 文件（url 为加密的临时下载链接）。
+type FileContent struct {
+	URL string `json:"url"`
+}
+
+// VideoContent 视频（url 为加密的临时下载链接）。
+type VideoContent struct {
+	URL string `json:"url"`
+}
+
+// StreamContent 流式消息刷新。
+type StreamContent struct {
+	ID string `json:"id"`
 }
 
 // MixedMsgItem 混排子项。
@@ -85,23 +106,36 @@ type MixedContent struct {
 	MsgItem []MixedMsgItem `json:"msg_item"`
 }
 
-// BaseMessage 公共字段。
+// QuoteContent 引用的消息。
+type QuoteContent struct {
+	MsgType string        `json:"msgtype"`
+	Text    *TextContent  `json:"text,omitempty"`
+	Image   *ImageContent `json:"image,omitempty"`
+	Mixed   *MixedContent `json:"mixed,omitempty"`
+	Voice   *VoiceContent `json:"voice,omitempty"`
+	File    *FileContent  `json:"file,omitempty"`
+	Video   *VideoContent `json:"video,omitempty"`
+}
+
+// BaseMessage 公共字段（所有消息回调均含这些字段）。
 type BaseMessage struct {
-	MsgID    string      `json:"msgid"`
-	AibotID  string      `json:"aibotid"`
-	ChatID   string      `json:"chatid,omitempty"`
-	ChatType string      `json:"chattype"`
-	From     MessageFrom `json:"from"`
-	MsgType  string      `json:"msgtype"`
+	MsgID       string      `json:"msgid"`
+	AibotID     string      `json:"aibotid"`
+	ChatID      string      `json:"chatid,omitempty"`
+	ChatType    string      `json:"chattype"`
+	From        MessageFrom `json:"from"`
+	ResponseURL string      `json:"response_url,omitempty"`
+	MsgType     string      `json:"msgtype"`
 }
 
 // TextMessage 纯文本。
 type TextMessage struct {
 	BaseMessage
-	Text TextContent `json:"text"`
+	Text  TextContent   `json:"text"`
+	Quote *QuoteContent `json:"quote,omitempty"`
 }
 
-// ImageMessage 纯图片。
+// ImageMessage 纯图片（仅单聊）。
 type ImageMessage struct {
 	BaseMessage
 	Image ImageContent `json:"image"`
@@ -110,7 +144,32 @@ type ImageMessage struct {
 // MixedMessage 图文混排。
 type MixedMessage struct {
 	BaseMessage
-	Mixed MixedContent `json:"mixed"`
+	Mixed MixedContent  `json:"mixed"`
+	Quote *QuoteContent `json:"quote,omitempty"`
+}
+
+// VoiceMessage 语音（仅单聊，已转文本）。
+type VoiceMessage struct {
+	BaseMessage
+	Voice VoiceContent `json:"voice"`
+}
+
+// FileMessage 文件（仅单聊，≤100MB）。
+type FileMessage struct {
+	BaseMessage
+	File FileContent `json:"file"`
+}
+
+// VideoMessage 视频（仅单聊，≤100MB）。
+type VideoMessage struct {
+	BaseMessage
+	Video VideoContent `json:"video"`
+}
+
+// StreamMessage 流式消息刷新回调。
+type StreamMessage struct {
+	BaseMessage
+	Stream StreamContent `json:"stream"`
 }
 
 // ReplyMsgItem 流式回复中的图片项（协议字段，当前 hub 未使用）。

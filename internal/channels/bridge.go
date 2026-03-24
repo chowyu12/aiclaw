@@ -29,7 +29,7 @@ type Bridge struct {
 	executor *agent.Executor
 }
 
-func NewBridge(s store.Store, exec *agent.Executor) *Bridge {
+func newBridge(s store.Store, exec *agent.Executor) *Bridge {
 	if s == nil || exec == nil {
 		return nil
 	}
@@ -55,7 +55,7 @@ func (b *Bridge) HandleInboundAsync(parent context.Context, ch *model.Channel, i
 		"thread_key":    strings.TrimSpace(in.ThreadKey),
 		"thread_lookup": strings.Join(threadLookupKeys(in), " | "),
 		"sender_id":     strings.TrimSpace(in.SenderID),
-		"message":       truncateRunes(text, channelLogTextRunes),
+		"message":       TruncateRunes(text, channelLogTextRunes),
 		"message_runes": utf8.RuneCountInString(text),
 	}).Info("[Channel] inbound")
 	cc := ConfigFromModel(ch)
@@ -70,6 +70,7 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
+	startAt := time.Now()
 
 	convUUID, err := b.ensureThreadConversation(ctx, ch, in)
 	if err != nil {
@@ -78,7 +79,7 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 			"channel_type": string(ch.ChannelType),
 			"thread_key":   strings.TrimSpace(in.ThreadKey),
 			"sender_id":    strings.TrimSpace(in.SenderID),
-			"message":      truncateRunes(userText, channelLogTextRunes),
+			"message":      TruncateRunes(userText, channelLogTextRunes),
 		}).Error("[Channel] ensure conversation failed")
 		return
 	}
@@ -95,22 +96,41 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 			SenderID:  strings.TrimSpace(in.SenderID),
 		},
 	}
+	log.WithFields(log.Fields{
+		"channel_id":        ch.ID,
+		"channel_type":      string(ch.ChannelType),
+		"conversation_uuid": convUUID,
+		"thread_key":        strings.TrimSpace(in.ThreadKey),
+		"sender_id":         strings.TrimSpace(in.SenderID),
+		"user_message":      TruncateRunes(userText, channelLogTextRunes),
+	}).Info("[Channel] executor >> start")
 	res, err := b.executor.Execute(ctx, req)
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"channel_id":        ch.ID,
 			"channel_type":      string(ch.ChannelType),
 			"conversation_uuid": convUUID,
-			"message":           truncateRunes(userText, channelLogTextRunes),
+			"message":           TruncateRunes(userText, channelLogTextRunes),
+			"duration_ms":       time.Since(startAt).Milliseconds(),
 		}).Error("[Channel] executor failed")
-		_ = b.sendChannelReply(ctx, ad, cc, in, "处理失败，请稍后重试。")
+		fallback := "处理失败，请稍后重试。"
+		_ = b.persistAssistantFallback(ctx, convUUID, fallback)
+		_ = b.sendChannelReply(ctx, ad, cc, in, fallback)
 		return
 	}
+	log.WithFields(log.Fields{
+		"channel_id":        ch.ID,
+		"channel_type":      string(ch.ChannelType),
+		"conversation_uuid": convUUID,
+		"duration_ms":       time.Since(startAt).Milliseconds(),
+		"tokens_used":       res.TokensUsed,
+		"steps_count":       len(res.Steps),
+	}).Info("[Channel] executor << done")
 	if err := b.sendChannelReply(ctx, ad, cc, in, res.Content); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"channel_id":        ch.ID,
 			"conversation_uuid": convUUID,
-			"reply":             truncateRunes(res.Content, channelLogTextRunes),
+			"reply":             TruncateRunes(res.Content, channelLogTextRunes),
 		}).Warn("[Channel] reply failed")
 		return
 	}
@@ -119,11 +139,28 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		"channel_uuid":       ch.UUID,
 		"channel_type":       string(ch.ChannelType),
 		"conversation_uuid":  convUUID,
-		"reply":              truncateRunes(res.Content, channelLogTextRunes),
+		"reply":              TruncateRunes(res.Content, channelLogTextRunes),
 		"reply_runes":        utf8.RuneCountInString(res.Content),
-		"user_message":       truncateRunes(userText, channelLogTextRunes),
+		"user_message":       TruncateRunes(userText, channelLogTextRunes),
 		"user_message_runes": utf8.RuneCountInString(userText),
 	}).Info("[Channel] reply ok")
+}
+
+func (b *Bridge) persistAssistantFallback(ctx context.Context, conversationUUID, content string) error {
+	conv, err := b.store.GetConversationByUUID(ctx, conversationUUID)
+	if err != nil {
+		return err
+	}
+	msg := &model.Message{
+		ConversationID: conv.ID,
+		Role:           "assistant",
+		Content:        content,
+		TokensUsed:     0,
+	}
+	if err := b.store.CreateMessage(ctx, msg); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (b *Bridge) sendChannelReply(ctx context.Context, ad WebhookDriver, cc ChannelConfig, in *Inbound, text string) error {
@@ -148,8 +185,10 @@ func threadLookupKeys(in *Inbound) []string {
 	for _, a := range in.ThreadKeyAliases {
 		add(a)
 	}
-	add(in.SenderID)
 	if len(out) == 0 {
+		if s := strings.TrimSpace(in.SenderID); s != "" {
+			return []string{s}
+		}
 		return []string{"default"}
 	}
 	return out
@@ -192,13 +231,19 @@ func (b *Bridge) ensureThreadConversationBody(ctx context.Context, ch *model.Cha
 			continue
 		}
 		if strings.TrimSpace(row.ConversationUUID) != "" {
+			if _, err := b.store.GetConversationByUUID(ctx, row.ConversationUUID); err != nil {
+				if !errors.Is(err, sql.ErrNoRows) {
+					return "", err
+				}
+				continue
+			}
 			if err := b.bindThreadKeys(ctx, ch.ID, keys, row.ConversationUUID); err != nil {
 				return "", err
 			}
 			return row.ConversationUUID, nil
 		}
 	}
-	title := truncateRunes(strings.TrimSpace(in.Text), 80)
+	title := TruncateRunes(strings.TrimSpace(in.Text), 80)
 	if title == "" {
 		title = "Channel"
 	}
@@ -223,7 +268,8 @@ func channelUserID(ch *model.Channel, in *Inbound) string {
 	return "channel:" + ch.UUID + ":" + sender
 }
 
-func truncateRunes(s string, n int) string {
+// TruncateRunes 截断字符串到 n 个 rune。
+func TruncateRunes(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}

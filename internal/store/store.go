@@ -30,6 +30,8 @@ type ChannelStore interface {
 type ChannelThreadStore interface {
 	GetChannelThread(ctx context.Context, channelID int64, threadKey string) (*model.ChannelThread, error)
 	UpsertChannelThread(ctx context.Context, channelID int64, threadKey, conversationUUID string) error
+	ListChannelThreads(ctx context.Context, channelID int64) ([]model.ChannelThread, error)
+	DeleteChannelThreadsByConversation(ctx context.Context, channelID int64, conversationUUID string) error
 }
 
 // MCPServerStore 运行时 MCP 服务列表（与设置页「MCP」同步）。
@@ -59,12 +61,14 @@ type ConversationStore interface {
 	GetConversation(ctx context.Context, id int64) (*model.Conversation, error)
 	GetConversationByUUID(ctx context.Context, uuid string) (*model.Conversation, error)
 	ListConversations(ctx context.Context, userID string, q model.ListQuery) ([]*model.Conversation, int64, error)
+	ListConversationsByUserPrefix(ctx context.Context, prefix string, q model.ListQuery) ([]*model.Conversation, int64, error)
 	UpdateConversationTitle(ctx context.Context, id int64, title string) error
 	DeleteConversation(ctx context.Context, id int64) error
 
 	CreateMessage(ctx context.Context, m *model.Message) error
 	CreateMessages(ctx context.Context, msgs []*model.Message) error
 	ListMessages(ctx context.Context, conversationID int64, limit int) ([]model.Message, error)
+	CountMessages(ctx context.Context, conversationID int64) (int64, error)
 
 	CreateExecutionStep(ctx context.Context, step *model.ExecutionStep) error
 	UpdateStepsMessageID(ctx context.Context, conversationID, messageID int64) error

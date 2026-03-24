@@ -13,6 +13,8 @@ type FrameEmitter interface {
 	EmitMessageMixed(frame *WsFrame)
 	EmitMessageVoice(frame *WsFrame)
 	EmitMessageFile(frame *WsFrame)
+	EmitMessageVideo(frame *WsFrame)
+	EmitMessageStream(frame *WsFrame)
 	EmitEvent(frame *WsFrame)
 	EmitEventEnterChat(frame *WsFrame)
 	EmitEventTemplateCardEvent(frame *WsFrame)
@@ -73,6 +75,10 @@ func (h *MessageHandler) handleMessageCallback(frame *WsFrame, emitter FrameEmit
 		emitter.EmitMessageVoice(frame)
 	case string(MessageTypeFile):
 		emitter.EmitMessageFile(frame)
+	case string(MessageTypeVideo):
+		emitter.EmitMessageVideo(frame)
+	case string(MessageTypeStream):
+		emitter.EmitMessageStream(frame)
 	default:
 		h.logger.Debug("Received unhandled message type: " + msgtype)
 	}

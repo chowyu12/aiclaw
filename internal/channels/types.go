@@ -52,10 +52,10 @@ type WebhookDriver interface {
 	Reply(ctx context.Context, ch ChannelConfig, in *Inbound, text string) error
 }
 
-// ChannelDriver 运行时渠道接口：用于管理渠道后台任务（例如 WebSocket 长连接）。
-// 不需要后台任务的渠道不必实现该接口。
+// ChannelDriver 运行时渠道接口：用于管理后台长连接等（如企微 WebSocket）。
+// Refresh 入参为该驱动所属 ChannelType 的全部渠道（含未启用），驱动自行决定启停。
 type ChannelDriver interface {
-	Refresh(ctx context.Context, all []*model.Channel, bridge *Bridge)
+	Refresh(ctx context.Context, channels []*model.Channel, bridge *Bridge)
 	Stop()
 }
 

@@ -139,11 +139,10 @@ async function handleLogin() {
   height: 44px;
   font-size: 15px;
   font-weight: 600;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  border-radius: 10px;
   border: none;
 }
 .login-btn:hover {
-  filter: brightness(1.06);
+  filter: brightness(1.05);
 }
 </style>

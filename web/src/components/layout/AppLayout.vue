@@ -176,7 +176,7 @@ body,
 }
 .app-aside {
   background-color: var(--aic-sidebar-bg);
-  transition: width 0.3s;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
   border-right: 1px solid var(--aic-sidebar-border);
   display: flex;
@@ -191,12 +191,12 @@ body,
 }
 .logo {
   flex-shrink: 0;
-  height: 60px;
+  height: 56px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 10px 0 12px;
+  padding: 0 12px;
   color: var(--aic-sidebar-logo-text);
   font-size: 18px;
   font-weight: 600;
@@ -226,6 +226,25 @@ body,
   min-height: 0;
   overflow-y: auto;
   border-right: none;
+  padding: 6px 8px;
+}
+.app-menu :deep(.el-menu-item) {
+  height: 40px;
+  line-height: 40px;
+  border-radius: 8px;
+  margin-bottom: 2px;
+  padding-left: 14px !important;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.15s, color 0.15s;
+}
+.app-menu :deep(.el-menu-item .el-icon) {
+  font-size: 17px;
+  margin-right: 10px;
+}
+.app-menu :deep(.el-menu--collapse .el-menu-item) {
+  padding-left: 0 !important;
+  justify-content: center;
 }
 .sidebar-footer {
   flex-shrink: 0;

@@ -3,13 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
-	"strings"
 	"time"
 
-	openai "github.com/sashabaranov/go-openai"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/model"
@@ -108,13 +104,9 @@ func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*Execute
 	defer ec.closeMCP()
 
 	ctx = workspace.WithWorkdirScope(ctx, ec.ag.UUID)
-
 	ec.l.WithField("user", req.UserID).Info("[Execute] >> start")
-	if body, err := json.Marshal(req); err == nil {
-		ec.l.WithField("body", string(body)).Debug("[Execute]    request body")
-	}
 
-	return e.execute(ctx, ec)
+	return e.run(ctx, ec, blockingCaller(ec.llmProv), false)
 }
 
 func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error) error {
@@ -125,17 +117,16 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 	defer ec.closeMCP()
 
 	ctx = workspace.WithWorkdirScope(ctx, ec.ag.UUID)
-
 	ec.l.WithField("user", req.UserID).Info("[Execute] >> start (stream)")
 
 	ec.tracker.SetOnStep(func(step model.ExecutionStep) {
-		_ = chunkHandler(model.StreamChunk{
-			ConversationID: ec.conv.UUID,
-			Step:           &step,
-		})
+		_ = chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Step: &step})
 	})
 
-	return e.stream(ctx, ec, chunkHandler)
+	if _, err := e.run(ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true); err != nil {
+		return err
+	}
+	return chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Done: true})
 }
 
 // ============================================================
@@ -357,299 +348,6 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 
 	toolSkillMap := make(map[string]string)
 	return agentTools, toolSkillMap, nil
-}
-
-// ============================================================
-//  核心执行（非流式，统一有/无工具）
-// ============================================================
-
-func (e *Executor) execute(ctx context.Context, ec *execContext) (*ExecuteResult, error) {
-	if t := ec.ag.TimeoutSeconds(); t > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(t)*time.Second)
-		defer cancel()
-	}
-
-	st, err := e.bootstrapAgentTurn(ctx, ec, false)
-	if err != nil {
-		return nil, err
-	}
-
-	var finalContent string
-	var totalTokens int
-	totalStart := time.Now()
-
-	maxIter := ec.ag.IterationLimit()
-	completed := false
-	loopDet := newToolLoopDetector(ec.l)
-	calledTools := make(map[string]bool)
-
-	for i := range maxIter {
-		req := openai.ChatCompletionRequest{
-			Model:    ec.ag.ModelName,
-			Messages: st.Messages,
-			Tools:    toolsSentToLLM(st.TSMode, st.AllToolDefs, st.Discovered),
-		}
-		applyModelCaps(&req, ec.ag, ec.l)
-		ec.l.WithFields(log.Fields{"round": i + 1, "model": ec.ag.ModelName}).Info("[LLM] >> call")
-		iterStart := time.Now()
-		resp, err := ec.llmProv.CreateChatCompletion(ctx, req)
-		iterDur := time.Since(iterStart)
-
-		if err != nil {
-			ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur}).WithError(err).Error("[LLM] << failed")
-			ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, err.Error(), iterDur, 0, ec.stepMeta())
-			return nil, fmt.Errorf("generate content: %w", err)
-		}
-
-		totalTokens += resp.Usage.TotalTokens
-
-		if len(resp.Choices) == 0 {
-			ec.l.Warn("[LLM] << empty response")
-			completed = true
-			break
-		}
-
-		choice := resp.Choices[0]
-
-		if len(choice.Message.ToolCalls) == 0 {
-			finalContent = choice.Message.Content
-			completed = true
-			ec.l.WithFields(log.Fields{
-				"round":    i + 1,
-				"duration": iterDur,
-				"tokens":   resp.Usage.TotalTokens,
-				"len":      len(finalContent),
-				"preview":  truncateLog(finalContent, 200),
-			}).Info("[LLM] << final answer")
-			break
-		}
-
-		tcNames := make([]string, 0, len(choice.Message.ToolCalls))
-		for _, tc := range choice.Message.ToolCalls {
-			tcNames = append(tcNames, tc.Function.Name)
-		}
-		ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur, "tool_calls": tcNames}).Info("[LLM] << tool calls requested")
-
-		st.Messages = e.appendAssistantToolRound(ctx, ec, st.Messages, choice.Message, st.ToolMap, st.TSMode, st.AllToolDefs, st.Discovered, loopDet, calledTools)
-	}
-
-	if !completed {
-		ec.l.WithField("max_iterations", maxIter).Error("[Execute] max iterations reached without final answer")
-		errMsg := fmt.Sprintf("已达到最大迭代次数 %d，Agent 未能给出最终回答", maxIter)
-		ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, errMsg, time.Since(totalStart), totalTokens, ec.stepMeta())
-		return nil, errors.New(errMsg)
-	}
-
-	if ec.hasTools() {
-		e.recordUsedSkillSteps(ctx, ec.skills, ec.toolSkillMap, calledTools, ec.tracker)
-	}
-
-	return e.saveResult(ctx, ec, finalContent, totalTokens, time.Since(totalStart))
-}
-
-// ============================================================
-//  流式执行（统一有/无工具，均走真 SSE 流式）
-// ============================================================
-
-func (e *Executor) stream(ctx context.Context, ec *execContext, chunkHandler func(chunk model.StreamChunk) error) error {
-	if t := ec.ag.TimeoutSeconds(); t > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(t)*time.Second)
-		defer cancel()
-	}
-
-	st, err := e.bootstrapAgentTurn(ctx, ec, true)
-	if err != nil {
-		return err
-	}
-
-	var totalTokens int
-	var finalContent string
-	totalStart := time.Now()
-	maxIter := ec.ag.IterationLimit()
-	completed := false
-	loopDet := newToolLoopDetector(ec.l)
-	calledTools := make(map[string]bool)
-
-	for i := range maxIter {
-		apiReq := openai.ChatCompletionRequest{
-			Model:    ec.ag.ModelName,
-			Messages: st.Messages,
-			Tools:    toolsSentToLLM(st.TSMode, st.AllToolDefs, st.Discovered),
-			Stream:   true,
-			StreamOptions: &openai.StreamOptions{
-				IncludeUsage: true,
-			},
-		}
-		applyModelCaps(&apiReq, ec.ag, ec.l)
-
-		ec.l.WithFields(log.Fields{"round": i + 1, "model": ec.ag.ModelName}).Info("[LLM] >> call (stream)")
-		iterStart := time.Now()
-
-		s, err := ec.llmProv.CreateChatCompletionStream(ctx, apiReq)
-		if err != nil {
-			iterDur := time.Since(iterStart)
-			ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur}).WithError(err).Error("[LLM] << stream create failed")
-			ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, err.Error(), iterDur, 0, ec.stepMeta())
-			return fmt.Errorf("stream content: %w", err)
-		}
-
-		var iterContent strings.Builder
-		var toolCalls []openai.ToolCall
-		var finishReason openai.FinishReason
-		var roundTokens int
-
-		for {
-			response, recvErr := s.Recv()
-			if errors.Is(recvErr, io.EOF) {
-				break
-			}
-			if recvErr != nil {
-				s.Close()
-				iterDur := time.Since(iterStart)
-				ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur}).WithError(recvErr).Error("[LLM] << stream recv failed")
-				ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, recvErr.Error(), iterDur, 0, ec.stepMeta())
-				return fmt.Errorf("stream content: %w", recvErr)
-			}
-
-			if response.Usage != nil {
-				roundTokens = response.Usage.TotalTokens
-			}
-			if len(response.Choices) == 0 {
-				continue
-			}
-
-			choice := response.Choices[0]
-			if choice.FinishReason != "" {
-				finishReason = choice.FinishReason
-			}
-
-			if choice.Delta.Content != "" {
-				iterContent.WriteString(choice.Delta.Content)
-				if err := chunkHandler(model.StreamChunk{
-					ConversationID: ec.conv.UUID,
-					Delta:          choice.Delta.Content,
-				}); err != nil {
-					s.Close()
-					return err
-				}
-			}
-
-			for _, tc := range choice.Delta.ToolCalls {
-				idx := 0
-				if tc.Index != nil {
-					idx = *tc.Index
-				}
-				for len(toolCalls) <= idx {
-					toolCalls = append(toolCalls, openai.ToolCall{Type: openai.ToolTypeFunction})
-				}
-				if tc.ID != "" {
-					toolCalls[idx].ID = tc.ID
-				}
-				if tc.Type != "" {
-					toolCalls[idx].Type = tc.Type
-				}
-				toolCalls[idx].Function.Name += tc.Function.Name
-				toolCalls[idx].Function.Arguments += tc.Function.Arguments
-			}
-		}
-		s.Close()
-
-		totalTokens += roundTokens
-		iterDur := time.Since(iterStart)
-		content := iterContent.String()
-
-		if finishReason != openai.FinishReasonToolCalls || len(toolCalls) == 0 {
-			finalContent = content
-			completed = true
-			ec.l.WithFields(log.Fields{
-				"round":    i + 1,
-				"duration": iterDur,
-				"tokens":   roundTokens,
-				"len":      len(finalContent),
-				"preview":  truncateLog(finalContent, 200),
-			}).Info("[LLM] << final answer (stream)")
-			break
-		}
-
-		tcNames := make([]string, 0, len(toolCalls))
-		for _, tc := range toolCalls {
-			tcNames = append(tcNames, tc.Function.Name)
-		}
-		ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur, "tokens": roundTokens, "tool_calls": tcNames}).Info("[LLM] << tool calls requested (stream)")
-
-		asst := openai.ChatCompletionMessage{
-			Role:      openai.ChatMessageRoleAssistant,
-			Content:   content,
-			ToolCalls: toolCalls,
-		}
-		st.Messages = e.appendAssistantToolRound(ctx, ec, st.Messages, asst, st.ToolMap, st.TSMode, st.AllToolDefs, st.Discovered, loopDet, calledTools)
-	}
-
-	if !completed {
-		ec.l.WithField("max_iterations", maxIter).Error("[Execute] max iterations reached without final answer (stream)")
-		errMsg := fmt.Sprintf("已达到最大迭代次数 %d，Agent 未能给出最终回答", maxIter)
-		ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, errMsg, time.Since(totalStart), totalTokens, ec.stepMeta())
-		return errors.New(errMsg)
-	}
-
-	if ec.hasTools() {
-		e.recordUsedSkillSteps(ctx, ec.skills, ec.toolSkillMap, calledTools, ec.tracker)
-	}
-
-	if _, err := e.saveResult(ctx, ec, finalContent, totalTokens, time.Since(totalStart)); err != nil {
-		return err
-	}
-
-	return chunkHandler(model.StreamChunk{
-		ConversationID: ec.conv.UUID,
-		Done:           true,
-	})
-}
-
-// ============================================================
-//  Tool Search 内联处理
-// ============================================================
-
-func (e *Executor) handleToolSearch(ctx context.Context, ec *execContext, tc openai.ToolCall, allDefs []openai.Tool, discovered map[string]bool) openai.ChatCompletionMessage {
-	var args struct {
-		Query string `json:"query"`
-	}
-	_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
-
-	ec.l.WithField("query", args.Query).Info("[ToolSearch] >> search")
-	start := time.Now()
-	results := searchTools(args.Query, allDefs)
-	dur := time.Since(start)
-
-	newCount := 0
-	for _, r := range results {
-		if !discovered[r.Name] {
-			discovered[r.Name] = true
-			newCount++
-		}
-	}
-
-	resultJSON := formatToolSearchResults(results, len(allDefs), newCount, len(discovered))
-	ec.l.WithFields(log.Fields{
-		"query":            args.Query,
-		"matches":          len(results),
-		"newly_discovered": newCount,
-		"total_discovered": len(discovered),
-		"duration":         dur,
-	}).Info("[ToolSearch] << done")
-
-	ec.tracker.RecordStep(ctx, model.StepToolCall, toolSearchName, tc.Function.Arguments, resultJSON, model.StepSuccess, "", dur, 0, &model.StepMetadata{
-		ToolName: toolSearchName,
-	})
-
-	return openai.ChatCompletionMessage{
-		Role:       openai.ChatMessageRoleTool,
-		Content:    resultJSON,
-		ToolCallID: tc.ID,
-		Name:       toolSearchName,
-	}
 }
 
 // ============================================================

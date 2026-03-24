@@ -59,3 +59,18 @@ type UpdateChannelReq struct {
 	Config       JSON    `json:"config,omitzero"`
 	Description  *string `json:"description,omitzero"`
 }
+
+// ChannelConversationItem 渠道会话列表项（用于渠道页面内嵌会话视图）。
+type ChannelConversationItem struct {
+	ConversationID   int64     `json:"conversation_id"`
+	ConversationUUID string    `json:"conversation_uuid"`
+	Title            string    `json:"title"`
+	UserID           string    `json:"user_id"`
+	SenderID         string    `json:"sender_id"`
+	ThreadKeys       []string  `json:"thread_keys,omitzero"`
+	MessageCount     int64     `json:"message_count"`
+	LastUserMessage  string    `json:"last_user_message,omitzero"`
+	LastReplyMessage string    `json:"last_reply_message,omitzero"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	CreatedAt        time.Time `json:"created_at"`
+}

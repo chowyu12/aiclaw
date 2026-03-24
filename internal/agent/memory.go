@@ -277,13 +277,6 @@ func (m *MemoryManager) SaveAssistantMessage(ctx context.Context, conversationID
 	return m.saveMessage(ctx, conversationID, "assistant", content, tokensUsed)
 }
 
-// ToolResult 表示单个工具调用的结果。
-type ToolResult struct {
-	ToolCallID string
-	ToolName   string
-	Content    string
-}
-
 // SaveToolCallRound atomically saves one tool-call round: assistant message +
 // all tool responses in a single DB transaction. On failure the entire round
 // is rolled back, preventing orphaned tool_calls in the database.

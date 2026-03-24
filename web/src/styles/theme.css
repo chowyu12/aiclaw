@@ -425,13 +425,83 @@ html[data-theme='light'] .aic-page .aic-card.el-card {
   border-radius: 10px;
 }
 
+/* —— 全局字体与平滑渲染 —— */
+html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 /* —— 弹窗 —— */
 .el-dialog {
-  border-radius: 16px;
+  border-radius: 14px;
   overflow: hidden;
 }
 
+/* —— 抽屉 —— */
+.el-drawer {
+  --el-drawer-padding-primary: 20px;
+}
+.el-drawer__header {
+  padding: 16px 20px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  font-weight: 600;
+}
+.el-drawer__body {
+  padding: 16px 20px;
+}
+
+/* —— 表格：统一行高、字号、header 风格 —— */
+.aic-page .el-table {
+  --el-table-border-color: var(--el-border-color-lighter);
+  --el-table-row-hover-bg-color: var(--el-fill-color-light);
+  font-size: 13px;
+}
+.aic-page .el-table th.el-table__cell {
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--el-text-color-secondary);
+  background: var(--el-fill-color-lighter) !important;
+}
+.aic-page .el-table td.el-table__cell {
+  padding: 10px 0;
+}
+
+/* —— 标签：统一圆角 —— */
+.aic-page .el-tag {
+  border-radius: 6px;
+}
+
+/* —— 按钮：统一圆角 —— */
+.aic-page .el-button {
+  border-radius: 8px;
+}
+
+/* —— 分页 —— */
 .aic-page .el-pagination {
   --el-pagination-text-color: var(--aic-pagination-text);
   --el-pagination-button-color: var(--aic-pagination-text);
+}
+
+/* —— 工具条（多页面共用）—— */
+.aic-page .toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* —— 表格内溢出文本 —— */
+.aic-page .desc-cell {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  word-break: break-word;
+  line-height: 1.5;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
 }

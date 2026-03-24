@@ -112,20 +112,30 @@ func (s *mockStore) CreateChannel(_ context.Context, c *model.Channel) error {
 	}
 	return nil
 }
-func (s *mockStore) GetChannel(_ context.Context, id int64) (*model.Channel, error) { return nil, sql.ErrNoRows }
+func (s *mockStore) GetChannel(_ context.Context, id int64) (*model.Channel, error) {
+	return nil, sql.ErrNoRows
+}
 func (s *mockStore) GetChannelByUUID(_ context.Context, uuid string) (*model.Channel, error) {
 	return nil, sql.ErrNoRows
 }
 func (s *mockStore) ListChannels(_ context.Context, _ model.ListQuery) ([]*model.Channel, int64, error) {
 	return nil, 0, nil
 }
-func (s *mockStore) UpdateChannel(_ context.Context, _ int64, _ model.UpdateChannelReq) error { return nil }
-func (s *mockStore) DeleteChannel(_ context.Context, _ int64) error                           { return nil }
+func (s *mockStore) UpdateChannel(_ context.Context, _ int64, _ model.UpdateChannelReq) error {
+	return nil
+}
+func (s *mockStore) DeleteChannel(_ context.Context, _ int64) error { return nil }
 
 func (s *mockStore) GetChannelThread(_ context.Context, _ int64, _ string) (*model.ChannelThread, error) {
 	return nil, sql.ErrNoRows
 }
 func (s *mockStore) UpsertChannelThread(_ context.Context, _ int64, _, _ string) error { return nil }
+func (s *mockStore) ListChannelThreads(_ context.Context, _ int64) ([]model.ChannelThread, error) {
+	return nil, nil
+}
+func (s *mockStore) DeleteChannelThreadsByConversation(_ context.Context, _ int64, _ string) error {
+	return nil
+}
 
 func (s *mockStore) CreateConversation(_ context.Context, c *model.Conversation) error {
 	s.mu.Lock()

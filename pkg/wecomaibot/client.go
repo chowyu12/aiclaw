@@ -21,12 +21,14 @@ type WSClient struct {
 	wsManager *WsConnectionManager
 	handler   *MessageHandler
 
-	onMessage      messageHandlerFunc
-	onMessageText  messageHandlerFunc
-	onMessageImage messageHandlerFunc
-	onMessageMixed messageHandlerFunc
-	onMessageVoice messageHandlerFunc
-	onMessageFile  messageHandlerFunc
+	onMessage       messageHandlerFunc
+	onMessageText   messageHandlerFunc
+	onMessageImage  messageHandlerFunc
+	onMessageMixed  messageHandlerFunc
+	onMessageVoice  messageHandlerFunc
+	onMessageFile   messageHandlerFunc
+	onMessageVideo  messageHandlerFunc
+	onMessageStream messageHandlerFunc
 
 	onEvent                  eventHandlerFunc
 	onEventEnterChat         eventHandlerFunc
@@ -169,6 +171,12 @@ func (c *WSClient) OnMessageVoice(handler messageHandlerFunc) { c.onMessageVoice
 // OnMessageFile 文件。
 func (c *WSClient) OnMessageFile(handler messageHandlerFunc) { c.onMessageFile = handler }
 
+// OnMessageVideo 视频。
+func (c *WSClient) OnMessageVideo(handler messageHandlerFunc) { c.onMessageVideo = handler }
+
+// OnMessageStream 流式消息刷新回调。
+func (c *WSClient) OnMessageStream(handler messageHandlerFunc) { c.onMessageStream = handler }
+
 // OnMessage 任意消息类型（先于细分回调）。
 func (c *WSClient) OnMessage(handler messageHandlerFunc) { c.onMessage = handler }
 
@@ -231,6 +239,18 @@ func (c *WSClient) EmitMessageVoice(frame *WsFrame) {
 func (c *WSClient) EmitMessageFile(frame *WsFrame) {
 	if c.onMessageFile != nil {
 		c.onMessageFile(frame)
+	}
+}
+
+func (c *WSClient) EmitMessageVideo(frame *WsFrame) {
+	if c.onMessageVideo != nil {
+		c.onMessageVideo(frame)
+	}
+}
+
+func (c *WSClient) EmitMessageStream(frame *WsFrame) {
+	if c.onMessageStream != nil {
+		c.onMessageStream(frame)
 	}
 }
 

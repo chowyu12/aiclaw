@@ -28,11 +28,12 @@ type snapshotResult struct {
 	Text     string        `json:"text"`
 }
 
-const snapshotJS = `(function(){
-  document.querySelectorAll('[data-agent-ref]').forEach(function(el){
-    el.removeAttribute('data-agent-ref');
-  });
-
+// snapshotJSTemplate 参数化的 snapshot JS：%s 占位 root 节点获取方式。
+// "document" 代表全页，"document.querySelector(xxx)" 代表子树。
+const snapshotJSTemplate = `(function(){
+  var root = %s;
+  if(!root) return JSON.stringify({url:location.href,title:document.title,elements:[],text:''});
+  root.querySelectorAll('[data-agent-ref]').forEach(function(el){ el.removeAttribute('data-agent-ref'); });
   var selectors = 'a,button,input,select,textarea,summary,' +
     '[role="button"],[role="link"],[role="tab"],' +
     '[role="checkbox"],[role="radio"],[role="switch"],' +
@@ -41,21 +42,14 @@ const snapshotJS = `(function(){
     '[role="searchbox"],[role="textbox"],' +
     '[tabindex]:not([tabindex="-1"]),' +
     '[onclick],[contenteditable="true"]';
-  var nodes = document.querySelectorAll(selectors);
-  var elements = [];
-  var idx = 0;
-
+  var nodes = root.querySelectorAll(selectors);
+  var elements = []; var idx = 0;
   nodes.forEach(function(el){
     var rect = el.getBoundingClientRect();
-    if(rect.width===0 && rect.height===0 &&
-       el.tagName!=='INPUT' &&
-       el.getAttribute('type')!=='hidden') return;
+    if(rect.width===0 && rect.height===0 && el.tagName!=='INPUT' && el.getAttribute('type')!=='hidden') return;
     if(el.disabled) return;
-
-    idx++;
-    var ref = 'e' + idx;
+    idx++; var ref = 'e' + idx;
     el.setAttribute('data-agent-ref', ref);
-
     elements.push({
       ref: ref,
       tag: el.tagName.toLowerCase(),
@@ -68,37 +62,20 @@ const snapshotJS = `(function(){
       aria_label: el.getAttribute('aria-label')||''
     });
   });
-
-  var pageText = (document.body && document.body.innerText||'').substring(0,8000);
-  return JSON.stringify({
-    url: location.href,
-    title: document.title,
-    elements: elements,
-    text: pageText
-  });
+  var textSrc = (root === document) ? document.body : root;
+  var pageText = (textSrc && textSrc.innerText||'').substring(0,8000);
+  return JSON.stringify({url:location.href,title:document.title,elements:elements,text:pageText});
 })()`
 
-func (bm *browserManager) takeSnapshot(tabCtx context.Context, targetID, selector string) (string, error) {
-	js := snapshotJS
-	if selector != "" {
-		js = fmt.Sprintf(`(function(){
-  var root = document.querySelector(%q);
-  if(!root) return JSON.stringify({url:location.href,title:document.title,elements:[],text:''});
-  root.querySelectorAll('[data-agent-ref]').forEach(function(el){ el.removeAttribute('data-agent-ref'); });
-  var selectors = 'a,button,input,select,textarea,summary,[role="button"],[role="link"],[role="tab"],[role="checkbox"],[role="radio"],[role="switch"],[role="menuitem"],[role="option"],[role="combobox"],[role="listbox"],[role="slider"],[role="spinbutton"],[role="searchbox"],[role="textbox"],[tabindex]:not([tabindex="-1"]),[onclick],[contenteditable="true"]';
-  var nodes = root.querySelectorAll(selectors);
-  var elements = []; var idx = 0;
-  nodes.forEach(function(el){
-    var rect = el.getBoundingClientRect();
-    if(rect.width===0 && rect.height===0 && el.tagName!=='INPUT' && el.getAttribute('type')!=='hidden') return;
-    if(el.disabled) return;
-    idx++; var ref = 'e' + idx;
-    el.setAttribute('data-agent-ref', ref);
-    elements.push({ref:ref,tag:el.tagName.toLowerCase(),text:(el.innerText||el.value||'').trim().substring(0,100),type:el.getAttribute('type')||'',name:el.getAttribute('name')||'',href:el.getAttribute('href')||'',role:el.getAttribute('role')||'',placeholder:el.getAttribute('placeholder')||'',aria_label:el.getAttribute('aria-label')||''});
-  });
-  return JSON.stringify({url:location.href,title:document.title,elements:elements,text:(root.innerText||'').substring(0,8000)});
-})()`, selector)
+func buildSnapshotJS(selector string) string {
+	if selector == "" {
+		return fmt.Sprintf(snapshotJSTemplate, "document")
 	}
+	return fmt.Sprintf(snapshotJSTemplate, fmt.Sprintf("document.querySelector(%q)", selector))
+}
+
+func (bm *browserManager) takeSnapshot(tabCtx context.Context, targetID, selector string) (string, error) {
+	js := buildSnapshotJS(selector)
 
 	var resultJSON string
 	if err := chromedp.Run(tabCtx, chromedp.Evaluate(js, &resultJSON)); err != nil {

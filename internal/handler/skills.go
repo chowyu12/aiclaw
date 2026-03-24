@@ -8,13 +8,13 @@ import (
 	"github.com/chowyu12/aiclaw/pkg/httputil"
 )
 
-type WorkspaceSkillsHandler struct{}
+type SkillsHandler struct{}
 
-func NewWorkspaceSkillsHandler() *WorkspaceSkillsHandler {
-	return &WorkspaceSkillsHandler{}
+func NewSkillsHandler() *SkillsHandler {
+	return &SkillsHandler{}
 }
 
-func (h *WorkspaceSkillsHandler) Register(mux *http.ServeMux) {
+func (h *SkillsHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/workspace/skills", h.List)
 }
 
@@ -28,7 +28,7 @@ type workspaceSkillItem struct {
 	MainFile    string `json:"main_file"`
 }
 
-func (h *WorkspaceSkillsHandler) List(w http.ResponseWriter, r *http.Request) {
+func (h *SkillsHandler) List(w http.ResponseWriter, r *http.Request) {
 	skillsDir := workspace.Skills()
 	if skillsDir == "" {
 		httputil.InternalError(w, "workspace not initialized")

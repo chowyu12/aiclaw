@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
+	"github.com/chowyu12/aiclaw/internal/channels"
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/handler"
 	"github.com/chowyu12/aiclaw/internal/store"
@@ -13,6 +14,7 @@ import (
 type APIParams struct {
 	Store              store.Store
 	Executor           *agentpkg.Executor
+	ChannelMgr         *channels.Manager
 	DatabaseConfigured bool
 	Upload             config.UploadConfig
 }
@@ -23,9 +25,9 @@ func RegisterAPIRoutes(mux *http.ServeMux, p APIParams) {
 	handler.NewProviderHandler(p.Store).Register(mux)
 	handler.NewAgentHandler(p.Store).Register(mux)
 	handler.NewToolHandler(p.Store).Register(mux)
-	handler.NewWorkspaceSkillsHandler().Register(mux)
-	handler.NewRuntimeMCPHandler(p.Store).Register(mux)
-	handler.NewChannelHandler(p.Store, p.Executor).Register(mux)
+	handler.NewSkillsHandler().Register(mux)
+	handler.NewMCPHandler(p.Store).Register(mux)
+	handler.NewChannelHandler(p.Store, p.ChannelMgr).Register(mux)
 	handler.NewChatHandler(p.Store, p.Executor).Register(mux)
 	handler.NewFileHandler(p.Store, p.Upload).Register(mux)
 }

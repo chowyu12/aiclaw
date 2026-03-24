@@ -107,17 +107,17 @@ func Run(opts Options) {
 	registry := agentpkg.NewToolRegistry()
 	executor := agentpkg.NewExecutor(store, registry)
 
-	channels.InitChannelRuntimes(store, executor)
-	defer channels.StopChannelRuntimes()
+	channelMgr := channels.NewManager(store, executor)
+	defer channelMgr.Stop()
 
 	mux := http.NewServeMux()
 	server.RegisterAPIRoutes(mux, server.APIParams{
 		Store:              store,
 		Executor:           executor,
+		ChannelMgr:         channelMgr,
 		DatabaseConfigured: !cfg.NeedsDatabaseSetup(),
 		Upload:             cfg.Upload,
 	})
-	channels.RefreshChannelRuntimes(context.Background())
 	server.MountEmbeddedFrontend(mux)
 
 	authCfg := auth.Config{

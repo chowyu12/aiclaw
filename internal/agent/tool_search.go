@@ -2,13 +2,18 @@ package agent
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 	"unicode"
 
 	openai "github.com/sashabaranov/go-openai"
+	log "github.com/sirupsen/logrus"
+
+	"github.com/chowyu12/aiclaw/internal/model"
 )
 
 const (
@@ -209,6 +214,41 @@ func formatToolSearchResults(results []toolSearchResult, totalTools int, newCoun
 func preloadSkillTools(toolSkillMap map[string]string, discovered map[string]bool) {
 	for toolName := range toolSkillMap {
 		discovered[toolName] = true
+	}
+}
+
+func (e *Executor) handleToolSearch(ctx context.Context, ec *execContext, tc openai.ToolCall, st *agentRunState) openai.ChatCompletionMessage {
+	var args struct {
+		Query string `json:"query"`
+	}
+	_ = json.Unmarshal([]byte(tc.Function.Arguments), &args)
+
+	ec.l.WithField("query", args.Query).Info("[ToolSearch] >> search")
+	start := time.Now()
+	results := searchTools(args.Query, st.AllToolDefs)
+	dur := time.Since(start)
+
+	newCount := 0
+	for _, r := range results {
+		if !st.Discovered[r.Name] {
+			st.Discovered[r.Name] = true
+			newCount++
+		}
+	}
+
+	resultJSON := formatToolSearchResults(results, len(st.AllToolDefs), newCount, len(st.Discovered))
+	ec.l.WithFields(log.Fields{
+		"query": args.Query, "matches": len(results),
+		"newly_discovered": newCount, "total_discovered": len(st.Discovered), "duration": dur,
+	}).Info("[ToolSearch] << done")
+
+	ec.tracker.RecordStep(ctx, model.StepToolCall, toolSearchName, tc.Function.Arguments, resultJSON, model.StepSuccess, "", dur, 0, &model.StepMetadata{
+		ToolName: toolSearchName,
+	})
+
+	return openai.ChatCompletionMessage{
+		Role: openai.ChatMessageRoleTool, Content: resultJSON,
+		ToolCallID: tc.ID, Name: toolSearchName,
 	}
 }
 

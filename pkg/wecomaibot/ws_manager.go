@@ -43,6 +43,8 @@ type WsConnectionManager struct {
 	reconnectBaseDelay   int
 	maxReconnectAttempts int
 
+	// connMu 保护 ws / isManualClose / reconnectAttempts / missedPongCount 等连接级状态。
+	connMu        sync.Mutex
 	ws            *websocket.Conn
 	isManualClose bool
 
@@ -112,11 +114,17 @@ func (m *WsConnectionManager) SetCredentials(botID, botSecret string) {
 
 // Connect 建立连接并发送认证。
 func (m *WsConnectionManager) Connect() {
+	m.connMu.Lock()
 	m.isManualClose = false
 	if m.ws != nil {
 		_ = m.ws.Close()
 		m.ws = nil
 	}
+	// Disconnect 会取消旧 context，每次 Connect 需要刷新。
+	if m.ctx == nil || m.ctx.Err() != nil {
+		m.ctx, m.cancel = context.WithCancel(context.Background())
+	}
+	m.connMu.Unlock()
 	m.logger.Info("Connecting to WebSocket: " + m.wsURL + "...")
 	go m.dialAndRun()
 }
@@ -133,7 +141,9 @@ func (m *WsConnectionManager) dialAndRun() {
 		m.scheduleReconnect()
 		return
 	}
+	m.connMu.Lock()
 	m.ws = ws
+	m.connMu.Unlock()
 	m.setupReader()
 	m.sendAuth()
 }
@@ -217,7 +227,9 @@ func (m *WsConnectionManager) handleHeartbeatResponse(frame *WsFrame) {
 		m.logger.Warn(fmt.Sprintf("Heartbeat ack error: errcode=%d, errmsg=%s", frame.ErrCode, frame.ErrMsg))
 		return
 	}
+	m.connMu.Lock()
 	m.missedPongCount = 0
+	m.connMu.Unlock()
 	m.logger.Debug("Received heartbeat ack")
 }
 
@@ -228,17 +240,23 @@ func (m *WsConnectionManager) handleClose(reason string) {
 	if m.OnDisconnected != nil {
 		m.OnDisconnected(reason)
 	}
-	if !m.isManualClose {
+	m.connMu.Lock()
+	manual := m.isManualClose
+	m.connMu.Unlock()
+	if !manual {
 		m.scheduleReconnect()
 	}
 }
 
 func (m *WsConnectionManager) sendAuth() {
+	m.connMu.Lock()
 	if m.ws == nil {
+		m.connMu.Unlock()
 		return
 	}
 	m.reconnectAttempts = 0
 	m.missedPongCount = 0
+	m.connMu.Unlock()
 	body, err := json.Marshal(map[string]string{"bot_id": m.botID, "secret": m.botSecret})
 	if err != nil {
 		m.logger.Error("Failed to marshal auth body: " + err.Error())
@@ -256,15 +274,21 @@ func (m *WsConnectionManager) sendAuth() {
 }
 
 func (m *WsConnectionManager) sendHeartbeat() {
+	m.connMu.Lock()
 	if m.missedPongCount >= maxMissedPong {
 		m.logger.Warn(fmt.Sprintf("No heartbeat ack for %d consecutive pings, closing", m.missedPongCount))
+		m.connMu.Unlock()
 		m.stopHeartbeat()
+		m.connMu.Lock()
 		if m.ws != nil {
 			_ = m.ws.Close()
 		}
+		m.connMu.Unlock()
 		return
 	}
 	m.missedPongCount++
+	m.connMu.Unlock()
+
 	frame := WsFrame{
 		Cmd: WsCmd.HEARTBEAT,
 		Headers: WsFrameHeaders{
@@ -273,6 +297,7 @@ func (m *WsConnectionManager) sendHeartbeat() {
 	}
 	m.sendFrame(frame)
 	m.logger.Debug("Heartbeat sent")
+	m.startHeartbeat()
 }
 
 func (m *WsConnectionManager) startHeartbeat() {
@@ -293,7 +318,9 @@ func (m *WsConnectionManager) stopHeartbeat() {
 }
 
 func (m *WsConnectionManager) scheduleReconnect() {
+	m.connMu.Lock()
 	if m.maxReconnectAttempts > 0 && m.reconnectAttempts >= m.maxReconnectAttempts {
+		m.connMu.Unlock()
 		m.logger.Error(fmt.Sprintf("Max reconnect attempts reached (%d), giving up", m.maxReconnectAttempts))
 		if m.OnError != nil {
 			m.OnError(errors.New("max reconnect attempts exceeded"))
@@ -301,19 +328,25 @@ func (m *WsConnectionManager) scheduleReconnect() {
 		return
 	}
 	m.reconnectAttempts++
+	attempt := m.reconnectAttempts
+	m.connMu.Unlock()
+
 	delay := m.reconnectBaseDelay
-	if m.reconnectAttempts > 1 {
-		delay = m.reconnectBaseDelay * (1 << (m.reconnectAttempts - 1))
+	if attempt > 1 {
+		delay = m.reconnectBaseDelay * (1 << (attempt - 1))
 	}
 	if delay > reconnectMaxDelay {
 		delay = reconnectMaxDelay
 	}
-	m.logger.Info(fmt.Sprintf("Reconnecting in %dms (attempt %d)...", delay, m.reconnectAttempts))
+	m.logger.Info(fmt.Sprintf("Reconnecting in %dms (attempt %d)...", delay, attempt))
 	if m.OnReconnecting != nil {
-		m.OnReconnecting(m.reconnectAttempts)
+		m.OnReconnecting(attempt)
 	}
 	time.AfterFunc(time.Duration(delay)*time.Millisecond, func() {
-		if m.isManualClose {
+		m.connMu.Lock()
+		manual := m.isManualClose
+		m.connMu.Unlock()
+		if manual {
 			return
 		}
 		m.Connect()
@@ -321,29 +354,35 @@ func (m *WsConnectionManager) scheduleReconnect() {
 }
 
 func (m *WsConnectionManager) sendFrame(frame WsFrame) {
-	if m.ws == nil {
-		return
-	}
 	data, err := json.Marshal(frame)
 	if err != nil {
 		m.logger.Error("Failed to marshal frame: " + err.Error())
 		return
 	}
-	if err := m.ws.WriteMessage(websocket.TextMessage, data); err != nil {
+	m.connMu.Lock()
+	ws := m.ws
+	m.connMu.Unlock()
+	if ws == nil {
+		return
+	}
+	if err := ws.WriteMessage(websocket.TextMessage, data); err != nil {
 		m.logger.Error("Failed to send frame: " + err.Error())
 	}
 }
 
 // Send 发送原始帧。
 func (m *WsConnectionManager) Send(frame WsFrame) error {
-	if m.ws == nil {
-		return errors.New("WebSocket not connected, unable to send data")
-	}
 	data, err := json.Marshal(frame)
 	if err != nil {
 		return err
 	}
-	return m.ws.WriteMessage(websocket.TextMessage, data)
+	m.connMu.Lock()
+	ws := m.ws
+	m.connMu.Unlock()
+	if ws == nil {
+		return errors.New("WebSocket not connected, unable to send data")
+	}
+	return ws.WriteMessage(websocket.TextMessage, data)
 }
 
 // SendReply 发送回复并等待回执。
@@ -523,20 +562,30 @@ func (m *WsConnectionManager) clearPendingMessages(reason string) {
 
 // Disconnect 断开连接。
 func (m *WsConnectionManager) Disconnect() {
+	m.connMu.Lock()
 	m.isManualClose = true
+	m.connMu.Unlock()
+
 	m.authOK.Store(0)
-	m.cancel()
+	if m.cancel != nil {
+		m.cancel()
+	}
 	m.stopHeartbeat()
 	m.clearPendingMessages("Connection manually closed")
+
+	m.connMu.Lock()
 	if m.ws != nil {
 		_ = m.ws.Close()
 		m.ws = nil
 	}
+	m.connMu.Unlock()
 	m.logger.Info("WebSocket connection manually closed")
 }
 
 // IsConnected 是否已连接（存在底层 conn）。
 func (m *WsConnectionManager) IsConnected() bool {
+	m.connMu.Lock()
+	defer m.connMu.Unlock()
 	return m.ws != nil
 }
 

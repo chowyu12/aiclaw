@@ -53,6 +53,24 @@ func (s *GormStore) ListConversations(ctx context.Context, userID string, q mode
 	return items, total, nil
 }
 
+func (s *GormStore) ListConversationsByUserPrefix(ctx context.Context, prefix string, q model.ListQuery) ([]*model.Conversation, int64, error) {
+	var items []*model.Conversation
+	var total int64
+
+	db := s.db.WithContext(ctx).Model(&model.Conversation{}).Where("user_id LIKE ?", prefix+"%")
+	if q.Keyword != "" {
+		db = db.Where("title LIKE ?", "%"+q.Keyword+"%")
+	}
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	offset, limit := paginate(q)
+	if err := db.Order("updated_at DESC").Offset(offset).Limit(limit).Find(&items).Error; err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 func (s *GormStore) UpdateConversationTitle(ctx context.Context, id int64, title string) error {
 	return s.db.WithContext(ctx).Model(&model.Conversation{}).Where("id = ?", id).Update("title", title).Error
 }
@@ -79,6 +97,17 @@ func (s *GormStore) CreateMessages(ctx context.Context, msgs []*model.Message) e
 		}
 		return nil
 	})
+}
+
+func (s *GormStore) CountMessages(ctx context.Context, conversationID int64) (int64, error) {
+	var count int64
+	if err := s.db.WithContext(ctx).
+		Model(&model.Message{}).
+		Where("conversation_id = ? AND role = ?", conversationID, "user").
+		Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func (s *GormStore) ListMessages(ctx context.Context, conversationID int64, maxTurns int) ([]model.Message, error) {

@@ -8,20 +8,20 @@ import (
 	"github.com/chowyu12/aiclaw/pkg/httputil"
 )
 
-type RuntimeMCPHandler struct {
+type MCPHandler struct {
 	store store.Store
 }
 
-func NewRuntimeMCPHandler(s store.Store) *RuntimeMCPHandler {
-	return &RuntimeMCPHandler{store: s}
+func NewMCPHandler(s store.Store) *MCPHandler {
+	return &MCPHandler{store: s}
 }
 
-func (h *RuntimeMCPHandler) Register(mux *http.ServeMux) {
+func (h *MCPHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/runtime/mcp", h.Get)
 	mux.HandleFunc("PUT /api/v1/runtime/mcp", h.Put)
 }
 
-func (h *RuntimeMCPHandler) Get(w http.ResponseWriter, r *http.Request) {
+func (h *MCPHandler) Get(w http.ResponseWriter, r *http.Request) {
 	list, err := h.store.ListMCPServers(r.Context())
 	if err != nil {
 		httputil.InternalError(w, err.Error())
@@ -37,7 +37,7 @@ type putMCPReq struct {
 	Servers []model.MCPServer `json:"servers"`
 }
 
-func (h *RuntimeMCPHandler) Put(w http.ResponseWriter, r *http.Request) {
+func (h *MCPHandler) Put(w http.ResponseWriter, r *http.Request) {
 	var req putMCPReq
 	if err := httputil.BindJSON(r, &req); err != nil {
 		httputil.BadRequest(w, "invalid request body")

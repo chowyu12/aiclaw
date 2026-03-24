@@ -58,10 +58,5 @@ onMounted(() => loadWorkspaceSkills());
 </script>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
+/* toolbar 已移入 theme.css 全局样式 */
 </style>

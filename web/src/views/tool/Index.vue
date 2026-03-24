@@ -115,14 +115,5 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.desc-cell {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-  overflow: hidden;
-  word-break: break-word;
-  line-height: 1.5;
-  font-size: 13px;
-  color: #606266;
-}
+/* desc-cell 已移入 theme.css 全局样式 */
 </style>

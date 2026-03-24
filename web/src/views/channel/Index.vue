@@ -47,13 +47,23 @@
           <el-table-column
             prop="enabled"
             label="状态"
-            width="80"
+            width="140"
             align="center"
           >
             <template #default="{ row }">
-              <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{
-                row.enabled ? "启用" : "禁用"
-              }}</el-tag>
+              <div class="status-cell">
+                <el-switch
+                  :model-value="row.enabled"
+                  :loading="toggleLoadingId === row.id"
+                  inline-prompt
+                  active-text="开"
+                  inactive-text="关"
+                  @change="onToggleEnabled(row, $event as boolean)"
+                />
+                <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{
+                  row.enabled ? "已启用" : "已禁用"
+                }}</el-tag>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="Webhook / 接入" min-width="200">
@@ -87,8 +97,11 @@
             width="170"
             show-overflow-tooltip
           />
-          <el-table-column label="操作" width="160" fixed="right">
+          <el-table-column label="操作" width="230" fixed="right">
             <template #default="{ row }">
+              <el-button link type="success" @click="openChannelConversations(row)"
+                >查看会话</el-button
+              >
               <el-button link type="primary" @click="openEdit(row)"
                 >编辑</el-button
               >
@@ -115,7 +128,117 @@
           @current-change="loadData"
         />
       </el-card>
+
+      <el-card v-if="selectedChannel" class="aic-card" shadow="never" style="margin-top: 16px">
+        <template #header>
+          <div class="aic-card-header">
+            <span class="aic-card-title">
+              最近会话 · {{ selectedChannel.name }}
+            </span>
+            <div class="conv-filter-bar">
+              <el-input
+                v-model="convFilterThread"
+                placeholder="Thread 关键字"
+                clearable
+                style="width: 180px"
+                @clear="refreshChannelConversations"
+                @keyup.enter="refreshChannelConversations"
+              />
+              <el-input
+                v-model="convFilterSender"
+                placeholder="Sender 关键字"
+                clearable
+                style="width: 180px"
+                @clear="refreshChannelConversations"
+                @keyup.enter="refreshChannelConversations"
+              />
+              <el-button @click="refreshChannelConversations">
+                <el-icon><Search /></el-icon> 查询
+              </el-button>
+              <el-button @click="clearChannelConversationPanel">收起</el-button>
+            </div>
+          </div>
+        </template>
+
+        <el-table :data="channelConversations" v-loading="convLoading" stripe>
+          <el-table-column prop="conversation_id" label="会话ID" width="90" />
+          <el-table-column prop="title" label="标题" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="sender_id" label="Sender" width="160" show-overflow-tooltip />
+          <el-table-column prop="message_count" label="对话轮数" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag size="small" type="info">{{ row.message_count ?? 0 }} 轮</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="last_user_message" label="最近用户消息" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span>{{ row.last_user_message || "-" }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="last_reply_message" label="最近回复" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span>{{ row.last_reply_message || "-" }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="Thread Keys" min-width="200" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span>{{ (row.thread_keys || []).join(' | ') || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="更新时间" width="170">
+            <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openConversationMessages(row)">消息记录</el-button>
+              <el-popconfirm title="确定删除该渠道会话？" @confirm="deleteChannelConversation(row.conversation_id)">
+                <template #reference>
+                  <el-button link type="danger">删除</el-button>
+                </template>
+              </el-popconfirm>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-pagination
+          v-model:current-page="convPage"
+          v-model:page-size="convPageSize"
+          :total="convTotal"
+          :page-sizes="[10, 20, 50]"
+          layout="total, sizes, prev, pager, next"
+          style="margin-top: 16px; justify-content: flex-end"
+          @size-change="loadChannelConversations"
+          @current-change="loadChannelConversations"
+        />
+      </el-card>
     </div>
+
+    <el-drawer
+      v-model="msgDrawerVisible"
+      :title="'消息记录 · ' + (msgConversation?.title || '')"
+      size="640px"
+      destroy-on-close
+    >
+      <div v-loading="msgLoading" class="msg-drawer-body">
+        <div v-if="conversationMessages.length === 0 && !msgLoading" class="msg-empty">
+          暂无消息记录
+        </div>
+        <div
+          v-for="msg in conversationMessages"
+          :key="msg.id"
+          class="msg-item"
+          :class="'msg-role-' + msg.role"
+        >
+          <div class="msg-meta">
+            <el-tag :type="msg.role === 'user' ? 'primary' : msg.role === 'assistant' ? 'success' : 'info'" size="small">
+              {{ msg.role === 'user' ? '用户' : msg.role === 'assistant' ? '助手' : msg.role }}
+            </el-tag>
+            <span class="msg-time">{{ formatTime(msg.created_at) }}</span>
+            <span v-if="msg.tokens_used" class="msg-tokens">{{ msg.tokens_used }} tokens</span>
+          </div>
+          <div class="msg-content">{{ msg.content }}</div>
+        </div>
+      </div>
+    </el-drawer>
 
     <el-dialog
       v-model="dialogVisible"
@@ -324,7 +447,7 @@
 <script setup lang="ts">
 import { ref, reactive, watch, computed, onMounted } from "vue";
 import { ElMessage } from "element-plus";
-import { channelApi, type Channel, type ChannelType } from "@/api/channel";
+import { channelApi, type Channel, type ChannelType, type ChannelConversationItem, type ChannelMessage } from "@/api/channel";
 
 const list = ref<Channel[]>([]);
 const loading = ref(false);
@@ -332,6 +455,20 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
 const keyword = ref("");
+const selectedChannel = ref<Channel | null>(null);
+const channelConversations = ref<ChannelConversationItem[]>([]);
+const convLoading = ref(false);
+const convTotal = ref(0);
+const convPage = ref(1);
+const convPageSize = ref(20);
+const convFilterThread = ref("");
+const convFilterSender = ref("");
+const toggleLoadingId = ref<number>(0);
+
+const msgDrawerVisible = ref(false);
+const msgConversation = ref<ChannelConversationItem | null>(null);
+const conversationMessages = ref<ChannelMessage[]>([]);
+const msgLoading = ref(false);
 
 const dialogVisible = ref(false);
 const isEdit = ref(false);
@@ -456,6 +593,85 @@ function copyText(s: string) {
   navigator.clipboard.writeText(s).then(() => ElMessage.success("已复制"));
 }
 
+function formatTime(t: string) {
+  if (!t) return "";
+  return new Date(t).toLocaleString("zh-CN", { hour12: false });
+}
+
+function clearChannelConversationPanel() {
+  selectedChannel.value = null;
+  channelConversations.value = [];
+  convTotal.value = 0;
+  convPage.value = 1;
+  convFilterThread.value = "";
+  convFilterSender.value = "";
+}
+
+function openChannelConversations(row: Channel) {
+  selectedChannel.value = row;
+  convPage.value = 1;
+  loadChannelConversations();
+}
+
+function refreshChannelConversations() {
+  convPage.value = 1;
+  loadChannelConversations();
+}
+
+async function loadChannelConversations() {
+  if (!selectedChannel.value) return;
+  convLoading.value = true;
+  try {
+    const res: any = await channelApi.conversations(selectedChannel.value.id, {
+      page: convPage.value,
+      page_size: convPageSize.value,
+      thread_key: convFilterThread.value || undefined,
+      sender_id: convFilterSender.value || undefined,
+    });
+    channelConversations.value = res.data?.list || [];
+    convTotal.value = res.data?.total || 0;
+  } finally {
+    convLoading.value = false;
+  }
+}
+
+async function openConversationMessages(row: ChannelConversationItem) {
+  if (!selectedChannel.value) return;
+  msgConversation.value = row;
+  msgDrawerVisible.value = true;
+  msgLoading.value = true;
+  try {
+    const res: any = await channelApi.conversationMessages(
+      selectedChannel.value.id,
+      row.conversation_id,
+      { limit: 100, with_steps: false }
+    );
+    conversationMessages.value = (res.data || []).filter((m: ChannelMessage) => {
+      if (m.role === "user") return true;
+      if (m.role === "assistant" && m.content?.trim()) return true;
+      return false;
+    });
+  } catch {
+    conversationMessages.value = [];
+  } finally {
+    msgLoading.value = false;
+  }
+}
+
+async function deleteChannelConversation(conversationId: number) {
+  if (!selectedChannel.value) return;
+  try {
+    await channelApi.deleteConversation(selectedChannel.value.id, conversationId);
+    ElMessage.success("会话已删除");
+    if (channelConversations.value.length === 1 && convPage.value > 1) {
+      convPage.value -= 1;
+    }
+    await loadChannelConversations();
+  } catch {
+    /* error message from interceptor */
+  }
+}
+
 async function loadData() {
   loading.value = true;
   try {
@@ -468,6 +684,24 @@ async function loadData() {
     total.value = res.data?.total || 0;
   } finally {
     loading.value = false;
+  }
+}
+
+async function onToggleEnabled(row: Channel, enabled: boolean) {
+  if (toggleLoadingId.value) return;
+  const prev = row.enabled;
+  row.enabled = enabled;
+  toggleLoadingId.value = row.id;
+  try {
+    await channelApi.setEnabled(row.id, enabled);
+    ElMessage.success(enabled ? "渠道已启用，监听已刷新" : "渠道已禁用，监听已停止");
+    if (selectedChannel.value?.id === row.id) {
+      selectedChannel.value.enabled = enabled;
+    }
+  } catch {
+    row.enabled = prev;
+  } finally {
+    toggleLoadingId.value = 0;
   }
 }
 
@@ -619,6 +853,9 @@ async function handleDelete(id: number) {
   try {
     await channelApi.delete(id);
     ElMessage.success("已删除");
+    if (selectedChannel.value?.id === id) {
+      clearChannelConversationPanel();
+    }
     loadData();
   } catch {
     /* el message from interceptor */
@@ -643,7 +880,17 @@ onMounted(() => loadData());
 .webhook-secondary {
   display: block;
   margin-top: 2px;
-  opacity: 0.85;
+  opacity: 0.8;
+}
+.status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.conv-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .config-hint {
   margin-bottom: 12px;
@@ -667,5 +914,52 @@ onMounted(() => loadData());
 .mono :deep(.el-textarea__inner) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+}
+
+/* ── 消息记录抽屉 ── */
+.msg-drawer-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-empty {
+  text-align: center;
+  color: var(--el-text-color-secondary);
+  padding: 48px 0;
+  font-size: 13px;
+}
+.msg-item {
+  border-radius: 10px;
+  padding: 10px 14px;
+  border: 1px solid var(--el-border-color-extra-light);
+  background: var(--el-bg-color);
+}
+.msg-role-user {
+  background: var(--el-color-primary-light-9);
+  border-color: transparent;
+}
+.msg-role-assistant {
+  background: var(--el-fill-color-lighter);
+  border-color: transparent;
+}
+.msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.msg-tokens {
+  margin-left: auto;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.msg-content {
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--el-text-color-primary);
 }
 </style>

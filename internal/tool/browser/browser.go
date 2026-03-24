@@ -143,16 +143,6 @@ var defaultBrowser = &browserManager{
 	targetLifecycleTabs: make(map[string]bool),
 }
 
-// agentRunMu 在「整次 Agent Execute/stream」期间由 executor 持有，串行化多个 goroutine 对共享 defaultBrowser 的访问。
-// opMu 只覆盖单次 browser Handler；多轮 LLM 之间的空档无锁，channel 等场景下并发 Execute 会交错关 tab / evict，导致 tab.ctx 已 canceled。
-var agentRunMu sync.Mutex
-
-// LockSharedChromeAgentRun 占用共享 Chrome 会话的整次 Agent 互斥；返回的 unlock 应 defer 调用。
-func LockSharedChromeAgentRun() (unlock func()) {
-	agentRunMu.Lock()
-	return func() { agentRunMu.Unlock() }
-}
-
 func SetVisible(v bool) {
 	defaultBrowser.mu.Lock()
 	defer defaultBrowser.mu.Unlock()
