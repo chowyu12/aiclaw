@@ -49,7 +49,7 @@ func (bm *browserManager) actionSetDevice(reqCtx context.Context, p browserParam
 		return "", fmt.Errorf("unknown device %q, available: %v", p.Device, names)
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -75,7 +75,7 @@ func (bm *browserManager) actionSetMedia(reqCtx context.Context, p browserParams
 		scheme = "no-preference"
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}

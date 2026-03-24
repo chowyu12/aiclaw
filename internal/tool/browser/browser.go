@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/workspace"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/runtime"
+	cdpTarget "github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -86,11 +88,15 @@ type formField struct {
 }
 
 type tabInfo struct {
-	id     string
-	ctx    context.Context
-	cancel context.CancelFunc
-	url    string
-	title  string
+	id           string
+	ctx          context.Context
+	cancel       context.CancelFunc
+	url          string
+	title        string
+	cdpTargetID  string
+	cdpSessionID string
+	canceledBy   string
+	canceledTime time.Time
 }
 
 const (
@@ -99,6 +105,9 @@ const (
 )
 
 type browserManager struct {
+	// opMu 序列化所有「工具 Handler」与「closeBrowser/idle 关闭」；否则 idle 里 allocCancel 可与正在执行的 chromedp 并发，
+	// tabCtx 被关掉后 snapshot/get_text 会立刻 context canceled（与 Agent 超时无关）。
+	opMu        sync.Mutex
 	mu          sync.Mutex
 	allocCtx    context.Context
 	allocCancel context.CancelFunc
@@ -119,11 +128,29 @@ type browserManager struct {
 	idleTimeout time.Duration
 	maxTabs     int
 	idleTimer   *time.Timer
+	// CDP 事件归因：target/session -> tab 映射；用于定位「外部关闭 target」。
+	cdpTargetToTab  map[string]string
+	cdpSessionToTab map[string]string
+	// targetLifecycleTabs 已为哪些 tabID 注册过 ListenTarget 生命周期回调（recover 同 id 新 ctx 需重挂）。
+	targetLifecycleTabs map[string]bool
 }
 
 var defaultBrowser = &browserManager{
-	tabs:    make(map[string]*tabInfo),
-	tabRefs: make(map[string]map[string]elementInfo),
+	tabs:            make(map[string]*tabInfo),
+	tabRefs:         make(map[string]map[string]elementInfo),
+	cdpTargetToTab:  make(map[string]string),
+	cdpSessionToTab: make(map[string]string),
+	targetLifecycleTabs: make(map[string]bool),
+}
+
+// agentRunMu 在「整次 Agent Execute/stream」期间由 executor 持有，串行化多个 goroutine 对共享 defaultBrowser 的访问。
+// opMu 只覆盖单次 browser Handler；多轮 LLM 之间的空档无锁，channel 等场景下并发 Execute 会交错关 tab / evict，导致 tab.ctx 已 canceled。
+var agentRunMu sync.Mutex
+
+// LockSharedChromeAgentRun 占用共享 Chrome 会话的整次 Agent 互斥；返回的 unlock 应 defer 调用。
+func LockSharedChromeAgentRun() (unlock func()) {
+	agentRunMu.Lock()
+	return func() { agentRunMu.Unlock() }
 }
 
 func SetVisible(v bool) {
@@ -188,14 +215,14 @@ func Handler(ctx context.Context, args string) (string, error) {
 		return bm.closeBrowser()
 	}
 
-	// 请求 context 已取消（如 HTTP/SSE 断开）时绝不启动 Chrome，避免 ensureStarted 在无人消费结果时拉起进程。
-	if err := ctx.Err(); err != nil {
-		return "", fmt.Errorf("browser: %w", err)
-	}
+	bm.opMu.Lock()
+	defer bm.opMu.Unlock()
 
 	if err := bm.ensureStarted(); err != nil {
 		return "", fmt.Errorf("start browser: %w", err)
 	}
+	// 任意一次 browser 调用（含失败）都顺延 idle，避免「evaluate 失败后未 reset」与短 idle 叠加误关会话。
+	defer bm.resetIdleTimer()
 
 	var result string
 	var err error
@@ -269,9 +296,6 @@ func Handler(ctx context.Context, args string) (string, error) {
 		return "", fmt.Errorf("unknown action: %s", p.Action)
 	}
 
-	if err == nil {
-		bm.resetIdleTimer()
-	}
 	return result, err
 }
 
@@ -385,6 +409,8 @@ func (bm *browserManager) addTab(tabCtx context.Context, tabCancel context.Cance
 		id: tabID, ctx: tabCtx, cancel: tabCancel,
 		url: tabURL, title: title,
 	}
+	bm.captureTabIdentityLocked(tabID, tabCtx)
+	bm.attachTargetLifecycleMonitorLocked(tabID, tabCtx)
 	bm.tabOrder = append(bm.tabOrder, tabID)
 	bm.activeTab = tabID
 	bm.started = true
@@ -439,8 +465,9 @@ func (bm *browserManager) evictOldestTab() {
 			return
 		}
 		bm.removeFromTabOrder(victim)
-		if tab, ok := bm.tabs[victim]; ok {
-			tab.cancel()
+		if _, ok := bm.tabs[victim]; ok {
+			bm.cancelTabLocked(victim, "evict_oldest_tab")
+			bm.unregisterTabIdentityLocked(victim)
 			delete(bm.tabs, victim)
 			delete(bm.tabRefs, victim)
 			log.WithField("tab", victim).Info("[Browser] evicted oldest tab (tab limit reached)")
@@ -474,6 +501,9 @@ func discoverBrowserWSURL(endpoint string) (string, error) {
 }
 
 func (bm *browserManager) closeBrowser() (string, error) {
+	bm.opMu.Lock()
+	defer bm.opMu.Unlock()
+
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
@@ -487,7 +517,10 @@ func (bm *browserManager) closeBrowser() (string, error) {
 	}
 
 	for _, tab := range bm.tabs {
-		tab.cancel()
+		if tab == nil {
+			continue
+		}
+		bm.cancelTabLocked(tab.id, "close_browser")
 	}
 	if bm.allocCancel != nil {
 		bm.allocCancel()
@@ -500,6 +533,9 @@ func (bm *browserManager) closeBrowser() (string, error) {
 	bm.tabs = make(map[string]*tabInfo)
 	bm.tabOrder = nil
 	bm.tabRefs = make(map[string]map[string]elementInfo)
+	bm.cdpTargetToTab = make(map[string]string)
+	bm.cdpSessionToTab = make(map[string]string)
+	bm.targetLifecycleTabs = make(map[string]bool)
 	bm.activeTab = ""
 	bm.started = false
 	bm.remote = false
@@ -514,19 +550,271 @@ func (bm *browserManager) closeBrowser() (string, error) {
 	return browserJSON("ok", true, "message", "browser closed"), nil
 }
 
-func (bm *browserManager) getTabCtx(targetID string) (context.Context, error) {
+// removeTabEntryLocked 从会话中移除 tab（须在持有 bm.mu 下调用）。
+func (bm *browserManager) removeTabEntryLocked(id string) {
+	if id == "" {
+		return
+	}
+	if bm.targetLifecycleTabs != nil {
+		delete(bm.targetLifecycleTabs, id)
+	}
+	bm.unregisterTabIdentityLocked(id)
+	delete(bm.tabs, id)
+	bm.removeFromTabOrder(id)
+	delete(bm.tabRefs, id)
+	if bm.activeTab != id {
+		return
+	}
+	bm.activeTab = ""
+	for _, tid := range bm.tabOrder {
+		if _, ok := bm.tabs[tid]; ok {
+			bm.activeTab = tid
+			return
+		}
+	}
+}
+
+// attachTargetLifecycleMonitorLocked 在页会话上监听 Target.* 事件；调用方须已持有 bm.mu。
+// chromedp 对带 sessionId 的 CDP 消息只投递到对应 Target 的 ListenTarget，不会进 ListenBrowser。
+func (bm *browserManager) attachTargetLifecycleMonitorLocked(tabID string, tabCtx context.Context) {
+	if bm.targetLifecycleTabs == nil {
+		bm.targetLifecycleTabs = make(map[string]bool)
+	}
+	if bm.targetLifecycleTabs[tabID] {
+		return
+	}
+	bm.targetLifecycleTabs[tabID] = true
+	chromedp.ListenTarget(context.WithoutCancel(tabCtx), bm.handleTargetLifecycleEvent)
+}
+
+func (bm *browserManager) handleTargetLifecycleEvent(ev any) {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
+
+	switch e := ev.(type) {
+	case *cdpTarget.EventTargetDestroyed:
+		tid := normCDPMapKey(string(e.TargetID))
+		tabID := bm.cdpTargetToTab[tid]
+		if tabID == "" {
+			log.WithField("cdp_target_id", tid).Debug("[Browser] CDP target destroyed (no mapped tab)")
+			return
+		}
+		bm.markTabCanceledByLocked(tabID, "cdp_target_destroyed")
+		log.WithFields(log.Fields{"tab": tabID, "cdp_target_id": tid}).Warn("[Browser] CDP target destroyed")
+	case *cdpTarget.EventTargetCrashed:
+		tid := normCDPMapKey(string(e.TargetID))
+		tabID := bm.cdpTargetToTab[tid]
+		if tabID == "" {
+			return
+		}
+		bm.markTabCanceledByLocked(tabID, "cdp_target_crashed")
+		log.WithFields(log.Fields{
+			"tab":           tabID,
+			"cdp_target_id": tid,
+			"status":        e.Status,
+			"error_code":    e.ErrorCode,
+		}).Warn("[Browser] CDP target crashed")
+	case *cdpTarget.EventDetachedFromTarget:
+		sid := normCDPMapKey(string(e.SessionID))
+		tabID := bm.cdpSessionToTab[sid]
+		if tabID == "" {
+			log.WithField("cdp_session_id", sid).Debug("[Browser] CDP detached (no mapped tab)")
+			return
+		}
+		bm.markTabCanceledByLocked(tabID, "cdp_detached_from_target")
+		log.WithFields(log.Fields{"tab": tabID, "cdp_session_id": sid}).Warn("[Browser] CDP detached from target")
+	}
+}
+
+// normCDPMapKey CDP 事件里的 targetId/sessionId 与 chromedp 内存串可能大小写不一致，统一小写再查表。
+func normCDPMapKey(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+func (bm *browserManager) captureTabIdentityLocked(tabID string, tabCtx context.Context) {
+	tab, ok := bm.tabs[tabID]
+	if !ok || tab == nil {
+		return
+	}
+	c := chromedp.FromContext(tabCtx)
+	if c == nil || c.Target == nil {
+		return
+	}
+	tid := normCDPMapKey(string(c.Target.TargetID))
+	sid := normCDPMapKey(string(c.Target.SessionID))
+	tab.cdpTargetID = tid
+	tab.cdpSessionID = sid
+	if tid != "" {
+		bm.cdpTargetToTab[tid] = tabID
+	}
+	if sid != "" {
+		bm.cdpSessionToTab[sid] = tabID
+	}
+}
+
+func (bm *browserManager) unregisterTabIdentityLocked(tabID string) {
+	tab, ok := bm.tabs[tabID]
+	if !ok || tab == nil {
+		return
+	}
+	if tab.cdpTargetID != "" {
+		delete(bm.cdpTargetToTab, normCDPMapKey(tab.cdpTargetID))
+	}
+	if tab.cdpSessionID != "" {
+		delete(bm.cdpSessionToTab, normCDPMapKey(tab.cdpSessionID))
+	}
+}
+
+func (bm *browserManager) markTabCanceledByLocked(tabID, reason string) {
+	tab, ok := bm.tabs[tabID]
+	if !ok || tab == nil || tab.canceledBy != "" {
+		return
+	}
+	tab.canceledBy = reason
+	tab.canceledTime = time.Now()
+}
+
+// cancelTabLocked 记录取消来源并取消 tab（须在持有 bm.mu 下调用）。
+func (bm *browserManager) cancelTabLocked(id, reason string) {
+	tab, ok := bm.tabs[id]
+	if !ok || tab == nil {
+		return
+	}
+	if tab.canceledBy == "" {
+		tab.canceledBy = strings.TrimSpace(reason)
+		tab.canceledTime = time.Now()
+	}
+	tab.cancel()
+}
+
+func (bm *browserManager) getTabCtx(reqCtx context.Context, targetID string) (context.Context, error) {
+	bm.mu.Lock()
 
 	id := targetID
 	if id == "" {
 		id = bm.activeTab
 	}
+	if id == "" {
+		bm.mu.Unlock()
+		return nil, fmt.Errorf("no active tab")
+	}
 	tab, ok := bm.tabs[id]
 	if !ok {
+		bm.mu.Unlock()
 		return nil, fmt.Errorf("tab %q not found", id)
 	}
-	return tab.ctx, nil
+	if tab.ctx.Err() == nil {
+		ctx := tab.ctx
+		bm.mu.Unlock()
+		return ctx, nil
+	}
+
+	recoverURL := tab.url
+	fields := log.Fields{
+		"tab":          id,
+		"recover_url":  recoverURL,
+		"ctx_err":      tab.ctx.Err().Error(),
+		"cdp_target_id": tab.cdpTargetID,
+		"cdp_session_id": tab.cdpSessionID,
+		"canceled_by":  tab.canceledBy,
+		"canceled_at":  tab.canceledTime,
+		"started_tabs": len(bm.tabs),
+	}
+	if c := context.Cause(tab.ctx); c != nil {
+		fields["context_cause"] = c.Error()
+	}
+	if tab.canceledBy == "" {
+		fields["canceled_by_note"] = "no_browser_event_match; check_cdp_id_case_or_unmap_race"
+		if bm.allocCtx != nil && bm.allocCtx.Err() != nil {
+			fields["alloc_ctx_err"] = bm.allocCtx.Err().Error()
+		}
+	}
+	log.WithFields(fields).Warn("[Browser] tab CDP session lost; recovering (re-attach + navigate to last URL, same target_id)")
+	bm.removeTabEntryLocked(id)
+	bm.mu.Unlock()
+
+	ctx, err := bm.attemptRecoverTab(reqCtx, recoverURL, id)
+	if err != nil {
+		return nil, err
+	}
+	return ctx, nil
+}
+
+// attemptRecoverTab 在 alloc 仍可用时新建 chromedp tab，导航到 recoverURL（不安全或空则用 about:blank）。
+// reuseID 非空时复用该 target_id，便于 LLM 继续传同一 target_id。
+func (bm *browserManager) attemptRecoverTab(reqCtx context.Context, recoverURL, reuseID string) (context.Context, error) {
+	bm.mu.Lock()
+	if !bm.started {
+		bm.mu.Unlock()
+		return nil, fmt.Errorf("browser session not active; run action navigate again")
+	}
+	allocCtx := bm.allocCtx
+	bm.mu.Unlock()
+	if allocCtx == nil {
+		return nil, fmt.Errorf("browser allocator missing; run action navigate again")
+	}
+
+	tabCtx, tabCancel := chromedp.NewContext(allocCtx, chromedp.WithErrorf(log.Errorf))
+	bm.attachTabMonitor(tabCtx)
+
+	if err := chromedp.Run(tabCtx, network.Enable(), runtime.Enable()); err != nil {
+		tabCancel()
+		return nil, fmt.Errorf("recover tab: enable domains: %w", err)
+	}
+
+	navURL := strings.TrimSpace(recoverURL)
+	if navURL != "" && navURL != "about:blank" {
+		if err := isURLSafe(navURL); err != nil {
+			navURL = "about:blank"
+		}
+	}
+	if navURL == "" {
+		navURL = "about:blank"
+	}
+
+	var navErr error
+	if navURL != "about:blank" {
+		navErr = runChromedpNavigate(tabCtx, reqCtx, navURL)
+	} else {
+		navErr = chromedp.Run(tabCtx, chromedp.Navigate(navURL))
+		if navErr == nil {
+			_ = chromedp.Run(tabCtx, chromedp.WaitReady("body", chromedp.ByQuery))
+		}
+	}
+	if navErr != nil {
+		tabCancel()
+		return nil, fmt.Errorf("recover tab: navigate: %w", navErr)
+	}
+
+	tabID := reuseID
+	if tabID == "" {
+		tabID = uuid.New().String()[:8]
+	}
+
+	bm.mu.Lock()
+	defer bm.mu.Unlock()
+
+	if _, exists := bm.tabs[tabID]; exists {
+		tabCancel()
+		return nil, fmt.Errorf("recover tab: target id collision %q", tabID)
+	}
+	bm.tabs[tabID] = &tabInfo{
+		id: tabID, ctx: tabCtx, cancel: tabCancel,
+		url: navURL, title: "",
+	}
+	bm.captureTabIdentityLocked(tabID, tabCtx)
+	bm.attachTargetLifecycleMonitorLocked(tabID, tabCtx)
+	if !slices.Contains(bm.tabOrder, tabID) {
+		bm.tabOrder = append(bm.tabOrder, tabID)
+	}
+	bm.activeTab = tabID
+	if bm.tabRefs == nil {
+		bm.tabRefs = make(map[string]map[string]elementInfo)
+	}
+	bm.tabRefs[tabID] = make(map[string]elementInfo)
+
+	log.WithFields(log.Fields{"tab": tabID, "url": navURL}).Info("[Browser] CDP tab recovered")
+	return tabCtx, nil
 }
 
 // effectiveTabID 解析 target_id（空则 active），并校验 tab 存在。

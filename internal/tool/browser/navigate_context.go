@@ -91,6 +91,9 @@ func mergedActionContext(tabCtx, reqCtx context.Context) (context.Context, conte
 
 // mergedActionContextMax 与 mergedActionContext 相同，但允许单次动作使用更长上限（如 slowly 输入、多字段表单）。
 func mergedActionContextMax(tabCtx, reqCtx context.Context, maxDur time.Duration) (context.Context, context.CancelFunc) {
+	if tabCtx.Err() != nil {
+		return tabCtx, func() {}
+	}
 	if maxDur > interactionDeadlineCap {
 		maxDur = interactionDeadlineCap
 	}

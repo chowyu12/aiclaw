@@ -26,7 +26,7 @@ func (bm *browserManager) actionNavigate(reqCtx context.Context, p browserParams
 		return "", err
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -44,6 +44,9 @@ func (bm *browserManager) actionNavigate(reqCtx context.Context, p browserParams
 		bm.tabRefs = make(map[string]map[string]elementInfo)
 	}
 	bm.tabRefs[tabID] = make(map[string]elementInfo)
+	if t, ok := bm.tabs[tabID]; ok {
+		t.url = p.URL
+	}
 	bm.mu.Unlock()
 
 	deadline, _, postWait := navigateMergedDeadline(reqCtx, p.URL)
@@ -65,7 +68,7 @@ func (bm *browserManager) actionNavigate(reqCtx context.Context, p browserParams
 }
 
 func (bm *browserManager) actionScreenshot(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -106,7 +109,7 @@ func (bm *browserManager) actionScreenshot(reqCtx context.Context, p browserPara
 }
 
 func (bm *browserManager) actionSnapshot(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -116,7 +119,7 @@ func (bm *browserManager) actionSnapshot(reqCtx context.Context, p browserParams
 }
 
 func (bm *browserManager) actionGetText(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -147,7 +150,7 @@ func (bm *browserManager) actionEvaluate(reqCtx context.Context, p browserParams
 		return "", fmt.Errorf("expression is required for evaluate")
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -166,7 +169,7 @@ func (bm *browserManager) actionEvaluate(reqCtx context.Context, p browserParams
 }
 
 func (bm *browserManager) actionPDF(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -222,7 +225,7 @@ func (bm *browserManager) actionClick(reqCtx context.Context, p browserParams) (
 		return "", err
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -302,7 +305,7 @@ func (bm *browserManager) actionType(reqCtx context.Context, p browserParams) (s
 		return "", err
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -388,7 +391,7 @@ func (bm *browserManager) actionHover(reqCtx context.Context, p browserParams) (
 		return "", err
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -425,7 +428,7 @@ func (bm *browserManager) actionDrag(reqCtx context.Context, p browserParams) (s
 		return "", err
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -464,7 +467,7 @@ func (bm *browserManager) actionSelect(reqCtx context.Context, p browserParams) 
 		return "", fmt.Errorf("values is required for select")
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -499,7 +502,7 @@ func (bm *browserManager) actionFillForm(reqCtx context.Context, p browserParams
 		return "", fmt.Errorf("fields is required for fill_form")
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -533,7 +536,7 @@ func (bm *browserManager) actionFillForm(reqCtx context.Context, p browserParams
 }
 
 func (bm *browserManager) actionScroll(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -590,7 +593,7 @@ func (bm *browserManager) actionUpload(reqCtx context.Context, p browserParams) 
 		resolvedPaths = append(resolvedPaths, resolved)
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -608,11 +611,7 @@ func (bm *browserManager) actionUpload(reqCtx context.Context, p browserParams) 
 }
 
 func (bm *browserManager) actionWait(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
-	if err != nil {
-		return "", err
-	}
-
+	// 仅 wait_ms 的睡眠不访问 DOM/CDP，不应依赖 tab；否则标签页已 detach 时也会误报 session ended。
 	if p.WaitTime > 0 {
 		d := time.Duration(p.WaitTime) * time.Millisecond
 		t := time.NewTimer(d)
@@ -623,6 +622,11 @@ func (bm *browserManager) actionWait(reqCtx context.Context, p browserParams) (s
 		case <-t.C:
 		}
 		return browserJSON("ok", true, "waited_ms", p.WaitTime), nil
+	}
+
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
+	if err != nil {
+		return "", err
 	}
 
 	runCtx, runCancel := mergedActionContext(tabCtx, reqCtx)
@@ -739,7 +743,7 @@ func (bm *browserManager) waitNetworkIdle(waitCtx context.Context) (string, erro
 }
 
 func (bm *browserManager) actionDialog(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -849,8 +853,7 @@ func (bm *browserManager) actionCloseTab(p browserParams) (string, error) {
 		targetID = bm.activeTab
 	}
 
-	tab, ok := bm.tabs[targetID]
-	if !ok {
+	if _, ok := bm.tabs[targetID]; !ok {
 		return "", fmt.Errorf("tab %q not found", targetID)
 	}
 
@@ -858,7 +861,8 @@ func (bm *browserManager) actionCloseTab(p browserParams) (string, error) {
 		return "", fmt.Errorf("cannot close the last tab, use close action to stop browser")
 	}
 
-	tab.cancel()
+	bm.cancelTabLocked(targetID, "close_tab")
+	bm.unregisterTabIdentityLocked(targetID)
 	delete(bm.tabs, targetID)
 	bm.removeFromTabOrder(targetID)
 	delete(bm.tabRefs, targetID)
@@ -886,7 +890,7 @@ func (bm *browserManager) removeFromTabOrder(tabID string) {
 // --- Cookie management ---
 
 func (bm *browserManager) actionCookies(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -961,7 +965,7 @@ func (bm *browserManager) actionCookies(reqCtx context.Context, p browserParams)
 // --- Storage management ---
 
 func (bm *browserManager) actionStorage(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -1053,7 +1057,7 @@ func (bm *browserManager) actionPress(reqCtx context.Context, p browserParams) (
 		return "", fmt.Errorf("key_name is required for press")
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -1079,7 +1083,7 @@ func (bm *browserManager) actionPress(reqCtx context.Context, p browserParams) (
 // --- Navigation history ---
 
 func (bm *browserManager) actionBack(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -1101,7 +1105,7 @@ func (bm *browserManager) actionBack(reqCtx context.Context, p browserParams) (s
 }
 
 func (bm *browserManager) actionForward(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -1123,7 +1127,7 @@ func (bm *browserManager) actionForward(reqCtx context.Context, p browserParams)
 }
 
 func (bm *browserManager) actionReload(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -1171,7 +1175,7 @@ const extractTableJS = `(function(sel){
 })`
 
 func (bm *browserManager) actionExtractTable(reqCtx context.Context, p browserParams) (string, error) {
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -1209,7 +1213,7 @@ func (bm *browserManager) actionResize(reqCtx context.Context, p browserParams) 
 		return "", fmt.Errorf("width and height must be positive integers")
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
@@ -1233,7 +1237,7 @@ func (bm *browserManager) actionHighlight(reqCtx context.Context, p browserParam
 		return "", err
 	}
 
-	tabCtx, err := bm.getTabCtx(p.TargetID)
+	tabCtx, err := bm.getTabCtx(reqCtx, p.TargetID)
 	if err != nil {
 		return "", err
 	}
