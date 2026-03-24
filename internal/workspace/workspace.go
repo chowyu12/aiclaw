@@ -16,7 +16,7 @@ func WithWorkdirScope(ctx context.Context, scopeID string) context.Context {
 	return context.WithValue(ctx, ctxKey{}, scopeID)
 }
 
-func WorkdirScopeFromContext(ctx context.Context) string {
+func workdirScopeFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(ctxKey{}).(string); ok {
 		return v
 	}
@@ -112,14 +112,7 @@ func Sandbox() string {
 	return filepath.Join(root, "sandbox")
 }
 
-func Agents() string {
-	if root == "" {
-		return ""
-	}
-	return filepath.Join(root, "agents")
-}
-
-// AgentDir 返回指定 agent 的工作目录，并自动创建所需子目录。
+// AgentDir 返回指定 agent 的工作目录，并尝试创建所需子目录（失败时静默忽略）。
 func AgentDir(uuid string) string {
 	if root == "" || uuid == "" {
 		return ""
@@ -149,7 +142,7 @@ func AgentTmp(uuid string) string {
 
 // AgentSandboxFromCtx 从 context 中的 WorkdirScope 返回对应 sandbox 目录。
 func AgentSandboxFromCtx(ctx context.Context) string {
-	if id := WorkdirScopeFromContext(ctx); id != "" {
+	if id := workdirScopeFromContext(ctx); id != "" {
 		return AgentSandbox(id)
 	}
 	return Sandbox()
@@ -157,7 +150,7 @@ func AgentSandboxFromCtx(ctx context.Context) string {
 
 // AgentTmpFromCtx 从 context 中的 WorkdirScope 返回对应 tmp 目录。
 func AgentTmpFromCtx(ctx context.Context) string {
-	if id := WorkdirScopeFromContext(ctx); id != "" {
+	if id := workdirScopeFromContext(ctx); id != "" {
 		return AgentTmp(id)
 	}
 	return Tmp()

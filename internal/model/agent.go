@@ -98,23 +98,6 @@ func (a *Agent) IterationLimit() int {
 	return DefaultAgentMaxIterations
 }
 
-type CreateAgentReq struct {
-	Name              string      `json:"name"`
-	Description       string      `json:"description"`
-	SystemPrompt      string      `json:"system_prompt"`
-	ProviderID        int64       `json:"provider_id"`
-	ModelName         string      `json:"model_name"`
-	Temperature       float64     `json:"temperature"`
-	MaxTokens         int         `json:"max_tokens"`
-	Timeout           int         `json:"timeout"`
-	MaxHistory        int         `json:"max_history"`
-	MaxIterations     int         `json:"max_iterations"`
-	ToolSearchEnabled bool        `json:"tool_search_enabled"`
-	MemOSEnabled      bool        `json:"memos_enabled"`
-	MemOSCfg          MemOSConfig `json:"memos_config"`
-	ToolIDs           []int64     `json:"tool_ids,omitzero"`
-}
-
 type UpdateAgentReq struct {
 	Name              *string      `json:"name,omitzero"`
 	Description       *string      `json:"description,omitzero"`

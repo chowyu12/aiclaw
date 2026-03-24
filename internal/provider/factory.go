@@ -42,7 +42,7 @@ func (a *adapter) CreateChatCompletionStream(ctx context.Context, req openai.Cha
 
 var _ LLMProvider = (*adapter)(nil)
 
-func ResolveBaseURL(p *model.Provider) (string, error) {
+func resolveBaseURL(p *model.Provider) (string, error) {
 	baseURL := p.BaseURL
 	if baseURL == "" {
 		var ok bool
@@ -61,7 +61,7 @@ type openAIModelsResponse struct {
 }
 
 func FetchRemoteModels(ctx context.Context, p *model.Provider) ([]string, error) {
-	baseURL, err := ResolveBaseURL(p)
+	baseURL, err := resolveBaseURL(p)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func FetchRemoteModels(ctx context.Context, p *model.Provider) ([]string, error)
 }
 
 func NewFromProvider(p *model.Provider, modelName string) (LLMProvider, error) {
-	baseURL, err := ResolveBaseURL(p)
+	baseURL, err := resolveBaseURL(p)
 	if err != nil {
 		return nil, err
 	}

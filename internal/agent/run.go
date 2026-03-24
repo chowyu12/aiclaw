@@ -192,7 +192,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 	return e.saveResult(ctx, ec, finalContent, totalTokens, time.Since(totalStart))
 }
 
-// ── bootstrapAgentTurn（从 executor_run.go 迁入） ────────────
+// ── bootstrapAgentTurn ──────────────────────────────────────
 
 type agentRunState struct {
 	Messages    []openai.ChatCompletionMessage
@@ -290,7 +290,7 @@ func toolsSentToLLM(tsMode bool, allDefs []openai.Tool, discovered map[string]bo
 	return allDefs
 }
 
-// ── 从 executor_util.go 迁入的工具函数 ──────────────────────
+// ── 工具函数 ────────────────────────────────────────────────
 
 func extractContent(resp openai.ChatCompletionResponse) string {
 	if len(resp.Choices) == 0 {

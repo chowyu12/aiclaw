@@ -113,7 +113,3 @@ async function handleDelete(id: number) {
 
 onMounted(loadData)
 </script>
-
-<style scoped>
-/* desc-cell 已移入 theme.css 全局样式 */
-</style>

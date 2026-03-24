@@ -56,7 +56,3 @@ async function loadWorkspaceSkills() {
 
 onMounted(() => loadWorkspaceSkills());
 </script>
-
-<style scoped>
-/* toolbar 已移入 theme.css 全局样式 */
-</style>

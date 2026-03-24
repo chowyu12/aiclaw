@@ -221,6 +221,14 @@ func (s *mockStore) CreateMessages(_ context.Context, msgs []*model.Message) err
 	}
 	return nil
 }
+func (s *mockStore) ListConversationsByUserPrefix(_ context.Context, _ string, _ model.ListQuery) ([]*model.Conversation, int64, error) {
+	return nil, 0, nil
+}
+func (s *mockStore) CountMessages(_ context.Context, conversationID int64) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return int64(len(s.messages[conversationID])), nil
+}
 func (s *mockStore) ListMessages(_ context.Context, conversationID int64, limit int) ([]model.Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
