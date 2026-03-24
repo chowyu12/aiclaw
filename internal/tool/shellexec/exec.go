@@ -4,15 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/creack/pty"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -60,20 +60,10 @@ func Handler(ctx context.Context, args string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	shell := findShell()
-	cmd := exec.CommandContext(ctx, shell, "-c", p.Command)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	cmd.WaitDelay = 5 * time.Second
-	if p.WorkingDir != "" {
-		cmd.Dir = p.WorkingDir
-	}
-
 	log.WithFields(log.Fields{"command": p.Command, "timeout": timeout}).Info("[exec] >> run")
 
-	output, exitCode, err := runWithPTY(cmd)
+	workDir := resolveWorkingDir(p.WorkingDir)
+	output, exitCode, err := runWithShellFallback(ctx, p.Command, workDir)
 
 	r := truncate(output, maxOutput)
 
@@ -90,22 +80,37 @@ func Handler(ctx context.Context, args string) (string, error) {
 	return r, nil
 }
 
-func runWithPTY(cmd *exec.Cmd) (string, int, error) {
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		return runPipe(cmd)
-	}
-	defer ptmx.Close()
+func runWithShellFallback(ctx context.Context, command, workDir string) (string, int, error) {
+	candidates := shellCandidates()
+	var lastErr error
+	for _, shell := range candidates {
+		cmd := exec.CommandContext(ctx, shell, "-c", command)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			if cmd.Process == nil {
+				return nil
+			}
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		cmd.WaitDelay = 5 * time.Second
+		if workDir != "" {
+			cmd.Dir = workDir
+		}
 
-	var buf bytes.Buffer
-	io.Copy(&buf, ptmx)
-
-	err = cmd.Wait()
-	exitCode := 0
-	if cmd.ProcessState != nil {
-		exitCode = cmd.ProcessState.ExitCode()
+		output, exitCode, err := runPipe(cmd)
+		if err == nil {
+			return output, exitCode, nil
+		}
+		lastErr = err
+		if !isSpawnENOENT(err) {
+			return output, exitCode, err
+		}
+		log.WithFields(log.Fields{"shell": shell, "error": err}).Debug("[exec] shell unavailable, trying next")
 	}
-	return buf.String(), exitCode, err
+	if lastErr != nil {
+		return "", -1, fmt.Errorf("no usable shell: %w", lastErr)
+	}
+	return "", -1, fmt.Errorf("no usable shell found")
 }
 
 func runPipe(cmd *exec.Cmd) (string, int, error) {
@@ -117,6 +122,8 @@ func runPipe(cmd *exec.Cmd) (string, int, error) {
 	exitCode := 0
 	if cmd.ProcessState != nil {
 		exitCode = cmd.ProcessState.ExitCode()
+	} else if err != nil {
+		exitCode = -1
 	}
 
 	r := stdout.String()
@@ -126,16 +133,83 @@ func runPipe(cmd *exec.Cmd) (string, int, error) {
 	return r, exitCode, err
 }
 
-func findShell() string {
-	if sh := os.Getenv("SHELL"); sh != "" {
-		return sh
+func shellCandidates() []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0, 8)
+	add := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" || seen[path] {
+			return
+		}
+		seen[path] = true
+		out = append(out, path)
 	}
-	for _, s := range []string{"/bin/bash", "/bin/zsh", "/bin/sh"} {
+
+	// Prefer widely available POSIX shells first.
+	for _, s := range []string{"/bin/bash", "/bin/sh", "/usr/bin/bash", "/usr/bin/sh", "/bin/ash"} {
 		if _, err := os.Stat(s); err == nil {
-			return s
+			add(s)
 		}
 	}
-	return defaultShell
+	if sh := strings.TrimSpace(os.Getenv("SHELL")); sh != "" {
+		add(sh)
+		base := filepath.Base(sh)
+		if looked, err := exec.LookPath(base); err == nil {
+			add(looked)
+		}
+	}
+	for _, name := range []string{"bash", "sh", "ash", "zsh"} {
+		if looked, err := exec.LookPath(name); err == nil {
+			add(looked)
+		}
+	}
+	for _, s := range []string{"/bin/zsh", "/usr/bin/zsh", defaultShell} {
+		if _, err := os.Stat(s); err == nil {
+			add(s)
+		}
+	}
+	if len(out) == 0 {
+		add(defaultShell)
+	}
+	return out
+}
+
+func isSpawnENOENT(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, exec.ErrNotFound) {
+		return true
+	}
+	var ee *exec.Error
+	if errors.As(err, &ee) && errors.Is(ee.Err, os.ErrNotExist) {
+		return true
+	}
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		return errors.Is(pe.Err, os.ErrNotExist) || errors.Is(pe.Err, syscall.ENOENT)
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "fork/exec") && strings.Contains(msg, "no such file")
+}
+
+func resolveWorkingDir(dir string) string {
+	dir = strings.TrimSpace(dir)
+	if dir == "" {
+		return ""
+	}
+	if dir == "~" {
+		if home, err := os.UserHomeDir(); err == nil {
+			return home
+		}
+		return dir
+	}
+	if strings.HasPrefix(dir, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, strings.TrimPrefix(dir, "~/"))
+		}
+	}
+	return dir
 }
 
 func checkDangerous(cmdStr string) error {
