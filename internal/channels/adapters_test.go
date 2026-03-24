@@ -16,20 +16,7 @@ func TestWeComHTTPNoInbound(t *testing.T) {
 	}
 }
 
-func TestParseWeComJSON(t *testing.T) {
-	in := parseWeComJSON([]byte(`{"text":{"content":" hello "},"from":"u1","chatid":"c1"}`))
-	if in == nil || in.Text != "hello" || in.ThreadKey != "c1" {
-		t.Fatalf("in=%v", in)
-	}
-}
 
-func TestParseWeComXML(t *testing.T) {
-	body := []byte(`<xml><FromUserName><![CDATA[from]]></FromUserName><ToUserName><![CDATA[to]]></ToUserName><MsgType><![CDATA[text]]></MsgType><Content><![CDATA[hi]]></Content></xml>`)
-	in := parseWeComXML(body)
-	if in == nil || in.Text != "hi" || in.SenderID != "from" {
-		t.Fatalf("in=%v", in)
-	}
-}
 
 func TestFeishuChallenge(t *testing.T) {
 	ad := feishuAdapter{}

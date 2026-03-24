@@ -79,6 +79,19 @@
                   }}</code>
                 </el-tooltip>
               </template>
+              <template v-else-if="row.channel_type === 'wechat'">
+                <span class="webhook-muted">iLink 长轮询</span>
+                <template v-if="row.config?.ilink_bot_id">
+                  <el-tag size="small" type="success">已登录</el-tag>
+                </template>
+                <template v-else>
+                  <el-tag size="small" type="warning">未登录</el-tag>
+                  <el-button
+                    link type="primary" size="small"
+                    @click="openWeChatQRLogin(row)"
+                  >扫码登录</el-button>
+                </template>
+              </template>
               <template v-else>
                 <code class="webhook-snippet">{{ webhookURL(row.uuid) }}</code>
                 <el-button
@@ -400,6 +413,34 @@
           </el-form-item>
         </template>
 
+        <template v-else-if="form.channel_type === 'wechat'">
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            class="config-hint"
+          >
+            <template #title>微信 · iLink 扫码登录</template>
+            <div class="hint-lines">
+              保存渠道后，在列表中点击「扫码登录」获取二维码，使用微信扫码完成登录。
+              登录成功后服务端将自动启动长轮询消息监听。
+            </div>
+          </el-alert>
+          <template v-if="isEdit && cfg.ilink_bot_id">
+            <el-form-item label="Bot ID">
+              <el-input :model-value="cfg.ilink_bot_id" disabled />
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-tag type="success">已登录</el-tag>
+              <el-button
+                link type="warning" size="small"
+                style="margin-left: 12px"
+                @click="openWeChatQRLoginInDialog"
+              >重新扫码</el-button>
+            </el-form-item>
+          </template>
+        </template>
+
         <template v-else>
           <el-alert
             type="warning"
@@ -441,12 +482,47 @@
         >
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="qrDialogVisible"
+      title="微信扫码登录"
+      width="420px"
+      destroy-on-close
+      @closed="stopQRPolling"
+    >
+      <div class="qr-login-body">
+        <div v-if="qrLoading" v-loading="true" style="height: 200px" />
+        <template v-else-if="qrDataURL">
+          <img :src="qrDataURL" alt="微信登录二维码" class="qr-img" />
+          <p class="qr-status-text">
+            <template v-if="qrStatus === 'wait'">请使用微信扫描二维码</template>
+            <template v-else-if="qrStatus === 'scaned'">已扫码，请在手机上确认</template>
+            <template v-else-if="qrStatus === 'confirmed'">
+              <el-tag type="success">登录成功</el-tag>
+            </template>
+            <template v-else-if="qrStatus === 'expired'">
+              二维码已过期
+              <el-button link type="primary" @click="fetchQRCode">重新获取</el-button>
+            </template>
+            <template v-else-if="qrStatus === 'error'">
+              获取状态失败
+              <el-button link type="primary" @click="fetchQRCode">重试</el-button>
+            </template>
+          </p>
+        </template>
+        <div v-else class="qr-error">
+          获取二维码失败
+          <el-button type="primary" size="small" @click="fetchQRCode">重试</el-button>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, computed, onMounted } from "vue";
+import { ref, reactive, watch, computed, onMounted, onBeforeUnmount } from "vue";
 import { ElMessage } from "element-plus";
+import QRCode from "qrcode";
 import { channelApi, type Channel, type ChannelType, type ChannelConversationItem, type ChannelMessage } from "@/api/channel";
 
 const list = ref<Channel[]>([]);
@@ -481,10 +557,10 @@ const saving = ref(false);
  */
 const CONFIG_KEYS_BY_TYPE: Record<ChannelType, readonly string[]> = {
   wecom: ["bot_id", "secret"],
+  wechat: ["bot_token", "ilink_bot_id", "base_url", "ilink_user_id"],
   whatsapp: ["verify_token", "hub_verify_token"],
   telegram: ["bot_token", "token"],
   feishu: ["app_id", "app_secret", "verification_token", "encrypt_key"],
-  wechat_kf: [],
   dingtalk: [],
 };
 
@@ -497,6 +573,9 @@ const CFG_SHAPE = {
   app_secret: "",
   verification_token: "",
   encrypt_key: "",
+  ilink_bot_id: "",
+  base_url: "",
+  ilink_user_id: "",
 } as const;
 
 type CfgKey = keyof typeof CFG_SHAPE;
@@ -512,8 +591,9 @@ function configKeysForType(t: ChannelType): Set<string> {
   return new Set(CONFIG_KEYS_BY_TYPE[t] || []);
 }
 
-/** 企微走 WebSocket，业务入站不经 HTTP，一般不需要 Webhook 密钥。 */
-const needsWebhookTokenField = computed(() => form.channel_type !== "wecom");
+const needsWebhookTokenField = computed(
+  () => form.channel_type !== "wecom" && form.channel_type !== "wechat",
+);
 
 function loadConfigIntoForm(
   raw: Record<string, unknown> | null | undefined,
@@ -556,7 +636,7 @@ function loadConfigIntoForm(
 
 const typeOptions: { value: ChannelType; label: string }[] = [
   { value: "wecom", label: "企业微信 · 智能机器人" },
-  { value: "wechat_kf", label: "微信客服 wechat_kf" },
+  { value: "wechat", label: "微信 · 扫码登录" },
   { value: "feishu", label: "飞书 feishu" },
   { value: "dingtalk", label: "钉钉 dingtalk" },
   { value: "whatsapp", label: "WhatsApp" },
@@ -788,6 +868,11 @@ function buildConfigPayload(): Record<string, unknown> | null {
     set("app_secret");
     set("verification_token");
     set("encrypt_key");
+  } else if (t === "wechat") {
+    for (const k of ["bot_token", "ilink_bot_id", "base_url", "ilink_user_id"] as const) {
+      const v = String((cfg as Record<string, string>)[k] ?? "").trim();
+      if (v) out[k] = v;
+    }
   }
   return out;
 }
@@ -861,6 +946,86 @@ async function handleDelete(id: number) {
     /* el message from interceptor */
   }
 }
+
+// ────────────────────── 微信扫码登录 ──────────────────────
+
+const qrDialogVisible = ref(false);
+const qrLoading = ref(false);
+const qrDataURL = ref("");
+const qrStatus = ref<"wait" | "scaned" | "confirmed" | "expired" | "error">("wait");
+const qrChannelId = ref(0);
+const qrCode = ref("");
+let qrPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+function openWeChatQRLogin(row: Channel) {
+  qrChannelId.value = row.id;
+  qrDialogVisible.value = true;
+  fetchQRCode();
+}
+
+function openWeChatQRLoginInDialog() {
+  qrDialogVisible.value = true;
+  fetchQRCode();
+}
+
+async function fetchQRCode() {
+  qrLoading.value = true;
+  qrDataURL.value = "";
+  qrStatus.value = "wait";
+  stopQRPolling();
+  try {
+    const id = qrChannelId.value || editId.value;
+    if (!id) {
+      ElMessage.warning("请先保存渠道");
+      qrDialogVisible.value = false;
+      return;
+    }
+    qrChannelId.value = id;
+    const res: any = await channelApi.wechatQRCode(id);
+    const data = res.data;
+    qrCode.value = data.qrcode;
+    const url = data.qrcode_url;
+    qrDataURL.value = await QRCode.toDataURL(url, { width: 280, margin: 2 });
+    startQRPolling();
+  } catch (e: any) {
+    ElMessage.error("获取二维码失败: " + (e?.message || e));
+  } finally {
+    qrLoading.value = false;
+  }
+}
+
+function startQRPolling() {
+  stopQRPolling();
+  pollQROnce();
+}
+
+function stopQRPolling() {
+  if (qrPollTimer) {
+    clearTimeout(qrPollTimer);
+    qrPollTimer = null;
+  }
+}
+
+async function pollQROnce() {
+  if (!qrCode.value || !qrDialogVisible.value) return;
+  try {
+    const res: any = await channelApi.wechatQRStatus(qrChannelId.value, qrCode.value);
+    const data = res.data;
+    qrStatus.value = data.status;
+    if (data.status === "confirmed") {
+      ElMessage.success("微信登录成功");
+      qrDialogVisible.value = false;
+      await loadData();
+      return;
+    }
+    if (data.status === "expired") return;
+    qrPollTimer = setTimeout(pollQROnce, 1500);
+  } catch {
+    qrStatus.value = "error";
+  }
+}
+
+onBeforeUnmount(() => stopQRPolling());
 
 onMounted(() => loadData());
 </script>
@@ -961,5 +1126,34 @@ onMounted(() => loadData());
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--el-text-color-primary);
+}
+
+/* ── 微信扫码登录 ── */
+.qr-login-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 200px;
+}
+.qr-img {
+  width: 280px;
+  height: 280px;
+  border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter);
+}
+.qr-status-text {
+  margin-top: 16px;
+  font-size: 14px;
+  color: var(--el-text-color-regular);
+  text-align: center;
+}
+.qr-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 0;
+  font-size: 14px;
+  color: var(--el-text-color-secondary);
 }
 </style>

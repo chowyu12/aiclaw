@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"io"
 	"net/http"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
 	"github.com/chowyu12/aiclaw/pkg/httputil"
+	"github.com/chowyu12/aiclaw/pkg/wechatlink"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -37,6 +39,8 @@ func (h *ChannelHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/v1/channels/{id}", h.Delete)
 	mux.HandleFunc("POST /api/v1/webhooks/channels/{uuid}", h.WebhookPOST)
 	mux.HandleFunc("GET /api/v1/webhooks/channels/{uuid}", h.WebhookGET)
+	mux.HandleFunc("POST /api/v1/channels/{id}/wechat/qrcode", h.WeChatQRCode)
+	mux.HandleFunc("GET /api/v1/channels/{id}/wechat/qrcode/status", h.WeChatQRCodeStatus)
 }
 
 func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
@@ -409,4 +413,89 @@ func (h *ChannelHandler) verifyWebhookToken(r *http.Request, ch *model.Channel) 
 		tok = r.URL.Query().Get("token")
 	}
 	return subtle.ConstantTimeCompare([]byte(tok), []byte(ch.WebhookToken)) == 1
+}
+
+// ────────────────────── 微信 iLink 扫码登录 ──────────────────────
+
+// WeChatQRCode 获取微信扫码登录二维码。
+func (h *ChannelHandler) WeChatQRCode(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httputil.BadRequest(w, "invalid id")
+		return
+	}
+	ch, err := h.store.GetChannel(r.Context(), id)
+	if err != nil {
+		httputil.NotFound(w, "channel not found")
+		return
+	}
+	if ch.ChannelType != model.ChannelWeChat {
+		httputil.BadRequest(w, "channel type must be wechat")
+		return
+	}
+	qr, err := wechatlink.FetchQRCode(r.Context())
+	if err != nil {
+		log.WithError(err).Error("[wechat] fetch QR code failed")
+		httputil.InternalError(w, "获取二维码失败: "+err.Error())
+		return
+	}
+	httputil.OK(w, qr)
+}
+
+// WeChatQRCodeStatus 轮询微信扫码状态（长轮询，单次最长约 40 秒）。
+// 当状态为 confirmed 时自动将凭据保存到渠道配置并刷新运行时。
+func (h *ChannelHandler) WeChatQRCodeStatus(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		httputil.BadRequest(w, "invalid id")
+		return
+	}
+	qrcode := strings.TrimSpace(r.URL.Query().Get("qrcode"))
+	if qrcode == "" {
+		httputil.BadRequest(w, "missing qrcode parameter")
+		return
+	}
+	ch, err := h.store.GetChannel(r.Context(), id)
+	if err != nil {
+		httputil.NotFound(w, "channel not found")
+		return
+	}
+	if ch.ChannelType != model.ChannelWeChat {
+		httputil.BadRequest(w, "channel type must be wechat")
+		return
+	}
+
+	resp, err := wechatlink.PollQRStatus(r.Context(), qrcode)
+	if err != nil {
+		httputil.OK(w, map[string]any{"status": "error", "error": err.Error()})
+		return
+	}
+
+	if resp.Status != "confirmed" {
+		httputil.OK(w, map[string]any{"status": resp.Status})
+		return
+	}
+
+	configJSON, _ := json.Marshal(map[string]string{
+		"bot_token":     resp.BotToken,
+		"ilink_bot_id":  resp.ILinkBotID,
+		"base_url":      resp.BaseURL,
+		"ilink_user_id": resp.ILinkUserID,
+	})
+	if err := h.store.UpdateChannel(r.Context(), ch.ID, model.UpdateChannelReq{
+		Config: model.JSON(configJSON),
+	}); err != nil {
+		httputil.InternalError(w, "保存凭据失败: "+err.Error())
+		return
+	}
+	h.mgr.Refresh(r.Context())
+	log.WithFields(log.Fields{
+		"channel_id": ch.ID,
+		"bot_id":     resp.ILinkBotID,
+	}).Info("[wechat] 扫码登录成功，凭据已保存，长轮询已启动")
+
+	httputil.OK(w, map[string]any{
+		"status": "confirmed",
+		"bot_id": resp.ILinkBotID,
+	})
 }

@@ -8,7 +8,7 @@ type ChannelType string
 const (
 	// ChannelWeCom 企业微信「智能机器人」：WebSocket 长连接，配置 bot_id + secret（实现见 pkg/wecomaibot，协议见官方文档）。
 	ChannelWeCom    ChannelType = "wecom"
-	ChannelWeChatKF ChannelType = "wechat_kf" // 微信客服
+	ChannelWeChat   ChannelType = "wechat"    // 微信（iLink Bot API，扫码登录 + 长轮询）
 	ChannelFeishu   ChannelType = "feishu"    // 飞书
 	ChannelDingTalk ChannelType = "dingtalk"  // 钉钉
 	ChannelWhatsApp ChannelType = "whatsapp"  // WhatsApp（如 Meta Cloud API）
@@ -16,8 +16,8 @@ const (
 )
 
 var validChannelTypes = map[ChannelType]struct{}{
-	ChannelWeCom:    {},
-	ChannelWeChatKF: {},
+	ChannelWeCom:  {},
+	ChannelWeChat: {},
 	ChannelFeishu:   {},
 	ChannelDingTalk: {},
 	ChannelWhatsApp: {},
