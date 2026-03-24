@@ -33,5 +33,7 @@ func ApplyBrowserToolConfig(c config.BrowserConfig) {
 	}
 	if c.MaxTabs > 0 {
 		browser.SetMaxTabs(c.MaxTabs)
+	} else {
+		browser.SetMaxTabs(50)
 	}
 }
