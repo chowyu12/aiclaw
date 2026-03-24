@@ -137,7 +137,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 	for i := range maxIter {
 		req := openai.ChatCompletionRequest{
 			Model:    ec.ag.ModelName,
-			Messages: st.Messages,
+			Messages: ensureContentPresent(st.Messages),
 			Tools:    toolsSentToLLM(st.TSMode, st.AllToolDefs, st.Discovered),
 		}
 		applyModelCaps(&req, ec.ag, ec.l)
@@ -384,4 +384,18 @@ func truncateLog(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "..."
+}
+
+// ensureContentPresent 确保每条消息的 Content 不为空字符串。
+// go-openai SDK 使用 `json:"content,omitempty"`，空 Content 会导致序列化时
+// content 字段被省略，而部分供应商（如通义千问 Qwen）要求 content 字段必须存在。
+func ensureContentPresent(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	out := make([]openai.ChatCompletionMessage, len(msgs))
+	copy(out, msgs)
+	for i := range out {
+		if out[i].Content == "" && len(out[i].MultiContent) == 0 {
+			out[i].Content = " "
+		}
+	}
+	return out
 }
