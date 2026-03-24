@@ -2,7 +2,7 @@ import request, { type ListQuery } from './request'
 
 export type ChannelType =
   | 'wecom'
-  | 'wechat_kf'
+  | 'wechat'
   | 'feishu'
   | 'dingtalk'
   | 'whatsapp'
@@ -57,6 +57,17 @@ export interface ChannelMessage {
   steps?: unknown[]
 }
 
+export interface WeChatQRCodeResult {
+  qrcode: string
+  qrcode_url: string
+}
+
+export interface WeChatQRStatusResult {
+  status: 'wait' | 'scaned' | 'confirmed' | 'expired' | 'error'
+  bot_id?: string
+  error?: string
+}
+
 export const channelApi = {
   list: (params: ListQuery) => request.get('/channels', { params }),
   setEnabled: (id: number, enabled: boolean) => request.patch(`/channels/${id}/enabled`, { enabled }),
@@ -70,4 +81,8 @@ export const channelApi = {
   update: (id: number, data: Partial<CreateChannelReq> & { config?: Record<string, unknown> | null }) =>
     request.put(`/channels/${id}`, data),
   delete: (id: number) => request.delete(`/channels/${id}`),
+  wechatQRCode: (id: number) =>
+    request.post<WeChatQRCodeResult>(`/channels/${id}/wechat/qrcode`),
+  wechatQRStatus: (id: number, qrcode: string) =>
+    request.get<WeChatQRStatusResult>(`/channels/${id}/wechat/qrcode/status`, { params: { qrcode } }),
 }
