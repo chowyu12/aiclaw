@@ -1,7 +1,7 @@
 <template>
   <div class="aic-page">
     <div class="aic-page-head">
-      <h1 class="aic-title">渠道 Channel</h1>
+      <h1 class="aic-title">渠道</h1>
       <p class="aic-sub"></p>
     </div>
     <div class="aic-page-body">
