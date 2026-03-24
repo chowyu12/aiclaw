@@ -12,6 +12,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build Frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -19,16 +32,20 @@ jobs:
 
       - name: Build
         run: |
-          GOOS=linux GOARCH=amd64 go build -o aiclaw-linux-amd64
-          GOOS=windows GOARCH=amd64 go build -o aiclaw-windows-amd64.exe
-          GOOS=darwin GOARCH=amd64 go build -o aiclaw-darwin-amd64
-          GOOS=darwin GOARCH=arm64 go build -o aiclaw-darwin-arm64
+          VERSION=${GITHUB_REF_NAME}
+          LDFLAGS="-s -w -X main.version=${VERSION}"
+          GOOS=linux  GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o aiclaw-linux-amd64   ./cmd/server
+          GOOS=linux  GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o aiclaw-linux-arm64   ./cmd/server
+          GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o aiclaw-windows-amd64.exe ./cmd/server
+          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o aiclaw-darwin-amd64  ./cmd/server
+          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o aiclaw-darwin-arm64  ./cmd/server
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             aiclaw-linux-amd64
+            aiclaw-linux-arm64
             aiclaw-windows-amd64.exe
             aiclaw-darwin-amd64
             aiclaw-darwin-arm64
