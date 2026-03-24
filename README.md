@@ -2,14 +2,6 @@
 
 基于 Go + Vue 3 构建的 AI Agent 管理与执行平台，当前采用**单例 Agent**架构，支持多模型供应商接入、工具调用、技能编排和多轮对话。
 
-## 项目现状（2026-03）
-
-- **单例 Agent 模式**：运行时只有一个可热更新的 Agent 配置（持久化在 `config.yaml` + 数据库）。
-- **启动编排解耦**：服务入口由 `cmd/server/main.go` 精简为参数解析，启动流程集中在 `internal/bootstrap`。
-- **Workspace 目录**：默认根目录为 `~/.aiclaw`，技能目录为 `~/.aiclaw/skills`。
-- **Browser 工具稳定性增强**：增加 CDP 生命周期归因与自动恢复，日志可见 `canceled_by` 等字段。
-- **Exec 工具兼容性增强**：移除 PTY 依赖，启动失败返回 `exit_code=-1`，支持 shell 候选回退与 `~/` 工作目录展开。
-
 ## 核心优势
 
 ### 灵活的 Agent 自定义
@@ -59,6 +51,21 @@
 - 可配置 Base URL、API Key、可用模型列表
 - 创建 Agent 时自动拉取供应商模型列表，支持搜索过滤
 
+### 渠道接入
+
+支持将 Agent 接入多种消息渠道，实现多平台自动回复：
+
+| 渠道 | 类型标识 | 接入方式 | 说明 |
+| --- | --- | --- | --- |
+| 企业微信 | `wecom` | WebSocket 长连接 | 智能机器人，配置 Bot ID + Secret，服务端自动建连 |
+| 微信 | `wechat` | iLink 长轮询 | 微信个人号，Web 端扫码登录后自动启动消息监听 |
+| 飞书 | `feishu` | Webhook | 配置 App ID / App Secret / Verification Token |
+| 钉钉 | `dingtalk` | Webhook | 配置 Webhook URL 到钉钉机器人 |
+| WhatsApp | `whatsapp` | Webhook | Meta Cloud API，配置 Verify Token |
+| Telegram | `telegram` | Webhook | BotFather Token，自动 setWebhook |
+
+渠道管理页面支持一键启用/禁用、查看会话记录和消息明细。
+
 ### 工具系统
 
 14 个内置工具，覆盖文件操作、命令执行、网页交互和任务调度：
@@ -97,7 +104,8 @@
   - **系统运维** — `exec` + `process` + `read` + `grep`，系统健康检查、日志排错、进程管理
   - **数据处理** — `code_interpreter` + `read` + `write`，CSV/JSON/Excel 数据清洗、转换、统计
   - **网页采集** — `browser` + `web_fetch` + `code_interpreter` + `write`，结构化提取网页数据
-    **技能目录结构：**
+
+**技能目录结构：**
 
 ```
 ~/.aiclaw/skills/
