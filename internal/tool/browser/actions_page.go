@@ -12,6 +12,7 @@ import (
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/tool/result"
 )
@@ -243,7 +244,21 @@ func (bm *browserManager) actionWait(reqCtx context.Context, p browserParams) (s
 	if p.WaitLoad != "" {
 		switch p.WaitLoad {
 		case "networkidle":
-			return bm.waitNetworkIdle(waitCtx)
+			idleCtx, idleCancel := context.WithTimeout(waitCtx, 8*time.Second)
+			nResult, nErr := bm.waitNetworkIdle(idleCtx)
+			idleCancel()
+			if nErr == nil {
+				return nResult, nil
+			}
+			domCtx, domCancel := context.WithTimeout(waitCtx, 3*time.Second)
+			domErr := chromedp.Run(domCtx, chromedp.WaitReady("body", chromedp.ByQuery))
+			domCancel()
+			if domErr == nil {
+				log.Debug("[Browser] wait: network not idle but DOM is interactive")
+				return browserJSON("ok", true, "load_state", "domready",
+					"note", "network not fully idle but page is interactive"), nil
+			}
+			return "", nErr
 		case "domcontentloaded":
 			if err := chromedp.Run(waitCtx, chromedp.WaitReady("body", chromedp.ByQuery)); err != nil {
 				return "", fmt.Errorf("wait domcontentloaded: %w", err)
