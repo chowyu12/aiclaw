@@ -586,10 +586,11 @@ func (bm *browserManager) handleTargetLifecycleEvent(ev any) {
 		tid := normCDPMapKey(string(e.TargetID))
 		tabID := bm.cdpTargetToTab[tid]
 		if tabID == "" {
-			log.WithField("cdp_target_id", tid).Debug("[Browser] CDP target destroyed (no mapped tab)")
 			return
 		}
-		bm.markTabCanceledByLocked(tabID, "cdp_target_destroyed")
+		if !bm.tryMarkTabCanceledByLocked(tabID, "cdp_target_destroyed") {
+			return
+		}
 		log.WithFields(log.Fields{"tab": tabID, "cdp_target_id": tid}).Warn("[Browser] CDP target destroyed")
 	case *cdpTarget.EventTargetCrashed:
 		tid := normCDPMapKey(string(e.TargetID))
@@ -597,7 +598,9 @@ func (bm *browserManager) handleTargetLifecycleEvent(ev any) {
 		if tabID == "" {
 			return
 		}
-		bm.markTabCanceledByLocked(tabID, "cdp_target_crashed")
+		if !bm.tryMarkTabCanceledByLocked(tabID, "cdp_target_crashed") {
+			return
+		}
 		log.WithFields(log.Fields{
 			"tab":           tabID,
 			"cdp_target_id": tid,
@@ -608,10 +611,11 @@ func (bm *browserManager) handleTargetLifecycleEvent(ev any) {
 		sid := normCDPMapKey(string(e.SessionID))
 		tabID := bm.cdpSessionToTab[sid]
 		if tabID == "" {
-			log.WithField("cdp_session_id", sid).Debug("[Browser] CDP detached (no mapped tab)")
 			return
 		}
-		bm.markTabCanceledByLocked(tabID, "cdp_detached_from_target")
+		if !bm.tryMarkTabCanceledByLocked(tabID, "cdp_detached_from_target") {
+			return
+		}
 		log.WithFields(log.Fields{"tab": tabID, "cdp_session_id": sid}).Warn("[Browser] CDP detached from target")
 	}
 }
@@ -655,13 +659,17 @@ func (bm *browserManager) unregisterTabIdentityLocked(tabID string) {
 	}
 }
 
-func (bm *browserManager) markTabCanceledByLocked(tabID, reason string) {
+// tryMarkTabCanceledByLocked 标记 tab 为已取消，返回 true 表示首次标记。
+// Target.targetDestroyed 等浏览器级广播事件会被每个 tab 的 ListenTarget 回调收到，
+// 通过返回值去重，避免同一事件产生 N 条重复日志。
+func (bm *browserManager) tryMarkTabCanceledByLocked(tabID, reason string) bool {
 	tab, ok := bm.tabs[tabID]
 	if !ok || tab == nil || tab.canceledBy != "" {
-		return
+		return false
 	}
 	tab.canceledBy = reason
 	tab.canceledTime = time.Now()
+	return true
 }
 
 // cancelTabLocked 记录取消来源并取消 tab（须在持有 bm.mu 下调用）。
