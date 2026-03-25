@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	DefaultBaseURL   = "https://ilinkai.weixin.qq.com"
-	longPollTimeout  = 35 * time.Second
-	sendTimeout      = 15 * time.Second
+	DefaultBaseURL  = "https://ilinkai.weixin.qq.com"
+	longPollTimeout = 60 * time.Second
+	sendTimeout     = 15 * time.Second
 )
 
 // Client 微信 iLink Bot API 客户端。
@@ -115,9 +115,9 @@ func (c *Client) SendTyping(ctx context.Context, userID, contextToken string) er
 	return nil
 }
 
-// GetUpdates 长轮询获取消息（阻塞约 35 秒）。
+// GetUpdates 长轮询获取消息（服务端 hold 约 30-60 秒）。
 func (c *Client) GetUpdates(ctx context.Context, buf string) (msgs []rawWeixinMsg, newBuf string, err error) {
-	ctx, cancel := context.WithTimeout(ctx, longPollTimeout+5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, longPollTimeout+10*time.Second)
 	defer cancel()
 	var resp getUpdatesResp
 	if err := c.doPost(ctx, "/ilink/bot/getupdates", getUpdatesReq{
