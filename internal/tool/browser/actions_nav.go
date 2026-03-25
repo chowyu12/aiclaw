@@ -11,7 +11,7 @@ import (
 
 // postNavigateSummary 导航完成后获取 title + 可选正文摘要，供 navigate/open_tab 共用。
 func postNavigateSummary(tabCtx, reqCtx context.Context, targetURL string) string {
-	deadline, _, postWait := navigateMergedDeadline(reqCtx, targetURL)
+	deadline, postWait := navigateMergedDeadline(reqCtx, targetURL)
 	extDL := minTime(time.Now().Add(postWait), deadline)
 	extCtx, extCancel := context.WithDeadline(tabCtx, extDL)
 	defer extCancel()
@@ -91,7 +91,7 @@ func (bm *browserManager) actionOpenTab(reqCtx context.Context, p browserParams)
 		return "", fmt.Errorf("open_tab: %w", err)
 	}
 
-	deadline, _, postWait := navigateMergedDeadline(reqCtx, targetURL)
+	deadline, postWait := navigateMergedDeadline(reqCtx, targetURL)
 	extDL := minTime(time.Now().Add(postWait), deadline)
 	extCtx, extCancel := context.WithDeadline(tabCtx, extDL)
 	defer extCancel()

@@ -15,9 +15,6 @@ const (
 	defaultNavigateDeadline = 60 * time.Second
 	heavyNavigateDeadline   = 30 * time.Second
 
-	defaultBodyWait = 14 * time.Second
-	heavyBodyWait   = 5 * time.Second
-
 	postNavigateExtract = 12 * time.Second
 	heavyPostExtract    = 6 * time.Second
 
@@ -53,17 +50,15 @@ func isHeavyDynamicSite(host string) bool {
 	}
 }
 
-// navigateMergedDeadline 合并：站点策略上限、请求 / Agent ctx 的截止时间。
-func navigateMergedDeadline(reqCtx context.Context, rawURL string) (deadline time.Time, bodyWait, postExtract time.Duration) {
+// navigateMergedDeadline 合并站点策略上限与请求 / Agent ctx 的截止时间。
+func navigateMergedDeadline(reqCtx context.Context, rawURL string) (deadline time.Time, postExtract time.Duration) {
 	host := hostFromRawURL(rawURL)
 	heavy := isHeavyDynamicSite(host)
 
 	navMax := defaultNavigateDeadline
-	bodyWait = defaultBodyWait
 	postExtract = postNavigateExtract
 	if heavy {
 		navMax = heavyNavigateDeadline
-		bodyWait = heavyBodyWait
 		postExtract = heavyPostExtract
 	}
 
@@ -72,11 +67,10 @@ func navigateMergedDeadline(reqCtx context.Context, rawURL string) (deadline tim
 	if d, ok := reqCtx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	// 与 mergedActionContextMax 一致：避免 WithDeadline(parent, 已过期时间) 导致导航立刻 context canceled。
 	if !deadline.After(now) {
 		deadline = now.Add(navMax)
 	}
-	return deadline, bodyWait, postExtract
+	return deadline, postExtract
 }
 
 func minTime(a, b time.Time) time.Time {
@@ -121,20 +115,23 @@ func mergedActionContextMax(tabCtx, reqCtx context.Context, maxDur time.Duration
 	}
 }
 
-// loadWaitTimeout 是等待 load 事件的上限；超过后如果 DOM 已就绪则视为导航成功。
-// chromedp.Navigate 会阻塞到 Page.loadEventFired，资源密集型网站（长连接/流媒体/广告）
-// 可能永远不会触发该事件，从而耗尽整个工具超时。
+// DOM-first 导航策略常量。
+//
+// chromedp.Navigate 阻塞到 Page.loadEventFired（所有资源加载完成），
+// 但大多数现代网站 DOM 在 2-5 秒即可交互，load 事件可能需要 30 秒+（广告/长连接/流媒体）。
+// 策略：给 load 事件一个短窗口，超时后只要 DOM ready 即视为成功。
 const (
-	defaultLoadWait = 25 * time.Second
-	heavyLoadWait   = 10 * time.Second
-	domProbeTimeout = 5 * time.Second
+	defaultLoadWait = 8 * time.Second
+	heavyLoadWait   = 4 * time.Second
+	domProbeTimeout = 8 * time.Second
 )
 
-// runChromedpNavigate 分两阶段执行导航：
-//  1. 用较短超时尝试完整 load（chromedp.Navigate 等待 loadEventFired）；
-//  2. 若 load 超时，探测 DOM 是否已可用——若 body ready 则视为成功（页面可交互，仅残留资源未加载）。
+// runChromedpNavigate 以 DOM 可用为主要成功标准，load 事件为快速路径：
+//  1. 用短超时尝试 chromedp.Navigate（等 loadEventFired）；简单页面会在此阶段直接完成。
+//  2. 若 load 超时，探测 DOM body 是否已可交互——ready 则返回成功。
+//  3. 两者都失败才返回错误。
 func runChromedpNavigate(tabCtx, reqCtx context.Context, rawURL string) error {
-	deadline, bodyWait, _ := navigateMergedDeadline(reqCtx, rawURL)
+	deadline, _ := navigateMergedDeadline(reqCtx, rawURL)
 
 	host := hostFromRawURL(rawURL)
 	loadWait := defaultLoadWait
@@ -142,32 +139,32 @@ func runChromedpNavigate(tabCtx, reqCtx context.Context, rawURL string) error {
 		loadWait = heavyLoadWait
 	}
 
+	// Phase 1: 快速路径——等 load 事件，简单页面几秒就能完成。
 	navDL := minTime(time.Now().Add(loadWait), deadline)
 	navCtx, navCancel := context.WithDeadline(tabCtx, navDL)
 	err := chromedp.Run(navCtx, chromedp.Navigate(rawURL))
 	navCancel()
 
-	if err != nil {
-		if !errors.Is(err, context.DeadlineExceeded) {
-			return err
-		}
-		// load 事件未在 loadWait 内触发——探测页面是否已部分可用。
-		probeCtx, probeCancel := context.WithTimeout(tabCtx, domProbeTimeout)
-		probeErr := chromedp.Run(probeCtx, chromedp.WaitReady("body", chromedp.ByQuery))
-		probeCancel()
-		if probeErr != nil {
-			return err
-		}
-		log.WithFields(log.Fields{"url": rawURL, "load_wait": loadWait}).
-			Debug("[Browser] navigate: load event timed out but DOM is ready, continuing")
-	}
-
-	bodyDL := minTime(time.Now().Add(bodyWait), deadline)
-	if !bodyDL.After(time.Now()) {
+	if err == nil {
 		return nil
 	}
-	bodyCtx, bodyCancel := context.WithDeadline(tabCtx, bodyDL)
-	defer bodyCancel()
-	_ = chromedp.Run(bodyCtx, chromedp.WaitReady("body", chromedp.ByQuery))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+
+	// Phase 2: load 未触发——探测 DOM 是否已可交互（body ready）。
+	probeDL := minTime(time.Now().Add(domProbeTimeout), deadline)
+	if !probeDL.After(time.Now()) {
+		return err
+	}
+	probeCtx, probeCancel := context.WithDeadline(tabCtx, probeDL)
+	probeErr := chromedp.Run(probeCtx, chromedp.WaitReady("body", chromedp.ByQuery))
+	probeCancel()
+	if probeErr != nil {
+		return err
+	}
+
+	log.WithFields(log.Fields{"url": rawURL, "load_wait": loadWait}).
+		Debug("[Browser] navigate: load event timed out but DOM is ready, continuing")
 	return nil
 }
