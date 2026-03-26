@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path"
@@ -16,7 +17,7 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/chowyu12/aiclaw/internal/tool"
+	"github.com/chowyu12/aiclaw/internal/tools"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/parser"
 	"github.com/chowyu12/aiclaw/internal/workspace"
@@ -158,7 +159,12 @@ func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatF
 			if seen[cf.URL] {
 				continue
 			}
-			f := e.loadRemoteFile(ctx, cf.URL, cf.Type)
+			var f *model.File
+			if filepath.IsAbs(cf.URL) {
+				f = loadLocalMediaFile(cf.URL, cf.Type)
+			} else {
+				f = e.loadRemoteFile(ctx, cf.URL, cf.Type)
+			}
 			if f != nil {
 				seen[cf.URL] = true
 				files = append(files, f)
@@ -188,6 +194,30 @@ func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatF
 	return files
 }
 
+func loadLocalMediaFile(absPath string, chatFileType model.ChatFileType) *model.File {
+	info, err := os.Stat(absPath)
+	if err != nil || info.IsDir() {
+		log.WithField("path", absPath).WithError(err).Warn("[Execute] local media file stat failed, skipping")
+		return nil
+	}
+	ct := mime.TypeByExtension(filepath.Ext(absPath))
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	filename := filepath.Base(absPath)
+	fileType := chatFileTypeToFileType(chatFileType, ct, filename)
+
+	log.WithFields(log.Fields{"path": absPath, "type": string(fileType), "size": info.Size()}).Info("[Execute] local media file loaded")
+	return &model.File{
+		UUID:        absPath,
+		Filename:    filename,
+		ContentType: ct,
+		FileSize:    info.Size(),
+		FileType:    fileType,
+		StoragePath: absPath,
+	}
+}
+
 func (e *Executor) buildToolResponseParts(ctx context.Context, toolCallID, toolName, toolResult string, ok bool, l *log.Entry) (openai.ChatCompletionMessage, []openai.ChatMessagePart) {
 	toolMsg := func(content string) openai.ChatCompletionMessage {
 		return openai.ChatCompletionMessage{
@@ -202,7 +232,7 @@ func (e *Executor) buildToolResponseParts(ctx context.Context, toolCallID, toolN
 		return toolMsg(toolResult), nil
 	}
 
-	fr := tool.ParseFileResult(toolResult)
+	fr := tools.ParseFileResult(toolResult)
 	if fr == nil {
 		return toolMsg(toolResult), nil
 	}

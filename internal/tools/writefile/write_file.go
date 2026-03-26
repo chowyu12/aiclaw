@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chowyu12/aiclaw/internal/tool/result"
+	"github.com/chowyu12/aiclaw/internal/tools/result"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 

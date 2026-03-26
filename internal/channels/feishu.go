@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/larksuite/oapi-sdk-go/v3"
 	larkcore "github.com/larksuite/oapi-sdk-go/v3/core"
@@ -14,6 +18,8 @@ import (
 	"github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/chowyu12/aiclaw/internal/model"
 )
 
 // 飞书渠道：事件订阅使用 github.com/larksuite/oapi-sdk-go/v3 的 EventDispatcher（解密、签名校验、路由）；
@@ -35,6 +41,9 @@ func (feishuAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, hdr htt
 	disp := dispatcher.NewEventDispatcher(ver, enc)
 	disp.InitConfig(larkevent.WithLogLevel(larkcore.LogLevelError))
 
+	appID := cfgString(ch.ConfigJSON, "app_id")
+	appSecret := cfgString(ch.ConfigJSON, "app_secret")
+
 	var inbound *Inbound
 	disp.OnP2MessageReceiveV1(func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 		_ = ctx
@@ -42,14 +51,34 @@ func (feishuAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, hdr htt
 			return nil
 		}
 		msg := event.Event.Message
-		if deref(msg.MessageType) == "system" {
+		msgType := deref(msg.MessageType)
+		if msgType == "system" {
 			return nil
 		}
 		if event.Event.Sender != nil && strings.EqualFold(deref(event.Event.Sender.SenderType), "app") {
 			return nil
 		}
-		text := feishuMessageText(deref(msg.MessageType), deref(msg.Content))
-		if text == "" {
+
+		text := feishuMessageText(msgType, deref(msg.Content))
+		var files []model.ChatFile
+
+		if msgType == "image" {
+			imageKey := feishuExtractImageKey(deref(msg.Content))
+			if imageKey != "" && appID != "" && appSecret != "" {
+				if localPath := feishuDownloadImage(imageKey, appID, appSecret); localPath != "" {
+					files = append(files, model.ChatFile{
+						Type:           model.ChatFileImage,
+						TransferMethod: model.TransferRemoteURL,
+						URL:            localPath,
+					})
+				}
+			}
+			if text == "" && len(files) > 0 {
+				text = "请描述这张图片"
+			}
+		}
+
+		if text == "" && len(files) == 0 {
 			return nil
 		}
 		chatID := deref(msg.ChatId)
@@ -59,7 +88,7 @@ func (feishuAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, hdr htt
 		sender := feishuSenderOpenID(event.Event.Sender)
 		meta := map[string]any{
 			"message_id":   deref(msg.MessageId),
-			"message_type": deref(msg.MessageType),
+			"message_type": msgType,
 			"chat_type":    deref(msg.ChatType),
 		}
 		if eb := event.EventV2Base; eb != nil && eb.Header != nil {
@@ -69,6 +98,7 @@ func (feishuAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, hdr htt
 			ThreadKey: chatID,
 			SenderID:  sender,
 			Text:      text,
+			Files:     files,
 			RawMeta:   meta,
 		}
 		return nil
@@ -125,6 +155,59 @@ func feishuMessageText(messageType, content string) string {
 		return ""
 	}
 	return strings.TrimSpace(m.Text)
+}
+
+func feishuExtractImageKey(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	var m struct {
+		ImageKey string `json:"image_key"`
+	}
+	if json.Unmarshal([]byte(content), &m) != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.ImageKey)
+}
+
+func feishuDownloadImage(imageKey, appID, appSecret string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	client := lark.NewClient(appID, appSecret)
+	req := larkim.NewGetImageReqBuilder().ImageKey(imageKey).Build()
+	resp, err := client.Im.Image.Get(ctx, req)
+	if err != nil {
+		log.WithError(err).WithField("image_key", imageKey).Warn("[feishu] download image failed")
+		return ""
+	}
+	if resp == nil || resp.File == nil {
+		log.WithField("image_key", imageKey).Warn("[feishu] download image: empty response")
+		return ""
+	}
+
+	ext := ".png"
+	if resp.FileName != "" {
+		if e := filepath.Ext(resp.FileName); e != "" {
+			ext = e
+		}
+	}
+	tmpFile, err := os.CreateTemp("", "feishu-img-*"+ext)
+	if err != nil {
+		log.WithError(err).Warn("[feishu] create temp file for image failed")
+		return ""
+	}
+	defer tmpFile.Close()
+
+	n, err := io.Copy(tmpFile, resp.File)
+	if err != nil {
+		log.WithError(err).Warn("[feishu] write image to temp file failed")
+		os.Remove(tmpFile.Name())
+		return ""
+	}
+	log.WithFields(log.Fields{"image_key": imageKey, "path": tmpFile.Name(), "size": n}).Info("[feishu] image downloaded")
+	return tmpFile.Name()
 }
 
 func feishuSenderOpenID(sender *larkim.EventSender) string {

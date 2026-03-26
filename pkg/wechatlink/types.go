@@ -38,6 +38,7 @@ type QRStatusResult struct {
 type Message struct {
 	FromUserID   string
 	Text         string
+	ImageURLs    []string
 	ContextToken string
 }
 

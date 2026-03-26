@@ -658,16 +658,23 @@ func TestCollectTools(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		exec := newTestExecutor(s, NewToolRegistry(), &mockLLMProvider{})
+		registry := NewToolRegistry()
+		builtinCount := len(registry.BuiltinDefs())
+
+		exec := newTestExecutor(s, registry, &mockLLMProvider{})
 		tools, _, err := exec.collectTools(ctx, ag)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(tools) != 1 {
-			t.Fatalf("expected 1 agent-bound tool, got %d", len(tools))
+		if len(tools) != builtinCount+1 {
+			t.Fatalf("expected %d tools (builtins + direct_tool), got %d", builtinCount+1, len(tools))
 		}
-		if tools[0].Name != directTool.Name {
-			t.Errorf("expected tool %q, got %q", directTool.Name, tools[0].Name)
+		names := make(map[string]bool)
+		for _, tool := range tools {
+			names[tool.Name] = true
+		}
+		if !names[directTool.Name] {
+			t.Errorf("expected tool %q in result", directTool.Name)
 		}
 	})
 

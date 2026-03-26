@@ -18,10 +18,9 @@ import (
 	"github.com/chowyu12/aiclaw/internal/auth"
 	"github.com/chowyu12/aiclaw/internal/channels"
 	"github.com/chowyu12/aiclaw/internal/config"
-	"github.com/chowyu12/aiclaw/internal/seed"
 	"github.com/chowyu12/aiclaw/internal/server"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
-	"github.com/chowyu12/aiclaw/internal/tool/browser"
+	"github.com/chowyu12/aiclaw/internal/tools/browser"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -95,8 +94,6 @@ func Run(opts Options) {
 		log.WithError(err).Fatal("connect database failed")
 	}
 	defer store.Close()
-
-	seed.Init(context.Background(), store)
 
 	if err := agentpkg.InitSingletonAgent(context.Background(), store); err != nil {
 		log.WithError(err).Fatal("init singleton agent failed")

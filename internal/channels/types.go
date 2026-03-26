@@ -15,6 +15,7 @@ type Inbound struct {
 	ThreadKeyAliases []string
 	SenderID         string
 	Text             string
+	Files            []model.ChatFile
 	RawMeta          map[string]any
 	// ReplyWith 若设置，Bridge 优先用它回包（如企微智能机器人 WebSocket），不再调用 WebhookAdapter.Reply。
 	ReplyWith func(ctx context.Context, text string) error

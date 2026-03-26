@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/tools/result"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -37,6 +38,10 @@ func Handler(_ context.Context, args string) (string, error) {
 	}
 	if info.IsDir() {
 		return "", fmt.Errorf("%q is a directory, use ls tool instead", targetPath)
+	}
+
+	if mime := result.MimeFromExt(filepath.Ext(targetPath)); strings.HasPrefix(mime, "image/") {
+		return result.NewFileResult(targetPath, mime, fmt.Sprintf("Image file: %s (%d bytes)", filepath.Base(targetPath), info.Size())), nil
 	}
 
 	f, err := os.Open(targetPath)

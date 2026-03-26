@@ -10,9 +10,9 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/provider"
-	"github.com/chowyu12/aiclaw/internal/skill"
+	"github.com/chowyu12/aiclaw/internal/skills"
 	"github.com/chowyu12/aiclaw/internal/store"
-	"github.com/chowyu12/aiclaw/internal/tool/mcp"
+	"github.com/chowyu12/aiclaw/internal/tools/mcp"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -211,20 +211,28 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 }
 
 func loadWorkspaceSkills() ([]model.Skill, error) {
+	out := skills.BuiltinSkills()
+	seen := make(map[string]bool, len(out))
+	for _, s := range out {
+		seen[s.DirName] = true
+	}
+
 	dir := workspace.Skills()
-	if dir == "" {
-		return nil, nil
+	if dir != "" {
+		infos, err := skills.ScanAll(dir)
+		if err != nil {
+			return out, err
+		}
+		for i := range infos {
+			if seen[infos[i].DirName] {
+				continue
+			}
+			s := skills.InfoToSkill(infos[i], model.SkillSourceLocal, "")
+			s.Enabled = true
+			out = append(out, *s)
+		}
 	}
-	infos, err := skill.ScanAll(dir)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]model.Skill, 0, len(infos))
-	for i := range infos {
-		s := skill.InfoToSkill(infos[i], model.SkillSourceLocal, "")
-		s.Enabled = true
-		out = append(out, *s)
-	}
+
 	return out, nil
 }
 
@@ -267,9 +275,9 @@ func (e *Executor) connectMCPServers(ctx context.Context, servers []model.MCPSer
 	return mgr, mcpTools
 }
 
-func (e *Executor) buildSkillManifestTools(skills []model.Skill, tracker *StepTracker, toolSkillMap map[string]string) []Tool {
+func (e *Executor) buildSkillManifestTools(skillList []model.Skill, tracker *StepTracker, toolSkillMap map[string]string) []Tool {
 	var result []Tool
-	for _, sk := range skills {
+	for _, sk := range skillList {
 		if !sk.Enabled || len(sk.ToolDefs) == 0 {
 			continue
 		}
@@ -288,7 +296,7 @@ func (e *Executor) buildSkillManifestTools(skills []model.Skill, tracker *StepTr
 				if skillDir != "" {
 					mainFile := sk.MainFile
 					handler = func(ctx context.Context, input string) (string, error) {
-						return skill.RunTool(ctx, skillDir, mainFile, td.Name, input, nil, 0)
+						return skills.RunTool(ctx, skillDir, mainFile, td.Name, input, nil, 0)
 					}
 				}
 			}
@@ -319,7 +327,12 @@ func (e *Executor) buildSkillManifestTools(skills []model.Skill, tracker *StepTr
 
 func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.Tool, map[string]string, error) {
 	var agentTools []model.Tool
-	seen := make(map[int64]bool)
+	seenName := make(map[string]bool)
+
+	for _, bt := range e.registry.BuiltinDefs() {
+		agentTools = append(agentTools, bt)
+		seenName[bt.Name] = true
+	}
 
 	if ag.ToolSearchEnabled {
 		items, _, err := e.store.ListTools(ctx, model.ListQuery{Page: 1, PageSize: 10000})
@@ -327,24 +340,25 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 			return nil, nil, fmt.Errorf("list all tools: %w", err)
 		}
 		for _, t := range items {
-			if t.Enabled {
+			if t.Enabled && !seenName[t.Name] {
 				agentTools = append(agentTools, *t)
-				seen[t.ID] = true
+				seenName[t.Name] = true
 			}
 		}
-		log.WithField("count", len(agentTools)).Info("[Execute]    tool_search: loaded all enabled tools")
 	} else {
 		for _, tid := range ag.ToolIDs {
 			t, err := e.store.GetTool(ctx, tid)
 			if err != nil || t == nil || !t.Enabled {
 				continue
 			}
-			if !seen[t.ID] {
+			if !seenName[t.Name] {
 				agentTools = append(agentTools, *t)
-				seen[t.ID] = true
+				seenName[t.Name] = true
 			}
 		}
 	}
+
+	log.WithField("count", len(agentTools)).Info("[Execute]    tools loaded (builtins always included)")
 
 	toolSkillMap := make(map[string]string)
 	return agentTools, toolSkillMap, nil

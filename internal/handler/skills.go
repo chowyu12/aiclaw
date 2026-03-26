@@ -3,7 +3,7 @@ package handler
 import (
 	"net/http"
 
-	"github.com/chowyu12/aiclaw/internal/skill"
+	"github.com/chowyu12/aiclaw/internal/skills"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 	"github.com/chowyu12/aiclaw/pkg/httputil"
 )
@@ -34,7 +34,7 @@ func (h *SkillsHandler) List(w http.ResponseWriter, r *http.Request) {
 		httputil.InternalError(w, "workspace not initialized")
 		return
 	}
-	infos, err := skill.ScanAll(skillsDir)
+	infos, err := skills.ScanAll(skillsDir)
 	if err != nil {
 		httputil.InternalError(w, err.Error())
 		return

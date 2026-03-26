@@ -45,7 +45,7 @@ func (b *Bridge) HandleInboundAsync(parent context.Context, ch *model.Channel, i
 		ad = noopAdapter{}
 	}
 	text := strings.TrimSpace(in.Text)
-	if text == "" {
+	if text == "" && len(in.Files) == 0 {
 		return
 	}
 	log.WithFields(log.Fields{
@@ -88,6 +88,7 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		ConversationID: convUUID,
 		UserID:         channelUserID(ch, in),
 		Message:        userText,
+		Files:          in.Files,
 		ExecChannel: &model.ChannelExecTrace{
 			ID:        ch.ID,
 			UUID:      ch.UUID,

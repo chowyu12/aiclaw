@@ -7,7 +7,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/chowyu12/aiclaw/internal/tool"
+	"github.com/chowyu12/aiclaw/internal/tools"
 	"github.com/chowyu12/aiclaw/internal/model"
 )
 
@@ -20,19 +20,26 @@ type Tool interface {
 type BuiltinHandler func(ctx context.Context, args string) (string, error)
 
 type ToolRegistry struct {
-	builtins map[string]BuiltinHandler
+	builtins    map[string]BuiltinHandler
+	builtinDefs []model.Tool
 }
 
 func NewToolRegistry() *ToolRegistry {
 	r := &ToolRegistry{builtins: make(map[string]BuiltinHandler)}
-	for name, handler := range tool.DefaultBuiltins() {
+	for name, handler := range tools.DefaultBuiltins() {
 		r.builtins[name] = handler
 	}
+	r.builtinDefs = tools.DefaultBuiltinDefs()
 	return r
 }
 
 func (r *ToolRegistry) RegisterBuiltin(name string, handler BuiltinHandler) {
 	r.builtins[name] = handler
+}
+
+// BuiltinDefs 返回所有内置工具的元数据定义，始终 Enabled。
+func (r *ToolRegistry) BuiltinDefs() []model.Tool {
+	return r.builtinDefs
 }
 
 func (r *ToolRegistry) BuildTrackedTools(toolDefs []model.Tool, tracker *StepTracker, toolSkillMap map[string]string) []Tool {
@@ -72,7 +79,7 @@ func (r *ToolRegistry) buildTool(td model.Tool) Tool {
 		return &dynamicTool{
 			toolName: td.Name,
 			toolDesc: td.Description,
-			handler:  tool.NewHTTPHandler(cfg, td.TimeoutSeconds()),
+			handler:  tools.NewHTTPHandler(cfg, td.TimeoutSeconds()),
 		}
 	case model.HandlerCommand:
 		var cfg model.CommandHandlerConfig
@@ -82,7 +89,7 @@ func (r *ToolRegistry) buildTool(td model.Tool) Tool {
 		return &dynamicTool{
 			toolName: td.Name,
 			toolDesc: td.Description,
-			handler:  tool.NewCommandHandler(cfg, td.TimeoutSeconds()),
+			handler:  tools.NewCommandHandler(cfg, td.TimeoutSeconds()),
 		}
 	case model.HandlerScript:
 		log.WithField("tool", td.Name).Warn("handler_type script is not implemented; use builtin/command/http")

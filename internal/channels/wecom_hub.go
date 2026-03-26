@@ -232,9 +232,27 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 		return
 	}
 	text := strings.TrimSpace(userText)
-	if text == "" {
+
+	var files []model.ChatFile
+	if urls, ok := extra["image_urls"].([]string); ok {
+		for _, u := range urls {
+			if u = strings.TrimSpace(u); u != "" {
+				files = append(files, model.ChatFile{
+					Type:           model.ChatFileImage,
+					TransferMethod: model.TransferRemoteURL,
+					URL:            u,
+				})
+			}
+		}
+	}
+
+	if text == "" && len(files) == 0 {
 		return
 	}
+	if text == "" && len(files) > 0 {
+		text = "请描述这张图片"
+	}
+
 	c := strings.TrimSpace(base.ChatID)
 	u := strings.TrimSpace(base.From.UserID)
 	thread := c
@@ -251,8 +269,9 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 	in := &Inbound{
 		ThreadKey: thread,
 		SenderID:  base.From.UserID,
-		Text:             text,
-		RawMeta:          meta,
+		Text:      text,
+		Files:     files,
+		RawMeta:   meta,
 		ReplyWith: func(ctx context.Context, reply string) error {
 			streamID := fmt.Sprintf("stream_%s", frame.Headers.ReqID)
 			_, err := client.ReplyStream(frame, streamID, reply, true, nil, nil)

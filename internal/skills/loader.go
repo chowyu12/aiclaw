@@ -1,4 +1,4 @@
-package skill
+package skills
 
 import (
 	"encoding/json"
@@ -24,7 +24,6 @@ type SkillInfo struct {
 	ToolDefs    model.JSON
 }
 
-// ClawHub 的 _meta.json 格式
 type clawHubMeta struct {
 	OwnerID     string `json:"ownerId"`
 	Slug        string `json:"slug"`
@@ -51,7 +50,6 @@ func ParseSkillDir(dirPath string) (*SkillInfo, error) {
 	return nil, fmt.Errorf("no manifest.json, _meta.json, or SKILL.md found in %s", dirPath)
 }
 
-// 我们自己的 manifest.json 格式
 func parseManifestFormat(dirPath string) (*SkillInfo, error) {
 	data, err := os.ReadFile(filepath.Join(dirPath, "manifest.json"))
 	if err != nil {
@@ -100,7 +98,6 @@ func parseManifestFormat(dirPath string) (*SkillInfo, error) {
 	return info, nil
 }
 
-// ClawHub 格式: _meta.json + SKILL.md (带 YAML frontmatter)
 func parseClawHubFormat(dirPath string) (*SkillInfo, error) {
 	metaData, err := os.ReadFile(filepath.Join(dirPath, "_meta.json"))
 	if err != nil {
@@ -134,7 +131,6 @@ func parseClawHubFormat(dirPath string) (*SkillInfo, error) {
 	return info, nil
 }
 
-// 仅有 SKILL.md 的最简格式
 func parseSkillMDOnly(dirPath string) (*SkillInfo, error) {
 	content, err := os.ReadFile(filepath.Join(dirPath, "SKILL.md"))
 	if err != nil {
@@ -160,7 +156,6 @@ func parseSkillMDOnly(dirPath string) (*SkillInfo, error) {
 }
 
 // parseFrontmatter 解析 YAML frontmatter（简易实现，不依赖 yaml 库）。
-// 返回 frontmatter 的 key-value 和正文部分。
 func parseFrontmatter(content string) (map[string]string, string) {
 	result := make(map[string]string)
 	if !strings.HasPrefix(content, "---") {

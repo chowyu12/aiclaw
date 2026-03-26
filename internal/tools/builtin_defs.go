@@ -1,8 +1,19 @@
-package seed
+package tools
 
-import "github.com/chowyu12/aiclaw/internal/model"
+import (
+	"encoding/json"
 
-func defaultTools() []model.Tool {
+	"github.com/chowyu12/aiclaw/internal/model"
+)
+
+func mustJSON(v any) model.JSON {
+	data, _ := json.Marshal(v)
+	return model.JSON(data)
+}
+
+// DefaultBuiltinDefs 返回所有内置工具的元数据定义（名称、描述、参数 schema）。
+// 内置工具不保存数据库，始终在内存中生效，默认启用给所有 Agent。
+func DefaultBuiltinDefs() []model.Tool {
 	return []model.Tool{
 		{
 			Name:        "current_time",
@@ -20,12 +31,12 @@ func defaultTools() []model.Tool {
 		},
 		{
 			Name:        "read",
-			Description: "读取文件内容。支持全文读取或按行范围读取（通过 offset/limit 参数）。",
+			Description: "读取文件内容。支持全文读取或按行范围读取（通过 offset/limit 参数）。对于图片文件（png/jpg/gif/webp/svg），会自动将图片传递给视觉模型进行理解和分析。",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
 				"name":        "read",
-				"description": "Read file content. Supports full read or partial read by line range using offset/limit.",
+				"description": "Read file content. Supports full read or partial read by line range using offset/limit. For image files (png/jpg/gif/webp/svg), the image is automatically passed to the vision model for understanding and analysis.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{

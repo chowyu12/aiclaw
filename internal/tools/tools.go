@@ -1,23 +1,23 @@
-package tool
+package tools
 
 import (
 	"context"
 
-	"github.com/chowyu12/aiclaw/internal/tool/browser"
-	"github.com/chowyu12/aiclaw/internal/tool/builtin"
-	"github.com/chowyu12/aiclaw/internal/tool/canvas"
-	"github.com/chowyu12/aiclaw/internal/tool/codeinterp"
-	"github.com/chowyu12/aiclaw/internal/tool/crontab"
-	"github.com/chowyu12/aiclaw/internal/tool/editfile"
-	"github.com/chowyu12/aiclaw/internal/tool/findfile"
-	"github.com/chowyu12/aiclaw/internal/tool/grepfile"
-	"github.com/chowyu12/aiclaw/internal/tool/ls"
-	"github.com/chowyu12/aiclaw/internal/tool/process"
-	"github.com/chowyu12/aiclaw/internal/tool/readfile"
-	"github.com/chowyu12/aiclaw/internal/tool/result"
-	"github.com/chowyu12/aiclaw/internal/tool/shellexec"
-	"github.com/chowyu12/aiclaw/internal/tool/urlreader"
-	"github.com/chowyu12/aiclaw/internal/tool/writefile"
+	"github.com/chowyu12/aiclaw/internal/tools/browser"
+	"github.com/chowyu12/aiclaw/internal/tools/builtin"
+	"github.com/chowyu12/aiclaw/internal/tools/canvas"
+	"github.com/chowyu12/aiclaw/internal/tools/codeinterp"
+	"github.com/chowyu12/aiclaw/internal/tools/crontab"
+	"github.com/chowyu12/aiclaw/internal/tools/editfile"
+	"github.com/chowyu12/aiclaw/internal/tools/findfile"
+	"github.com/chowyu12/aiclaw/internal/tools/grepfile"
+	"github.com/chowyu12/aiclaw/internal/tools/ls"
+	"github.com/chowyu12/aiclaw/internal/tools/process"
+	"github.com/chowyu12/aiclaw/internal/tools/readfile"
+	"github.com/chowyu12/aiclaw/internal/tools/result"
+	"github.com/chowyu12/aiclaw/internal/tools/shellexec"
+	"github.com/chowyu12/aiclaw/internal/tools/urlreader"
+	"github.com/chowyu12/aiclaw/internal/tools/writefile"
 )
 
 type FileResult = result.FileResult

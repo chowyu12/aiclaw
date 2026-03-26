@@ -14,7 +14,7 @@ import (
 	"github.com/chromedp/chromedp"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/chowyu12/aiclaw/internal/tool/result"
+	"github.com/chowyu12/aiclaw/internal/tools/result"
 )
 
 func (bm *browserManager) actionScreenshot(reqCtx context.Context, p browserParams) (string, error) {

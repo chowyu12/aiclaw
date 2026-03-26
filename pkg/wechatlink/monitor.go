@@ -58,28 +58,36 @@ func (m *Monitor) Run(ctx context.Context) {
 		if newBuf != "" {
 			buf = newBuf
 		}
-		for _, raw := range msgs {
-			if raw.MessageType != MsgTypeUser {
-				continue
-			}
-			text := extractText(raw.ItemList)
-			if text == "" {
-				continue
-			}
-			m.handler(Message{
-				FromUserID:   raw.FromUserID,
-				Text:         text,
-				ContextToken: raw.ContextToken,
-			})
+	for _, raw := range msgs {
+		if raw.MessageType != MsgTypeUser {
+			continue
 		}
+		text, imageURLs := extractContent(raw.ItemList)
+		if text == "" && len(imageURLs) == 0 {
+			continue
+		}
+		m.handler(Message{
+			FromUserID:   raw.FromUserID,
+			Text:         text,
+			ImageURLs:    imageURLs,
+			ContextToken: raw.ContextToken,
+		})
+	}
 	}
 }
 
-func extractText(items []MessageItem) string {
+func extractContent(items []MessageItem) (text string, imageURLs []string) {
 	for _, it := range items {
-		if it.Type == ItemTypeText && it.TextItem != nil {
-			return it.TextItem.Text
+		switch it.Type {
+		case ItemTypeText:
+			if it.TextItem != nil && it.TextItem.Text != "" {
+				text = it.TextItem.Text
+			}
+		case ItemTypeImage:
+			if it.ImageItem != nil && it.ImageItem.URL != "" {
+				imageURLs = append(imageURLs, it.ImageItem.URL)
+			}
 		}
 	}
-	return ""
+	return
 }

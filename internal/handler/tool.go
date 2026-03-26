@@ -6,6 +6,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
+	"github.com/chowyu12/aiclaw/internal/tools"
 	"github.com/chowyu12/aiclaw/pkg/httputil"
 )
 
@@ -65,18 +66,33 @@ func (h *ToolHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 func (h *ToolHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := ParseListQuery(r)
-	list, total, err := h.store.ListTools(r.Context(), q)
+
+	builtins := tools.DefaultBuiltinDefs()
+	dbList, dbTotal, err := h.store.ListTools(r.Context(), q)
 	if err != nil {
 		httputil.InternalError(w, err.Error())
 		return
 	}
-	httputil.OKList(w, list, total)
+
+	var merged []*model.Tool
+	for i := range builtins {
+		bt := builtins[i]
+		bt.ID = -int64(i + 1)
+		merged = append(merged, &bt)
+	}
+	merged = append(merged, dbList...)
+
+	httputil.OKList(w, merged, dbTotal+int64(len(builtins)))
 }
 
 func (h *ToolHandler) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		httputil.BadRequest(w, "invalid id")
+		return
+	}
+	if id <= 0 {
+		httputil.BadRequest(w, "builtin tools cannot be modified")
 		return
 	}
 	var req model.UpdateToolReq
@@ -95,6 +111,10 @@ func (h *ToolHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		httputil.BadRequest(w, "invalid id")
+		return
+	}
+	if id <= 0 {
+		httputil.BadRequest(w, "builtin tools cannot be deleted")
 		return
 	}
 	if err := h.store.DeleteTool(r.Context(), id); err != nil {

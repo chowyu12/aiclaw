@@ -1,4 +1,4 @@
-package skill
+package skills
 
 import (
 	"bytes"
@@ -12,9 +12,9 @@ import (
 )
 
 type RunInput struct {
-	Tool      string         `json:"tool"`
+	Tool      string          `json:"tool"`
 	Arguments json.RawMessage `json:"arguments"`
-	Config    map[string]any `json:"config,omitzero"`
+	Config    map[string]any  `json:"config,omitzero"`
 }
 
 func RunTool(ctx context.Context, skillDir, mainFile, toolName string, argsJSON string, config map[string]any, timeout time.Duration) (string, error) {

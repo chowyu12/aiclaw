@@ -6,7 +6,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/config"
-	"github.com/chowyu12/aiclaw/internal/tool/browser"
+	"github.com/chowyu12/aiclaw/internal/tools/browser"
 )
 
 // ApplyBrowserToolConfig 根据配置初始化浏览器类内置工具（chromedp）。

@@ -154,10 +154,25 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 		}
 	}()
 
+	var files []model.ChatFile
+	for _, u := range msg.ImageURLs {
+		files = append(files, model.ChatFile{
+			Type:           model.ChatFileImage,
+			TransferMethod: model.TransferRemoteURL,
+			URL:            u,
+		})
+	}
+
+	text := msg.Text
+	if text == "" && len(files) > 0 {
+		text = "请描述这张图片"
+	}
+
 	in := &Inbound{
 		ThreadKey: fromUser,
 		SenderID:  fromUser,
-		Text:      msg.Text,
+		Text:      text,
+		Files:     files,
 		RawMeta: map[string]any{
 			"context_token": contextToken,
 		},
