@@ -1,6 +1,6 @@
 <template>
   <el-container class="app-layout">
-    <el-aside :width="isCollapse ? '64px' : '220px'" class="app-aside">
+    <el-aside :width="isCollapse ? '64px' : '168px'" class="app-aside">
       <div class="aside-inner">
         <div class="logo">
           <div
