@@ -27,6 +27,7 @@ func (dingTalkAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, _ htt
 		return jsonOK(), nil
 	}
 	text := dingTalkExtractText(root)
+	// TODO: 解析 richText / picture 类型消息中的图片
 	if text == "" {
 		return jsonOK(), nil
 	}

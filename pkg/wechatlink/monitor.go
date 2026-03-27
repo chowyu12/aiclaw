@@ -62,21 +62,21 @@ func (m *Monitor) Run(ctx context.Context) {
 		if raw.MessageType != MsgTypeUser {
 			continue
 		}
-		text, imageURLs := extractContent(raw.ItemList)
-		if text == "" && len(imageURLs) == 0 {
+		text, images := extractContent(raw.ItemList)
+		if text == "" && len(images) == 0 {
 			continue
 		}
 		m.handler(Message{
 			FromUserID:   raw.FromUserID,
 			Text:         text,
-			ImageURLs:    imageURLs,
+			Images:       images,
 			ContextToken: raw.ContextToken,
 		})
 	}
 	}
 }
 
-func extractContent(items []MessageItem) (text string, imageURLs []string) {
+func extractContent(items []MessageItem) (text string, images []ImageSource) {
 	for _, it := range items {
 		switch it.Type {
 		case ItemTypeText:
@@ -84,8 +84,15 @@ func extractContent(items []MessageItem) (text string, imageURLs []string) {
 				text = it.TextItem.Text
 			}
 		case ItemTypeImage:
-			if it.ImageItem != nil && it.ImageItem.URL != "" {
-				imageURLs = append(imageURLs, it.ImageItem.URL)
+			if it.ImageItem == nil {
+				continue
+			}
+			img := ImageSource{URL: it.ImageItem.URL}
+			if it.ImageItem.Media != nil {
+				img.Media = it.ImageItem.Media
+			}
+			if img.URL != "" || img.Media != nil {
+				images = append(images, img)
 			}
 		}
 	}
