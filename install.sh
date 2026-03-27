@@ -13,7 +13,7 @@ INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="aiclaw"
 SERVICE_NAME="aiclaw"
 CONFIG_DIR="$HOME/.aiclaw"
-DEFAULT_PORT=8080
+DEFAULT_PORT=10789
 
 # ───────────────────── 工具函数 ─────────────────────
 
