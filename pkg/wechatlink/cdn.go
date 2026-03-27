@@ -14,16 +14,19 @@ import (
 
 const cdnBaseURL = "https://novac2c.cdn.weixin.qq.com/c2c"
 
-// DownloadFromCDN 从微信 CDN 下载并解密文件。
-// encryptQueryParam 和 aesKeyBase64 来自 MediaInfo 字段。
+// DownloadFromCDN 从微信 CDN 下载文件。
+// aesKeyBase64 非空时进行 AES-128-ECB 解密，为空时直接返回原始数据。
 func DownloadFromCDN(ctx context.Context, encryptQueryParam, aesKeyBase64 string) ([]byte, error) {
-	aesKeyHexBytes, err := base64.StdEncoding.DecodeString(aesKeyBase64)
-	if err != nil {
-		return nil, fmt.Errorf("decode AES key base64: %w", err)
-	}
-	aesKey, err := hex.DecodeString(string(aesKeyHexBytes))
-	if err != nil {
-		return nil, fmt.Errorf("decode AES key hex: %w", err)
+	var aesKey []byte
+	if aesKeyBase64 != "" {
+		aesKeyHexBytes, err := base64.StdEncoding.DecodeString(aesKeyBase64)
+		if err != nil {
+			return nil, fmt.Errorf("decode AES key base64: %w", err)
+		}
+		aesKey, err = hex.DecodeString(string(aesKeyHexBytes))
+		if err != nil {
+			return nil, fmt.Errorf("decode AES key hex: %w", err)
+		}
 	}
 
 	downloadURL := fmt.Sprintf("%s/download?encrypted_query_param=%s",
@@ -48,12 +51,15 @@ func DownloadFromCDN(ctx context.Context, encryptQueryParam, aesKeyBase64 string
 		return nil, fmt.Errorf("CDN download HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	encrypted, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("read CDN response: %w", err)
 	}
 
-	return decryptAESECB(encrypted, aesKey)
+	if len(aesKey) > 0 {
+		return decryptAESECB(data, aesKey)
+	}
+	return data, nil
 }
 
 func decryptAESECB(ciphertext, key []byte) ([]byte, error) {

@@ -163,22 +163,33 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 
 	var files []model.ChatFile
 	for _, img := range msg.Images {
-		switch {
-		case img.URL != "":
+		if isHTTPURL(img.URL) {
 			files = append(files, model.ChatFile{
 				Type:           model.ChatFileImage,
 				TransferMethod: model.TransferRemoteURL,
 				URL:            img.URL,
 			})
-		case img.Media != nil && img.Media.EncryptQueryParam != "":
-			localPath := wechatDownloadCDNImage(img.Media)
-			if localPath != "" {
-				files = append(files, model.ChatFile{
-					Type:           model.ChatFileImage,
-					TransferMethod: model.TransferRemoteURL,
-					URL:            localPath,
-				})
-			}
+			continue
+		}
+
+		encParam := ""
+		aesKey := ""
+		if img.Media != nil {
+			encParam = img.Media.EncryptQueryParam
+			aesKey = img.Media.AESKey
+		}
+		if encParam == "" && img.URL != "" {
+			encParam = img.URL
+		}
+		if encParam == "" {
+			continue
+		}
+		if localPath := wechatDownloadCDNImage(encParam, aesKey); localPath != "" {
+			files = append(files, model.ChatFile{
+				Type:           model.ChatFileImage,
+				TransferMethod: model.TransferRemoteURL,
+				URL:            localPath,
+			})
 		}
 	}
 
@@ -202,9 +213,14 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 	bridge.HandleInboundAsync(context.Background(), ch, in, noopDrv)
 }
 
-// wechatDownloadCDNImage 从微信 CDN 下载加密图片并保存到临时文件，返回本地路径。
-func wechatDownloadCDNImage(media *wechatlink.MediaInfo) string {
-	data, err := wechatlink.DownloadFromCDN(context.Background(), media.EncryptQueryParam, media.AESKey)
+func isHTTPURL(s string) bool {
+	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+}
+
+// wechatDownloadCDNImage 从微信 CDN 下载图片并保存到临时文件，返回本地路径。
+// aesKey 为空时跳过解密（直接使用原始响应数据）。
+func wechatDownloadCDNImage(encParam, aesKey string) string {
+	data, err := wechatlink.DownloadFromCDN(context.Background(), encParam, aesKey)
 	if err != nil {
 		log.WithError(err).Warn("[wechat] CDN image download failed")
 		return ""
