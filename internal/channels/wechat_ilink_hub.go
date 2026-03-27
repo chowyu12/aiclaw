@@ -2,9 +2,14 @@ package channels
 
 import (
 	"context"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -157,12 +162,24 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 	}()
 
 	var files []model.ChatFile
-	for _, u := range msg.ImageURLs {
-		files = append(files, model.ChatFile{
-			Type:           model.ChatFileImage,
-			TransferMethod: model.TransferRemoteURL,
-			URL:            u,
-		})
+	for _, img := range msg.Images {
+		switch {
+		case img.URL != "":
+			files = append(files, model.ChatFile{
+				Type:           model.ChatFileImage,
+				TransferMethod: model.TransferRemoteURL,
+				URL:            img.URL,
+			})
+		case img.Media != nil && img.Media.EncryptQueryParam != "":
+			localPath := wechatDownloadCDNImage(img.Media)
+			if localPath != "" {
+				files = append(files, model.ChatFile{
+					Type:           model.ChatFileImage,
+					TransferMethod: model.TransferRemoteURL,
+					URL:            localPath,
+				})
+			}
+		}
 	}
 
 	text := msg.Text
@@ -183,4 +200,35 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 		},
 	}
 	bridge.HandleInboundAsync(context.Background(), ch, in, noopDrv)
+}
+
+// wechatDownloadCDNImage 从微信 CDN 下载加密图片并保存到临时文件，返回本地路径。
+func wechatDownloadCDNImage(media *wechatlink.MediaInfo) string {
+	data, err := wechatlink.DownloadFromCDN(context.Background(), media.EncryptQueryParam, media.AESKey)
+	if err != nil {
+		log.WithError(err).Warn("[wechat] CDN image download failed")
+		return ""
+	}
+	ext := detectImageExtFromBytes(data)
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("wechat-img-%d%s", time.Now().UnixNano(), ext))
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		log.WithError(err).Warn("[wechat] save CDN image to temp failed")
+		return ""
+	}
+	log.WithFields(log.Fields{"path": tmpPath, "size": len(data)}).Info("[wechat] CDN image saved")
+	return tmpPath
+}
+
+func detectImageExtFromBytes(data []byte) string {
+	ct := http.DetectContentType(data)
+	switch {
+	case strings.HasPrefix(ct, "image/png"):
+		return ".png"
+	case strings.HasPrefix(ct, "image/gif"):
+		return ".gif"
+	case strings.HasPrefix(ct, "image/webp"):
+		return ".webp"
+	default:
+		return ".jpg"
+	}
 }

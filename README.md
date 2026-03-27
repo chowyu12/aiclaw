@@ -102,7 +102,6 @@ aiclaw version    # 查看当前版本
 | `process`          | 管理后台命令会话（启动、列出、读取输出、终止）                       |
 | `web_fetch`        | 抓取 URL 并提取可读内容，自动回退浏览器渲染                          |
 | `browser`          | 浏览器自动化：33 种操作（导航、截图、快照、交互、监控、仿真等）      |
-| `desktop`          | 桌面 RPA：截图、鼠标点击/滚动、键盘输入、窗口管理、UI 元素定位       |
 | `canvas`           | 渲染 HTML/CSS/JS 画布，执行 JS 表达式，截取快照                      |
 | `cron`             | 管理定时任务与唤醒事件（提醒）                                       |
 | `code_interpreter` | 代码解释器：Python/JavaScript/Shell 沙箱执行                         |
@@ -216,7 +215,7 @@ cd aiclaw
 ```yaml
 database:
   driver: mysql
-  dsn: "YOUR_USER:YOUR_PASSWORD@tcp(127.0.0.1:3306)/aiclaw?charset=utf8mb4&parseTime=True&loc=Local"
+  dsn: 'YOUR_USER:YOUR_PASSWORD@tcp(127.0.0.1:3306)/aiclaw?charset=utf8mb4&parseTime=True&loc=Local'
 ```
 
 **PostgreSQL**：
@@ -224,7 +223,7 @@ database:
 ```yaml
 database:
   driver: postgres
-  dsn: "host=127.0.0.1 user=YOUR_USER password=YOUR_PASSWORD dbname=aiclaw port=5432 sslmode=disable"
+  dsn: 'host=127.0.0.1 user=YOUR_USER password=YOUR_PASSWORD dbname=aiclaw port=5432 sslmode=disable'
 ```
 
 **SQLite**（零配置，适合开发/单机部署）：
@@ -232,7 +231,7 @@ database:
 ```yaml
 database:
   driver: sqlite
-  dsn: "aiclaw.db"
+  dsn: 'aiclaw.db'
 ```
 
 > 启动时 GORM 会自动创建/迁移表结构，无需手动执行 SQL。
@@ -241,7 +240,7 @@ database:
 
 ```yaml
 server:
-  host: "0.0.0.0"
+  host: '0.0.0.0'
   port: 8080
 
 log:
@@ -249,7 +248,7 @@ log:
 
 auth:
   # 留空则首次启动会自动生成并写回配置文件
-  web_token: ""
+  web_token: ''
 ```
 
 ### 4. 安装依赖并启动

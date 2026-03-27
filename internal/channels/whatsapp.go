@@ -54,6 +54,7 @@ func (whatsAppAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, _ htt
 	if txt, ok := m0["text"].(map[string]any); ok {
 		text, _ = txt["body"].(string)
 	}
+	// TODO: 解析 type=image 消息，通过 Graph API 下载 media
 	text = strings.TrimSpace(text)
 	if text == "" || from == "" {
 		return jsonOK(), nil

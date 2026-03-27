@@ -8,7 +8,6 @@ import (
 	"github.com/chowyu12/aiclaw/internal/tools/canvas"
 	"github.com/chowyu12/aiclaw/internal/tools/codeinterp"
 	"github.com/chowyu12/aiclaw/internal/tools/crontab"
-	"github.com/chowyu12/aiclaw/internal/tools/desktop"
 	"github.com/chowyu12/aiclaw/internal/tools/editfile"
 	"github.com/chowyu12/aiclaw/internal/tools/findfile"
 	"github.com/chowyu12/aiclaw/internal/tools/grepfile"
@@ -40,6 +39,5 @@ func DefaultBuiltins() map[string]func(context.Context, string) (string, error) 
 	m["canvas"] = canvas.Handler
 	m["cron"] = crontab.Handler
 	m["code_interpreter"] = codeinterp.Handler
-	m["desktop"] = desktop.Handler
 	return m
 }

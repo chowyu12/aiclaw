@@ -38,7 +38,7 @@ type QRStatusResult struct {
 type Message struct {
 	FromUserID   string
 	Text         string
-	ImageURLs    []string
+	Images       []ImageSource
 	ContextToken string
 }
 
@@ -54,9 +54,24 @@ type TextItem struct {
 	Text string `json:"text"`
 }
 
+// MediaInfo CDN 加密媒体引用。
+type MediaInfo struct {
+	EncryptQueryParam string `json:"encrypt_query_param"`
+	AESKey            string `json:"aes_key"`
+	EncryptType       int    `json:"encrypt_type"`
+}
+
 // ImageItem 图片内容。
 type ImageItem struct {
-	URL string `json:"url,omitempty"`
+	URL     string     `json:"url,omitempty"`
+	Media   *MediaInfo `json:"media,omitempty"`
+	MidSize int        `json:"mid_size,omitempty"`
+}
+
+// ImageSource 归一化后的图片来源。
+type ImageSource struct {
+	URL   string     // 直接可访问的 URL（可能为空）
+	Media *MediaInfo // CDN 加密引用（可能为 nil）
 }
 
 // ────────────────────── 内部协议结构 ──────────────────────

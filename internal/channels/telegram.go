@@ -8,11 +8,15 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
+
+	"github.com/chowyu12/aiclaw/internal/model"
 )
 
 // Telegram Bot Webhook：https://core.telegram.org/bots/api#setwebhook
@@ -41,9 +45,27 @@ func (telegramAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, _ htt
 	if content == "" {
 		content = strings.TrimSpace(msg.Caption)
 	}
-	if content == "" {
+
+	var files []model.ChatFile
+	token := cfgString(ch.ConfigJSON, "bot_token", "token")
+	if len(msg.Photo) > 0 && token != "" {
+		best := msg.Photo[len(msg.Photo)-1]
+		if localPath := telegramDownloadFile(token, best.FileID); localPath != "" {
+			files = append(files, model.ChatFile{
+				Type:           model.ChatFileImage,
+				TransferMethod: model.TransferRemoteURL,
+				URL:            localPath,
+			})
+		}
+	}
+
+	if content == "" && len(files) > 0 {
+		content = "请描述这张图片"
+	}
+	if content == "" && len(files) == 0 {
 		return jsonOK(), nil
 	}
+
 	senderID := ""
 	if msg.From != nil {
 		senderID = strconv.FormatInt(msg.From.ID, 10)
@@ -53,6 +75,7 @@ func (telegramAdapter) HandlePOST(ch ChannelConfig, body []byte, _ string, _ htt
 		ThreadKey: chatID,
 		SenderID:  senderID,
 		Text:      content,
+		Files:     files,
 		RawMeta: map[string]any{
 			"message_id": msg.MessageID,
 			"chat_type":  msg.Chat.Type,
@@ -96,11 +119,12 @@ type telegramUpdate struct {
 }
 
 type telegramMessage struct {
-	MessageID int           `json:"message_id"`
-	From      *telegramUser `json:"from"`
-	Chat      telegramChat  `json:"chat"`
-	Text      string        `json:"text"`
-	Caption   string        `json:"caption"`
+	MessageID int              `json:"message_id"`
+	From      *telegramUser    `json:"from"`
+	Chat      telegramChat     `json:"chat"`
+	Text      string           `json:"text"`
+	Caption   string           `json:"caption"`
+	Photo     []telegramPhoto  `json:"photo"`
 }
 
 type telegramUser struct {
@@ -110,4 +134,82 @@ type telegramUser struct {
 type telegramChat struct {
 	ID   int64  `json:"id"`
 	Type string `json:"type"`
+}
+
+type telegramPhoto struct {
+	FileID   string `json:"file_id"`
+	Width    int    `json:"width"`
+	Height   int    `json:"height"`
+	FileSize int    `json:"file_size"`
+}
+
+// telegramDownloadFile 通过 Bot API 获取文件路径并下载到临时文件。
+func telegramDownloadFile(botToken, fileID string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/getFile?file_id=%s", botToken, url.QueryEscape(fileID))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		log.WithError(err).Warn("[telegram] getFile request failed")
+		return ""
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.WithError(err).Warn("[telegram] getFile failed")
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			FilePath string `json:"file_path"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || !result.OK || result.Result.FilePath == "" {
+		log.WithField("file_id", fileID).Warn("[telegram] getFile: invalid response")
+		return ""
+	}
+
+	downloadURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", botToken, result.Result.FilePath)
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return ""
+	}
+	dlResp, err := client.Do(dlReq)
+	if err != nil {
+		log.WithError(err).Warn("[telegram] download file failed")
+		return ""
+	}
+	defer dlResp.Body.Close()
+	if dlResp.StatusCode != http.StatusOK {
+		return ""
+	}
+
+	data, err := io.ReadAll(io.LimitReader(dlResp.Body, 20<<20))
+	if err != nil {
+		log.WithError(err).Warn("[telegram] read file body failed")
+		return ""
+	}
+
+	ext := filepath.Ext(result.Result.FilePath)
+	if ext == "" {
+		ext = ".jpg"
+	}
+	tmpFile, err := os.CreateTemp("", "tg-img-*"+ext)
+	if err != nil {
+		log.WithError(err).Warn("[telegram] create temp file failed")
+		return ""
+	}
+	defer tmpFile.Close()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		log.WithError(err).Warn("[telegram] write temp file failed")
+		os.Remove(tmpFile.Name())
+		return ""
+	}
+	log.WithFields(log.Fields{"file_id": fileID, "path": tmpFile.Name(), "size": len(data)}).Info("[telegram] image downloaded")
+	return tmpFile.Name()
 }
