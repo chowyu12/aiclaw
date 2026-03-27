@@ -113,7 +113,8 @@ func (h *ChatHandler) ListConversations(w http.ResponseWriter, r *http.Request) 
 	q := ParseListQuery(r)
 	userID := r.URL.Query().Get("user_id")
 	userPrefix := strings.TrimSpace(r.URL.Query().Get("user_prefix"))
-	if userID == "" {
+	includeChannels := r.URL.Query().Get("include_channels") == "true"
+	if userID == "" && !includeChannels {
 		if id := auth.IdentityFromContext(r.Context()); id != nil && id.IsWebSession() {
 			userID = auth.DefaultChatUserID
 		}

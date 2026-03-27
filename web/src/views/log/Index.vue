@@ -10,6 +10,7 @@
         <div class="aic-card-header">
           <span class="aic-card-title">会话记录</span>
           <div class="filter-bar">
+            <el-checkbox v-model="includeChannels" @change="loadData">包含渠道会话</el-checkbox>
             <el-input v-model="filterUserId" placeholder="用户 ID" clearable style="width: 150px;" @clear="loadData" @keyup.enter="loadData" />
             <el-input v-model="filterUserPrefix" placeholder="用户前缀（如 channel:xxx:）" clearable style="width: 240px;" @clear="loadData" @keyup.enter="loadData" />
             <el-button @click="loadData">
@@ -134,7 +135,13 @@
             {{ defaultAgent?.name || '—' }}
           </template>
         </el-table-column>
-        <el-table-column prop="user_id" label="用户" width="120" show-overflow-tooltip />
+        <el-table-column label="来源" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.user_id?.startsWith('channel:')" type="success" size="small" effect="plain">渠道</el-tag>
+            <el-tag v-else size="small" effect="plain">Web</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="user_id" label="用户" width="160" show-overflow-tooltip />
         <el-table-column prop="title" label="标题" min-width="150" show-overflow-tooltip />
         <el-table-column prop="uuid" label="会话 UUID" width="140" show-overflow-tooltip />
         <el-table-column label="更新时间" width="180">
@@ -188,6 +195,7 @@ const page = ref(1)
 const pageSize = ref(20)
 const filterUserId = ref('')
 const filterUserPrefix = ref('')
+const includeChannels = ref(true)
 const expandedRows = ref<number[]>([])
 const route = useRoute()
 
@@ -214,6 +222,7 @@ async function loadData() {
     const params: any = { page: page.value, page_size: pageSize.value }
     if (filterUserId.value) params.user_id = filterUserId.value
     if (filterUserPrefix.value) params.user_prefix = filterUserPrefix.value
+    if (includeChannels.value && !filterUserId.value && !filterUserPrefix.value) params.include_channels = 'true'
     const res: any = await chatApi.conversations(params)
     conversations.value = (res.data?.list || []).map((c: Conversation) => reactive({ ...c, _loading: false, _messages: undefined }))
     total.value = res.data?.total || 0
