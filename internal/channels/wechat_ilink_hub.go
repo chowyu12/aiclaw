@@ -16,9 +16,10 @@ import (
 var wechatILinkRuntimeDrv = &wechatILinkRuntimeDriver{}
 
 type wechatILinkRunner struct {
-	botID  string
-	cancel context.CancelFunc
-	chLive *atomic.Pointer[model.Channel]
+	botID    string
+	botToken string
+	cancel   context.CancelFunc
+	chLive   *atomic.Pointer[model.Channel]
 }
 
 type wechatILinkRuntimeDriver struct {
@@ -67,7 +68,7 @@ func (w *wechatILinkRuntimeDriver) Refresh(ctx context.Context, all []*model.Cha
 
 	for id, r := range w.runs {
 		rec, ok := want[id]
-		if ok && r.botID == rec.creds.ILinkBotID {
+		if ok && r.botID == rec.creds.ILinkBotID && r.botToken == rec.creds.BotToken {
 			if r.chLive != nil {
 				r.chLive.Store(rec.ch)
 			}
@@ -86,9 +87,10 @@ func (w *wechatILinkRuntimeDriver) Refresh(ctx context.Context, all []*model.Cha
 		chLive := &atomic.Pointer[model.Channel]{}
 		chLive.Store(rec.ch)
 		runner := &wechatILinkRunner{
-			botID:  rec.creds.ILinkBotID,
-			cancel: cancel,
-			chLive: chLive,
+			botID:    rec.creds.ILinkBotID,
+			botToken: rec.creds.BotToken,
+			cancel:   cancel,
+			chLive:   chLive,
 		}
 		w.runs[id] = runner
 
