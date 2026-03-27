@@ -34,6 +34,7 @@ type desktopParams struct {
 	ScrollX int    `json:"scroll_x"`
 	ScrollY int    `json:"scroll_y"`
 	Window  string `json:"window"`
+	App     string `json:"app"`
 	Display int    `json:"display"`
 	Region  *rect  `json:"region"`
 }
@@ -71,8 +72,10 @@ func Handler(ctx context.Context, args string) (string, error) {
 		return actionListWindows()
 	case "focus_window":
 		return doAndVerify(p, actionFocusWindow)
+	case "find_element":
+		return actionFindElement(p)
 	default:
-		return "", fmt.Errorf("unknown action: %s (available: screenshot, click, type, press, scroll, mouse_move, list_windows, focus_window)", p.Action)
+		return "", fmt.Errorf("unknown action: %s (available: screenshot, click, type, press, scroll, mouse_move, list_windows, focus_window, find_element)", p.Action)
 	}
 }
 
@@ -81,9 +84,15 @@ func Handler(ctx context.Context, args string) (string, error) {
 func takeScreenshot(p desktopParams) (string, error) {
 	filePath := tempFilePath(".png")
 
-	if err := captureDisplay(filePath, p.Display, p.Region); err != nil {
-		if err2 := platformScreenshotFallback(filePath, p.Region); err2 != nil {
-			return "", fmt.Errorf("screenshot failed: %v; fallback: %v", err, err2)
+	captured := false
+	// Platform-native first (screencapture on macOS uses ScreenCaptureKit on 15+).
+	if err := platformScreenshotFallback(filePath, p.Region); err == nil {
+		captured = true
+	}
+	// Fall back to kbinani/screenshot (CGDisplayCreateImage — fast, cross-platform).
+	if !captured {
+		if err := captureDisplay(filePath, p.Display, p.Region); err != nil {
+			return "", fmt.Errorf("screenshot failed: %v", err)
 		}
 	}
 
@@ -234,6 +243,39 @@ func actionFocusWindow(p desktopParams) (string, error) {
 	return fmt.Sprintf("Focused window: %s", p.Window), nil
 }
 
+func actionFindElement(p desktopParams) (string, error) {
+	if p.App == "" {
+		return "", fmt.Errorf("app is required for find_element")
+	}
+	elements, err := platformFindElements(p.App, p.Text)
+	if err != nil {
+		return "", fmt.Errorf("find_element failed: %w", err)
+	}
+	if len(elements) == 0 {
+		return "No matching elements found. Try screenshot and use visual coordinates.", nil
+	}
+
+	sw, sh := getScreenSize()
+	scale := getScaleFactor()
+	sw /= scale
+	sh /= scale
+
+	for i := range elements {
+		rx, ry := screenToRuler(elements[i].ScreenX, elements[i].ScreenY, sw, sh)
+		elements[i].RulerX = rx
+		elements[i].RulerY = ry
+	}
+
+	data, _ := json.MarshalIndent(elements, "", "  ")
+	prefix := fmt.Sprintf("Found %d element(s)", len(elements))
+	if p.Text != "" {
+		prefix += fmt.Sprintf(" matching '%s'", p.Text)
+	} else {
+		prefix += " (interactive elements)"
+	}
+	return prefix + ". Use ruler_x/ruler_y as x/y for click actions:\n" + string(data), nil
+}
+
 // ─── Coordinate mapping ───
 
 // imageToScreen 将标尺坐标映射到实际屏幕坐标。
@@ -262,6 +304,15 @@ func imageToScreen(rulerX, rulerY, displayIdx int) (int, int) {
 	screenY := rulerY * sh / contentH
 
 	return screenX, screenY
+}
+
+// screenToRuler 将屏幕坐标转换为标尺坐标（imageToScreen 的逆操作）。
+func screenToRuler(screenX, screenY, screenW, screenH int) (int, int) {
+	contentW := annotatedWidth - rulerLeft
+	contentH := screenH * contentW / screenW
+	rulerX := screenX * contentW / screenW
+	rulerY := screenY * contentH / screenH
+	return rulerX, rulerY
 }
 
 // ─── Image annotation ───
@@ -386,6 +437,18 @@ func blendPixel(dst *image.RGBA, x, y int, c color.RGBA) {
 type windowInfo struct {
 	Name  string `json:"name"`
 	Title string `json:"title"`
+}
+
+type uiElement struct {
+	Role    string `json:"role"`
+	Title   string `json:"title,omitzero"`
+	Value   string `json:"value,omitzero"`
+	RulerX  int    `json:"ruler_x"`
+	RulerY  int    `json:"ruler_y"`
+	Width   int    `json:"width,omitzero"`
+	Height  int    `json:"height,omitzero"`
+	ScreenX int    `json:"-"`
+	ScreenY int    `json:"-"`
 }
 
 func tempFilePath(ext string) string {
