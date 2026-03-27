@@ -240,14 +240,14 @@ print_access_info() {
   echo "║  平台:  ${OS}/${ARCH}"
   echo "║  二进制: ${INSTALL_DIR}/${BINARY_NAME}"
   echo "║  配置:  ${CONFIG_DIR}/config.yaml"
-  echo "║"
-  echo "║  本地访问:  http://127.0.0.1:${PORT}/"
-  if [ "$ip" != "127.0.0.1" ]; then
-  echo "║  局域网访问: http://${ip}:${PORT}/"
-  fi
+  local qs=""
   if [ -n "$token" ]; then
+    qs="?token=${token}"
+  fi
   echo "║"
-  echo "║  登录令牌: ${token}"
+  echo "║  本地访问:    http://127.0.0.1:${PORT}/${qs}"
+  if [ "$ip" != "127.0.0.1" ]; then
+  echo "║  局域网访问:  http://${ip}:${PORT}/${qs}"
   fi
   echo "║"
   case "$SERVICE_MODE" in
