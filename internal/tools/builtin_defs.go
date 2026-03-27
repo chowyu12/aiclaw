@@ -413,6 +413,92 @@ func DefaultBuiltinDefs() []model.Tool {
 				},
 			}),
 		},
+		{
+			Name:        "desktop",
+			Description: "桌面 RPA 工具。推荐用 find_element 通过无障碍 API 精确定位 UI 元素（返回坐标），再 click。截图带坐标标尺作为辅助。典型流程：find_element → 获取精确坐标 → click → 验证。",
+			HandlerType: model.HandlerBuiltin,
+			Enabled:     true,
+			FunctionDef: mustJSON(desktopToolDef()),
+		},
+	}
+}
+
+func desktopToolDef() map[string]any {
+	return map[string]any{
+		"name": "desktop",
+		"description": "Desktop RPA tool. " +
+			"BEST PRACTICE: Use find_element to get precise coordinates via Accessibility API. " +
+			"1) find_element(app, text) — searches title/value/description attributes; returns ruler_x/ruler_y. " +
+			"2) find_element(app) — no text → lists all interactive elements (buttons, text fields, etc.) with coordinates. " +
+			"3) Use returned ruler_x/ruler_y directly as x/y in click/scroll. " +
+			"Workflow: find_element → click(ruler_x, ruler_y) → verify. " +
+			"Fallback when find_element fails: screenshot → read ruler coords visually → click.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+			"action": map[string]any{
+				"type":        "string",
+				"enum":        []string{"screenshot", "click", "type", "press", "scroll", "mouse_move", "list_windows", "focus_window", "find_element"},
+				"description": "Action to perform. Use find_element first to get precise coordinates.",
+			},
+			"x": map[string]any{
+				"type":        "integer",
+				"description": "X coordinate read from the screenshot ruler (auto-mapped to screen). Required for click/scroll/mouse_move.",
+			},
+			"y": map[string]any{
+				"type":        "integer",
+				"description": "Y coordinate read from the screenshot ruler (auto-mapped to screen). Required for click/scroll/mouse_move.",
+			},
+			"display": map[string]any{
+				"type":        "integer",
+				"description": "Display index for screenshot (0=primary, 1=secondary, etc.). Default: 0.",
+			},
+				"text": map[string]any{
+					"type":        "string",
+					"description": "For type: text to input. For find_element: search text (matches title/value/description; omit to list all interactive elements).",
+				},
+				"key": map[string]any{
+					"type":        "string",
+					"description": "Key or combination to press: enter, tab, escape, ctrl+c, cmd+v, alt+f4, shift+tab, etc.",
+				},
+				"button": map[string]any{
+					"type":        "string",
+					"enum":        []string{"left", "right", "middle"},
+					"description": "Mouse button for click (default: left)",
+				},
+				"clicks": map[string]any{
+					"type":        "integer",
+					"description": "Number of clicks (default: 1, use 2 for double-click)",
+				},
+				"scroll_x": map[string]any{
+					"type":        "integer",
+					"description": "Horizontal scroll amount (positive=right, negative=left)",
+				},
+				"scroll_y": map[string]any{
+					"type":        "integer",
+					"description": "Vertical scroll amount (positive=up, negative=down)",
+				},
+			"window": map[string]any{
+				"type":        "string",
+				"description": "Window/app name or title keyword for focus_window",
+			},
+			"app": map[string]any{
+				"type":        "string",
+				"description": "App name for find_element (e.g. '企业微信', 'Safari'). Required for find_element.",
+			},
+				"region": map[string]any{
+					"type":        "object",
+					"description": "Capture region for screenshot (optional, default: full screen)",
+					"properties": map[string]any{
+						"x":      map[string]any{"type": "integer", "description": "Top-left X"},
+						"y":      map[string]any{"type": "integer", "description": "Top-left Y"},
+						"width":  map[string]any{"type": "integer", "description": "Width in pixels"},
+						"height": map[string]any{"type": "integer", "description": "Height in pixels"},
+					},
+				},
+			},
+			"required": []string{"action"},
+		},
 	}
 }
 
