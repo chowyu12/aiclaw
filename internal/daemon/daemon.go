@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
 const envKey = "_AICLAW_DAEMON"
@@ -20,9 +19,9 @@ func dataDir() string {
 	return filepath.Join(home, ".aiclaw")
 }
 
-func PidFile() string  { return filepath.Join(dataDir(), "aiclaw.pid") }
-func LogFile() string  { return filepath.Join(dataDir(), "aiclaw.log") }
-func IsChild() bool    { return os.Getenv(envKey) == "1" }
+func PidFile() string { return filepath.Join(dataDir(), "aiclaw.pid") }
+func LogFile() string { return filepath.Join(dataDir(), "aiclaw.log") }
+func IsChild() bool   { return os.Getenv(envKey) == "1" }
 
 func Start() {
 	if pid, ok := readPid(); ok {
@@ -55,7 +54,7 @@ func Start() {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Env = append(os.Environ(), envKey+"=1")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	setSysProcAttr(cmd)
 
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "启动失败: %v\n", err)
@@ -81,12 +80,7 @@ func Stop() {
 		return
 	}
 
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "无法找到进程 %d: %v\n", pid, err)
-		os.Exit(1)
-	}
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
+	if err := stopProcess(pid); err != nil {
 		fmt.Fprintf(os.Stderr, "发送停止信号失败: %v\n", err)
 		os.Exit(1)
 	}
@@ -129,12 +123,4 @@ func readPid() (int, bool) {
 		return 0, false
 	}
 	return pid, true
-}
-
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
 }
