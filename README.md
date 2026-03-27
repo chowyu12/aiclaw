@@ -7,7 +7,7 @@
 适用于 Linux (amd64/arm64) 和 macOS (amd64/arm64)，自动下载最新 Release、注册系统服务并启动：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/master/install.sh | bash
 ```
 
 安装完成后会输出 Web 访问地址（含登录令牌），打开浏览器即可使用。首次启动自动使用 SQLite 并生成配置文件 `~/.aiclaw/config.yaml`。
