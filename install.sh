@@ -13,7 +13,7 @@ INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="aiclaw"
 SERVICE_NAME="aiclaw"
 CONFIG_DIR="$HOME/.aiclaw"
-DEFAULT_PORT=8080
+DEFAULT_PORT=10789
 
 # ───────────────────── 工具函数 ─────────────────────
 
@@ -56,7 +56,7 @@ fetch_latest_version() {
   local api_url="https://api.github.com/repos/${REPO}/releases/latest"
   info "正在获取最新版本..."
 
-  LATEST_TAG=$(curl -fsSL "$api_url" | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name":\s*"([^"]+)".*/\1/')
+  LATEST_TAG=$(curl -fsSL "$api_url" | grep '"tag_name"' | head -1 | cut -d'"' -f4)
   if [ -z "$LATEST_TAG" ]; then
     fatal "无法获取最新版本，请检查网络或 GitHub API 限流"
   fi
