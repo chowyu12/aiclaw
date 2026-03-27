@@ -2,6 +2,26 @@
 
 基于 Go + Vue 3 构建的 AI Agent 管理与执行平台，当前采用**单例 Agent**架构，支持多模型供应商接入、工具调用、技能编排和多轮对话。
 
+## 一键安装
+
+适用于 Linux (amd64/arm64) 和 macOS (amd64/arm64)，自动下载最新 Release、注册系统服务并启动：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/main/install.sh | bash
+```
+
+安装完成后会输出 Web 访问地址（含登录令牌），打开浏览器即可使用。首次启动自动使用 SQLite 并生成配置文件 `~/.aiclaw/config.yaml`。
+
+```bash
+aiclaw start      # 启动
+aiclaw stop       # 停止
+aiclaw status     # 查看状态
+aiclaw update     # 更新到最新版本
+aiclaw version    # 查看当前版本
+```
+
+> 如需从源码构建或自定义配置，请参考下方「从源码构建」章节。
+
 ## 核心优势
 
 ### 灵活的 Agent 自定义
@@ -170,40 +190,6 @@
 | 认证    | Web 访问令牌（Bearer）、Agent Token（ag- 前缀）    |
 | 前端    | Vue 3、TypeScript、Element Plus、Pinia、Vue Router |
 | 构建    | Go embed、Vite                                     |
-
-## 一键安装
-
-适用于 Linux (amd64/arm64) 和 macOS (amd64/arm64)，自动下载最新 Release、注册系统服务并启动：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/master/install.sh | bash
-```
-
-安装完成后会输出 Web 访问地址和登录令牌，打开浏览器即可使用。首次启动自动使用 SQLite 并生成配置文件 `~/.aiclaw/config.yaml`。
-
-<details>
-<summary>安装后常用管理命令</summary>
-
-**Linux (systemd)**
-
-```bash
-sudo systemctl status aiclaw      # 查看状态
-sudo journalctl -u aiclaw -f      # 查看日志
-sudo systemctl restart aiclaw     # 重启
-sudo systemctl stop aiclaw        # 停止
-```
-
-**macOS (launchd)**
-
-```bash
-tail -f ~/Library/Logs/aiclaw/aiclaw.log                                  # 查看日志
-launchctl unload ~/Library/LaunchAgents/com.aiclaw.agent.plist             # 停止
-launchctl load -w ~/Library/LaunchAgents/com.aiclaw.agent.plist            # 启动
-```
-
-</details>
-
-> 如需从源码构建或自定义配置，请参考下方「从源码构建」章节。
 
 ## 从源码构建
 

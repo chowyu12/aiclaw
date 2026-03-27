@@ -12,13 +12,6 @@ import (
 
 const envKey = "_AICLAW_DAEMON"
 
-const (
-	modeNone     = ""
-	modePid      = "pid"
-	modeSystemd  = "systemd"
-	modeLaunchd  = "launchd"
-)
-
 func dataDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -36,48 +29,99 @@ func launchdPlist() string {
 	return filepath.Join(home, "Library", "LaunchAgents", "com.aiclaw.agent.plist")
 }
 
-// detectMode 检测当前以哪种方式在运行。
-func detectMode() string {
-	if _, ok := readPid(); ok {
-		return modePid
+// hasSystemd 检测是否已注册 systemd 服务（不要求正在运行）。
+func hasSystemd() bool {
+	if runtime.GOOS != "linux" || !cmdExists("systemctl") {
+		return false
 	}
-	switch runtime.GOOS {
-	case "linux":
-		if cmdExists("systemctl") {
-			out, err := exec.Command("systemctl", "is-active", "aiclaw").Output()
-			if err == nil && strings.TrimSpace(string(out)) == "active" {
-				return modeSystemd
-			}
-		}
-	case "darwin":
-		if _, err := os.Stat(launchdPlist()); err == nil {
-			out, _ := exec.Command("launchctl", "list", "com.aiclaw.agent").Output()
-			if len(out) > 0 {
-				return modeLaunchd
-			}
-		}
+	err := exec.Command("systemctl", "cat", "aiclaw").Run()
+	return err == nil
+}
+
+// hasLaunchd 检测是否已注册 launchd 服务。
+func hasLaunchd() bool {
+	if runtime.GOOS != "darwin" {
+		return false
 	}
-	return modeNone
+	_, err := os.Stat(launchdPlist())
+	return err == nil
 }
 
 func Start() {
-	mode := detectMode()
-	switch mode {
-	case modePid:
-		pid, _ := readPid()
+	switch {
+	case hasSystemd():
+		fmt.Println("正在通过 systemd 启动 aiclaw ...")
+		run("sudo", "systemctl", "start", "aiclaw")
+		fmt.Println("aiclaw 已启动")
+
+	case hasLaunchd():
+		fmt.Println("正在通过 launchd 启动 aiclaw ...")
+		exec.Command("launchctl", "unload", launchdPlist()).Run()
+		run("launchctl", "load", "-w", launchdPlist())
+		fmt.Println("aiclaw 已启动")
+
+	default:
+		startDaemon()
+	}
+}
+
+func Stop() {
+	switch {
+	case hasSystemd():
+		fmt.Println("正在通过 systemd 停止 aiclaw ...")
+		run("sudo", "systemctl", "stop", "aiclaw")
+		fmt.Println("aiclaw 已停止")
+
+	case hasLaunchd():
+		fmt.Println("正在通过 launchd 停止 aiclaw ...")
+		run("launchctl", "unload", launchdPlist())
+		fmt.Println("aiclaw 已停止")
+
+	default:
+		stopDaemon()
+	}
+}
+
+func Status() {
+	switch {
+	case hasSystemd():
+		cmd := exec.Command("systemctl", "status", "aiclaw", "--no-pager", "-l")
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Run()
+
+	case hasLaunchd():
+		out, _ := exec.Command("launchctl", "list", "com.aiclaw.agent").Output()
+		if len(out) > 0 {
+			fmt.Println("aiclaw 正在运行 [launchd]")
+		} else {
+			fmt.Println("aiclaw 未在运行 [launchd 服务已注册但未加载]")
+		}
+		fmt.Printf("日志文件: %s\n", LogFile())
+
+	default:
+		pid, ok := readPid()
+		if ok && processAlive(pid) {
+			fmt.Printf("aiclaw 正在运行 (PID %d)\n", pid)
+			fmt.Printf("日志文件: %s\n", LogFile())
+		} else {
+			if ok {
+				os.Remove(PidFile())
+			}
+			fmt.Println("aiclaw 未在运行")
+		}
+	}
+}
+
+// ───────────────────── 内置后台模式 ─────────────────────
+
+func startDaemon() {
+	if pid, ok := readPid(); ok {
 		if processAlive(pid) {
 			fmt.Printf("aiclaw 已在运行 (PID %d)\n", pid)
 			return
 		}
 		os.Remove(PidFile())
-	case modeSystemd:
-		fmt.Println("aiclaw 已通过 systemd 运行，使用以下命令管理：")
-		fmt.Println("  sudo systemctl restart aiclaw")
-		return
-	case modeLaunchd:
-		fmt.Println("aiclaw 已通过 launchd 运行，使用以下命令管理：")
-		fmt.Printf("  launchctl kickstart -k gui/%d/com.aiclaw.agent\n", os.Getuid())
-		return
 	}
 
 	dir := dataDir()
@@ -116,76 +160,34 @@ func Start() {
 	fmt.Printf("日志文件: %s\n", logPath)
 }
 
-func Stop() {
-	mode := detectMode()
-	switch mode {
-	case modePid:
-		pid, _ := readPid()
-		if !processAlive(pid) {
-			os.Remove(PidFile())
-			fmt.Println("aiclaw 未在运行（已清理残留 PID 文件）")
-			return
-		}
-		if err := stopProcess(pid); err != nil {
-			fmt.Fprintf(os.Stderr, "发送停止信号失败: %v\n", err)
-			os.Exit(1)
-		}
-		os.Remove(PidFile())
-		fmt.Printf("已发送停止信号到 PID %d\n", pid)
-
-	case modeSystemd:
-		fmt.Println("正在通过 systemd 停止 aiclaw ...")
-		cmd := exec.Command("sudo", "systemctl", "stop", "aiclaw")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "停止失败: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("aiclaw 已停止")
-
-	case modeLaunchd:
-		fmt.Println("正在通过 launchd 停止 aiclaw ...")
-		cmd := exec.Command("launchctl", "unload", launchdPlist())
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "停止失败: %v\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("aiclaw 已停止（如需重新启动: launchctl load -w " + launchdPlist() + "）")
-
-	default:
+func stopDaemon() {
+	pid, ok := readPid()
+	if !ok {
 		fmt.Println("aiclaw 未在运行")
+		return
 	}
+	if !processAlive(pid) {
+		os.Remove(PidFile())
+		fmt.Println("aiclaw 未在运行（已清理残留 PID 文件）")
+		return
+	}
+	if err := stopProcess(pid); err != nil {
+		fmt.Fprintf(os.Stderr, "发送停止信号失败: %v\n", err)
+		os.Exit(1)
+	}
+	os.Remove(PidFile())
+	fmt.Printf("已发送停止信号到 PID %d\n", pid)
 }
 
-func Status() {
-	mode := detectMode()
-	switch mode {
-	case modePid:
-		pid, _ := readPid()
-		if processAlive(pid) {
-			fmt.Printf("aiclaw 正在运行 (PID %d) [后台模式]\n", pid)
-			fmt.Printf("日志文件: %s\n", LogFile())
-		} else {
-			os.Remove(PidFile())
-			fmt.Println("aiclaw 未在运行（已清理残留 PID 文件）")
-		}
+// ───────────────────── 工具函数 ─────────────────────
 
-	case modeSystemd:
-		fmt.Println("aiclaw 正在运行 [systemd 服务]")
-		cmd := exec.Command("systemctl", "status", "aiclaw", "--no-pager", "-l")
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		cmd.Run()
-
-	case modeLaunchd:
-		fmt.Println("aiclaw 正在运行 [launchd 服务]")
-		fmt.Printf("日志文件: %s\n", LogFile())
-
-	default:
-		fmt.Println("aiclaw 未在运行")
+func run(name string, args ...string) {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "执行失败: %s %s: %v\n", name, strings.Join(args, " "), err)
+		os.Exit(1)
 	}
 }
 
