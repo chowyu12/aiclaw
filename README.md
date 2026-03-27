@@ -55,14 +55,14 @@
 
 支持将 Agent 接入多种消息渠道，实现多平台自动回复：
 
-| 渠道 | 类型标识 | 接入方式 | 说明 |
-| --- | --- | --- | --- |
-| 企业微信 | `wecom` | WebSocket 长连接 | 智能机器人，配置 Bot ID + Secret，服务端自动建连 |
-| 微信 | `wechat` | iLink 长轮询 | 微信个人号，Web 端扫码登录后自动启动消息监听 |
-| 飞书 | `feishu` | Webhook | 配置 App ID / App Secret / Verification Token |
-| 钉钉 | `dingtalk` | Webhook | 配置 Webhook URL 到钉钉机器人 |
-| WhatsApp | `whatsapp` | Webhook | Meta Cloud API，配置 Verify Token |
-| Telegram | `telegram` | Webhook | BotFather Token，自动 setWebhook |
+| 渠道     | 类型标识   | 接入方式         | 说明                                             |
+| -------- | ---------- | ---------------- | ------------------------------------------------ |
+| 企业微信 | `wecom`    | WebSocket 长连接 | 智能机器人，配置 Bot ID + Secret，服务端自动建连 |
+| 微信     | `wechat`   | iLink 长轮询     | 微信个人号，Web 端扫码登录后自动启动消息监听     |
+| 飞书     | `feishu`   | Webhook          | 配置 App ID / App Secret / Verification Token    |
+| 钉钉     | `dingtalk` | Webhook          | 配置 Webhook URL 到钉钉机器人                    |
+| WhatsApp | `whatsapp` | Webhook          | Meta Cloud API，配置 Verify Token                |
+| Telegram | `telegram` | Webhook          | BotFather Token，自动 setWebhook                 |
 
 渠道管理页面支持一键启用/禁用、查看会话记录和消息明细。
 
@@ -171,7 +171,41 @@
 | 前端    | Vue 3、TypeScript、Element Plus、Pinia、Vue Router |
 | 构建    | Go embed、Vite                                     |
 
-## 快速开始
+## 一键安装
+
+适用于 Linux (amd64/arm64) 和 macOS (amd64/arm64)，自动下载最新 Release、注册系统服务并启动：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/master/install.sh | bash
+```
+
+安装完成后会输出 Web 访问地址和登录令牌，打开浏览器即可使用。首次启动自动使用 SQLite 并生成配置文件 `~/.aiclaw/config.yaml`。
+
+<details>
+<summary>安装后常用管理命令</summary>
+
+**Linux (systemd)**
+
+```bash
+sudo systemctl status aiclaw      # 查看状态
+sudo journalctl -u aiclaw -f      # 查看日志
+sudo systemctl restart aiclaw     # 重启
+sudo systemctl stop aiclaw        # 停止
+```
+
+**macOS (launchd)**
+
+```bash
+tail -f ~/Library/Logs/aiclaw/aiclaw.log                                  # 查看日志
+launchctl unload ~/Library/LaunchAgents/com.aiclaw.agent.plist             # 停止
+launchctl load -w ~/Library/LaunchAgents/com.aiclaw.agent.plist            # 启动
+```
+
+</details>
+
+> 如需从源码构建或自定义配置，请参考下方「从源码构建」章节。
+
+## 从源码构建
 
 ### 前置要求
 
