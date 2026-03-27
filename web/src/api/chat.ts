@@ -73,6 +73,15 @@ export interface StreamChunk {
   done: boolean
   step?: ExecutionStep
   steps?: ExecutionStep[]
+  files?: FileInfo[]
+}
+
+export interface FileInfo {
+  uuid: string
+  filename: string
+  content_type: string
+  file_type: 'text' | 'image' | 'document'
+  file_size: number
 }
 
 export interface Conversation {
