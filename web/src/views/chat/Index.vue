@@ -638,7 +638,9 @@ function sendMessage() {
       if (chunk.done) {
         const steps = [...pendingSteps.value]
         const tokensUsed = steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
-        messages.value.push(reactive({ role: 'assistant', content: streamingContent.value, tokens_used: tokensUsed || undefined, steps, _showSteps: false }))
+        const msg: any = { role: 'assistant', content: streamingContent.value, tokens_used: tokensUsed || undefined, steps, _showSteps: false }
+        if (chunk.files?.length) msg.files = chunk.files
+        messages.value.push(reactive(msg))
         streamingContent.value = ''
         pendingSteps.value = []
         streaming.value = false
@@ -688,7 +690,15 @@ function retryMessage(assistantIdx: number) {
 }
 
 function formatMessage(text: string): string {
-  return text.replace(/\n/g, '<br/>')
+  let s = text
+  // 移除 LLM 输出的无效图片标签（非 /public/files/ 开头的 src）
+  s = s.replace(/<img\s+[^>]*src\s*=\s*["'](?!\/public\/files\/)[^"']*["'][^>]*\/?>/gi, '')
+  // 移除 markdown 图片语法中非本站链接的图片
+  s = s.replace(/!\[[^\]]*\]\((?!\/public\/files\/)[^)]*\)/g, '')
+  // 渲染本站 markdown 图片为 img 标签
+  s = s.replace(/!\[([^\]]*)\]\((\/public\/files\/[^)]+)\)/g, '<img src="$2" alt="$1" class="attach-img" />')
+  s = s.replace(/\n/g, '<br/>')
+  return s
 }
 
 function stepTypeLabel(t: string) {

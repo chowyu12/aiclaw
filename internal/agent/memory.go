@@ -334,6 +334,10 @@ func (m *MemoryManager) linkFiles(ctx context.Context, files []*model.File, conv
 	}
 }
 
+func (m *MemoryManager) LinkFilesToMessage(ctx context.Context, files []*model.File, conversationID, messageID int64) {
+	m.linkFiles(ctx, files, conversationID, messageID)
+}
+
 func (m *MemoryManager) AutoSetTitle(ctx context.Context, conversationID int64, userMessage string) {
 	title := userMessage
 	rs := []rune(title)

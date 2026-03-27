@@ -72,6 +72,8 @@ type execContext struct {
 	skillTools   []Tool
 	mcpManager   *mcp.Manager
 	toolSkillMap map[string]string
+
+	toolFiles []*model.File
 }
 
 func (ec *execContext) hasTools() bool {
@@ -126,7 +128,11 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 	if _, err := e.run(ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true); err != nil {
 		return err
 	}
-	return chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Done: true})
+	doneChunk := model.StreamChunk{ConversationID: ec.conv.UUID, Done: true}
+	if len(ec.toolFiles) > 0 {
+		doneChunk.Files = ec.toolFiles
+	}
+	return chunkHandler(doneChunk)
 }
 
 // ============================================================
@@ -373,6 +379,10 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, content stri
 	if err != nil {
 		ec.l.WithError(err).Error("[Execute] save assistant message failed")
 		return nil, err
+	}
+
+	if len(ec.toolFiles) > 0 {
+		e.memory.LinkFilesToMessage(ctx, ec.toolFiles, ec.conv.ID, msgID)
 	}
 
 	ec.tracker.SetMessageID(msgID)

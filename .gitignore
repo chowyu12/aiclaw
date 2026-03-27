@@ -3,3 +3,7 @@ uploads/*
 bin/aiclaw
 aiclaw.db
 docs/swagger.yaml
+server
+.gitignore
+server.exe
+main

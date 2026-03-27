@@ -3,10 +3,18 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/internal/tools"
+	"github.com/chowyu12/aiclaw/internal/workspace"
+	"github.com/google/uuid"
 )
 
 // ToolResult 表示单个工具调用的结果。
@@ -74,7 +82,55 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	}
 
 	toolMsg, fileParts = e.buildToolResponseParts(ctx, tc.ID, toolName, toolResult, callErr == nil, ec.l)
+
+	if callErr == nil {
+		if f := e.persistToolFile(ctx, ec, toolResult); f != nil {
+			ec.toolFiles = append(ec.toolFiles, f)
+		}
+	}
+
 	return toolMsg, ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: toolMsg.Content}, fileParts
+}
+
+func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolResult string) *model.File {
+	fr := tools.ParseFileResult(toolResult)
+	if fr == nil || !strings.HasPrefix(fr.MimeType, "image/") {
+		return nil
+	}
+
+	data, err := os.ReadFile(fr.Path)
+	if err != nil {
+		return nil
+	}
+
+	uploadsDir := workspace.Uploads()
+	if uploadsDir == "" {
+		return nil
+	}
+
+	fileUUID := uuid.New().String()
+	ext := filepath.Ext(fr.Path)
+	storagePath := filepath.Join(uploadsDir, fileUUID+ext)
+	if err := os.WriteFile(storagePath, data, 0o644); err != nil {
+		ec.l.WithError(err).Warn("[Tool] persist tool file to uploads failed")
+		return nil
+	}
+
+	f := &model.File{
+		UUID:           fileUUID,
+		ConversationID: ec.conv.ID,
+		Filename:       filepath.Base(fr.Path),
+		ContentType:    fr.MimeType,
+		FileSize:       int64(len(data)),
+		FileType:       model.FileTypeImage,
+		StoragePath:    storagePath,
+	}
+	if err := e.store.CreateFile(ctx, f); err != nil {
+		ec.l.WithError(err).Warn("[Tool] create file record failed")
+		return nil
+	}
+	ec.l.WithFields(log.Fields{"file_uuid": fileUUID, "path": storagePath}).Info("[Tool] persisted tool screenshot as file")
+	return f
 }
 
 func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *agentRunState, assistant openai.ChatCompletionMessage) {

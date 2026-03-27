@@ -131,6 +131,7 @@ type StreamChunk struct {
 	Done           bool            `json:"done"`
 	Step           *ExecutionStep  `json:"step,omitzero"`
 	Steps          []ExecutionStep `json:"steps,omitzero"`
+	Files          []*File         `json:"files,omitzero"`
 }
 
 type ListQuery struct {

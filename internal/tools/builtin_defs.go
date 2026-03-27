@@ -413,6 +413,86 @@ func DefaultBuiltinDefs() []model.Tool {
 				},
 			}),
 		},
+		{
+			Name:        "desktop",
+			Description: "桌面 RPA 工具。控制鼠标、键盘和窗口。截图带坐标标尺，直接用标尺上读到的坐标进行 click/scroll 操作（自动映射到屏幕坐标）。支持多显示器。典型流程：screenshot → 读标尺坐标 → click/type → 查看验证截图。",
+			HandlerType: model.HandlerBuiltin,
+			Enabled:     true,
+			FunctionDef: mustJSON(desktopToolDef()),
+		},
+	}
+}
+
+func desktopToolDef() map[string]any {
+	return map[string]any{
+		"name": "desktop",
+		"description": "Desktop RPA tool. Screenshots have coordinate rulers on edges with numbers every 100px. " +
+			"IMPORTANT: Read x,y from the rulers on the screenshot, then use those numbers directly for click/scroll — coordinates are auto-mapped to real screen positions. " +
+			"Supports multiple displays via 'display' param (0=primary). " +
+			"click/type/press/scroll/focus_window auto-capture a verification screenshot. " +
+			"Workflow: screenshot → read ruler coordinates → click/type/press → verify.",
+		"parameters": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"action": map[string]any{
+					"type":        "string",
+					"enum":        []string{"screenshot", "click", "type", "press", "scroll", "mouse_move", "list_windows", "focus_window"},
+					"description": "Action to perform",
+				},
+			"x": map[string]any{
+				"type":        "integer",
+				"description": "X coordinate read from the screenshot ruler (auto-mapped to screen). Required for click/scroll/mouse_move.",
+			},
+			"y": map[string]any{
+				"type":        "integer",
+				"description": "Y coordinate read from the screenshot ruler (auto-mapped to screen). Required for click/scroll/mouse_move.",
+			},
+			"display": map[string]any{
+				"type":        "integer",
+				"description": "Display index for screenshot (0=primary, 1=secondary, etc.). Default: 0.",
+			},
+				"text": map[string]any{
+					"type":        "string",
+					"description": "Text to type (for type action)",
+				},
+				"key": map[string]any{
+					"type":        "string",
+					"description": "Key or combination to press: enter, tab, escape, ctrl+c, cmd+v, alt+f4, shift+tab, etc.",
+				},
+				"button": map[string]any{
+					"type":        "string",
+					"enum":        []string{"left", "right", "middle"},
+					"description": "Mouse button for click (default: left)",
+				},
+				"clicks": map[string]any{
+					"type":        "integer",
+					"description": "Number of clicks (default: 1, use 2 for double-click)",
+				},
+				"scroll_x": map[string]any{
+					"type":        "integer",
+					"description": "Horizontal scroll amount (positive=right, negative=left)",
+				},
+				"scroll_y": map[string]any{
+					"type":        "integer",
+					"description": "Vertical scroll amount (positive=up, negative=down)",
+				},
+				"window": map[string]any{
+					"type":        "string",
+					"description": "Window/app name or title keyword for focus_window",
+				},
+				"region": map[string]any{
+					"type":        "object",
+					"description": "Capture region for screenshot (optional, default: full screen)",
+					"properties": map[string]any{
+						"x":      map[string]any{"type": "integer", "description": "Top-left X"},
+						"y":      map[string]any{"type": "integer", "description": "Top-left Y"},
+						"width":  map[string]any{"type": "integer", "description": "Width in pixels"},
+						"height": map[string]any{"type": "integer", "description": "Height in pixels"},
+					},
+				},
+			},
+			"required": []string{"action"},
+		},
 	}
 }
 
