@@ -146,6 +146,10 @@ func requireCmd(name string) {
 	}
 }
 
+func platformFindElements(_, _ string) ([]uiElement, error) {
+	return nil, fmt.Errorf("find_element not yet implemented on Linux; use screenshot + coordinates instead")
+}
+
 func getScaleFactor() int { return 1 }
 
 func getScreenSize() (int, int) {

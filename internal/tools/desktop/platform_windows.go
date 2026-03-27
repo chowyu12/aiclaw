@@ -160,6 +160,10 @@ func translateKeyWindows(key string) string {
 	return strings.Join(mods, "") + mk
 }
 
+func platformFindElements(_, _ string) ([]uiElement, error) {
+	return nil, fmt.Errorf("find_element not yet implemented on Windows; use screenshot + coordinates instead")
+}
+
 func getScaleFactor() int { return 1 }
 
 func getScreenSize() (int, int) {

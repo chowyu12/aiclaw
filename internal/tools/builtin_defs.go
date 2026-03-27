@@ -415,7 +415,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "desktop",
-			Description: "桌面 RPA 工具。控制鼠标、键盘和窗口。截图带坐标标尺，直接用标尺上读到的坐标进行 click/scroll 操作（自动映射到屏幕坐标）。支持多显示器。典型流程：screenshot → 读标尺坐标 → click/type → 查看验证截图。",
+			Description: "桌面 RPA 工具。推荐用 find_element 通过无障碍 API 精确定位 UI 元素（返回坐标），再 click。截图带坐标标尺作为辅助。典型流程：find_element → 获取精确坐标 → click → 验证。",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(desktopToolDef()),
@@ -426,19 +426,21 @@ func DefaultBuiltinDefs() []model.Tool {
 func desktopToolDef() map[string]any {
 	return map[string]any{
 		"name": "desktop",
-		"description": "Desktop RPA tool. Screenshots have coordinate rulers on edges with numbers every 100px. " +
-			"IMPORTANT: Read x,y from the rulers on the screenshot, then use those numbers directly for click/scroll — coordinates are auto-mapped to real screen positions. " +
-			"Supports multiple displays via 'display' param (0=primary). " +
-			"click/type/press/scroll/focus_window auto-capture a verification screenshot. " +
-			"Workflow: screenshot → read ruler coordinates → click/type/press → verify.",
+		"description": "Desktop RPA tool. " +
+			"BEST PRACTICE: Use find_element to get precise coordinates via Accessibility API. " +
+			"1) find_element(app, text) — searches title/value/description attributes; returns ruler_x/ruler_y. " +
+			"2) find_element(app) — no text → lists all interactive elements (buttons, text fields, etc.) with coordinates. " +
+			"3) Use returned ruler_x/ruler_y directly as x/y in click/scroll. " +
+			"Workflow: find_element → click(ruler_x, ruler_y) → verify. " +
+			"Fallback when find_element fails: screenshot → read ruler coords visually → click.",
 		"parameters": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"action": map[string]any{
-					"type":        "string",
-					"enum":        []string{"screenshot", "click", "type", "press", "scroll", "mouse_move", "list_windows", "focus_window"},
-					"description": "Action to perform",
-				},
+			"action": map[string]any{
+				"type":        "string",
+				"enum":        []string{"screenshot", "click", "type", "press", "scroll", "mouse_move", "list_windows", "focus_window", "find_element"},
+				"description": "Action to perform. Use find_element first to get precise coordinates.",
+			},
 			"x": map[string]any{
 				"type":        "integer",
 				"description": "X coordinate read from the screenshot ruler (auto-mapped to screen). Required for click/scroll/mouse_move.",
@@ -453,7 +455,7 @@ func desktopToolDef() map[string]any {
 			},
 				"text": map[string]any{
 					"type":        "string",
-					"description": "Text to type (for type action)",
+					"description": "For type: text to input. For find_element: search text (matches title/value/description; omit to list all interactive elements).",
 				},
 				"key": map[string]any{
 					"type":        "string",
@@ -476,10 +478,14 @@ func desktopToolDef() map[string]any {
 					"type":        "integer",
 					"description": "Vertical scroll amount (positive=up, negative=down)",
 				},
-				"window": map[string]any{
-					"type":        "string",
-					"description": "Window/app name or title keyword for focus_window",
-				},
+			"window": map[string]any{
+				"type":        "string",
+				"description": "Window/app name or title keyword for focus_window",
+			},
+			"app": map[string]any{
+				"type":        "string",
+				"description": "App name for find_element (e.g. '企业微信', 'Safari'). Required for find_element.",
+			},
 				"region": map[string]any{
 					"type":        "object",
 					"description": "Capture region for screenshot (optional, default: full screen)",
