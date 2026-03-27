@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/chowyu12/aiclaw/internal/bootstrap"
+	"github.com/chowyu12/aiclaw/internal/daemon"
 	"github.com/chowyu12/aiclaw/internal/selfupdate"
 )
 
@@ -19,6 +20,15 @@ func main() {
 			return
 		case "update":
 			selfupdate.Run(version)
+			return
+		case "start":
+			daemon.Start()
+			return
+		case "stop":
+			daemon.Stop()
+			return
+		case "status":
+			daemon.Status()
 			return
 		}
 	}

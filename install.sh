@@ -4,7 +4,7 @@
 # 用法: curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/main/install.sh | bash
 #
 # 支持平台: Linux (amd64/arm64)、macOS (amd64/arm64)
-# 功能: 下载最新 release → 安装到 /usr/local/bin → 注册系统服务 → 启动 → 输出 Web 访问地址
+# 功能: 下载最新 release → 安装到 /usr/local/bin → 注册系统服务(开机自启) → 启动 → 输出 Web 访问地址
 #
 set -euo pipefail
 
@@ -13,7 +13,7 @@ INSTALL_DIR="/usr/local/bin"
 BINARY_NAME="aiclaw"
 SERVICE_NAME="aiclaw"
 CONFIG_DIR="$HOME/.aiclaw"
-DEFAULT_PORT=10789
+DEFAULT_PORT=8080
 
 # ───────────────────── 工具函数 ─────────────────────
 
@@ -87,15 +87,39 @@ download_and_install() {
   ok "二进制文件已安装: ${INSTALL_DIR}/${BINARY_NAME}"
 }
 
-# ───────────────────── Linux: systemd 服务 ─────────────────────
+# ───────────────────── 启动服务 ─────────────────────
 
-install_systemd_service() {
+start_service() {
+  SERVICE_MODE="manual"
+
+  case "$OS" in
+    linux)
+      if command -v systemctl >/dev/null 2>&1; then
+        install_systemd
+        SERVICE_MODE="systemd"
+        return
+      fi
+      ;;
+    darwin)
+      install_launchd
+      SERVICE_MODE="launchd"
+      return
+      ;;
+  esac
+
+  info "未检测到系统服务管理器，使用内置后台模式..."
+  "${INSTALL_DIR}/${BINARY_NAME}" stop 2>/dev/null || true
+  "${INSTALL_DIR}/${BINARY_NAME}" start
+  ok "已通过 aiclaw start 后台启动（无开机自启，重启后需手动执行 aiclaw start）"
+}
+
+install_systemd() {
   local service_file="/etc/systemd/system/${SERVICE_NAME}.service"
   local run_user="${SUDO_USER:-$USER}"
   local run_home
   run_home="$(eval echo "~${run_user}")"
 
-  info "创建 systemd 服务..."
+  info "注册 systemd 服务（开机自启）..."
 
   sudo tee "$service_file" >/dev/null <<UNIT
 [Unit]
@@ -119,19 +143,16 @@ UNIT
   sudo systemctl daemon-reload
   sudo systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
   sudo systemctl restart "$SERVICE_NAME"
-  ok "systemd 服务已启动"
+  ok "systemd 服务已启动（开机自启已开启）"
 }
 
-# ───────────────────── macOS: launchd 服务 ─────────────────────
-
-install_launchd_service() {
+install_launchd() {
   local plist_dir="$HOME/Library/LaunchAgents"
   local plist_file="${plist_dir}/com.aiclaw.agent.plist"
-  local log_dir="$HOME/Library/Logs/aiclaw"
 
-  mkdir -p "$plist_dir" "$log_dir"
+  mkdir -p "$plist_dir"
 
-  info "创建 launchd 服务..."
+  info "注册 launchd 服务（开机自启）..."
 
   cat > "$plist_file" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -149,9 +170,9 @@ install_launchd_service() {
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>${log_dir}/aiclaw.log</string>
+    <string>${CONFIG_DIR}/aiclaw.log</string>
     <key>StandardErrorPath</key>
-    <string>${log_dir}/aiclaw.err</string>
+    <string>${CONFIG_DIR}/aiclaw.log</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HOME</key>
@@ -163,7 +184,7 @@ PLIST
 
   launchctl unload "$plist_file" 2>/dev/null || true
   launchctl load -w "$plist_file"
-  ok "launchd 服务已启动"
+  ok "launchd 服务已启动（开机自启已开启）"
 }
 
 # ───────────────────── 等待服务就绪 ─────────────────────
@@ -227,22 +248,32 @@ print_access_info() {
   if [ -n "$token" ]; then
   echo "║"
   echo "║  登录令牌: ${token}"
-  echo "║  (首次由服务自动生成，保存在配置文件中)"
   fi
   echo "║"
-  if [ "$OS" = "linux" ]; then
+  case "$SERVICE_MODE" in
+    systemd)
   echo "║  管理命令:"
   echo "║    查看状态:  sudo systemctl status ${SERVICE_NAME}"
   echo "║    查看日志:  sudo journalctl -u ${SERVICE_NAME} -f"
   echo "║    重启服务:  sudo systemctl restart ${SERVICE_NAME}"
   echo "║    停止服务:  sudo systemctl stop ${SERVICE_NAME}"
-  echo "║    卸载服务:  sudo systemctl stop ${SERVICE_NAME} && sudo systemctl disable ${SERVICE_NAME}"
-  else
+      ;;
+    launchd)
   echo "║  管理命令:"
-  echo "║    查看日志:  tail -f ~/Library/Logs/aiclaw/aiclaw.log"
+  echo "║    查看日志:  tail -f ${CONFIG_DIR}/aiclaw.log"
+  echo "║    重启服务:  launchctl kickstart -k gui/\$(id -u)/com.aiclaw.agent"
   echo "║    停止服务:  launchctl unload ~/Library/LaunchAgents/com.aiclaw.agent.plist"
-  echo "║    启动服务:  launchctl load -w ~/Library/LaunchAgents/com.aiclaw.agent.plist"
-  fi
+      ;;
+    *)
+  echo "║  管理命令:"
+  echo "║    查看状态:  aiclaw status"
+  echo "║    查看日志:  tail -f ${CONFIG_DIR}/aiclaw.log"
+  echo "║    重启服务:  aiclaw stop && aiclaw start"
+  echo "║    停止服务:  aiclaw stop"
+      ;;
+  esac
+  echo "║"
+  echo "║  更新版本:  aiclaw update"
   echo "╚══════════════════════════════════════════════════════════════╝"
   echo ""
 }
@@ -259,20 +290,7 @@ main() {
   detect_platform
   fetch_latest_version
   download_and_install
-
-  case "$OS" in
-    linux)
-      if command -v systemctl >/dev/null 2>&1; then
-        install_systemd_service
-      else
-        warn "未检测到 systemd，跳过服务注册，请手动运行: ${INSTALL_DIR}/${BINARY_NAME}"
-      fi
-      ;;
-    darwin)
-      install_launchd_service
-      ;;
-  esac
-
+  start_service
   wait_for_ready
   print_access_info
 }
