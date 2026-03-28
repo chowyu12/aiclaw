@@ -27,6 +27,9 @@ func main() {
 		case "stop":
 			daemon.Stop()
 			return
+		case "restart":
+			daemon.Restart()
+			return
 		case "status":
 			daemon.Status()
 			return

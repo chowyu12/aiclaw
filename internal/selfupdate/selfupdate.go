@@ -62,15 +62,7 @@ func Run(currentVersion string) {
 
 	fmt.Printf("\n✅ 更新成功: %s → %s\n", currentVersion, latest)
 	fmt.Println("请重启服务以使新版本生效：")
-	switch runtime.GOOS {
-	case "linux":
-		fmt.Println("  sudo systemctl restart aiclaw")
-	case "darwin":
-		fmt.Println("  launchctl unload ~/Library/LaunchAgents/com.aiclaw.agent.plist")
-		fmt.Println("  launchctl load -w ~/Library/LaunchAgents/com.aiclaw.agent.plist")
-	default:
-		fmt.Println("  手动重启 aiclaw 进程")
-	}
+	fmt.Println("  aiclaw restart")
 }
 
 func fetchLatestTag() (string, error) {
