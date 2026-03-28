@@ -82,6 +82,25 @@ func Stop() {
 	}
 }
 
+func Restart() {
+	switch {
+	case hasSystemd():
+		fmt.Println("正在通过 systemd 重启 aiclaw ...")
+		run("sudo", "systemctl", "restart", "aiclaw")
+		fmt.Println("aiclaw 已重启")
+
+	case hasLaunchd():
+		fmt.Println("正在通过 launchd 重启 aiclaw ...")
+		exec.Command("launchctl", "unload", launchdPlist()).Run()
+		run("launchctl", "load", "-w", launchdPlist())
+		fmt.Println("aiclaw 已重启")
+
+	default:
+		stopDaemon()
+		startDaemon()
+	}
+}
+
 func Status() {
 	switch {
 	case hasSystemd():
