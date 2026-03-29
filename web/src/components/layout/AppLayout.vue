@@ -103,7 +103,7 @@
           </div>
           <template v-if="!isCollapse">
             <div class="sidebar-user-line">
-              <span class="username">{{ appVersion ? 'v' + appVersion : 'AiClaw' }}</span>
+              <span class="username">{{ appVersion ?  appVersion : 'AiClaw' }}</span>
               <el-button text type="danger" size="small" @click="handleLogout"
                 >退出</el-button
               >
