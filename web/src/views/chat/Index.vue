@@ -107,20 +107,20 @@
                 <span v-if="msg.role === 'assistant' && msg.tokens_used" class="msg-tokens">{{ msg.tokens_used }} tokens</span>
               </div>
 
-              <!-- 附件 -->
-              <div v-if="msg.files && msg.files.length > 0" class="msg-attachments">
-                <template v-for="f in msg.files" :key="f.uuid">
-                  <img v-if="f.file_type === 'image'" :src="'/public/files/' + f.uuid" :alt="f.filename" class="attach-img" />
-                  <a v-else :href="'/public/files/' + f.uuid" target="_blank" class="attach-file">
-                    <span class="attach-file-icon">{{ fileTypeIcon(f.file_type) }}</span>
-                    <span class="attach-file-name">{{ f.filename }}</span>
-                    <span class="attach-file-size" v-if="f.file_size">{{ formatFileSize(f.file_size) }}</span>
-                  </a>
-                </template>
+              <!-- 消息气泡（附件 + 文本统一展示） -->
+              <div class="msg-bubble">
+                <div v-if="msg.files && msg.files.length > 0" class="bubble-attachments">
+                  <template v-for="f in msg.files" :key="f.uuid">
+                    <img v-if="f.file_type === 'image'" :src="'/public/files/' + f.uuid" :alt="f.filename" class="attach-img" />
+                    <a v-else :href="'/public/files/' + f.uuid" target="_blank" class="attach-file">
+                      <span class="attach-file-icon">{{ fileTypeIcon(f.file_type) }}</span>
+                      <span class="attach-file-name">{{ f.filename }}</span>
+                      <span class="attach-file-size" v-if="f.file_size">{{ formatFileSize(f.file_size) }}</span>
+                    </a>
+                  </template>
+                </div>
+                <div class="bubble-text" v-html="formatMessage(msg.content)"></div>
               </div>
-
-              <!-- 消息内容 -->
-              <div class="msg-bubble" v-html="formatMessage(msg.content)"></div>
 
               <!-- 操作按钮 -->
               <div class="msg-actions">
@@ -1113,7 +1113,7 @@ function truncateText(text: string, maxLen: number): string {
 .msg-row.user .msg-actions {
   justify-content: flex-end;
 }
-.msg-row.user .msg-attachments {
+.msg-row.user .bubble-attachments {
   justify-content: flex-end;
 }
 
@@ -1390,7 +1390,7 @@ function truncateText(text: string, maxLen: number): string {
   cursor: not-allowed;
 }
 
-.msg-attachments {
+.bubble-attachments {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
