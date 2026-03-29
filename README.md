@@ -41,13 +41,7 @@ aiclaw version    # 查看当前版本
 
 当 Agent 挂载大量工具时，传统方式会将所有工具的 Function 定义（名称 + 描述 + 参数 Schema）一次性发送给 LLM，随着工具数量增长，Token 开销急剧膨胀且工具选择准确率下降。
 
-开启 **Tool Search** 后，Agent 会加载系统中全部已启用工具（含 MCP / 技能声明工具），但根据**工具条数自动选择模式**：
-
-- **工具条数 ≤ 24（默认阈值）**：**自动全量下发**所有工具定义，不进入懒加载，避免「只有十几个工具却反复 `tool_search`」浪费轮次（与少量内置工具场景对齐）。
-- **工具条数 > 24**：进入**懒加载**：
-  1. **初始请求**只携带轻量的 `tool_search` 与技能预加载工具
-  2. LLM 调用 `tool_search("关键词")`，本地关键词匹配返回 Top 5
-  3. 匹配工具**完整定义注入下一轮**，已发现工具会保留
+开启 **Tool Search** 后，Agent 会加载系统中全部已启用工具（含 MCP / 技能声明工具），但根据**工具条数自动选择模式**
 
 此外，执行器内置**轻量循环检测**（参考 OpenClaw `loop-detection` 思路）：连续相同参数调用、`tool_search` 短时内过多、两工具 ping-pong 交替等模式会触发拦截，向模型返回 `[loop_guard]` 提示，减少无效重复工具调用。
 
@@ -75,14 +69,16 @@ aiclaw version    # 查看当前版本
 
 支持将 Agent 接入多种消息渠道，实现多平台自动回复：
 
-| 渠道     | 类型标识   | 接入方式         | 说明                                             |
-| -------- | ---------- | ---------------- | ------------------------------------------------ |
-| 企业微信 | `wecom`    | WebSocket 长连接 | 智能机器人，配置 Bot ID + Secret，服务端自动建连 |
-| 微信     | `wechat`   | iLink 长轮询     | 微信个人号，Web 端扫码登录后自动启动消息监听     |
-| 飞书     | `feishu`   | Webhook          | 配置 App ID / App Secret / Verification Token    |
-| 钉钉     | `dingtalk` | Webhook          | 配置 Webhook URL 到钉钉机器人                    |
-| WhatsApp | `whatsapp` | Webhook          | Meta Cloud API，配置 Verify Token                |
-| Telegram | `telegram` | Webhook          | BotFather Token，自动 setWebhook                 |
+
+| 渠道       | 类型标识       | 接入方式          | 说明                                          |
+| -------- | ---------- | ------------- | ------------------------------------------- |
+| 企业微信     | `wecom`    | WebSocket 长连接 | 智能机器人，配置 Bot ID + Secret，服务端自动建连            |
+| 微信       | `wechat`   | iLink 长轮询     | 微信个人号，Web 端扫码登录后自动启动消息监听                    |
+| 飞书       | `feishu`   | Webhook       | 配置 App ID / App Secret / Verification Token |
+| 钉钉       | `dingtalk` | Webhook       | 配置 Webhook URL 到钉钉机器人                       |
+| WhatsApp | `whatsapp` | Webhook       | Meta Cloud API，配置 Verify Token              |
+| Telegram | `telegram` | Webhook       | BotFather Token，自动 setWebhook               |
+
 
 渠道管理页面支持一键启用/禁用、查看会话记录和消息明细。
 
@@ -90,22 +86,24 @@ aiclaw version    # 查看当前版本
 
 15 个内置工具，覆盖文件操作、命令执行、网页交互、桌面自动化和任务调度：
 
-| 工具               | 说明                                                                 |
-| ------------------ | -------------------------------------------------------------------- |
-| `read`             | 读取文件内容，支持按行范围读取                                       |
-| `write`            | 创建或覆盖文件，自动创建父目录                                       |
-| `edit`             | 精确编辑文件（查找并替换）                                           |
-| `grep`             | 按正则表达式搜索文件内容                                             |
-| `find`             | 按 glob 模式查找文件                                                 |
-| `ls`               | 列出目录内容                                                         |
+
+| 工具                 | 说明                                                 |
+| ------------------ | -------------------------------------------------- |
+| `read`             | 读取文件内容，支持按行范围读取                                    |
+| `write`            | 创建或覆盖文件，自动创建父目录                                    |
+| `edit`             | 精确编辑文件（查找并替换）                                      |
+| `grep`             | 按正则表达式搜索文件内容                                       |
+| `find`             | 按 glob 模式查找文件                                      |
+| `ls`               | 列出目录内容                                             |
 | `exec`             | 运行 Shell 命令（无 PTY），支持 shell 回退、`working_dir` 与超时控制 |
-| `process`          | 管理后台命令会话（启动、列出、读取输出、终止）                       |
-| `web_fetch`        | 抓取 URL 并提取可读内容，自动回退浏览器渲染                          |
-| `browser`          | 浏览器自动化：33 种操作（导航、截图、快照、交互、监控、仿真等）      |
-| `canvas`           | 渲染 HTML/CSS/JS 画布，执行 JS 表达式，截取快照                      |
-| `cron`             | 管理定时任务与唤醒事件（提醒）                                       |
-| `code_interpreter` | 代码解释器：Python/JavaScript/Shell 沙箱执行                         |
-| `current_time`     | 获取当前系统时间                                                     |
+| `process`          | 管理后台命令会话（启动、列出、读取输出、终止）                            |
+| `web_fetch`        | 抓取 URL 并提取可读内容，自动回退浏览器渲染                           |
+| `browser`          | 浏览器自动化：33 种操作（导航、截图、快照、交互、监控、仿真等）                  |
+| `canvas`           | 渲染 HTML/CSS/JS 画布，执行 JS 表达式，截取快照                   |
+| `cron`             | 管理定时任务与唤醒事件（提醒）                                    |
+| `code_interpreter` | 代码解释器：Python/JavaScript/Shell 沙箱执行                 |
+| `current_time`     | 获取当前系统时间                                           |
+
 
 - 支持自定义 HTTP 工具和命令工具（通过 Web UI 或 API 创建）
 - MCP 协议客户端，支持接入 MCP 远程工具服务
@@ -182,14 +180,16 @@ aiclaw version    # 查看当前版本
 
 ## 技术栈
 
-| 层级    | 技术                                               |
-| ------- | -------------------------------------------------- |
-| 后端    | Go 1.25、net/http、logrus                          |
-| AI 编排 | Function Calling（openai-go SDK）                  |
-| ORM     | GORM（MySQL / PostgreSQL / SQLite）                |
-| 认证    | Web 访问令牌（Bearer）、Agent Token（ag- 前缀）    |
+
+| 层级    | 技术                                             |
+| ----- | ---------------------------------------------- |
+| 后端    | Go 1.25、net/http、logrus                        |
+| AI 编排 | Function Calling（openai-go SDK）                |
+| ORM   | GORM（MySQL / PostgreSQL / SQLite）              |
+| 认证    | Web 访问令牌（Bearer）、Agent Token（ag- 前缀）           |
 | 前端    | Vue 3、TypeScript、Element Plus、Pinia、Vue Router |
-| 构建    | Go embed、Vite                                     |
+| 构建    | Go embed、Vite                                  |
+
 
 ## 从源码构建
 
@@ -510,3 +510,4 @@ docker run -d \
   -v ~/.aiclaw:/root/.aiclaw \
   aiclaw:latest
 ```
+
