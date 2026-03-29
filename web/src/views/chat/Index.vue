@@ -374,6 +374,68 @@ import { computed, onMounted, nextTick, reactive } from 'vue'
 import { agentApi, type Agent } from '../../api/agent'
 import { chatApi, streamChat, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Marked } from 'marked'
+import hljs from 'highlight.js/lib/core'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import python from 'highlight.js/lib/languages/python'
+import bash from 'highlight.js/lib/languages/bash'
+import json from 'highlight.js/lib/languages/json'
+import css from 'highlight.js/lib/languages/css'
+import xml from 'highlight.js/lib/languages/xml'
+import sql from 'highlight.js/lib/languages/sql'
+import go from 'highlight.js/lib/languages/go'
+import yaml from 'highlight.js/lib/languages/yaml'
+import markdown from 'highlight.js/lib/languages/markdown'
+import diff from 'highlight.js/lib/languages/diff'
+
+hljs.registerLanguage('javascript', javascript)
+hljs.registerLanguage('js', javascript)
+hljs.registerLanguage('typescript', typescript)
+hljs.registerLanguage('ts', typescript)
+hljs.registerLanguage('python', python)
+hljs.registerLanguage('py', python)
+hljs.registerLanguage('bash', bash)
+hljs.registerLanguage('sh', bash)
+hljs.registerLanguage('shell', bash)
+hljs.registerLanguage('json', json)
+hljs.registerLanguage('css', css)
+hljs.registerLanguage('html', xml)
+hljs.registerLanguage('xml', xml)
+hljs.registerLanguage('sql', sql)
+hljs.registerLanguage('go', go)
+hljs.registerLanguage('yaml', yaml)
+hljs.registerLanguage('yml', yaml)
+hljs.registerLanguage('markdown', markdown)
+hljs.registerLanguage('md', markdown)
+hljs.registerLanguage('diff', diff)
+
+const md = new Marked({
+  breaks: true,
+  gfm: true,
+  renderer: {
+    code({ text, lang }: { text: string; lang?: string }) {
+      const language = lang && hljs.getLanguage(lang) ? lang : ''
+      const highlighted = language
+        ? hljs.highlight(text, { language }).value
+        : escapeHtml(text)
+      const langLabel = lang || 'text'
+      return `<div class="code-block"><div class="code-header"><span class="code-lang">${langLabel}</span><button class="code-copy" onclick="navigator.clipboard.writeText(this.closest('.code-block').querySelector('code').textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button></div><pre><code class="hljs${language ? ' language-' + language : ''}">${highlighted}</code></pre></div>`
+    },
+    codespan({ text }: { text: string }) {
+      return `<code class="inline-code">${text}</code>`
+    },
+    image({ href, title, text }: { href: string; title?: string | null; text?: string }) {
+      const alt = text ? ` alt="${text}"` : ''
+      const t = title ? ` title="${title}"` : ''
+      return `<img src="${href}"${alt}${t} class="md-img" />`
+    },
+  },
+})
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
 
 interface UploadedFile {
   uuid: string
@@ -691,14 +753,9 @@ function retryMessage(assistantIdx: number) {
 
 function formatMessage(text: string): string {
   let s = text
-  // 移除 LLM 输出的无效图片标签（非 /public/files/ 开头的 src）
   s = s.replace(/<img\s+[^>]*src\s*=\s*["'](?!\/public\/files\/)[^"']*["'][^>]*\/?>/gi, '')
-  // 移除 markdown 图片语法中非本站链接的图片
   s = s.replace(/!\[[^\]]*\]\((?!\/public\/files\/)[^)]*\)/g, '')
-  // 渲染本站 markdown 图片为 img 标签
-  s = s.replace(/!\[([^\]]*)\]\((\/public\/files\/[^)]+)\)/g, '<img src="$2" alt="$1" class="attach-img" />')
-  s = s.replace(/\n/g, '<br/>')
-  return s
+  return md.parse(s) as string
 }
 
 function stepTypeLabel(t: string) {
@@ -1123,6 +1180,183 @@ function truncateText(text: string, maxLen: number): string {
   border-radius: 18px 18px 6px 18px;
   box-shadow: 0 8px 24px rgba(37, 99, 235, 0.35);
 }
+
+/* ── Markdown 渲染样式 ── */
+.msg-bubble :deep(p) { margin: 0 0 0.6em; }
+.msg-bubble :deep(p:last-child) { margin-bottom: 0; }
+.msg-bubble :deep(h1),
+.msg-bubble :deep(h2),
+.msg-bubble :deep(h3),
+.msg-bubble :deep(h4),
+.msg-bubble :deep(h5),
+.msg-bubble :deep(h6) {
+  margin: 1em 0 0.4em;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #0f172a;
+}
+.msg-bubble :deep(h1) { font-size: 1.4em; }
+.msg-bubble :deep(h2) { font-size: 1.25em; }
+.msg-bubble :deep(h3) { font-size: 1.1em; }
+.msg-bubble :deep(h1:first-child),
+.msg-bubble :deep(h2:first-child),
+.msg-bubble :deep(h3:first-child) { margin-top: 0; }
+
+.msg-bubble :deep(ul),
+.msg-bubble :deep(ol) {
+  margin: 0.4em 0;
+  padding-left: 1.6em;
+}
+.msg-bubble :deep(li) { margin: 0.2em 0; }
+.msg-bubble :deep(li > p) { margin: 0; }
+
+.msg-bubble :deep(blockquote) {
+  margin: 0.6em 0;
+  padding: 0.4em 0.8em;
+  border-left: 3px solid #94a3b8;
+  color: #64748b;
+  background: rgba(148, 163, 184, 0.08);
+  border-radius: 0 6px 6px 0;
+}
+.msg-bubble :deep(blockquote p) { margin: 0; }
+
+.msg-bubble :deep(hr) {
+  border: none;
+  border-top: 1px solid #e2e8f0;
+  margin: 0.8em 0;
+}
+
+.msg-bubble :deep(a) {
+  color: #2563eb;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.msg-row.user .msg-bubble :deep(a) { color: #bfdbfe; }
+
+.msg-bubble :deep(.inline-code) {
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.88em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+}
+.msg-row.user .msg-bubble :deep(.inline-code) {
+  background: rgba(255, 255, 255, 0.2);
+  color: #e0e7ff;
+}
+
+.msg-bubble :deep(.code-block) {
+  margin: 0.6em -4px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  background: #1e293b;
+}
+.msg-bubble :deep(.code-header) {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 12px;
+  background: #334155;
+  font-size: 11px;
+}
+.msg-bubble :deep(.code-lang) {
+  color: #94a3b8;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.msg-bubble :deep(.code-copy) {
+  background: none;
+  border: 1px solid #475569;
+  color: #94a3b8;
+  font-size: 11px;
+  padding: 2px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.msg-bubble :deep(.code-copy:hover) {
+  border-color: #0ea5e9;
+  color: #0ea5e9;
+}
+.msg-bubble :deep(.code-block pre) {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.msg-bubble :deep(.code-block code) {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  color: #e2e8f0;
+  background: none;
+}
+
+.msg-bubble :deep(table) {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  width: 100%;
+  font-size: 0.9em;
+}
+.msg-bubble :deep(th),
+.msg-bubble :deep(td) {
+  border: 1px solid #e2e8f0;
+  padding: 6px 10px;
+  text-align: left;
+}
+.msg-bubble :deep(th) {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #334155;
+}
+.msg-bubble :deep(tr:nth-child(even)) {
+  background: #f8fafc;
+}
+
+.msg-bubble :deep(strong) { font-weight: 700; }
+.msg-bubble :deep(em) { font-style: italic; }
+.msg-bubble :deep(del) { text-decoration: line-through; color: #94a3b8; }
+
+.msg-bubble :deep(img) {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 0.4em 0;
+}
+.msg-bubble :deep(img.md-img),
+.msg-bubble :deep(img.attach-img) {
+  max-width: 320px;
+  max-height: 240px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.msg-bubble :deep(img.md-img:hover),
+.msg-bubble :deep(img.attach-img:hover) {
+  transform: scale(1.02);
+}
+
+/* highlight.js 语法色 */
+.msg-bubble :deep(.hljs-keyword) { color: #c084fc; }
+.msg-bubble :deep(.hljs-string) { color: #86efac; }
+.msg-bubble :deep(.hljs-number) { color: #fbbf24; }
+.msg-bubble :deep(.hljs-comment) { color: #64748b; font-style: italic; }
+.msg-bubble :deep(.hljs-function) { color: #60a5fa; }
+.msg-bubble :deep(.hljs-title) { color: #60a5fa; }
+.msg-bubble :deep(.hljs-params) { color: #e2e8f0; }
+.msg-bubble :deep(.hljs-built_in) { color: #38bdf8; }
+.msg-bubble :deep(.hljs-literal) { color: #fb923c; }
+.msg-bubble :deep(.hljs-type) { color: #34d399; }
+.msg-bubble :deep(.hljs-attr) { color: #38bdf8; }
+.msg-bubble :deep(.hljs-variable) { color: #f472b6; }
+.msg-bubble :deep(.hljs-meta) { color: #94a3b8; }
+.msg-bubble :deep(.hljs-punctuation) { color: #94a3b8; }
+.msg-bubble :deep(.hljs-addition) { color: #86efac; background: rgba(134,239,172,0.1); }
+.msg-bubble :deep(.hljs-deletion) { color: #fca5a5; background: rgba(252,165,165,0.1); }
+.msg-bubble :deep(.hljs-selector-class) { color: #38bdf8; }
+.msg-bubble :deep(.hljs-selector-tag) { color: #c084fc; }
+.msg-bubble :deep(.hljs-property) { color: #38bdf8; }
 
 .msg-actions {
   display: flex;
