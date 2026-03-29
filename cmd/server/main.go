@@ -38,5 +38,5 @@ func main() {
 
 	configFile := flag.String("config", "", "config file path (default: ~/.aiclaw/config.yaml)")
 	flag.Parse()
-	bootstrap.Run(bootstrap.Options{ConfigFlag: *configFile})
+	bootstrap.Run(bootstrap.Options{ConfigFlag: *configFile, Version: version})
 }

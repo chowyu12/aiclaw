@@ -103,7 +103,7 @@
           </div>
           <template v-if="!isCollapse">
             <div class="sidebar-user-line">
-              <span class="username">Web 已登录</span>
+              <span class="username">{{ appVersion ? 'v' + appVersion : 'AiClaw' }}</span>
               <el-button text type="danger" size="small" @click="handleLogout"
                 >退出</el-button
               >
@@ -133,17 +133,28 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useThemeStore } from "@/stores/theme";
 import AiclawLogo from "@/components/brand/AiclawLogo.vue";
+import request from "@/api/request";
 
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
 const isCollapse = ref(false);
+const appVersion = ref("");
+
+onMounted(async () => {
+  try {
+    const res: any = await request.get("/version");
+    appVersion.value = res.data?.version || "";
+  } catch {
+    appVersion.value = "";
+  }
+});
 
 const activeMenu = computed(() => {
   const p = route.path;

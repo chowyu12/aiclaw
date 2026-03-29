@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net/http"
@@ -27,6 +28,7 @@ import (
 // Options 命令行与启动选项（由 cmd/server 传入）。
 type Options struct {
 	ConfigFlag string // -config，空则走默认路径
+	Version    string // 构建时注入的版本号
 }
 
 // Run 阻塞运行直至收到 SIGINT/SIGTERM；正常退出前关闭 HTTP 与共享浏览器资源。
@@ -114,6 +116,7 @@ func Run(opts Options) {
 		ChannelMgr:         channelMgr,
 		DatabaseConfigured: !cfg.NeedsDatabaseSetup(),
 		Upload:             cfg.Upload,
+		Version:            cmp.Or(opts.Version, "dev"),
 	})
 	server.MountEmbeddedFrontend(mux)
 
