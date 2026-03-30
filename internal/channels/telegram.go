@@ -210,6 +210,6 @@ func telegramDownloadFile(botToken, fileID string) string {
 		os.Remove(tmpFile.Name())
 		return ""
 	}
-	log.WithFields(log.Fields{"file_id": fileID, "path": tmpFile.Name(), "size": len(data)}).Info("[telegram] image downloaded")
+	log.WithFields(log.Fields{"file_id": fileID, "path": tmpFile.Name(), "size": len(data)}).Debug("[telegram] image downloaded")
 	return tmpFile.Name()
 }

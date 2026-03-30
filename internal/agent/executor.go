@@ -109,7 +109,7 @@ func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*Execute
 	defer ec.closeMCP()
 
 	ctx = workspace.WithWorkdirScope(ctx, ec.ag.UUID)
-	ec.l.WithField("user", req.UserID).Info("[Execute] >> start")
+	ec.l.WithField("user", req.UserID).Debug("[Execute] >> start")
 
 	return e.run(ctx, ec, blockingCaller(ec.llmProv), false)
 }
@@ -122,7 +122,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 	defer ec.closeMCP()
 
 	ctx = workspace.WithWorkdirScope(ctx, ec.ag.UUID)
-	ec.l.WithField("user", req.UserID).Info("[Execute] >> start (stream)")
+	ec.l.WithField("user", req.UserID).Debug("[Execute] >> start (stream)")
 
 	ec.tracker.SetOnStep(func(step model.ExecutionStep) {
 		_ = chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Step: &step})
@@ -280,7 +280,7 @@ func (e *Executor) connectMCPServers(ctx context.Context, servers []model.MCPSer
 			tracker:   tracker,
 		})
 	}
-	log.WithField("count", len(mcpTools)).Info("[MCP] tools loaded")
+	log.WithField("count", len(mcpTools)).Debug("[MCP] tools loaded")
 	return mgr, mcpTools
 }
 
@@ -367,7 +367,7 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 		}
 	}
 
-	log.WithField("count", len(agentTools)).Info("[Execute]    tools loaded (builtins always included)")
+	log.WithField("count", len(agentTools)).Debug("[Execute]    tools loaded (builtins always included)")
 
 	toolSkillMap := make(map[string]string)
 	return agentTools, toolSkillMap, nil

@@ -100,6 +100,7 @@ func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolRes
 
 	data, err := os.ReadFile(fr.Path)
 	if err != nil {
+		ec.l.WithError(err).WithField("path", fr.Path).Warn("[Tool] read tool file for persist failed")
 		return nil
 	}
 

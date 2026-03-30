@@ -67,6 +67,6 @@ func (whatsAppAdapter) Reply(ctx context.Context, ch ChannelConfig, in *Inbound,
 	_ = ctx
 	_ = in
 	_ = text
-	log.WithField("channel_uuid", ch.UUID).Info("[whatsapp] Reply 需调用 Graph API messages，请在后端扩展")
+	log.WithField("channel_uuid", ch.UUID).Warn("[whatsapp] Reply 未实现：需调用 Graph API messages，回复已丢弃")
 	return nil
 }

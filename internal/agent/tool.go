@@ -73,7 +73,8 @@ func (r *ToolRegistry) buildTool(td model.Tool) Tool {
 		return &dynamicTool{toolName: td.Name, toolDesc: td.Description, handler: handler}
 	case model.HandlerHTTP:
 		var cfg model.HTTPHandlerConfig
-		if json.Unmarshal(td.HandlerConfig, &cfg) != nil {
+		if err := json.Unmarshal(td.HandlerConfig, &cfg); err != nil {
+			log.WithError(err).WithField("tool", td.Name).Warn("[Tool] invalid http handler config, skipping")
 			return nil
 		}
 		return &dynamicTool{
@@ -83,7 +84,8 @@ func (r *ToolRegistry) buildTool(td model.Tool) Tool {
 		}
 	case model.HandlerCommand:
 		var cfg model.CommandHandlerConfig
-		if json.Unmarshal(td.HandlerConfig, &cfg) != nil {
+		if err := json.Unmarshal(td.HandlerConfig, &cfg); err != nil {
+			log.WithError(err).WithField("tool", td.Name).Warn("[Tool] invalid command handler config, skipping")
 			return nil
 		}
 		return &dynamicTool{

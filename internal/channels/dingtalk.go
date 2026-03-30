@@ -72,6 +72,6 @@ func (dingTalkAdapter) Reply(ctx context.Context, ch ChannelConfig, in *Inbound,
 	_ = ctx
 	_ = in
 	_ = text
-	log.WithField("channel_uuid", ch.UUID).Info("[dingtalk] Reply 需按场景调用钉钉开放接口（机器人群 / 单聊），请在后端扩展")
+	log.WithField("channel_uuid", ch.UUID).Warn("[dingtalk] Reply 未实现：需按场景调用钉钉开放接口（机器人群 / 单聊），回复已丢弃")
 	return nil
 }

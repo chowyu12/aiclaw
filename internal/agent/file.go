@@ -96,7 +96,7 @@ func (e *Executor) loadRemoteFile(ctx context.Context, rawURL string, chatFileTy
 		f.TextContent = text
 	}
 
-	l.WithFields(log.Fields{"filename": filename, "type": string(fileType), "size": len(data)}).Info("[Execute] remote file loaded")
+	l.WithFields(log.Fields{"filename": filename, "type": string(fileType), "size": len(data)}).Debug("[Execute] remote file loaded")
 	return f
 }
 
@@ -189,7 +189,7 @@ func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatF
 		for _, f := range files {
 			names = append(names, fmt.Sprintf("%s(%s)", f.Filename, f.FileType))
 		}
-		log.WithField("files", names).Info("[Execute] files loaded for context")
+		log.WithField("files", names).Debug("[Execute] files loaded for context")
 	}
 	return files
 }
@@ -207,7 +207,7 @@ func loadLocalMediaFile(absPath string, chatFileType model.ChatFileType) *model.
 	filename := filepath.Base(absPath)
 	fileType := chatFileTypeToFileType(chatFileType, ct, filename)
 
-	log.WithFields(log.Fields{"path": absPath, "type": string(fileType), "size": info.Size()}).Info("[Execute] local media file loaded")
+	log.WithFields(log.Fields{"path": absPath, "type": string(fileType), "size": info.Size()}).Debug("[Execute] local media file loaded")
 	return &model.File{
 		UUID:        absPath,
 		Filename:    filename,

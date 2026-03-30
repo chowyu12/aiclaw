@@ -206,7 +206,7 @@ func feishuDownloadImage(imageKey, appID, appSecret string) string {
 		os.Remove(tmpFile.Name())
 		return ""
 	}
-	log.WithFields(log.Fields{"image_key": imageKey, "path": tmpFile.Name(), "size": n}).Info("[feishu] image downloaded")
+	log.WithFields(log.Fields{"image_key": imageKey, "path": tmpFile.Name(), "size": n}).Debug("[feishu] image downloaded")
 	return tmpFile.Name()
 }
 
