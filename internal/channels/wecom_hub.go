@@ -9,6 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/pkg/wecomaibot"
 )
@@ -158,11 +159,6 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 		return
 	}
 
-	cfg := []byte(ch.Config)
-	corpID := cfgString(cfg, "corp_id")
-	corpSecret := cfgString(cfg, "corp_secret")
-	publicURL := strings.TrimRight(cfgString(cfg, "public_url"), "/")
-
 	var files []model.ChatFile
 	for _, u := range nm.ImageURLs {
 		if u = strings.TrimSpace(u); u != "" {
@@ -210,38 +206,21 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 				log.WithError(err).Error("[wecom] ReplyText failed")
 				return err
 			}
-			log.WithFields(log.Fields{
-				"image_count": len(images),
-				"has_corp":    corpID != "" && corpSecret != "",
-				"has_puburl":  publicURL != "",
-			}).Info("[wecom] ReplyWith images")
+			publicURL := config.PublicURL()
 			for _, img := range images {
-				log.WithFields(log.Fields{
-					"file":    img.Filename,
-					"uuid":    img.UUID,
-					"storage": img.StoragePath,
-				}).Debug("[wecom] image candidate")
-				if corpID != "" && corpSecret != "" {
-					log.WithField("file", img.Filename).Info("[wecom] sending image via media_id")
-					if err := client.ReplyImageByMediaID(ctx, nm.Frame, corpID, corpSecret, img.StoragePath, img.Filename); err != nil {
-						log.WithError(err).WithField("file", img.Filename).Error("[wecom] send image via media_id failed")
-					}
+				if publicURL == "" || img.UUID == "" {
+					log.WithFields(log.Fields{
+						"file":       img.Filename,
+						"uuid":       img.UUID,
+						"has_puburl": publicURL != "",
+					}).Warn("[wecom] image skipped: server.public_url not configured or file has no uuid")
 					continue
 				}
-				if publicURL != "" && img.UUID != "" {
-					imgURL := publicURL + "/public/files/" + img.UUID
-					log.WithFields(log.Fields{"file": img.Filename, "url": imgURL}).Info("[wecom] sending image as news card")
-					if err := client.ReplyNewsCard(nm.Frame, img.Filename, imgURL); err != nil {
-						log.WithError(err).WithField("file", img.Filename).Error("[wecom] send news card failed")
-					}
-					continue
+				imgURL := publicURL + "/public/files/" + img.UUID
+				log.WithFields(log.Fields{"file": img.Filename, "url": imgURL}).Info("[wecom] sending image as news card")
+				if err := client.ReplyNewsCard(nm.Frame, img.Filename, imgURL); err != nil {
+					log.WithError(err).WithField("file", img.Filename).Error("[wecom] send news card failed")
 				}
-				log.WithFields(log.Fields{
-					"file":       img.Filename,
-					"uuid":       img.UUID,
-					"has_corp":   corpID != "" && corpSecret != "",
-					"has_puburl": publicURL != "",
-				}).Warn("[wecom] image skipped: no corp credentials and no public_url/uuid configured")
 			}
 			return nil
 		},

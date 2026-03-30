@@ -89,8 +89,9 @@ type UploadConfig struct {
 }
 
 type ServerConfig struct {
-	Host string `yaml:"host,omitempty"`
-	Port int    `yaml:"port,omitempty"`
+	Host      string `yaml:"host,omitempty"`
+	Port      int    `yaml:"port,omitempty"`
+	PublicURL string `yaml:"public_url,omitempty"`
 }
 
 type DatabaseConfig struct {

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"sync"
 )
 
@@ -29,6 +30,16 @@ func SaveRuntime() error {
 		return nil
 	}
 	return c.Save(path)
+}
+
+// PublicURL 返回全局服务公网地址（去除末尾斜线），未配置时返回空字符串。
+func PublicURL() string {
+	RT.Mu.RLock()
+	defer RT.Mu.RUnlock()
+	if RT.Cfg == nil {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(RT.Cfg.Server.PublicURL), "/")
 }
 
 // ReplaceRuntimeFromDisk 重新读取磁盘并合并进当前 Cfg（保持 Cfg 指针不变）。
