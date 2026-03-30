@@ -156,37 +156,84 @@ func parseSkillMDOnly(dirPath string) (*SkillInfo, error) {
 }
 
 // parseFrontmatter 解析 YAML frontmatter（简易实现，不依赖 yaml 库）。
+// 支持单行 key: value、多行折叠 (>)、多行保留换行 (|)、以及隐式多行（值为空 + 缩进续行）。
 func parseFrontmatter(content string) (map[string]string, string) {
-	result := make(map[string]string)
+	fm := make(map[string]string)
 	if !strings.HasPrefix(content, "---") {
-		return result, content
+		return fm, content
 	}
 
 	rest := content[3:]
 	endIdx := strings.Index(rest, "\n---")
 	if endIdx < 0 {
-		return result, content
+		return fm, content
 	}
 
 	fmBlock := rest[:endIdx]
 	body := rest[endIdx+4:]
 
-	for line := range strings.SplitSeq(fmBlock, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	lines := strings.Split(fmBlock, "\n")
+	var curKey string
+	var curLines []string
+	// "fold" = > (folded), "literal" = | (literal), "plain" = implicit multi-line
+	curMode := "plain"
+
+	flush := func() {
+		if curKey == "" {
+			return
+		}
+		var val string
+		switch curMode {
+		case "literal":
+			val = strings.Join(curLines, "\n")
+		default:
+			val = strings.Join(curLines, " ")
+		}
+		fm[curKey] = strings.TrimSpace(val)
+		curKey = ""
+		curLines = nil
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			if curKey != "" && curMode == "literal" {
+				curLines = append(curLines, "")
+			}
 			continue
 		}
-		key, val, found := strings.Cut(line, ":")
+
+		isIndented := len(line) > 0 && (line[0] == ' ' || line[0] == '\t')
+		if isIndented && curKey != "" {
+			curLines = append(curLines, trimmed)
+			continue
+		}
+
+		flush()
+
+		key, val, found := strings.Cut(trimmed, ":")
 		if !found {
 			continue
 		}
-		key = strings.TrimSpace(key)
+		curKey = strings.TrimSpace(key)
 		val = strings.TrimSpace(val)
-		val = strings.Trim(val, `"'`)
-		result[key] = val
-	}
 
-	return result, body
+		switch val {
+		case ">", ">-":
+			curMode = "fold"
+		case "|", "|-":
+			curMode = "literal"
+		case "":
+			curMode = "plain"
+		default:
+			curMode = "plain"
+			curLines = []string{strings.Trim(val, `"'`)}
+			flush()
+		}
+	}
+	flush()
+
+	return fm, body
 }
 
 func ScanAll(skillsRoot string) ([]SkillInfo, error) {
