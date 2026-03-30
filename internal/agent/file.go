@@ -246,7 +246,11 @@ func (e *Executor) buildToolResponseParts(ctx context.Context, toolCallID, toolN
 	l.WithFields(log.Fields{"tool": toolName, "path": fr.Path, "mime": fr.MimeType, "size": len(data)}).Info("[Tool] << attaching file to response")
 
 	if strings.HasPrefix(fr.MimeType, "image/") {
-		imgPart := imagePartFromData(fr.Path, fr.MimeType, data)
+		imgPart, err := imagePartFromData(fr.Path, fr.MimeType, data)
+		if err != nil {
+			l.WithError(err).WithField("path", fr.Path).Warn("[Tool] << image format not supported, using text fallback")
+			return toolMsg(fr.Description), nil
+		}
 		return toolMsg(fr.Description), []openai.ChatMessagePart{imgPart}
 	}
 
@@ -258,20 +262,55 @@ func (e *Executor) buildToolResponseParts(ctx context.Context, toolCallID, toolN
 	return toolMsg(fmt.Sprintf("%s\n\n%s", fr.Description, content)), nil
 }
 
-func imagePartFromData(name, mimeType string, data []byte) openai.ChatMessagePart {
-	if !strings.HasPrefix(mimeType, "image/") {
-		if detected := http.DetectContentType(data); strings.HasPrefix(detected, "image/") {
-			mimeType = detected
-		} else {
-			mimeType = "image/png"
-		}
+// supportedImageMIMEs lists MIME types accepted by mainstream multimodal LLM APIs.
+var supportedImageMIMEs = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/webp": true,
+	"image/gif":  true,
+}
+
+// detectImageMIME returns the actual image MIME type by inspecting the file's
+// magic bytes first, then falling back to the declared mimeType and finally
+// the file extension. It returns ("", false) if the format is not supported.
+func detectImageMIME(name, declared string, data []byte) (string, bool) {
+	// Use Go's content sniffer (reads up to 512 bytes of magic bytes).
+	sniffed := http.DetectContentType(data)
+	if strings.HasPrefix(sniffed, "image/") && supportedImageMIMEs[sniffed] {
+		return sniffed, true
 	}
-	dataURL := "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
-	log.WithFields(log.Fields{"file": filepath.Base(name), "mime": mimeType, "size": len(data)}).Debug("[Execute] attaching image via base64")
+
+	// Try the declared MIME type if it is already a supported image type.
+	if supportedImageMIMEs[declared] {
+		return declared, true
+	}
+
+	// Last resort: infer from the file extension.
+	extMIME := map[string]string{
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+		".webp": "image/webp",
+		".gif":  "image/gif",
+	}
+	if mt, ok := extMIME[strings.ToLower(filepath.Ext(name))]; ok {
+		return mt, true
+	}
+
+	return "", false
+}
+
+func imagePartFromData(name, mimeType string, data []byte) (openai.ChatMessagePart, error) {
+	actual, ok := detectImageMIME(name, mimeType, data)
+	if !ok {
+		return openai.ChatMessagePart{}, fmt.Errorf("unsupported image format (file=%s, declared=%s)", filepath.Base(name), mimeType)
+	}
+	dataURL := "data:" + actual + ";base64," + base64.StdEncoding.EncodeToString(data)
+	log.WithFields(log.Fields{"file": filepath.Base(name), "mime": actual, "size": len(data)}).Debug("[Execute] attaching image via base64")
 	return openai.ChatMessagePart{
 		Type:     openai.ChatMessagePartTypeImageURL,
 		ImageURL: &openai.ChatMessageImageURL{URL: dataURL},
-	}
+	}, nil
 }
 
 func imagePartForFile(f *model.File) (openai.ChatMessagePart, error) {
@@ -279,5 +318,5 @@ func imagePartForFile(f *model.File) (openai.ChatMessagePart, error) {
 	if err != nil {
 		return openai.ChatMessagePart{}, err
 	}
-	return imagePartFromData(f.Filename, f.ContentType, data), nil
+	return imagePartFromData(f.Filename, f.ContentType, data)
 }
