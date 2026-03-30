@@ -2,14 +2,9 @@ package channels
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -163,7 +158,7 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 
 	var files []model.ChatFile
 	for _, img := range msg.Images {
-		if isHTTPURL(img.URL) {
+		if strings.HasPrefix(img.URL, "http://") || strings.HasPrefix(img.URL, "https://") {
 			files = append(files, model.ChatFile{
 				Type:           model.ChatFileImage,
 				TransferMethod: model.TransferRemoteURL,
@@ -184,13 +179,18 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 		if encParam == "" {
 			continue
 		}
-		if localPath := wechatDownloadCDNImage(encParam, aesKey); localPath != "" {
-			files = append(files, model.ChatFile{
-				Type:           model.ChatFileImage,
-				TransferMethod: model.TransferRemoteURL,
-				URL:            localPath,
-			})
+
+		localPath, err := wechatlink.SaveToTemp(context.Background(), encParam, aesKey)
+		if err != nil {
+			log.WithError(err).WithField("channel_id", ch.ID).Warn("[wechat] CDN image download failed")
+			continue
 		}
+		log.WithFields(log.Fields{"channel_id": ch.ID, "path": localPath}).Info("[wechat] CDN image saved")
+		files = append(files, model.ChatFile{
+			Type:           model.ChatFileImage,
+			TransferMethod: model.TransferRemoteURL,
+			URL:            localPath,
+		})
 	}
 
 	text := msg.Text
@@ -227,40 +227,4 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 		},
 	}
 	bridge.HandleInboundAsync(context.Background(), ch, in, noopDrv)
-}
-
-func isHTTPURL(s string) bool {
-	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
-}
-
-// wechatDownloadCDNImage 从微信 CDN 下载图片并保存到临时文件，返回本地路径。
-// aesKey 为空时跳过解密（直接使用原始响应数据）。
-func wechatDownloadCDNImage(encParam, aesKey string) string {
-	data, err := wechatlink.DownloadFromCDN(context.Background(), encParam, aesKey)
-	if err != nil {
-		log.WithError(err).Warn("[wechat] CDN image download failed")
-		return ""
-	}
-	ext := detectImageExtFromBytes(data)
-	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("wechat-img-%d%s", time.Now().UnixNano(), ext))
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
-		log.WithError(err).Warn("[wechat] save CDN image to temp failed")
-		return ""
-	}
-	log.WithFields(log.Fields{"path": tmpPath, "size": len(data)}).Info("[wechat] CDN image saved")
-	return tmpPath
-}
-
-func detectImageExtFromBytes(data []byte) string {
-	ct := http.DetectContentType(data)
-	switch {
-	case strings.HasPrefix(ct, "image/png"):
-		return ".png"
-	case strings.HasPrefix(ct, "image/gif"):
-		return ".gif"
-	case strings.HasPrefix(ct, "image/webp"):
-		return ".webp"
-	default:
-		return ".jpg"
-	}
 }

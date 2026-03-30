@@ -119,6 +119,7 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		_ = b.sendChannelReply(ctx, ad, cc, in, fallback, nil)
 		return
 	}
+	imageFiles := imageFilesFrom(res.ToolFiles)
 	log.WithFields(log.Fields{
 		"channel_id":        ch.ID,
 		"channel_type":      string(ch.ChannelType),
@@ -126,8 +127,10 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		"duration_ms":       time.Since(startAt).Milliseconds(),
 		"tokens_used":       res.TokensUsed,
 		"steps_count":       len(res.Steps),
+		"tool_files":        len(res.ToolFiles),
+		"image_files":       len(imageFiles),
 	}).Info("[Channel] executor << done")
-	if err := b.sendChannelReply(ctx, ad, cc, in, res.Content, imageFilesFrom(res.ToolFiles)); err != nil {
+	if err := b.sendChannelReply(ctx, ad, cc, in, res.Content, imageFiles); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"channel_id":        ch.ID,
 			"conversation_uuid": convUUID,

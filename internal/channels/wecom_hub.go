@@ -2,11 +2,7 @@ package channels
 
 import (
 	"context"
-	"crypto/md5"
-	"encoding/base64"
-	"encoding/hex"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -129,82 +125,8 @@ func (*wecomRuntimeDriver) connectClient(bridge *Bridge, ch *model.Channel, botI
 	chLive := &atomic.Pointer[model.Channel]{}
 	chLive.Store(ch)
 
-	dispatch := func(frame *wecomaibot.WsFrame, base *wecomaibot.BaseMessage, userText string, extra map[string]any) {
-		wecomDispatchInbound(bridge, chLive, client, frame, base, userText, extra)
-	}
-
-	client.OnMessageText(func(frame *wecomaibot.WsFrame) {
-		var msg wecomaibot.TextMessage
-		if err := wecomaibot.ParseMessageBody(frame, &msg); err != nil {
-			log.WithError(err).WithField("channel_id", ch.ID).Debug("[wecom] parse text message")
-			return
-		}
-		text := strings.TrimSpace(msg.Text.Content)
-		dispatch(frame, &msg.BaseMessage, text, nil)
-	})
-
-	client.OnMessageMixed(func(frame *wecomaibot.WsFrame) {
-		var msg wecomaibot.MixedMessage
-		if err := wecomaibot.ParseMessageBody(frame, &msg); err != nil {
-			log.WithError(err).WithField("channel_id", ch.ID).Debug("[wecom] parse mixed message")
-			return
-		}
-		text := wecomaibot.MixedToUserVisibleText(&msg)
-		extra := map[string]any{}
-		if urls := wecomaibot.CollectImageURLsFromMixed(&msg); len(urls) > 0 {
-			extra["image_urls"] = urls
-		}
-		dispatch(frame, &msg.BaseMessage, text, extra)
-	})
-
-	client.OnMessageImage(func(frame *wecomaibot.WsFrame) {
-		var msg wecomaibot.ImageMessage
-		if err := wecomaibot.ParseMessageBody(frame, &msg); err != nil {
-			log.WithError(err).WithField("channel_id", ch.ID).Debug("[wecom] parse image message")
-			return
-		}
-		text := wecomaibot.ImageToUserVisibleText(&msg)
-		extra := map[string]any{}
-		if u := strings.TrimSpace(msg.Image.URL); u != "" {
-			extra["image_urls"] = []string{u}
-		}
-		dispatch(frame, &msg.BaseMessage, text, extra)
-	})
-
-	client.OnMessageVoice(func(frame *wecomaibot.WsFrame) {
-		var msg wecomaibot.VoiceMessage
-		if err := wecomaibot.ParseMessageBody(frame, &msg); err != nil {
-			log.WithError(err).WithField("channel_id", ch.ID).Debug("[wecom] parse voice message")
-			return
-		}
-		text := strings.TrimSpace(msg.Voice.Content)
-		dispatch(frame, &msg.BaseMessage, text, nil)
-	})
-
-	client.OnMessageFile(func(frame *wecomaibot.WsFrame) {
-		var msg wecomaibot.FileMessage
-		if err := wecomaibot.ParseMessageBody(frame, &msg); err != nil {
-			log.WithError(err).WithField("channel_id", ch.ID).Debug("[wecom] parse file message")
-			return
-		}
-		extra := map[string]any{}
-		if u := strings.TrimSpace(msg.File.URL); u != "" {
-			extra["file_url"] = u
-		}
-		dispatch(frame, &msg.BaseMessage, "[文件] "+msg.File.URL, extra)
-	})
-
-	client.OnMessageVideo(func(frame *wecomaibot.WsFrame) {
-		var msg wecomaibot.VideoMessage
-		if err := wecomaibot.ParseMessageBody(frame, &msg); err != nil {
-			log.WithError(err).WithField("channel_id", ch.ID).Debug("[wecom] parse video message")
-			return
-		}
-		extra := map[string]any{}
-		if u := strings.TrimSpace(msg.Video.URL); u != "" {
-			extra["video_url"] = u
-		}
-		dispatch(frame, &msg.BaseMessage, "[视频] "+msg.Video.URL, extra)
+	client.OnNormalizedMessage(func(nm *wecomaibot.NormalizedMessage) {
+		wecomDispatchInbound(bridge, chLive, client, nm)
 	})
 
 	client.OnMessageStream(func(frame *wecomaibot.WsFrame) {
@@ -230,26 +152,29 @@ func (*wecomRuntimeDriver) connectClient(bridge *Bridge, ch *model.Channel, botI
 	return client, chLive
 }
 
-func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel], client *wecomaibot.WSClient, frame *wecomaibot.WsFrame, base *wecomaibot.BaseMessage, userText string, extra map[string]any) {
-	chCur := chLive.Load()
-	if chCur == nil || base == nil {
+func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel], client *wecomaibot.WSClient, nm *wecomaibot.NormalizedMessage) {
+	ch := chLive.Load()
+	if ch == nil || nm.Base == nil {
 		return
 	}
-	text := strings.TrimSpace(userText)
+
+	cfg := []byte(ch.Config)
+	corpID := cfgString(cfg, "corp_id")
+	corpSecret := cfgString(cfg, "corp_secret")
+	publicURL := strings.TrimRight(cfgString(cfg, "public_url"), "/")
 
 	var files []model.ChatFile
-	if urls, ok := extra["image_urls"].([]string); ok {
-		for _, u := range urls {
-			if u = strings.TrimSpace(u); u != "" {
-				files = append(files, model.ChatFile{
-					Type:           model.ChatFileImage,
-					TransferMethod: model.TransferRemoteURL,
-					URL:            u,
-				})
-			}
+	for _, u := range nm.ImageURLs {
+		if u = strings.TrimSpace(u); u != "" {
+			files = append(files, model.ChatFile{
+				Type:           model.ChatFileImage,
+				TransferMethod: model.TransferRemoteURL,
+				URL:            u,
+			})
 		}
 	}
 
+	text := nm.Text
 	if text == "" && len(files) == 0 {
 		return
 	}
@@ -257,49 +182,50 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 		text = "请描述这张图片"
 	}
 
-	c := strings.TrimSpace(base.ChatID)
-	u := strings.TrimSpace(base.From.UserID)
-	thread := c
-	if thread == "" {
-		thread = u
-	}
 	meta := map[string]any{
-		"msgid":   base.MsgID,
-		"msgtype": base.MsgType,
+		"msgid":   nm.Base.MsgID,
+		"msgtype": nm.Base.MsgType,
 	}
-	for k, v := range extra {
-		meta[k] = v
+	if nm.FileURL != "" {
+		meta["file_url"] = nm.FileURL
 	}
+	if nm.VideoURL != "" {
+		meta["video_url"] = nm.VideoURL
+	}
+	for _, u := range nm.ImageURLs {
+		if u != "" {
+			meta["image_urls"] = nm.ImageURLs
+			break
+		}
+	}
+
 	in := &Inbound{
-		ThreadKey: thread,
-		SenderID:  base.From.UserID,
+		ThreadKey: nm.ThreadKey,
+		SenderID:  nm.SenderID,
 		Text:      text,
 		Files:     files,
 		RawMeta:   meta,
 		ReplyWith: func(ctx context.Context, reply string, images []*model.File) error {
-			streamID := fmt.Sprintf("stream_%s", frame.Headers.ReqID)
-			var msgItems []wecomaibot.ReplyMsgItem
+			if err := client.ReplyText(nm.Frame, reply); err != nil {
+				log.WithError(err).Error("[wecom] ReplyText failed")
+				return err
+			}
 			for _, img := range images {
-				data, err := os.ReadFile(img.StoragePath)
-				if err != nil {
-					log.WithError(err).WithField("file", img.Filename).Warn("[wecom] read image for reply failed, skipping")
+				if corpID != "" && corpSecret != "" {
+					if err := client.ReplyImageByMediaID(ctx, nm.Frame, corpID, corpSecret, img.StoragePath, img.Filename); err != nil {
+						log.WithError(err).WithField("file", img.Filename).Error("[wecom] send image via media_id failed")
+					}
 					continue
 				}
-				sum := md5.Sum(data)
-				msgItems = append(msgItems, wecomaibot.ReplyMsgItem{
-					MsgType: "image",
-					Image: struct {
-						Base64 string `json:"base64"`
-						MD5    string `json:"md5"`
-					}{
-						Base64: base64.StdEncoding.EncodeToString(data),
-						MD5:    hex.EncodeToString(sum[:]),
-					},
-				})
+				if publicURL != "" && img.UUID != "" {
+					imgURL := publicURL + "/public/files/" + img.UUID
+					if err := client.ReplyNewsCard(nm.Frame, img.Filename, imgURL); err != nil {
+						log.WithError(err).WithField("file", img.Filename).Error("[wecom] send news card failed")
+					}
+				}
 			}
-			_, err := client.ReplyStream(frame, streamID, reply, true, msgItems, nil)
-			return err
+			return nil
 		},
 	}
-	bridge.HandleInboundAsync(context.Background(), chCur, in, wecomDrv)
+	bridge.HandleInboundAsync(context.Background(), ch, in, wecomDrv)
 }
