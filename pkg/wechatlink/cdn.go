@@ -9,6 +9,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -60,6 +63,36 @@ func DownloadFromCDN(ctx context.Context, encryptQueryParam, aesKeyBase64 string
 		return decryptAESECB(data, aesKey)
 	}
 	return data, nil
+}
+
+// SaveToTemp 从微信 CDN 下载加密图片，解密后保存到系统临时目录，返回本地文件路径。
+// aesKey 为空时跳过解密（直接使用原始响应数据）。
+func SaveToTemp(ctx context.Context, encParam, aesKey string) (string, error) {
+	data, err := DownloadFromCDN(ctx, encParam, aesKey)
+	if err != nil {
+		return "", fmt.Errorf("download CDN image: %w", err)
+	}
+	ext := DetectImageExt(data)
+	tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("wechat-img-%d%s", time.Now().UnixNano(), ext))
+	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
+		return "", fmt.Errorf("save image to temp: %w", err)
+	}
+	return tmpPath, nil
+}
+
+// DetectImageExt 根据文件字节内容检测图片扩展名（含点号，如 ".png"）。
+func DetectImageExt(data []byte) string {
+	ct := http.DetectContentType(data)
+	switch {
+	case strings.HasPrefix(ct, "image/png"):
+		return ".png"
+	case strings.HasPrefix(ct, "image/gif"):
+		return ".gif"
+	case strings.HasPrefix(ct, "image/webp"):
+		return ".webp"
+	default:
+		return ".jpg"
+	}
 }
 
 func decryptAESECB(ciphertext, key []byte) ([]byte, error) {
