@@ -116,7 +116,7 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		}).Error("[Channel] executor failed")
 		fallback := "处理失败，请稍后重试。"
 		_ = b.persistAssistantFallback(ctx, convUUID, fallback)
-		_ = b.sendChannelReply(ctx, ad, cc, in, fallback)
+		_ = b.sendChannelReply(ctx, ad, cc, in, fallback, nil)
 		return
 	}
 	log.WithFields(log.Fields{
@@ -127,7 +127,7 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		"tokens_used":       res.TokensUsed,
 		"steps_count":       len(res.Steps),
 	}).Info("[Channel] executor << done")
-	if err := b.sendChannelReply(ctx, ad, cc, in, res.Content); err != nil {
+	if err := b.sendChannelReply(ctx, ad, cc, in, res.Content, imageFilesFrom(res.ToolFiles)); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"channel_id":        ch.ID,
 			"conversation_uuid": convUUID,
@@ -164,11 +164,22 @@ func (b *Bridge) persistAssistantFallback(ctx context.Context, conversationUUID,
 	return nil
 }
 
-func (b *Bridge) sendChannelReply(ctx context.Context, ad WebhookDriver, cc ChannelConfig, in *Inbound, text string) error {
+func (b *Bridge) sendChannelReply(ctx context.Context, ad WebhookDriver, cc ChannelConfig, in *Inbound, text string, images []*model.File) error {
 	if in.ReplyWith != nil {
-		return in.ReplyWith(ctx, text)
+		return in.ReplyWith(ctx, text, images)
 	}
 	return ad.Reply(ctx, cc, in, text)
+}
+
+// imageFilesFrom filters model.File slice to only image files with a storage path.
+func imageFilesFrom(files []*model.File) []*model.File {
+	var out []*model.File
+	for _, f := range files {
+		if f != nil && f.FileType == model.FileTypeImage && f.StoragePath != "" {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func threadLookupKeys(in *Inbound) []string {
