@@ -185,7 +185,7 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 			log.WithError(err).WithField("channel_id", ch.ID).Warn("[wechat] CDN image download failed")
 			continue
 		}
-		log.WithFields(log.Fields{"channel_id": ch.ID, "path": localPath}).Info("[wechat] CDN image saved")
+		log.WithFields(log.Fields{"channel_id": ch.ID, "path": localPath}).Debug("[wechat] CDN image saved")
 		files = append(files, model.ChatFile{
 			Type:           model.ChatFileImage,
 			TransferMethod: model.TransferRemoteURL,

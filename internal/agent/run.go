@@ -239,17 +239,17 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		}
 		if tsMode {
 			preloadSkillTools(ec.toolSkillMap, discovered)
-			ec.l.WithFields(log.Fields{"total_tools": len(allToolDefs), "skill_preloaded": len(discovered)}).Info("[Execute]    mode = " + tag + "tool-search")
+			ec.l.WithFields(log.Fields{"total_tools": len(allToolDefs), "skill_preloaded": len(discovered)}).Debug("[Execute]    mode = " + tag + "tool-search")
 		} else if ec.ag.ToolSearchEnabled && len(allToolDefs) > 0 {
-			ec.l.WithFields(log.Fields{"total_tools": len(allToolDefs), "threshold": ToolSearchAutoFullThreshold}).Info("[Execute]    mode = " + tag + "tool-augmented (auto full catalog)")
+			ec.l.WithFields(log.Fields{"total_tools": len(allToolDefs), "threshold": ToolSearchAutoFullThreshold}).Debug("[Execute]    mode = " + tag + "tool-augmented (auto full catalog)")
 		} else {
-			ec.l.Info("[Execute]    mode = " + tag + "tool-augmented")
+			ec.l.Debug("[Execute]    mode = " + tag + "tool-augmented")
 		}
 	} else {
 		if streaming {
-			ec.l.Info("[Execute]    mode = stream")
+			ec.l.Debug("[Execute]    mode = stream")
 		} else {
-			ec.l.Info("[Execute]    mode = simple")
+			ec.l.Debug("[Execute]    mode = simple")
 		}
 	}
 
@@ -352,7 +352,7 @@ func logResourceSummary(l *log.Entry, agentTools []model.Tool, skills []model.Sk
 	for _, s := range skills {
 		skillNames = append(skillNames, s.Name)
 	}
-	l.WithFields(log.Fields{"tools": toolNames, "skills": skillNames}).Info("[Execute]    resources loaded")
+	l.WithFields(log.Fields{"tools": toolNames, "skills": skillNames}).Debug("[Execute]    resources loaded")
 	for _, sk := range skills {
 		fields := log.Fields{"skill": sk.Name, "has_instruction": sk.Instruction != ""}
 		if sk.Instruction != "" {
