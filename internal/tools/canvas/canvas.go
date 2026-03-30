@@ -51,7 +51,7 @@ func show(ctx context.Context, p canvasParams) (string, error) {
 		return "", err
 	}
 
-	return fmt.Sprintf("Canvas rendered: %s\nOpen in browser to preview.", tmpFile), nil
+	return result.NewFileResult(tmpFile, "text/html", "Canvas rendered. Open in browser to preview."), nil
 }
 
 func evaluate(ctx context.Context, p canvasParams) (string, error) {
