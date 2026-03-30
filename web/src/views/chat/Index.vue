@@ -712,7 +712,7 @@ function sendMessage() {
       }
     },
     () => {
-      if (streaming.value && streamingContent.value) {
+      if (streaming.value && (streamingContent.value || pendingSteps.value.length > 0)) {
         const steps = [...pendingSteps.value]
         const tokensUsed = steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
         messages.value.push(reactive({ role: 'assistant', content: streamingContent.value, tokens_used: tokensUsed || undefined, steps, _showSteps: false }))
@@ -724,7 +724,10 @@ function sendMessage() {
       loadConversations()
     },
     (err: string) => {
-      messages.value.push(reactive({ role: 'assistant', content: `[错误] ${err}` }))
+      const steps = [...pendingSteps.value]
+      messages.value.push(reactive({ role: 'assistant', content: `[错误] ${err}`, steps, _showSteps: steps.length > 0 }))
+      streamingContent.value = ''
+      pendingSteps.value = []
       streaming.value = false
       _streamController = null
       scrollToBottom()
