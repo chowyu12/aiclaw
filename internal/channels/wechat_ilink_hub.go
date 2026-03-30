@@ -153,7 +153,7 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 	}
 	fromUser := strings.TrimSpace(msg.FromUserID)
 	contextToken := msg.ContextToken
-	clientID := uuid.New().String()
+	publicURL := strings.TrimRight(cfgString([]byte(ch.Config), "public_url"), "/")
 
 	go func() {
 		if err := client.SendTyping(context.Background(), fromUser, contextToken); err != nil {
@@ -206,8 +206,24 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 		RawMeta: map[string]any{
 			"context_token": contextToken,
 		},
-		ReplyWith: func(ctx context.Context, reply string) error {
-			return client.SendMessage(ctx, fromUser, contextToken, clientID, reply)
+		ReplyWith: func(ctx context.Context, reply string, images []*model.File) error {
+			replyClientID := uuid.New().String()
+			if len(images) == 0 || publicURL == "" {
+				return client.SendMessage(ctx, fromUser, contextToken, replyClientID, reply)
+			}
+			items := []wechatlink.MessageItem{
+				{Type: wechatlink.ItemTypeText, TextItem: &wechatlink.TextItem{Text: reply}},
+			}
+			for _, img := range images {
+				if img.UUID == "" {
+					continue
+				}
+				items = append(items, wechatlink.MessageItem{
+					Type:      wechatlink.ItemTypeImage,
+					ImageItem: &wechatlink.ImageItem{URL: publicURL + "/public/files/" + img.UUID},
+				})
+			}
+			return client.SendMessageItems(ctx, fromUser, contextToken, replyClientID, items)
 		},
 	}
 	bridge.HandleInboundAsync(context.Background(), ch, in, noopDrv)

@@ -18,7 +18,8 @@ type Inbound struct {
 	Files            []model.ChatFile
 	RawMeta          map[string]any
 	// ReplyWith 若设置，Bridge 优先用它回包（如企微智能机器人 WebSocket），不再调用 WebhookAdapter.Reply。
-	ReplyWith func(ctx context.Context, text string) error
+	// images 为本次 Agent 执行产生的图片文件（工具生成），可为 nil。
+	ReplyWith func(ctx context.Context, text string, images []*model.File) error
 }
 
 // WebhookHTTP 写回给第三方平台的 HTTP 响应。

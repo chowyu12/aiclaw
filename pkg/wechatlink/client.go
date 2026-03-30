@@ -63,6 +63,13 @@ func (c *Client) BotID() string { return c.botID }
 
 // SendMessage 发送文本消息。
 func (c *Client) SendMessage(ctx context.Context, toUserID, contextToken, clientID, text string) error {
+	return c.SendMessageItems(ctx, toUserID, contextToken, clientID,
+		[]MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: text}}},
+	)
+}
+
+// SendMessageItems 发送包含任意 ItemList 的消息（支持文字、图片混排）。
+func (c *Client) SendMessageItems(ctx context.Context, toUserID, contextToken, clientID string, items []MessageItem) error {
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
 	var resp sendMessageResp
@@ -73,7 +80,7 @@ func (c *Client) SendMessage(ctx context.Context, toUserID, contextToken, client
 			ClientID:     clientID,
 			MessageType:  MsgTypeBot,
 			MessageState: MsgStateFinish,
-			ItemList:     []MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: text}}},
+			ItemList:     items,
 			ContextToken: contextToken,
 		},
 	}, &resp); err != nil {

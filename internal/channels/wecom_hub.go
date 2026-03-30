@@ -2,7 +2,11 @@ package channels
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/base64"
+	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -272,9 +276,28 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 		Text:      text,
 		Files:     files,
 		RawMeta:   meta,
-		ReplyWith: func(ctx context.Context, reply string) error {
+		ReplyWith: func(ctx context.Context, reply string, images []*model.File) error {
 			streamID := fmt.Sprintf("stream_%s", frame.Headers.ReqID)
-			_, err := client.ReplyStream(frame, streamID, reply, true, nil, nil)
+			var msgItems []wecomaibot.ReplyMsgItem
+			for _, img := range images {
+				data, err := os.ReadFile(img.StoragePath)
+				if err != nil {
+					log.WithError(err).WithField("file", img.Filename).Warn("[wecom] read image for reply failed, skipping")
+					continue
+				}
+				sum := md5.Sum(data)
+				msgItems = append(msgItems, wecomaibot.ReplyMsgItem{
+					MsgType: "image",
+					Image: struct {
+						Base64 string `json:"base64"`
+						MD5    string `json:"md5"`
+					}{
+						Base64: base64.StdEncoding.EncodeToString(data),
+						MD5:    hex.EncodeToString(sum[:]),
+					},
+				})
+			}
+			_, err := client.ReplyStream(frame, streamID, reply, true, msgItems, nil)
 			return err
 		},
 	}
