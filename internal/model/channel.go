@@ -39,6 +39,7 @@ type Channel struct {
 	WebhookToken string      `json:"webhook_token,omitzero" gorm:"size:256"` // 调用本服务 Webhook 时携带的共享密钥（可选）
 	Config       JSON        `json:"config,omitzero" gorm:"type:text"`       // 平台凭证与参数（JSON）
 	Description  string      `json:"description,omitzero" gorm:"type:text"`
+	AgentUUID    string      `json:"agent_uuid" gorm:"size:36;index;default:''"`
 	CreatedAt    time.Time   `json:"created_at"`
 	UpdatedAt    time.Time   `json:"updated_at"`
 }
@@ -50,6 +51,7 @@ type CreateChannelReq struct {
 	WebhookToken string      `json:"webhook_token,omitzero"`
 	Config       JSON        `json:"config,omitzero"`
 	Description  string      `json:"description,omitzero"`
+	AgentUUID    string      `json:"agent_uuid,omitzero"`
 }
 
 type UpdateChannelReq struct {
@@ -58,6 +60,7 @@ type UpdateChannelReq struct {
 	WebhookToken *string `json:"webhook_token,omitzero"`
 	Config       JSON    `json:"config,omitzero"`
 	Description  *string `json:"description,omitzero"`
+	AgentUUID    *string `json:"agent_uuid,omitzero"`
 }
 
 // ChannelConversationItem 渠道会话列表项（用于渠道页面内嵌会话视图）。

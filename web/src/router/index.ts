@@ -52,7 +52,7 @@ const router = createRouter({
       children: [
         { path: '', redirect: '/chat' },
         { path: 'chat', name: 'Chat', component: () => import('../views/chat/Index.vue') },
-        { path: 'settings', name: 'Settings', component: () => import('../views/settings/Index.vue') },
+        { path: 'settings', redirect: '/agents' },
         { path: 'mcp', name: 'Mcp', component: () => import('../views/mcp/Index.vue') },
         { path: 'skill', name: 'Skill', component: () => import('../views/skill/Index.vue') },
         { path: 'providers', name: 'Providers', component: () => import('../views/provider/Index.vue') },
@@ -61,6 +61,9 @@ const router = createRouter({
         { path: 'tools/:id/edit', name: 'ToolEdit', component: () => import('../views/tool/Form.vue') },
         { path: 'logs', name: 'Logs', component: () => import('../views/log/Index.vue') },
         { path: 'channels', name: 'Channels', component: () => import('../views/channel/Index.vue') },
+        { path: 'agents', name: 'Agents', component: () => import('../views/agent/Index.vue') },
+        { path: 'agents/create', name: 'AgentCreate', component: () => import('../views/agent/Form.vue') },
+        { path: 'agents/:id/edit', name: 'AgentEdit', component: () => import('../views/agent/Form.vue') },
       ],
     },
   ],

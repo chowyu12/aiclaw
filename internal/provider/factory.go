@@ -111,7 +111,7 @@ func FetchRemoteModels(ctx context.Context, p *model.Provider) ([]string, error)
 	return models, nil
 }
 
-func NewFromProvider(p *model.Provider, modelName string) (LLMProvider, error) {
+func NewFromProvider(p *model.Provider) (LLMProvider, error) {
 	baseURL, err := resolveBaseURL(p)
 	if err != nil {
 		return nil, err

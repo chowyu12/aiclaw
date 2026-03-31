@@ -230,8 +230,6 @@ func TestExecute_Simple(t *testing.T) {
 
 func TestExecute_AgentNotInitialized(t *testing.T) {
 	s := newMockStore()
-	t.Cleanup(ClearTestAgent)
-	ClearTestAgent()
 	mockLLM := &mockLLMProvider{}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
@@ -247,9 +245,10 @@ func TestExecute_AgentNotInitialized(t *testing.T) {
 func TestExecute_ProviderNotFound(t *testing.T) {
 	s := newMockStore()
 	ctx := t.Context()
-	t.Cleanup(ClearTestAgent)
-	a := &model.Agent{UUID: "orphan", Name: "Orphan", ProviderID: 9999}
-	SetTestAgent(a)
+	a := &model.Agent{UUID: "orphan", Name: "Orphan", ProviderID: 9999, IsDefault: true}
+	if err := s.CreateAgent(ctx, a); err != nil {
+		t.Fatal(err)
+	}
 	mockLLM := &mockLLMProvider{}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
@@ -653,7 +652,7 @@ func TestCollectTools(t *testing.T) {
 		ctx := t.Context()
 
 		directTool := seedToolForAgent(t, s, agent.ID, "direct_tool", "direct")
-		ag, err := LoadAgent(ctx)
+		ag, err := s.GetDefaultAgent(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -691,12 +690,11 @@ func TestCollectTools(t *testing.T) {
 		disabled := &model.Tool{Name: "disabled_tool", Description: "disabled", HandlerType: model.HandlerBuiltin, Enabled: false}
 		s.CreateTool(ctx, disabled)
 
-		ag, err := LoadAgent(ctx)
+		ag, err := s.GetDefaultAgent(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		ag.ToolSearchEnabled = true
-		SetTestAgent(ag)
 
 		exec := newTestExecutor(s, NewToolRegistry(), &mockLLMProvider{})
 		tools, _, err := exec.collectTools(ctx, ag)
@@ -729,12 +727,11 @@ func TestCollectTools(t *testing.T) {
 		shared := &model.Tool{Name: "shared_tool", Description: "global", HandlerType: model.HandlerBuiltin, Enabled: true}
 		s.CreateTool(ctx, shared)
 
-		ag, err := LoadAgent(ctx)
+		ag, err := s.GetDefaultAgent(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
 		ag.ToolSearchEnabled = true
-		SetTestAgent(ag)
 
 		exec := newTestExecutor(s, NewToolRegistry(), &mockLLMProvider{})
 		tools, _, err := exec.collectTools(ctx, ag)
@@ -850,10 +847,10 @@ func TestStepTracker(t *testing.T) {
 
 func TestMemoryManager_GetOrCreateConversation(t *testing.T) {
 	ms := newMockStore()
-	mm := NewMemoryManager(ms, ms)
+	mm := NewMemoryManager(ms)
 	ctx := t.Context()
 
-	conv1, err := mm.GetOrCreateConversation(ctx, "", "user1")
+	conv1, err := mm.GetOrCreateConversation(ctx, "", "user1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -861,7 +858,7 @@ func TestMemoryManager_GetOrCreateConversation(t *testing.T) {
 		t.Error("new conversation should have UUID")
 	}
 
-	conv2, err := mm.GetOrCreateConversation(ctx, conv1.UUID, "user1")
+	conv2, err := mm.GetOrCreateConversation(ctx, conv1.UUID, "user1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -869,7 +866,7 @@ func TestMemoryManager_GetOrCreateConversation(t *testing.T) {
 		t.Errorf("expected same conversation ID %d, got %d", conv1.ID, conv2.ID)
 	}
 
-	conv3, err := mm.GetOrCreateConversation(ctx, "nonexistent", "user1")
+	conv3, err := mm.GetOrCreateConversation(ctx, "nonexistent", "user1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -880,10 +877,10 @@ func TestMemoryManager_GetOrCreateConversation(t *testing.T) {
 
 func TestMemoryManager_SaveAndLoadHistory(t *testing.T) {
 	ms := newMockStore()
-	mm := NewMemoryManager(ms, ms)
+	mm := NewMemoryManager(ms)
 	ctx := t.Context()
 
-	conv, _ := mm.GetOrCreateConversation(ctx, "", "user1")
+	conv, _ := mm.GetOrCreateConversation(ctx, "", "user1", "")
 
 	mm.SaveUserMessage(ctx, conv.ID, "你好", nil)
 	mm.SaveAssistantMessage(ctx, conv.ID, "你好！", 0)
@@ -906,10 +903,10 @@ func TestMemoryManager_SaveAndLoadHistory(t *testing.T) {
 
 func TestLoadHistory_WithToolCalls(t *testing.T) {
 	ms := newMockStore()
-	mm := NewMemoryManager(ms, ms)
+	mm := NewMemoryManager(ms)
 	ctx := t.Context()
 
-	conv, _ := mm.GetOrCreateConversation(ctx, "", "user1")
+	conv, _ := mm.GetOrCreateConversation(ctx, "", "user1", "")
 
 	ms.CreateMessage(ctx, &model.Message{
 		ConversationID: conv.ID,
@@ -984,12 +981,12 @@ func TestLoadHistory_WithToolCalls(t *testing.T) {
 
 func TestGetOrCreateConversation_DBError(t *testing.T) {
 	ms := newMockStore()
-	mm := NewMemoryManager(ms, ms)
+	mm := NewMemoryManager(ms)
 	ctx := t.Context()
 
 	ms.getConvByUUIDErr = errors.New("connection refused")
 
-	_, err := mm.GetOrCreateConversation(ctx, "some-uuid", "user1")
+	_, err := mm.GetOrCreateConversation(ctx, "some-uuid", "user1", "")
 	if err == nil {
 		t.Fatal("expected error when DB fails, got nil")
 	}
@@ -998,7 +995,7 @@ func TestGetOrCreateConversation_DBError(t *testing.T) {
 	}
 
 	ms.getConvByUUIDErr = nil
-	conv, err := mm.GetOrCreateConversation(ctx, "", "user1")
+	conv, err := mm.GetOrCreateConversation(ctx, "", "user1", "")
 	if err != nil {
 		t.Fatalf("expected success with empty UUID: %v", err)
 	}
@@ -1009,15 +1006,15 @@ func TestGetOrCreateConversation_DBError(t *testing.T) {
 
 func TestGetOrCreateConversation_WrongUser(t *testing.T) {
 	ms := newMockStore()
-	mm := NewMemoryManager(ms, ms)
+	mm := NewMemoryManager(ms)
 	ctx := t.Context()
 
-	conv, err := mm.GetOrCreateConversation(ctx, "", "owner")
+	conv, err := mm.GetOrCreateConversation(ctx, "", "owner", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = mm.GetOrCreateConversation(ctx, conv.UUID, "attacker")
+	_, err = mm.GetOrCreateConversation(ctx, conv.UUID, "attacker", "")
 	if err == nil {
 		t.Fatal("expected error for wrong user, got nil")
 	}
@@ -1025,7 +1022,7 @@ func TestGetOrCreateConversation_WrongUser(t *testing.T) {
 		t.Errorf("expected ownership error, got: %v", err)
 	}
 
-	got, err := mm.GetOrCreateConversation(ctx, conv.UUID, "owner")
+	got, err := mm.GetOrCreateConversation(ctx, conv.UUID, "owner", "")
 	if err != nil {
 		t.Fatalf("owner should succeed: %v", err)
 	}
@@ -1098,10 +1095,10 @@ func TestExecute_MultiRoundToolCalls(t *testing.T) {
 
 func TestAutoSetTitle(t *testing.T) {
 	ms := newMockStore()
-	mm := NewMemoryManager(ms, ms)
+	mm := NewMemoryManager(ms)
 	ctx := t.Context()
 
-	conv, _ := mm.GetOrCreateConversation(ctx, "", "user1")
+	conv, _ := mm.GetOrCreateConversation(ctx, "", "user1", "")
 	if conv.Title != "New Conversation" {
 		t.Fatalf("expected default title, got %q", conv.Title)
 	}

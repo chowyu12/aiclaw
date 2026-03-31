@@ -40,6 +40,9 @@ func (s *GormStore) ListConversations(ctx context.Context, userID string, q mode
 	if userID != "" {
 		db = db.Where("user_id = ?", userID)
 	}
+	if q.AgentUUID != "" {
+		db = db.Where("agent_uuid = ?", q.AgentUUID)
+	}
 	if q.Keyword != "" {
 		db = db.Where("title LIKE ?", "%"+q.Keyword+"%")
 	}
@@ -58,6 +61,9 @@ func (s *GormStore) ListConversationsByUserPrefix(ctx context.Context, prefix st
 	var total int64
 
 	db := s.db.WithContext(ctx).Model(&model.Conversation{}).Where("user_id LIKE ?", prefix+"%")
+	if q.AgentUUID != "" {
+		db = db.Where("agent_uuid = ?", q.AgentUUID)
+	}
 	if q.Keyword != "" {
 		db = db.Where("title LIKE ?", "%"+q.Keyword+"%")
 	}

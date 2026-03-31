@@ -17,6 +17,7 @@ export interface Channel {
   webhook_token: string
   config: Record<string, unknown> | null
   description: string
+  agent_uuid: string
   created_at: string
   updated_at: string
 }
@@ -28,6 +29,7 @@ export interface CreateChannelReq {
   webhook_token?: string
   config?: Record<string, unknown>
   description?: string
+  agent_uuid?: string
 }
 
 export interface ChannelConversationItem {

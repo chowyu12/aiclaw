@@ -11,6 +11,7 @@ export interface ChatFile {
 }
 
 export interface ChatRequest {
+  agent_uuid?: string
   conversation_id?: string
   user_id?: string
   message: string

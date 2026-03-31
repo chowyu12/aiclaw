@@ -7,6 +7,7 @@ import (
 )
 
 type Store interface {
+	AgentStore
 	ProviderStore
 	ToolStore
 	ChannelStore
@@ -15,6 +16,18 @@ type Store interface {
 	FileStore
 	MCPServerStore
 	Close() error
+}
+
+type AgentStore interface {
+	CreateAgent(ctx context.Context, a *model.Agent) error
+	GetAgent(ctx context.Context, id int64) (*model.Agent, error)
+	GetAgentByUUID(ctx context.Context, uuid string) (*model.Agent, error)
+	GetAgentByToken(ctx context.Context, token string) (*model.Agent, error)
+	GetDefaultAgent(ctx context.Context) (*model.Agent, error)
+	ListAgents(ctx context.Context, q model.ListQuery) ([]*model.Agent, int64, error)
+	UpdateAgent(ctx context.Context, id int64, req *model.UpdateAgentReq) error
+	ResetAgentToken(ctx context.Context, id int64) (string, error)
+	DeleteAgent(ctx context.Context, id int64) error
 }
 
 type ChannelStore interface {

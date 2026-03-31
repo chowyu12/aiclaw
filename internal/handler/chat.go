@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
+	"github.com/chowyu12/aiclaw/internal/agent"
 	"github.com/chowyu12/aiclaw/internal/auth"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
@@ -15,10 +15,10 @@ import (
 
 type ChatHandler struct {
 	store    store.Store
-	executor *agentpkg.Executor
+	executor *agent.Executor
 }
 
-func NewChatHandler(s store.Store, executor *agentpkg.Executor) *ChatHandler {
+func NewChatHandler(s store.Store, executor *agent.Executor) *ChatHandler {
 	return &ChatHandler{store: s, executor: executor}
 }
 
@@ -49,10 +49,6 @@ func (h *ChatHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fillIdentity(r, &req)
-	if _, err := agentpkg.TryLoadAgent(r.Context(), h.store); err != nil {
-		httputil.BadRequest(w, "no agent configured: add a model provider in settings first")
-		return
-	}
 	if req.Message == "" {
 		httputil.BadRequest(w, "message is required")
 		return
@@ -81,10 +77,6 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fillIdentity(r, &req)
-	if _, err := agentpkg.TryLoadAgent(r.Context(), h.store); err != nil {
-		httputil.BadRequest(w, "no agent configured: add a model provider in settings first")
-		return
-	}
 	if req.Message == "" {
 		httputil.BadRequest(w, "message is required")
 		return
@@ -111,6 +103,7 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 func (h *ChatHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
 	q := ParseListQuery(r)
+	q.AgentUUID = strings.TrimSpace(r.URL.Query().Get("agent_uuid"))
 	userID := r.URL.Query().Get("user_id")
 	userPrefix := strings.TrimSpace(r.URL.Query().Get("user_prefix"))
 	includeChannels := r.URL.Query().Get("include_channels") == "true"
@@ -120,30 +113,12 @@ func (h *ChatHandler) ListConversations(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if userPrefix != "" {
-		allQ := q
-		allQ.Page = 1
-		allQ.PageSize = 10000
-		all, _, err := h.store.ListConversations(r.Context(), "", allQ)
+		list, total, err := h.store.ListConversationsByUserPrefix(r.Context(), userPrefix, q)
 		if err != nil {
 			httputil.InternalError(w, err.Error())
 			return
 		}
-		filtered := make([]*model.Conversation, 0, len(all))
-		for _, c := range all {
-			if c != nil && strings.HasPrefix(c.UserID, userPrefix) {
-				filtered = append(filtered, c)
-			}
-		}
-		total := int64(len(filtered))
-		page := max(q.Page, 1)
-		pageSize := max(q.PageSize, 1)
-		offset := (page - 1) * pageSize
-		if offset >= len(filtered) {
-			httputil.OKList(w, []*model.Conversation{}, total)
-			return
-		}
-		end := min(offset+pageSize, len(filtered))
-		httputil.OKList(w, filtered[offset:end], total)
+		httputil.OKList(w, list, total)
 		return
 	}
 	list, total, err := h.store.ListConversations(r.Context(), userID, q)

@@ -11,19 +11,15 @@ import (
 	"github.com/chowyu12/aiclaw/pkg/httputil"
 )
 
-// TokenResolver resolves an agent token to an Agent.
-type TokenResolver interface {
+type AgentStore interface {
 	GetAgentByToken(ctx context.Context, token string) (*model.Agent, error)
 }
 
-// Config Web 端令牌由 CurrentWebToken() 提供（支持热加载）；此处仅保留 Agent 解析。
 type Config struct {
-	TokenResolver TokenResolver
+	AgentStore AgentStore
 }
 
-// Middleware returns an HTTP middleware that performs authentication and authorization.
-//
-// Flow: extract token → authenticate（Web web_token / Agent Token）→ authorize → next handler。
+// Middleware 认证流程：提取 token → Web token 或 Agent token 校验 → 权限检查 → 放行。
 func Middleware(cfg Config) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,13 +40,12 @@ func Middleware(cfg Config) func(http.Handler) http.Handler {
 				return
 			}
 
-			if err := authorize(id, r.Method, r.URL.Path); err != nil {
+			if err := authorize(id, r.URL.Path); err != nil {
 				httputil.Forbidden(w, err.Error())
 				return
 			}
 
-			ctx := WithIdentity(r.Context(), id)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			next.ServeHTTP(w, r.WithContext(WithIdentity(r.Context(), id)))
 		})
 	}
 }
@@ -66,25 +61,22 @@ func extractToken(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("token"))
 }
 
-func authenticate(cfg Config, ctx context.Context, tokenStr string) (*Identity, error) {
-	if strings.HasPrefix(tokenStr, "ag-") {
-		return authenticateAgentToken(cfg.TokenResolver, ctx, tokenStr)
+func authenticate(cfg Config, ctx context.Context, token string) (*Identity, error) {
+	if strings.HasPrefix(token, "ag-") {
+		ag, err := cfg.AgentStore.GetAgentByToken(ctx, token)
+		if err != nil || ag == nil || ag.Token == "" {
+			return nil, errors.New("invalid agent token")
+		}
+		return &Identity{Kind: KindAgentToken}, nil
 	}
 	wt := strings.TrimSpace(CurrentWebToken())
-	if wt != "" && secureStringEqual(strings.TrimSpace(tokenStr), wt) {
+	if wt != "" && subtle.ConstantTimeCompare([]byte(strings.TrimSpace(token)), []byte(wt)) == 1 {
 		return &Identity{Kind: KindWebSession}, nil
 	}
 	return nil, errors.New("invalid token")
 }
 
-func authenticateAgentToken(resolver TokenResolver, ctx context.Context, token string) (*Identity, error) {
-	if _, err := resolver.GetAgentByToken(ctx, token); err != nil {
-		return nil, errors.New("invalid agent token")
-	}
-	return &Identity{Kind: KindAgentToken}, nil
-}
-
-func authorize(id *Identity, method, path string) error {
+func authorize(id *Identity, path string) error {
 	if id.IsAgentToken() {
 		if !strings.HasPrefix(path, "/api/v1/chat/") {
 			return errors.New("agent token can only access chat endpoints")
@@ -106,11 +98,4 @@ func isPublic(path string) bool {
 	}
 	return path == "/api/v1/auth/login" ||
 		strings.HasPrefix(path, "/api/v1/setup/")
-}
-
-func secureStringEqual(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }

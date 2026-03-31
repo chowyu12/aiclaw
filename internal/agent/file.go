@@ -109,30 +109,8 @@ func chatFileTypeToFileType(chatType model.ChatFileType, contentType, filename s
 	case model.ChatFileAudio, model.ChatFileVideo:
 		return model.FileTypeDocument
 	default:
-		return classifyContentType(contentType, filename)
+		return model.ClassifyFileType(contentType, filename)
 	}
-}
-
-func classifyContentType(contentType, filename string) model.FileType {
-	ct := strings.ToLower(contentType)
-	fn := strings.ToLower(filename)
-
-	if strings.HasPrefix(ct, "image/") {
-		return model.FileTypeImage
-	}
-	docExts := []string{".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt"}
-	for _, ext := range docExts {
-		if strings.HasSuffix(fn, ext) {
-			return model.FileTypeDocument
-		}
-	}
-	docTypes := []string{"pdf", "word", "excel", "spreadsheet", "presentation", "officedocument"}
-	for _, dt := range docTypes {
-		if strings.Contains(ct, dt) {
-			return model.FileTypeDocument
-		}
-	}
-	return model.FileTypeText
 }
 
 func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatFile, conversationID int64) []*model.File {

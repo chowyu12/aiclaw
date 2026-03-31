@@ -1,6 +1,9 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 type FileType string
 
@@ -30,4 +33,27 @@ func (f *File) IsImage() bool {
 
 func (f *File) IsTextual() bool {
 	return f.FileType == FileTypeText || f.FileType == FileTypeDocument
+}
+
+// ClassifyFileType 根据 Content-Type 和文件名推断文件类型。
+var docExts = []string{".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt"}
+var docMIMEKeywords = []string{"pdf", "word", "excel", "spreadsheet", "presentation", "officedocument"}
+
+func ClassifyFileType(contentType, filename string) FileType {
+	ct := strings.ToLower(contentType)
+	fn := strings.ToLower(filename)
+	if strings.HasPrefix(ct, "image/") {
+		return FileTypeImage
+	}
+	for _, ext := range docExts {
+		if strings.HasSuffix(fn, ext) {
+			return FileTypeDocument
+		}
+	}
+	for _, kw := range docMIMEKeywords {
+		if strings.Contains(ct, kw) {
+			return FileTypeDocument
+		}
+	}
+	return FileTypeText
 }

@@ -64,6 +64,7 @@ func (h *ChannelHandler) Create(w http.ResponseWriter, r *http.Request) {
 		WebhookToken: req.WebhookToken,
 		Config:       req.Config,
 		Description:  req.Description,
+		AgentUUID:    req.AgentUUID,
 	}
 	if req.Enabled != nil {
 		c.Enabled = *req.Enabled
@@ -143,7 +144,7 @@ func (h *ChannelHandler) ListConversations(w http.ResponseWriter, r *http.Reques
 	senderFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sender_id")))
 
 	userPrefix := "channel:" + ch.UUID + ":"
-	conversations, total, err := h.store.ListConversationsByUserPrefix(r.Context(), userPrefix, q)
+	conversations, _, err := h.store.ListConversationsByUserPrefix(r.Context(), userPrefix, q)
 	if err != nil {
 		httputil.InternalError(w, err.Error())
 		return
@@ -204,7 +205,7 @@ func (h *ChannelHandler) ListConversations(w http.ResponseWriter, r *http.Reques
 			CreatedAt:        conv.CreatedAt,
 		})
 	}
-	httputil.OKList(w, items, total)
+	httputil.OKList(w, items, int64(len(items)))
 }
 
 func (h *ChannelHandler) ListConversationMessages(w http.ResponseWriter, r *http.Request) {

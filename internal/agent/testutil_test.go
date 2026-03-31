@@ -30,6 +30,10 @@ type mockStore struct {
 	messages      map[int64][]model.Message
 	execSteps     map[int64][]model.ExecutionStep
 
+	agents       map[int64]*model.Agent
+	agentsByUUID map[string]*model.Agent
+	defaultAgent *model.Agent
+
 	getConvByUUIDErr error
 }
 
@@ -41,6 +45,8 @@ func newMockStore() *mockStore {
 		convByUUID:    make(map[string]*model.Conversation),
 		messages:      make(map[int64][]model.Message),
 		execSteps:     make(map[int64][]model.ExecutionStep),
+		agents:        make(map[int64]*model.Agent),
+		agentsByUUID:  make(map[string]*model.Agent),
 	}
 }
 
@@ -303,6 +309,98 @@ func (s *mockStore) ReplaceMCPServers(_ context.Context, _ []model.MCPServer) er
 	return nil
 }
 
+func (s *mockStore) CreateAgent(_ context.Context, a *model.Agent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a.ID = s.nextID()
+	cp := *a
+	s.agents[cp.ID] = &cp
+	if cp.UUID != "" {
+		s.agentsByUUID[cp.UUID] = &cp
+	}
+	if cp.IsDefault || s.defaultAgent == nil {
+		s.defaultAgent = &cp
+	}
+	return nil
+}
+func (s *mockStore) GetAgent(_ context.Context, id int64) (*model.Agent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if a, ok := s.agents[id]; ok {
+		cp := *a
+		return &cp, nil
+	}
+	return nil, fmt.Errorf("agent %d not found", id)
+}
+func (s *mockStore) GetAgentByUUID(_ context.Context, uuid string) (*model.Agent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if a, ok := s.agentsByUUID[uuid]; ok {
+		cp := *a
+		return &cp, nil
+	}
+	return nil, fmt.Errorf("agent %q not found", uuid)
+}
+
+func (s *mockStore) GetAgentByToken(_ context.Context, token string) (*model.Agent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, a := range s.agents {
+		if a.Token == token {
+			cp := *a
+			return &cp, nil
+		}
+	}
+	return nil, fmt.Errorf("agent with token not found")
+}
+func (s *mockStore) GetDefaultAgent(_ context.Context) (*model.Agent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.defaultAgent != nil {
+		cp := *s.defaultAgent
+		return &cp, nil
+	}
+	return nil, fmt.Errorf("no default agent")
+}
+func (s *mockStore) ListAgents(_ context.Context, _ model.ListQuery) ([]*model.Agent, int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	list := make([]*model.Agent, 0, len(s.agents))
+	for _, a := range s.agents {
+		cp := *a
+		list = append(list, &cp)
+	}
+	return list, int64(len(list)), nil
+}
+func (s *mockStore) UpdateAgent(_ context.Context, id int64, req *model.UpdateAgentReq) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	a, ok := s.agents[id]
+	if !ok {
+		return fmt.Errorf("agent %d not found", id)
+	}
+	if req.ToolIDs != nil {
+		a.ToolIDs = model.Int64Slice(req.ToolIDs)
+	}
+	if req.ToolSearchEnabled != nil {
+		a.ToolSearchEnabled = *req.ToolSearchEnabled
+	}
+	if req.Name != nil {
+		a.Name = *req.Name
+	}
+	if a.UUID != "" {
+		s.agentsByUUID[a.UUID] = a
+	}
+	if s.defaultAgent != nil && s.defaultAgent.ID == id {
+		s.defaultAgent = a
+	}
+	return nil
+}
+func (s *mockStore) ResetAgentToken(_ context.Context, _ int64) (string, error) {
+	return "ag-testtoken", nil
+}
+func (s *mockStore) DeleteAgent(_ context.Context, _ int64) error { return nil }
+
 // ==================== Mock LLM Provider ====================
 
 type mockLLMProvider struct {
@@ -451,7 +549,6 @@ func testJSON(v any) model.JSON {
 
 func seedAgent(t *testing.T, s *mockStore) (*model.Agent, *model.Provider) {
 	t.Helper()
-	t.Cleanup(ClearTestAgent)
 	ctx := t.Context()
 	p := &model.Provider{Name: "test-prov", Type: model.ProviderOpenAI, APIKey: "k", Enabled: true}
 	if err := s.CreateProvider(ctx, p); err != nil {
@@ -460,13 +557,15 @@ func seedAgent(t *testing.T, s *mockStore) (*model.Agent, *model.Provider) {
 	a := &model.Agent{
 		UUID: "test-agent", Name: "TestBot", ProviderID: p.ID,
 		ModelName: "gpt-test", Temperature: 0.5, MaxTokens: 512,
-		SystemPrompt: "你是一个测试助手",
+		SystemPrompt: "你是一个测试助手", IsDefault: true,
 	}
-	SetTestAgent(a)
+	if err := s.CreateAgent(ctx, a); err != nil {
+		t.Fatal(err)
+	}
 	return a, p
 }
 
-func seedToolForAgent(t *testing.T, s *mockStore, _ int64, name, desc string) *model.Tool {
+func seedToolForAgent(t *testing.T, s *mockStore, agentID int64, name, desc string) *model.Tool {
 	t.Helper()
 	ctx := t.Context()
 	tool := &model.Tool{
@@ -479,18 +578,20 @@ func seedToolForAgent(t *testing.T, s *mockStore, _ int64, name, desc string) *m
 	if err := s.CreateTool(ctx, tool); err != nil {
 		t.Fatal(err)
 	}
-	ag, err := LoadAgent(ctx)
+	ag, err := s.GetAgent(ctx, agentID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ag.ToolIDs = append(ag.ToolIDs, tool.ID)
-	SetTestAgent(ag)
+	newToolIDs := []int64(append(ag.ToolIDs, tool.ID))
+	if err := s.UpdateAgent(ctx, agentID, &model.UpdateAgentReq{ToolIDs: newToolIDs}); err != nil {
+		t.Fatal(err)
+	}
 	return tool
 }
 
 func newTestExecutor(s *mockStore, registry *ToolRegistry, mockLLM *mockLLMProvider) *Executor {
 	return NewExecutor(s, registry, WithProviderFactory(
-		func(_ *model.Provider, _ string) (provider.LLMProvider, error) {
+		func(_ *model.Provider) (provider.LLMProvider, error) {
 			return mockLLM, nil
 		},
 	))

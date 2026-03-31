@@ -201,8 +201,9 @@ const route = useRoute()
 
 onMounted(async () => {
   try {
-    const res: any = await agentApi.get()
-    defaultAgent.value = res.data || null
+    const res = await agentApi.list({ page: 1, page_size: 100 })
+    const list = res.data?.list ?? []
+    defaultAgent.value = list.find((a) => a.is_default) ?? list[0] ?? null
   } catch {
     defaultAgent.value = null
   }

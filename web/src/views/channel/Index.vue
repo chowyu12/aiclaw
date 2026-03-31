@@ -66,6 +66,16 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column label="Agent" width="130" show-overflow-tooltip>
+            <template #default="{ row }">
+              <template v-if="row.agent_uuid">
+                <el-tag size="small" type="primary" effect="plain">
+                  {{ agentName(row.agent_uuid) }}
+                </el-tag>
+              </template>
+              <span v-else class="agent-default-hint">默认</span>
+            </template>
+          </el-table-column>
           <el-table-column label="Webhook / 接入" min-width="200">
             <template #default="{ row }">
               <template v-if="row.channel_type === 'wecom'">
@@ -298,6 +308,11 @@
             placeholder="备注"
           />
         </el-form-item>
+        <el-form-item label="绑定 Agent">
+          <el-select v-model="form.agent_uuid" clearable style="width:100%" placeholder="选择 Agent（留空则使用默认）">
+            <el-option v-for="ag in agentList" :key="ag.uuid" :label="ag.name" :value="ag.uuid" />
+          </el-select>
+        </el-form-item>
 
         <el-divider content-position="left">平台配置</el-divider>
 
@@ -524,6 +539,7 @@ import { ref, reactive, watch, computed, onMounted, onBeforeUnmount } from "vue"
 import { ElMessage } from "element-plus";
 import QRCode from "qrcode";
 import { channelApi, type Channel, type ChannelType, type ChannelConversationItem, type ChannelMessage } from "@/api/channel";
+import { agentApi, type Agent } from "@/api/agent";
 
 const list = ref<Channel[]>([]);
 const loading = ref(false);
@@ -649,6 +665,7 @@ const form = reactive({
   enabled: true,
   webhook_token: "",
   description: "",
+  agent_uuid: "",
 });
 
 watch(
@@ -662,6 +679,10 @@ watch(
 function typeLabel(t: string) {
   const o = typeOptions.find((x) => x.value === t);
   return o?.label ?? t;
+}
+
+function agentName(uuid: string) {
+  return agentList.value.find((a) => a.uuid === uuid)?.name ?? uuid
 }
 
 function webhookURL(uuid: string) {
@@ -791,6 +812,7 @@ function resetForm() {
   form.enabled = true;
   form.webhook_token = "";
   form.description = "";
+  form.agent_uuid = "";
   loadConfigIntoForm({}, "wecom");
   editId.value = 0;
 }
@@ -809,6 +831,7 @@ function openEdit(row: Channel) {
   form.enabled = row.enabled;
   form.webhook_token = row.webhook_token || "";
   form.description = row.description || "";
+  form.agent_uuid = (row as any).agent_uuid || "";
   loadConfigIntoForm(
     (row.config as Record<string, unknown>) || {},
     row.channel_type,
@@ -914,6 +937,7 @@ async function submitForm() {
         webhook_token: form.webhook_token,
         description: form.description,
         config,
+        agent_uuid: form.agent_uuid || undefined,
       });
       ElMessage.success("已更新");
     } else {
@@ -924,6 +948,7 @@ async function submitForm() {
         webhook_token: form.webhook_token,
         description: form.description,
         config,
+        agent_uuid: form.agent_uuid || undefined,
       });
       ElMessage.success("已创建");
     }
@@ -1027,10 +1052,25 @@ async function pollQROnce() {
 
 onBeforeUnmount(() => stopQRPolling());
 
-onMounted(() => loadData());
+const agentList = ref<Agent[]>([]);
+
+async function loadAgentList() {
+  try {
+    const res: any = await agentApi.list({ page: 1, page_size: 100 });
+    agentList.value = res.data?.list ?? [];
+  } catch {
+    agentList.value = [];
+  }
+}
+
+onMounted(() => { loadData(); loadAgentList(); });
 </script>
 
 <style scoped>
+.agent-default-hint {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
 .webhook-snippet {
   font-size: 11px;
   word-break: break-all;
