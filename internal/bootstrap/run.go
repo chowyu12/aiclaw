@@ -14,11 +14,13 @@ import (
 	"time"
 
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/natefinch/lumberjack.v2"
 
 	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
 	"github.com/chowyu12/aiclaw/internal/auth"
 	"github.com/chowyu12/aiclaw/internal/channels"
 	"github.com/chowyu12/aiclaw/internal/config"
+	"github.com/chowyu12/aiclaw/internal/daemon"
 	"github.com/chowyu12/aiclaw/internal/server"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/chowyu12/aiclaw/internal/tools/browser"
@@ -53,6 +55,19 @@ func Run(opts Options) {
 		} else {
 			log.WithFields(log.Fields{"level": cfg.Log.Level, "error": err}).Warn("invalid log level, using debug")
 		}
+	}
+
+	logFile := cfg.Log.File
+	if logFile == "" && daemon.IsChild() {
+		logFile = daemon.LogFile()
+	}
+	if logFile != "" {
+		log.SetOutput(&lumberjack.Logger{
+			Filename:   logFile,
+			MaxSize:    cfg.Log.MaxSize,
+			MaxBackups: 3,
+			Compress:   true,
+		})
 	}
 
 	if err := workspace.Init(cfg.Workspace); err != nil {
