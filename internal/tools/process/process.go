@@ -51,7 +51,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 
 	switch p.Action {
 	case "start":
-		return startSession(p.Command, p.WorkingDir)
+		return startSession(ctx, p.Command, p.WorkingDir)
 	case "list":
 		return listSessions()
 	case "read":
@@ -63,7 +63,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 	}
 }
 
-func startSession(command, workingDir string) (string, error) {
+func startSession(ctx context.Context, command, workingDir string) (string, error) {
 	if command == "" {
 		return "", fmt.Errorf("command is required for start")
 	}
@@ -72,7 +72,7 @@ func startSession(command, workingDir string) (string, error) {
 	setProcAttr(cmd)
 	dir := resolveWorkingDir(workingDir)
 	if dir == "" {
-		dir = workspace.Root()
+		dir = workspace.AgentSandboxFromCtx(ctx)
 	}
 	if dir != "" {
 		cmd.Dir = dir

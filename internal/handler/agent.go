@@ -9,6 +9,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
+	"github.com/chowyu12/aiclaw/internal/workspace"
 	"github.com/chowyu12/aiclaw/pkg/httputil"
 )
 
@@ -83,6 +84,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		httputil.InternalError(w, err.Error())
 		return
 	}
+	workspace.AgentDir(a.UUID)
 	httputil.OK(w, a)
 }
 

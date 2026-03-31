@@ -21,7 +21,7 @@ type readParams struct {
 
 const maxReadBytes = 256 * 1024
 
-func Handler(_ context.Context, args string) (string, error) {
+func Handler(ctx context.Context, args string) (string, error) {
 	var p readParams
 	if err := json.Unmarshal([]byte(args), &p); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -30,7 +30,7 @@ func Handler(_ context.Context, args string) (string, error) {
 		return "", fmt.Errorf("file_path is required")
 	}
 
-	targetPath := resolvePath(p.FilePath)
+	targetPath := resolvePath(ctx, p.FilePath)
 
 	info, err := os.Stat(targetPath)
 	if err != nil {
@@ -92,7 +92,7 @@ func Handler(_ context.Context, args string) (string, error) {
 	return sb.String(), nil
 }
 
-func resolvePath(raw string) string {
+func resolvePath(ctx context.Context, raw string) string {
 	if strings.HasPrefix(raw, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, raw[2:])
@@ -101,8 +101,8 @@ func resolvePath(raw string) string {
 	if filepath.IsAbs(raw) {
 		return raw
 	}
-	if root := workspace.Root(); root != "" {
-		return filepath.Join(root, raw)
+	if sandbox := workspace.AgentSandboxFromCtx(ctx); sandbox != "" {
+		return filepath.Join(sandbox, raw)
 	}
 	return raw
 }

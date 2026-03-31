@@ -7,13 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
 type lsParams struct {
 	Path string `json:"path"`
 }
 
-func Handler(_ context.Context, args string) (string, error) {
+func Handler(ctx context.Context, args string) (string, error) {
 	var p lsParams
 	if err := json.Unmarshal([]byte(args), &p); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -22,7 +24,7 @@ func Handler(_ context.Context, args string) (string, error) {
 		p.Path = "."
 	}
 
-	targetPath := resolvePath(p.Path)
+	targetPath := resolvePath(ctx, p.Path)
 
 	info, err := os.Stat(targetPath)
 	if err != nil {
@@ -70,7 +72,7 @@ func formatEntry(path string, info os.FileInfo) string {
 	)
 }
 
-func resolvePath(raw string) string {
+func resolvePath(ctx context.Context, raw string) string {
 	if strings.HasPrefix(raw, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, raw[2:])
@@ -78,6 +80,9 @@ func resolvePath(raw string) string {
 	}
 	if filepath.IsAbs(raw) {
 		return raw
+	}
+	if sandbox := workspace.AgentSandboxFromCtx(ctx); sandbox != "" {
+		return filepath.Join(sandbox, raw)
 	}
 	return raw
 }

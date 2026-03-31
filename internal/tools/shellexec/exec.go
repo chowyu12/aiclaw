@@ -62,7 +62,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 
 	workDir := resolveWorkingDir(p.WorkingDir)
 	if workDir == "" {
-		workDir = workspace.Root()
+		workDir = workspace.AgentSandboxFromCtx(ctx)
 	}
 	output, exitCode, err := runWithShellFallback(ctx, p.Command, workDir)
 

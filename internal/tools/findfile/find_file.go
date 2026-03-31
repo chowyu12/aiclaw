@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
 type findParams struct {
@@ -16,7 +18,7 @@ type findParams struct {
 
 const maxResults = 500
 
-func Handler(_ context.Context, args string) (string, error) {
+func Handler(ctx context.Context, args string) (string, error) {
 	var p findParams
 	if err := json.Unmarshal([]byte(args), &p); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -28,18 +30,19 @@ func Handler(_ context.Context, args string) (string, error) {
 		p.Path = "."
 	}
 
-	info, err := os.Stat(p.Path)
+	searchPath := resolvePath(ctx, p.Path)
+	info, err := os.Stat(searchPath)
 	if err != nil {
 		return "", fmt.Errorf("stat %q: %w", p.Path, err)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("%q is not a directory", p.Path)
+		return "", fmt.Errorf("%q is not a directory", searchPath)
 	}
 
 	var results []string
 	hasDoubleStar := strings.Contains(p.Pattern, "**")
 
-	err = filepath.WalkDir(p.Path, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(searchPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -82,6 +85,21 @@ func Handler(_ context.Context, args string) (string, error) {
 		sb.WriteString(fmt.Sprintf("\n... (showing first %d results, more may exist)\n", maxResults))
 	}
 	return sb.String(), nil
+}
+
+func resolvePath(ctx context.Context, raw string) string {
+	if strings.HasPrefix(raw, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, raw[2:])
+		}
+	}
+	if filepath.IsAbs(raw) {
+		return raw
+	}
+	if sandbox := workspace.AgentSandboxFromCtx(ctx); sandbox != "" {
+		return filepath.Join(sandbox, raw)
+	}
+	return raw
 }
 
 func doubleStarMatch(pattern, path string) bool {
