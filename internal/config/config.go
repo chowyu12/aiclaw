@@ -80,7 +80,9 @@ type DatabaseConfig struct {
 }
 
 type LogConfig struct {
-	Level string `yaml:"level,omitempty"`
+	Level   string `yaml:"level,omitempty"`
+	File    string `yaml:"file,omitempty"`
+	MaxSize int    `yaml:"max_size,omitempty"`
 }
 
 func Load(path string) (*Config, error) {
@@ -151,6 +153,9 @@ func setDefaults(cfg *Config) {
 	}
 	if cfg.Upload.MaxSize == 0 {
 		cfg.Upload.MaxSize = 20 << 20 // 20MB
+	}
+	if cfg.Log.MaxSize == 0 {
+		cfg.Log.MaxSize = 10 // 10MB
 	}
 	cfg.Auth.WebToken = strings.TrimSpace(cfg.Auth.WebToken)
 }
