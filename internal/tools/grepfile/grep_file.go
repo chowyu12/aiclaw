@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
 type grepParams struct {
@@ -26,7 +28,7 @@ type match struct {
 
 const maxMatches = 200
 
-func Handler(_ context.Context, args string) (string, error) {
+func Handler(ctx context.Context, args string) (string, error) {
 	var p grepParams
 	if err := json.Unmarshal([]byte(args), &p); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -47,16 +49,17 @@ func Handler(_ context.Context, args string) (string, error) {
 		return "", fmt.Errorf("invalid regex %q: %w", p.Pattern, err)
 	}
 
-	info, err := os.Stat(p.Path)
+	searchPath := resolvePath(ctx, p.Path)
+	info, err := os.Stat(searchPath)
 	if err != nil {
 		return "", fmt.Errorf("stat %q: %w", p.Path, err)
 	}
 
 	var matches []match
 	if info.IsDir() {
-		matches, err = searchDir(p.Path, re, p.Include)
+		matches, err = searchDir(searchPath, re, p.Include)
 	} else {
-		matches, err = searchFile(p.Path, re)
+		matches, err = searchFile(searchPath, re)
 	}
 	if err != nil {
 		return "", err
@@ -151,4 +154,19 @@ func truncateLine(s string, maxLen int) string {
 		return s[:maxLen] + "..."
 	}
 	return s
+}
+
+func resolvePath(ctx context.Context, raw string) string {
+	if strings.HasPrefix(raw, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, raw[2:])
+		}
+	}
+	if filepath.IsAbs(raw) {
+		return raw
+	}
+	if sandbox := workspace.AgentSandboxFromCtx(ctx); sandbox != "" {
+		return filepath.Join(sandbox, raw)
+	}
+	return raw
 }

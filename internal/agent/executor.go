@@ -54,6 +54,7 @@ func NewExecutor(s store.Store, registry *ToolRegistry, opts ...ExecutorOption) 
 
 // execContext 聚合单次执行所需的全部上下文。
 type execContext struct {
+	ctx     context.Context
 	ag      *model.Agent
 	prov    *model.Provider
 	llmProv provider.LLMProvider
@@ -98,10 +99,9 @@ func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*Execute
 	}
 	defer ec.closeMCP()
 
-	ctx = workspace.WithWorkdirScope(ctx, ec.ag.UUID)
 	ec.l.WithField("user", req.UserID).Debug("[Execute] >> start")
 
-	return e.run(ctx, ec, blockingCaller(ec.llmProv), false)
+	return e.run(ec.ctx, ec, blockingCaller(ec.llmProv), false)
 }
 
 func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error) error {
@@ -111,14 +111,13 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 	}
 	defer ec.closeMCP()
 
-	ctx = workspace.WithWorkdirScope(ctx, ec.ag.UUID)
 	ec.l.WithField("user", req.UserID).Debug("[Execute] >> start (stream)")
 
 	ec.tracker.SetOnStep(func(step model.ExecutionStep) {
 		_ = chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Step: &step})
 	})
 
-	if _, err := e.run(ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true); err != nil {
+	if _, err := e.run(ec.ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true); err != nil {
 		return err
 	}
 	doneChunk := model.StreamChunk{ConversationID: ec.conv.UUID, Done: true}
@@ -134,6 +133,8 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 		log.WithError(err).Error("[Execute] load agent config failed")
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
+	ctx = workspace.WithWorkdirScope(ctx, ag.UUID)
+
 	prov, err := e.store.GetProvider(ctx, ag.ProviderID)
 	if err != nil {
 		log.WithFields(log.Fields{"agent": ag.Name, "provider_id": ag.ProviderID}).WithError(err).Error("[Execute] provider not found")
@@ -188,6 +189,7 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 	files := e.loadRequestFiles(ctx, req.Files, conv.ID)
 
 	return &execContext{
+		ctx:          ctx,
 		ag:           ag,
 		prov:         prov,
 		llmProv:      llmProv,

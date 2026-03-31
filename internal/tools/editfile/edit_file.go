@@ -17,7 +17,7 @@ type editParams struct {
 	NewString string `json:"new_string"`
 }
 
-func Handler(_ context.Context, args string) (string, error) {
+func Handler(ctx context.Context, args string) (string, error) {
 	var p editParams
 	if err := json.Unmarshal([]byte(args), &p); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
@@ -29,7 +29,7 @@ func Handler(_ context.Context, args string) (string, error) {
 		return "", fmt.Errorf("old_string is required")
 	}
 
-	targetPath := resolvePath(p.FilePath)
+	targetPath := resolvePath(ctx, p.FilePath)
 
 	data, err := os.ReadFile(targetPath)
 	if err != nil {
@@ -54,7 +54,7 @@ func Handler(_ context.Context, args string) (string, error) {
 	return fmt.Sprintf("Edited %s: replaced 1 occurrence (%d bytes → %d bytes)", targetPath, len(data), len(newContent)), nil
 }
 
-func resolvePath(raw string) string {
+func resolvePath(ctx context.Context, raw string) string {
 	if strings.HasPrefix(raw, "~/") {
 		if home, err := os.UserHomeDir(); err == nil {
 			return filepath.Join(home, raw[2:])
@@ -63,8 +63,8 @@ func resolvePath(raw string) string {
 	if filepath.IsAbs(raw) {
 		return raw
 	}
-	if root := workspace.Root(); root != "" {
-		return filepath.Join(root, raw)
+	if sandbox := workspace.AgentSandboxFromCtx(ctx); sandbox != "" {
+		return filepath.Join(sandbox, raw)
 	}
 	return raw
 }

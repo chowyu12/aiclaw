@@ -208,7 +208,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 	bm.opMu.Lock()
 	defer bm.opMu.Unlock()
 
-	if err := bm.ensureStarted(); err != nil {
+	if err := bm.ensureStarted(ctx); err != nil {
 		return "", fmt.Errorf("start browser: %w", err)
 	}
 	// 任意一次 browser 调用（含失败）都顺延 idle，避免「evaluate 失败后未 reset」与短 idle 叠加误关会话。
@@ -289,7 +289,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 	return result, err
 }
 
-func (bm *browserManager) ensureStarted() error {
+func (bm *browserManager) ensureStarted(ctx context.Context) error {
 	bm.mu.Lock()
 	defer bm.mu.Unlock()
 
@@ -297,7 +297,7 @@ func (bm *browserManager) ensureStarted() error {
 		return nil
 	}
 
-	tmpBase := workspace.Tmp()
+	tmpBase := workspace.AgentTmpFromCtx(ctx)
 	if tmpBase == "" {
 		tmpBase = os.TempDir()
 	}
