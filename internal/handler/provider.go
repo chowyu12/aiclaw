@@ -5,9 +5,6 @@ import (
 	"net/http"
 	"strconv"
 
-	log "github.com/sirupsen/logrus"
-
-	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/provider"
 	"github.com/chowyu12/aiclaw/internal/store"
@@ -60,9 +57,6 @@ func (h *ProviderHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.CreateProvider(r.Context(), p); err != nil {
 		httputil.InternalError(w, err.Error())
 		return
-	}
-	if err := agentpkg.OnProviderCreated(r.Context(), h.store); err != nil {
-		log.WithError(err).Warn("singleton agent: bind first provider failed after provider create")
 	}
 	httputil.OK(w, p)
 }

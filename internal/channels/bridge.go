@@ -85,6 +85,7 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 	}
 
 	req := model.ChatRequest{
+		AgentUUID:      ch.AgentUUID,
 		ConversationID: convUUID,
 		UserID:         channelUserID(ch, in),
 		Message:        userText,

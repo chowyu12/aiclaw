@@ -5,11 +5,37 @@
       <div class="aside-header">
         <div class="aside-brand">
           <span class="aside-brand-dot" />
-          <span class="aside-title" :class="{ 'aside-title--agent': !!defaultAgent }" :title="defaultAgent ? currentAgentName : undefined">
+          <!-- 多 Agent：name 变为可点击的下拉切换器 -->
+          <el-dropdown
+            v-if="agentStore.agents.length > 1"
+            trigger="click"
+            class="aside-agent-dropdown"
+            @command="(uuid: string) => { const ag = agentStore.agents.find(a => a.uuid === uuid); if (ag) { agentStore.setActiveAgent(ag); defaultAgent = ag; resetChat(); loadConversations(); } }"
+          >
+            <div class="aside-agent-trigger" :title="currentAgentName">
+              <span class="aside-title aside-title--agent">{{ currentAgentName }}</span>
+              <el-icon class="aside-trigger-arrow"><ArrowDown /></el-icon>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item
+                  v-for="ag in agentStore.agents"
+                  :key="ag.uuid"
+                  :command="ag.uuid"
+                  :class="{ 'agent-item--active': ag.uuid === currentAgent?.uuid }"
+                >
+                  <span class="agent-item-dot" :class="{ active: ag.uuid === currentAgent?.uuid }" />
+                  {{ ag.name }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <!-- 单 Agent：纯文本 -->
+          <span v-else class="aside-title" :class="{ 'aside-title--agent': !!defaultAgent }" :title="defaultAgent ? currentAgentName : undefined">
             {{ defaultAgent ? currentAgentName : '会话' }}
           </span>
         </div>
-        <el-button class="aside-new-btn" circle size="small" @click="newConversation" :disabled="!defaultAgent" title="新对话">
+        <el-button class="aside-new-btn" circle size="small" @click="newConversation" :disabled="!currentAgent" title="新对话">
           <el-icon><Plus /></el-icon>
         </el-button>
       </div>
@@ -17,23 +43,23 @@
       <!-- Agent 与历史会话同一区域：Agent 固定在该区域顶部，下方为「最近」列表 -->
       <div class="aside-body">
         <div class="aside-session-scroll">
-          <div class="aside-agent-card" v-if="defaultAgent">
+          <div class="aside-agent-card" v-if="currentAgent">
             <div class="agent-icon">
               <el-icon :size="22"><Cpu /></el-icon>
             </div>
             <div class="agent-info">
-              <div class="agent-model agent-model--solo">{{ defaultAgent.model_name }}</div>
+              <div class="agent-model agent-model--solo">{{ currentAgent.model_name }}</div>
             </div>
-            <router-link to="/settings" class="settings-link">
+            <router-link to="/agents" class="settings-link">
               <el-icon :size="14"><Setting /></el-icon>
             </router-link>
           </div>
           <div v-else class="aside-empty-agent">
             <p>尚未配置 Agent</p>
-            <router-link to="/settings" class="aside-empty-link">前往设置</router-link>
+            <router-link to="/agents" class="aside-empty-link">前往设置</router-link>
           </div>
 
-          <template v-if="defaultAgent">
+          <template v-if="currentAgent">
             <div class="aside-divider" v-if="conversations.length > 0">
               <span>最近</span>
             </div>
@@ -69,7 +95,7 @@
       <header class="chat-main-head">
         <div class="chat-main-head-left">
           <h1 class="chat-main-title">对话</h1>
-          <p v-if="defaultAgent" class="chat-main-sub">{{ currentAgentName }} · {{ defaultAgent.model_name }}</p>
+          <p v-if="currentAgent" class="chat-main-sub">{{ currentAgentName }} · {{ currentAgent.model_name }}</p>
           <p v-else class="chat-main-sub muted">配置 Agent 后即可开始</p>
         </div>
       </header>
@@ -82,13 +108,13 @@
           <div class="empty-desc" style="margin-top: 12px">加载会话中...</div>
         </div>
         <!-- 空状态 -->
-        <div v-else-if="!defaultAgent || messages.length === 0" class="empty-state">
+        <div v-else-if="!currentAgent || messages.length === 0" class="empty-state">
           <div class="empty-glow" />
           <div class="empty-icon-wrap">
             <el-icon :size="36"><ChatDotRound /></el-icon>
           </div>
-          <div class="empty-title">{{ !defaultAgent ? '请先完成 Agent 配置' : '新对话' }}</div>
-          <div class="empty-desc" v-if="defaultAgent">
+          <div class="empty-title">{{ !currentAgent ? '请先完成 Agent 配置' : '新对话' }}</div>
+          <div class="empty-desc" v-if="currentAgent">
             在下方输入消息，与 <strong>{{ currentAgentName }}</strong> 开始交流
           </div>
           <div class="empty-hint" v-else>在侧栏进入设置，绑定模型供应商与参数</div>
@@ -371,7 +397,8 @@ let _streamController: AbortController | null = null
 
 <script setup lang="ts">
 import { computed, onMounted, nextTick, reactive } from 'vue'
-import { agentApi, type Agent } from '../../api/agent'
+import { type Agent } from '../../api/agent'
+import { useAgentStore } from '../../stores/agent'
 import { chatApi, streamChat, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Marked } from 'marked'
@@ -463,21 +490,21 @@ const conversations = ref<Conversation[]>([])
 const loadingHistory = ref(false)
 const copiedMsgIdx = ref(-1)
 
-const currentAgentName = computed(() => defaultAgent.value?.name || 'Agent')
+// 多 Agent 支持
+const agentStore = useAgentStore()
 
-const currentAgent = computed(() => defaultAgent.value)
+const currentAgentName = computed(() => agentStore.activeAgent?.name || defaultAgent.value?.name || 'Agent')
+
+const currentAgent = computed(() => agentStore.activeAgent || defaultAgent.value)
 
 onMounted(async () => {
-  try {
-    const res: any = await agentApi.get()
-    const a = res.data as Agent
-    if (a?.uuid) {
-      defaultAgent.value = a
-      loadConversations()
-      scrollToBottom()
-    }
-  } catch {
-    defaultAgent.value = null
+  await agentStore.loadAgents()
+  if (agentStore.activeAgent) {
+    defaultAgent.value = agentStore.activeAgent
+  }
+  if (defaultAgent.value || agentStore.activeAgent) {
+    loadConversations()
+    scrollToBottom()
   }
 })
 
@@ -485,7 +512,9 @@ async function loadConversations() {
   const ag = currentAgent.value
   if (!ag) { conversations.value = []; return }
   try {
-    const res: any = await chatApi.conversations({ page: 1, page_size: 50, user_id: 'default' })
+    const params: any = { page: 1, page_size: 50, user_id: 'default' }
+    if (ag.uuid) params.agent_uuid = ag.uuid
+    const res: any = await chatApi.conversations(params)
     conversations.value = res.data?.list || []
   } catch {
     conversations.value = []
@@ -667,7 +696,7 @@ function scrollToBottom() {
 
 function sendMessage() {
   const text = inputMessage.value.trim()
-  if (!text || !defaultAgent.value) return
+  if (!text || !currentAgent.value) return
 
   const chatFiles: ChatFile[] = [
     ...pendingFiles.value.map(f => ({ type: f.file_type as ChatFile['type'], transfer_method: 'local_file' as const, upload_file_id: f.uuid })),
@@ -691,7 +720,7 @@ function sendMessage() {
   scrollToBottom()
 
   _streamController = streamChat(
-    { conversation_id: conversationId.value, message: text, user_id: 'default', files: chatFiles.length > 0 ? chatFiles : undefined },
+    { agent_uuid: currentAgent.value?.uuid, conversation_id: conversationId.value, message: text, user_id: 'default', files: chatFiles.length > 0 ? chatFiles : undefined },
     (chunk: StreamChunk) => {
       if (chunk.conversation_id) conversationId.value = chunk.conversation_id
       if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
@@ -849,6 +878,52 @@ function truncateText(text: string, maxLen: number): string {
   flex: 1;
   overflow-y: auto;
   padding: 8px 10px 14px;
+}
+/* Agent 下拉切换器（header 内）*/
+.aside-agent-dropdown {
+  flex: 1;
+  min-width: 0;
+}
+.aside-agent-trigger {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 2px 4px 2px 0;
+  transition: background 0.15s;
+  max-width: 100%;
+  overflow: hidden;
+}
+.aside-agent-trigger:hover {
+  background: var(--el-fill-color-light, rgba(0,0,0,0.05));
+}
+.aside-trigger-arrow {
+  font-size: 11px;
+  opacity: 0.5;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+}
+.aside-agent-trigger:hover .aside-trigger-arrow {
+  opacity: 0.8;
+}
+/* 下拉菜单项样式 */
+.agent-item-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--el-border-color);
+  margin-right: 8px;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.agent-item-dot.active {
+  background: var(--el-color-primary);
+}
+:deep(.agent-item--active) {
+  color: var(--el-color-primary);
+  font-weight: 500;
 }
 .aside-agent-card {
   margin: 4px 2px 10px;

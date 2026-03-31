@@ -97,10 +97,6 @@ func Run(opts Options) {
 	}
 	defer store.Close()
 
-	if err := agentpkg.InitSingletonAgent(context.Background(), store); err != nil {
-		log.WithError(err).Fatal("init singleton agent failed")
-	}
-
 	server.ApplyBrowserToolConfig(cfg.Browser)
 
 	registry := agentpkg.NewToolRegistry()
@@ -120,11 +116,7 @@ func Run(opts Options) {
 	})
 	server.MountEmbeddedFrontend(mux)
 
-	authCfg := auth.Config{
-		TokenResolver: auth.AgentTokenResolver{
-			Providers: store,
-		},
-	}
+	authCfg := auth.Config{AgentStore: store}
 	wrapped := server.WrapWithAuthAndLog(mux, authCfg)
 
 	srv := &http.Server{
@@ -175,9 +167,6 @@ func startConfigHotReload(cfgPath string) {
 			return nil
 		}
 		auth.SetWebToken(c.Auth.WebToken)
-		if err := agentpkg.ReloadSingletonFromConfig(&c.Agent); err != nil {
-			log.WithError(err).Warn("hot reload: 保留内存中的 Agent（yaml 中 agent 段不完整时可手工修正）")
-		}
 		if c.Log.Level != "" {
 			if lvl, err := log.ParseLevel(c.Log.Level); err == nil {
 				log.SetLevel(lvl)

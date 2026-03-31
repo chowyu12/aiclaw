@@ -4,9 +4,10 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
-// MemOSConfig 存储 MemOS 连接配置（随 config.yaml 的 agent.memos_config 持久化）。
+// MemOSConfig 存储 MemOS 连接配置。
 type MemOSConfig struct {
 	BaseURL string `json:"base_url,omitempty" yaml:"base_url,omitempty"`
 	APIKey  string `json:"api_key,omitempty" yaml:"api_key,omitempty"`
@@ -52,27 +53,31 @@ func (c *MemOSConfig) Scan(src any) error {
 	return json.Unmarshal(data, c)
 }
 
-// Agent 运行时与 API 使用的单例配置（进程内权威副本，持久化到 config.yaml 的 agent 段；无数据库表）。
+// Agent 运行时配置，持久化在数据库 agents 表；支持多 Agent。
 type Agent struct {
-	ID                int64       `json:"id,omitempty"`
-	UUID              string      `json:"uuid"`
-	Name              string      `json:"name"`
-	Description       string      `json:"description"`
-	SystemPrompt      string      `json:"system_prompt"`
-	ProviderID        int64       `json:"provider_id"`
-	ModelName         string      `json:"model_name"`
-	Temperature       float64     `json:"temperature"`
-	MaxTokens         int         `json:"max_tokens"`
-	Timeout           int         `json:"timeout"`
-	MaxHistory        int         `json:"max_history"`
-	MaxIterations     int         `json:"max_iterations"`
-	Token             string      `json:"token"`
-	ToolSearchEnabled bool        `json:"tool_search_enabled"`
-	MemOSEnabled      bool        `json:"memos_enabled"`
-	MemOSCfg          MemOSConfig `json:"memos_config"`
-	ToolIDs           []int64     `json:"tool_ids,omitempty"`
+	ID                int64      `json:"id" gorm:"primaryKey;autoIncrement"`
+	UUID              string     `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
+	IsDefault         bool       `json:"is_default" gorm:"default:false;index"`
+	Name              string     `json:"name" gorm:"size:200;not null"`
+	Description       string     `json:"description" gorm:"size:500"`
+	SystemPrompt      string     `json:"system_prompt" gorm:"type:text"`
+	ProviderID        int64      `json:"provider_id" gorm:"default:0"`
+	ModelName         string     `json:"model_name" gorm:"size:200"`
+	Temperature       float64    `json:"temperature" gorm:"default:0.7"`
+	MaxTokens         int        `json:"max_tokens" gorm:"default:4096"`
+	Timeout           int        `json:"timeout" gorm:"default:0"`
+	MaxHistory        int        `json:"max_history" gorm:"default:30"`
+	MaxIterations     int        `json:"max_iterations" gorm:"default:50"`
+	Token             string     `json:"token" gorm:"size:100;uniqueIndex"`
+	ToolSearchEnabled bool       `json:"tool_search_enabled" gorm:"default:false"`
+	MemOSEnabled      bool        `json:"memos_enabled" gorm:"column:memos_enabled;default:false"`
+	MemOSCfg          MemOSConfig `json:"memos_config" gorm:"column:memos_config;type:text"`
+	ToolIDs           Int64Slice `json:"tool_ids,omitempty" gorm:"type:text"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 
-	Tools []Tool `json:"tools,omitempty"`
+	// 非数据库字段，仅用于 API 响应时附带已解析的工具列表
+	Tools []Tool `json:"tools,omitempty" gorm:"-"`
 }
 
 const (
@@ -113,4 +118,23 @@ type UpdateAgentReq struct {
 	MemOSEnabled      *bool        `json:"memos_enabled,omitzero"`
 	MemOSCfg          *MemOSConfig `json:"memos_config,omitzero"`
 	ToolIDs           []int64      `json:"tool_ids,omitzero"`
+	IsDefault         *bool        `json:"is_default,omitzero"`
+}
+
+type CreateAgentReq struct {
+	Name              string      `json:"name"`
+	Description       string      `json:"description"`
+	SystemPrompt      string      `json:"system_prompt"`
+	ProviderID        int64       `json:"provider_id"`
+	ModelName         string      `json:"model_name"`
+	Temperature       float64     `json:"temperature"`
+	MaxTokens         int         `json:"max_tokens"`
+	Timeout           int         `json:"timeout"`
+	MaxHistory        int         `json:"max_history"`
+	MaxIterations     int         `json:"max_iterations"`
+	ToolSearchEnabled bool        `json:"tool_search_enabled"`
+	MemOSEnabled      bool        `json:"memos_enabled"`
+	MemOSCfg          MemOSConfig `json:"memos_config"`
+	ToolIDs           []int64     `json:"tool_ids,omitzero"`
+	IsDefault         bool        `json:"is_default"`
 }

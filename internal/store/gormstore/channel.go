@@ -67,6 +67,9 @@ func (s *GormStore) UpdateChannel(ctx context.Context, id int64, req model.Updat
 	if req.Description != nil {
 		updates["description"] = *req.Description
 	}
+	if req.AgentUUID != nil {
+		updates["agent_uuid"] = *req.AgentUUID
+	}
 	if len(updates) == 0 {
 		return nil
 	}

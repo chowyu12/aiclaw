@@ -7,72 +7,24 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/chowyu12/aiclaw/internal/memos"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
 )
 
 type MemoryManager struct {
-	store store.ConversationStore
-	files store.FileStore
+	store store.Store
 }
 
-func NewMemoryManager(convStore store.ConversationStore, fileStore store.FileStore) *MemoryManager {
-	return &MemoryManager{store: convStore, files: fileStore}
+func NewMemoryManager(s store.Store) *MemoryManager {
+	return &MemoryManager{store: s}
 }
 
-func memosActive(ag *model.Agent) bool {
-	return ag.MemOSEnabled && ag.MemOSCfg.APIKey != ""
-}
 
-func memosClientFor(ag *model.Agent) *memos.Client {
-	return memos.NewClient(ag.MemOSCfg.BaseURL, ag.MemOSCfg.APIKey)
-}
-
-// RecallMemories 从 MemOS 长期记忆中检索与 userMsg 相关的记忆。
-// 如果 Agent 未启用 MemOS 或检索失败，返回空字符串。
-func (m *MemoryManager) RecallMemories(ctx context.Context, userMsg string, ag *model.Agent) string {
-	if !memosActive(ag) {
-		return ""
-	}
-	cfg := ag.MemOSCfg
-	client := memosClientFor(ag)
-	result, err := client.Search(ctx, userMsg, cfg.EffectiveUserID(), cfg.EffectiveTopK())
-	if err != nil {
-		log.WithError(err).Warn("[MemOS] recall failed, continuing without memories")
-		return ""
-	}
-	formatted := memos.FormatMemories(result)
-	if formatted != "" {
-		log.WithField("items", len(result.Memories)+len(result.Preferences)).Info("[MemOS] recalled memories")
-	}
-	return formatted
-}
-
-// StoreMemories 异步将本轮对话存入 MemOS 长期记忆。
-func (m *MemoryManager) StoreMemories(userMsg, assistantMsg string, ag *model.Agent) {
-	if !memosActive(ag) {
-		return
-	}
-	cfg := ag.MemOSCfg
-	client := memosClientFor(ag)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := client.Add(ctx, cfg.EffectiveUserID(), userMsg, assistantMsg, cfg.Async); err != nil {
-			log.WithError(err).Warn("[MemOS] add failed")
-		} else {
-			log.Debug("[MemOS] conversation added")
-		}
-	}()
-}
-
-func (m *MemoryManager) GetOrCreateConversation(ctx context.Context, conversationUUID string, userID string) (*model.Conversation, error) {
+func (m *MemoryManager) GetOrCreateConversation(ctx context.Context, conversationUUID string, userID string, agentUUID string) (*model.Conversation, error) {
 	if conversationUUID != "" {
 		conv, err := m.store.GetConversationByUUID(ctx, conversationUUID)
 		if err == nil {
@@ -86,8 +38,9 @@ func (m *MemoryManager) GetOrCreateConversation(ctx context.Context, conversatio
 		}
 	}
 	conv := &model.Conversation{
-		UserID: userID,
-		Title:  "New Conversation",
+		UserID:    userID,
+		AgentUUID: agentUUID,
+		Title:     "New Conversation",
 	}
 	if err := m.store.CreateConversation(ctx, conv); err != nil {
 		return nil, err
@@ -328,7 +281,7 @@ func (m *MemoryManager) linkFiles(ctx context.Context, files []*model.File, conv
 		if f.ID == 0 {
 			continue
 		}
-		if err := m.files.LinkFileToMessage(ctx, f.ID, conversationID, messageID); err != nil {
+		if err := m.store.LinkFileToMessage(ctx, f.ID, conversationID, messageID); err != nil {
 			log.WithFields(log.Fields{"file": f.Filename, "msg_id": messageID}).WithError(err).Warn("[Memory] link file to message failed")
 		}
 	}

@@ -31,6 +31,10 @@
             <el-icon><ChatDotRound /></el-icon>
             <template #title>对话</template>
           </el-menu-item>
+          <el-menu-item index="/agents">
+            <el-icon><User /></el-icon>
+            <template #title>Agents</template>
+          </el-menu-item>
           <el-menu-item index="/skill">
             <el-icon><Reading /></el-icon>
             <template #title>技能</template>
@@ -51,10 +55,7 @@
             <el-icon><Share /></el-icon>
             <template #title>渠道</template>
           </el-menu-item>
-          <el-menu-item index="/settings">
-            <el-icon><Setting /></el-icon>
-            <template #title>设置</template>
-          </el-menu-item>
+
           <el-menu-item index="/logs">
             <el-icon><Document /></el-icon>
             <template #title>日志</template>
@@ -103,7 +104,9 @@
           </div>
           <template v-if="!isCollapse">
             <div class="sidebar-user-line">
-              <span class="username">{{ appVersion ?  appVersion : 'AiClaw' }}</span>
+              <span class="username">{{
+                appVersion ? appVersion : "AiClaw"
+              }}</span>
               <el-button text type="danger" size="small" @click="handleLogout"
                 >退出</el-button
               >
@@ -159,6 +162,7 @@ onMounted(async () => {
 const activeMenu = computed(() => {
   const p = route.path;
   if (p === "/" || p === "") return "/chat";
+  if (p.startsWith("/agents")) return "/agents";
   return p;
 });
 
@@ -247,7 +251,9 @@ body,
   padding-left: 14px !important;
   font-size: 13px;
   font-weight: 500;
-  transition: background-color 0.15s, color 0.15s;
+  transition:
+    background-color 0.15s,
+    color 0.15s;
 }
 .app-menu :deep(.el-menu-item .el-icon) {
   font-size: 17px;

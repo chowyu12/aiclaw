@@ -6,6 +6,7 @@ type Conversation struct {
 	ID        int64     `json:"id" gorm:"primaryKey;autoIncrement"`
 	UUID      string    `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
 	UserID    string    `json:"user_id" gorm:"size:100;index;not null"`
+	AgentUUID string    `json:"agent_uuid" gorm:"size:36;index;default:''"`
 	Title     string    `json:"title" gorm:"size:500"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -109,6 +110,7 @@ type ChatFile struct {
 }
 
 type ChatRequest struct {
+	AgentUUID      string     `json:"agent_uuid,omitzero"`
 	ConversationID string     `json:"conversation_id,omitzero"`
 	UserID         string     `json:"user_id"`
 	Message        string     `json:"message"`
@@ -135,7 +137,8 @@ type StreamChunk struct {
 }
 
 type ListQuery struct {
-	Page     int    `json:"page"`
-	PageSize int    `json:"page_size"`
-	Keyword  string `json:"keyword,omitzero"`
+	Page      int    `json:"page"`
+	PageSize  int    `json:"page_size"`
+	Keyword   string `json:"keyword,omitzero"`
+	AgentUUID string `json:"agent_uuid,omitzero"`
 }

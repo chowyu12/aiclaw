@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v3"
@@ -42,29 +41,8 @@ type Config struct {
 	Database  DatabaseConfig `yaml:"database,omitempty"`
 	Log       LogConfig      `yaml:"log,omitempty"`
 	Auth      AuthConfig     `yaml:"auth,omitempty"`
-	Agent     AgentConfig    `yaml:"agent,omitempty"`
 	Upload    UploadConfig   `yaml:"upload,omitempty"`
 	Browser   BrowserConfig  `yaml:"browser,omitempty"`
-}
-
-// AgentConfig 单例 Agent，持久化在 config.yaml 的 agent 段；控制台保存与外部编辑 yaml 均会同步。
-type AgentConfig struct {
-	UUID              string            `yaml:"uuid,omitempty"`
-	Name              string            `yaml:"name,omitempty"`
-	Description       string            `yaml:"description,omitempty"`
-	SystemPrompt      string            `yaml:"system_prompt,omitempty"`
-	ProviderID        int64             `yaml:"provider_id,omitempty"`
-	ModelName         string            `yaml:"model_name,omitempty"`
-	Temperature       float64           `yaml:"temperature,omitempty"`
-	MaxTokens         int               `yaml:"max_tokens,omitempty"`
-	Timeout           int               `yaml:"timeout,omitempty"`
-	MaxHistory        int               `yaml:"max_history,omitempty"`
-	MaxIterations     int               `yaml:"max_iterations,omitempty"`
-	Token             string            `yaml:"token,omitempty"`
-	ToolSearchEnabled bool              `yaml:"tool_search_enabled,omitempty"`
-	MemOSEnabled      bool              `yaml:"memos_enabled,omitempty"`
-	MemOSCfg          model.MemOSConfig `yaml:"memos_config,omitempty"`
-	ToolIDs           []int64           `yaml:"tool_ids,omitempty"`
 }
 
 // AuthConfig Web 控制台访问令牌：在配置中设置；登录校验通过后前端以 Bearer 方式携带同一令牌访问 API。

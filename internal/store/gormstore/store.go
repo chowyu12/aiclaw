@@ -63,6 +63,7 @@ func New(cfg config.DatabaseConfig) (*GormStore, error) {
 
 func autoMigrate(db *gorm.DB) error {
 	return db.AutoMigrate(
+		&model.Agent{},
 		&model.Provider{},
 		&model.Tool{},
 		&model.Channel{},
