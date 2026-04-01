@@ -131,10 +131,14 @@ func (t *trackedTool) Call(ctx context.Context, input string) (string, error) {
 		errMsg = err.Error()
 	}
 
-	t.tracker.RecordStep(ctx, model.StepToolCall, t.name, input, output, status, errMsg, duration, 0, &model.StepMetadata{
+	meta := &model.StepMetadata{
 		ToolName:  t.name,
 		SkillName: t.skillName,
-	})
+	}
+	if t.name == "sub_agent" {
+		meta.SubAgentDepth = subAgentDepth(ctx) + 1
+	}
+	t.tracker.RecordStep(ctx, model.StepToolCall, t.name, input, output, status, errMsg, duration, 0, meta)
 	return output, err
 }
 

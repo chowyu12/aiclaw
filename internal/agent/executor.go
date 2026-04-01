@@ -159,6 +159,9 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 	}
 
 	l := log.WithFields(log.Fields{"agent": ag.Name, "provider": prov.Name, "model": ag.ModelName})
+	if depth := subAgentDepth(ctx); depth > 0 {
+		l = l.WithField("sub_agent", fmt.Sprintf("L%d", depth))
+	}
 
 	llmProv, err := e.providerFactory(prov)
 	if err != nil {
