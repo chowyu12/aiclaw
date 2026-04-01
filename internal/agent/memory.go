@@ -50,6 +50,10 @@ func (m *MemoryManager) GetOrCreateConversation(ctx context.Context, conversatio
 
 const recentTurnsFullDetail = 3
 
+// LoadHistory 使用三级压缩策略加载历史消息：
+//   - 最近 recentTurnsFullDetail 轮：完整保留
+//   - 中间 lightCompactTurns 轮：轻量压缩（保留消息结构，截断长内容）
+//   - 更早的轮：重度压缩（仅保留 user + 最后一条无 tool_calls 的 assistant）
 func (m *MemoryManager) LoadHistory(ctx context.Context, conversationID int64, maxTurns int) ([]openai.ChatCompletionMessage, error) {
 	msgs, err := m.store.ListMessages(ctx, conversationID, maxTurns)
 	if err != nil {
@@ -62,13 +66,21 @@ func (m *MemoryManager) LoadHistory(ctx context.Context, conversationID int64, m
 	turns := splitTurns(msgs)
 	total := len(turns)
 
+	recentBound := total - recentTurnsFullDetail
+	lightBound := recentBound - lightCompactTurns
+
 	var result []openai.ChatCompletionMessage
 	for i, turn := range turns {
-		if i >= total-recentTurnsFullDetail {
+		switch {
+		case i >= recentBound:
 			for _, msg := range turn {
 				result = append(result, toOpenAIMessage(msg))
 			}
-		} else {
+		case i >= lightBound:
+			for _, msg := range compactTurnLight(turn) {
+				result = append(result, toOpenAIMessage(msg))
+			}
+		default:
 			for _, msg := range compactTurn(turn) {
 				result = append(result, toOpenAIMessage(msg))
 			}

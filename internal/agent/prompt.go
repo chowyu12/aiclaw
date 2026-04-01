@@ -25,6 +25,7 @@ type messagesBuildInput struct {
 	ToolSkillMap   map[string]string
 	Files          []*model.File
 	MemosContext   string
+	SessionMemory  string
 	ToolSearchMode bool
 }
 
@@ -33,6 +34,10 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 
 	if in.MemosContext != "" {
 		systemPrompt += "\n\n## 相关记忆\n以下是从长期记忆中检索到的与当前对话相关的信息，请参考但不要盲目依赖：\n<memories>\n" + in.MemosContext + "\n</memories>"
+	}
+
+	if in.SessionMemory != "" {
+		systemPrompt += "\n\n## 会话笔记\n以下是本次会话的历史执行摘要，可帮助回顾之前的对话进展：\n<session_notes>\n" + in.SessionMemory + "\n</session_notes>"
 	}
 
 	var messages []openai.ChatCompletionMessage

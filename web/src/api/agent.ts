@@ -22,6 +22,7 @@ export interface Agent {
   timeout: number
   max_history: number
   max_iterations: number
+  token_budget: number
   tool_search_enabled: boolean
   memos_enabled: boolean
   memos_config: MemOSConfig
@@ -44,6 +45,7 @@ export interface UpdateAgentPayload {
   timeout?: number
   max_history?: number
   max_iterations?: number
+  token_budget?: number
   tool_search_enabled?: boolean
   memos_enabled?: boolean
   memos_config?: MemOSConfig
@@ -62,6 +64,7 @@ export interface CreateAgentPayload {
   timeout?: number
   max_history?: number
   max_iterations?: number
+  token_budget?: number
   tool_search_enabled?: boolean
   memos_enabled?: boolean
   memos_config?: MemOSConfig

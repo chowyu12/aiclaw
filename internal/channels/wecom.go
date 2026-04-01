@@ -34,3 +34,7 @@ func (wecomAdapter) HandlePOST(_ ChannelConfig, _ []byte, _ string, _ http.Heade
 func (wecomAdapter) Reply(context.Context, ChannelConfig, *Inbound, string) error {
 	return nil
 }
+
+func (wecomAdapter) SendTyping(context.Context, ChannelConfig, *Inbound) error {
+	return nil
+}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -128,6 +129,8 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 	st.loopDet = newToolLoopDetector(ec.l)
 	st.calledTools = make(map[string]bool)
 
+	budget := NewBudgetTracker(ec.ag.TokenBudget)
+
 	var totalTokens int
 	var finalContent string
 	totalStart := time.Now()
@@ -135,6 +138,12 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 	completed := false
 
 	for i := range maxIter {
+		// PreLLMCall hook
+		if action := e.hooks.Fire(ctx, HookPreLLMCall, &HookPayload{Model: ec.ag.ModelName, Round: i + 1}); action == HookAbort {
+			ec.l.WithField("round", i+1).Warn("[Hook] agent execution aborted by pre_llm_call hook")
+			return nil, errors.New("agent execution aborted by hook")
+		}
+
 		req := openai.ChatCompletionRequest{
 			Model:    ec.ag.ModelName,
 			Messages: ensureContentPresent(st.Messages),
@@ -154,6 +163,10 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		}
 
 		totalTokens += result.tokens
+		budget.Add(result.tokens)
+
+		// PostLLMCall hook
+		e.hooks.Fire(ctx, HookPostLLMCall, &HookPayload{Model: ec.ag.ModelName, Round: i + 1, Tokens: result.tokens})
 
 		if len(result.toolCalls) == 0 {
 			finalContent = result.content
@@ -162,6 +175,16 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 				"round": i + 1, "duration": iterDur, "tokens": result.tokens,
 				"len": len(finalContent), "preview": truncateLog(finalContent, 200),
 			}).Info("[LLM] << final answer")
+			break
+		}
+
+		// 检查 token 预算
+		if budget.Exceeded() {
+			finalContent = result.content
+			completed = true
+			ec.l.WithFields(log.Fields{
+				"round": i + 1, "budget_limit": ec.ag.TokenBudget, "consumed": budget.Consumed(),
+			}).Warn("[Budget] token budget exceeded, stopping after this round")
 			break
 		}
 
@@ -178,6 +201,9 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		}
 		e.appendAssistantToolRound(ctx, ec, st, asst)
 	}
+
+	// AgentStop hook
+	e.hooks.Fire(ctx, HookAgentStop, &HookPayload{Model: ec.ag.ModelName, Tokens: totalTokens})
 
 	if !completed {
 		ec.l.WithField("max_iterations", maxIter).Error("[Execute] max iterations reached")
@@ -201,6 +227,7 @@ type agentRunState struct {
 	TSMode      bool
 	Discovered  map[string]bool
 
+	mu          sync.Mutex
 	loopDet     *toolLoopDetector
 	calledTools map[string]bool
 }
@@ -254,6 +281,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 	}
 
 	memosCtx := recallMemories(ctx, ec.userMsg, ec.ag)
+	sessionMem := loadSessionMemory(ec.conv.UUID)
 
 	var msgTools []model.Tool
 	var msgToolSkillMap map[string]string
@@ -270,6 +298,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		ToolSkillMap:   msgToolSkillMap,
 		Files:          ec.files,
 		MemosContext:   memosCtx,
+		SessionMemory:  sessionMem,
 		ToolSearchMode: tsMode,
 	})
 	logMessages(ec.l, messages)

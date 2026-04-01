@@ -413,6 +413,34 @@ func DefaultBuiltinDefs() []model.Tool {
 				},
 			}),
 		},
+		{
+			Name:        "sub_agent",
+			Description: "启动子 Agent 执行独立子任务。子 Agent 拥有独立会话和推理链，适用于需要独立思考的子问题，如并行调研、专家分工等。",
+			HandlerType: model.HandlerBuiltin,
+			Enabled:     true,
+			Timeout:     600,
+			FunctionDef: mustJSON(map[string]any{
+				"name": "sub_agent",
+				"description": "Launch a sub-agent for an independent subtask. " +
+					"The sub-agent has its own conversation, tools, and reasoning chain. " +
+					"Use for: parallel research, expert delegation, or isolating complex subtasks. " +
+					"Max nesting depth: 3.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"prompt": map[string]any{
+							"type":        "string",
+							"description": "The task description / instructions for the sub-agent",
+						},
+						"agent_uuid": map[string]any{
+							"type":        "string",
+							"description": "Optional: use a different agent by UUID (default: same agent as parent)",
+						},
+					},
+					"required": []string{"prompt"},
+				},
+			}),
+		},
 	}
 }
 

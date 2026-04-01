@@ -70,3 +70,7 @@ func (whatsAppAdapter) Reply(ctx context.Context, ch ChannelConfig, in *Inbound,
 	log.WithField("channel_uuid", ch.UUID).Warn("[whatsapp] Reply 未实现：需调用 Graph API messages，回复已丢弃")
 	return nil
 }
+
+func (whatsAppAdapter) SendTyping(_ context.Context, _ ChannelConfig, _ *Inbound) error {
+	return nil
+}
