@@ -727,9 +727,10 @@ function sendMessage() {
       if (chunk.steps?.length) { for (const s of chunk.steps) pendingSteps.value.push(reactive({ ...s, _expanded: false })) }
       else if (chunk.step) pendingSteps.value.push(reactive({ ...chunk.step, _expanded: false }))
       if (chunk.done) {
-        const steps = [...pendingSteps.value]
-        const tokensUsed = steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
-        const msg: any = { role: 'assistant', content: streamingContent.value, tokens_used: tokensUsed || undefined, steps, _showSteps: false }
+        const steps = chunk.steps?.length ? chunk.steps : [...pendingSteps.value]
+        const tokensUsed = chunk.tokens_used || steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
+        const content = chunk.content || streamingContent.value
+        const msg: any = { role: 'assistant', content, tokens_used: tokensUsed || undefined, steps, _showSteps: false }
         if (chunk.files?.length) msg.files = chunk.files
         messages.value.push(reactive(msg))
         streamingContent.value = ''

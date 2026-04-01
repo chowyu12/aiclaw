@@ -130,6 +130,8 @@ type ChatResponse struct {
 type StreamChunk struct {
 	ConversationID string          `json:"conversation_id,omitzero"`
 	Delta          string          `json:"delta,omitzero"`
+	Content        string          `json:"content,omitzero"`
+	TokensUsed     int             `json:"tokens_used,omitzero"`
 	Done           bool            `json:"done"`
 	Step           *ExecutionStep  `json:"step,omitzero"`
 	Steps          []ExecutionStep `json:"steps,omitzero"`

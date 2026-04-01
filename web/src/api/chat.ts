@@ -71,6 +71,8 @@ export interface ChatResponse {
 export interface StreamChunk {
   conversation_id?: string
   delta?: string
+  content?: string
+  tokens_used?: number
   done: boolean
   step?: ExecutionStep
   steps?: ExecutionStep[]

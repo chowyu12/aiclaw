@@ -75,6 +75,10 @@
                     </el-form-item>
                   </el-col>
                 </el-row>
+                <el-form-item label="Token 预算" label-width="92px">
+                  <el-input-number v-model="agentForm.token_budget" :min="0" :max="10000000" :step="10000" controls-position="right" style="width: 100%" />
+                  <div class="hint">单次执行最大 Token 消耗，0 不限制</div>
+                </el-form-item>
               </div>
               <div class="agent-side-block" v-if="isEdit">
                 <div class="agent-side-title">API Token</div>
@@ -178,6 +182,7 @@ const agentForm = ref({
   timeout: 0,
   max_history: 30,
   max_iterations: 50,
+  token_budget: 0,
   tool_search_enabled: false,
   memos_enabled: false,
   memos_config: { base_url: '', api_key: '', user_id: '', top_k: 10, async: true },
@@ -251,6 +256,7 @@ function applyAgentDetail(detail: Agent) {
     timeout: detail.timeout ?? 0,
     max_history: detail.max_history ?? 30,
     max_iterations: detail.max_iterations ?? 50,
+    token_budget: detail.token_budget ?? 0,
     tool_search_enabled: !!detail.tool_search_enabled,
     memos_enabled: !!detail.memos_enabled,
     memos_config: {
@@ -308,6 +314,7 @@ async function saveAgent() {
       timeout: agentForm.value.timeout,
       max_history: agentForm.value.max_history,
       max_iterations: agentForm.value.max_iterations,
+      token_budget: agentForm.value.token_budget,
       tool_search_enabled: agentForm.value.tool_search_enabled,
       memos_enabled: agentForm.value.memos_enabled,
       memos_config: agentForm.value.memos_config,

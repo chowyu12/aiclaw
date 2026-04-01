@@ -20,3 +20,7 @@ func (noopAdapter) HandlePOST(_ ChannelConfig, body []byte, _ string, _ http.Hea
 func (noopAdapter) Reply(_ context.Context, _ ChannelConfig, _ *Inbound, _ string) error {
 	return nil
 }
+
+func (noopAdapter) SendTyping(_ context.Context, _ ChannelConfig, _ *Inbound) error {
+	return nil
+}

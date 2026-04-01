@@ -20,6 +20,9 @@ type Inbound struct {
 	// ReplyWith 若设置，Bridge 优先用它回包（如企微智能机器人 WebSocket），不再调用 WebhookAdapter.Reply。
 	// images 为本次 Agent 执行产生的图片文件（工具生成），可为 nil。
 	ReplyWith func(ctx context.Context, text string, images []*model.File) error
+	// SendTypingWith 若设置，Bridge 在流式执行期间调用此函数发送"正在输入"提示，
+	// 优先于 WebhookDriver.SendTyping（用于 Hub 类渠道注入自身的 typing 机制）。
+	SendTypingWith func(ctx context.Context) error
 }
 
 // WebhookHTTP 写回给第三方平台的 HTTP 响应。
@@ -47,11 +50,14 @@ func (w WebhookHTTP) WriteTo(rw http.ResponseWriter) {
 	}
 }
 
-// WebhookDriver 单平台 Webhook 行为（GET 校验 / POST 解析 / 异步回复）。
+// WebhookDriver 单平台 Webhook 行为（GET 校验 / POST 解析 / 异步回复 / 输入提示）。
 type WebhookDriver interface {
 	HandleGET(ch ChannelConfig, q url.Values) WebhookHTTP
 	HandlePOST(ch ChannelConfig, body []byte, contentType string, header http.Header) (WebhookHTTP, *Inbound)
 	Reply(ctx context.Context, ch ChannelConfig, in *Inbound, text string) error
+	// SendTyping 在 Agent 执行期间定期调用，向用户发送"正在输入"提示。
+	// 不支持 typing 的平台直接返回 nil。
+	SendTyping(ctx context.Context, ch ChannelConfig, in *Inbound) error
 }
 
 // ChannelDriver 运行时渠道接口：用于管理后台长连接等（如企微 WebSocket）。

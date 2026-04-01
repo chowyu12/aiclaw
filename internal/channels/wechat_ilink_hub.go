@@ -150,12 +150,6 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 	fromUser := strings.TrimSpace(msg.FromUserID)
 	contextToken := msg.ContextToken
 
-	go func() {
-		if err := client.SendTyping(context.Background(), fromUser, contextToken); err != nil {
-			log.WithError(err).WithField("channel_id", ch.ID).Debug("[wechat] sendTyping failed")
-		}
-	}()
-
 	var files []model.ChatFile
 	for _, img := range msg.Images {
 		if strings.HasPrefix(img.URL, "http://") || strings.HasPrefix(img.URL, "https://") {
@@ -205,6 +199,9 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 		Files:     files,
 		RawMeta: map[string]any{
 			"context_token": contextToken,
+		},
+		SendTypingWith: func(ctx context.Context) error {
+			return client.SendTyping(ctx, fromUser, contextToken)
 		},
 		ReplyWith: func(ctx context.Context, reply string, images []*model.File) error {
 			replyClientID := uuid.New().String()
