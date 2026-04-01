@@ -56,6 +56,7 @@ export interface ExecutionStep {
     channel_type?: string
     channel_thread_key?: string
     channel_sender_id?: string
+    sub_agent_depth?: number
   }
   created_at: string
   _expanded?: boolean
