@@ -7,14 +7,15 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/chowyu12/aiclaw/internal/tools"
 	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/internal/tools"
 )
 
 type Tool interface {
 	Name() string
 	Description() string
 	Call(ctx context.Context, input string) (string, error)
+	IsConcurrencySafe() bool
 }
 
 type BuiltinHandler func(ctx context.Context, args string) (string, error)
@@ -70,7 +71,7 @@ func (r *ToolRegistry) buildTool(td model.Tool) Tool {
 		if !ok {
 			return nil
 		}
-		return &dynamicTool{toolName: td.Name, toolDesc: td.Description, handler: handler}
+		return &dynamicTool{toolName: td.Name, toolDesc: td.Description, concurrencySafe: concurrencySafeBuiltins[td.Name], handler: handler}
 	case model.HandlerHTTP:
 		var cfg model.HTTPHandlerConfig
 		if err := json.Unmarshal(td.HandlerConfig, &cfg); err != nil {
@@ -109,8 +110,9 @@ type trackedTool struct {
 	tracker   *StepTracker
 }
 
-func (t *trackedTool) Name() string        { return t.baseTool.Name() }
-func (t *trackedTool) Description() string { return t.baseTool.Description() }
+func (t *trackedTool) Name() string            { return t.baseTool.Name() }
+func (t *trackedTool) Description() string     { return t.baseTool.Description() }
+func (t *trackedTool) IsConcurrencySafe() bool { return t.baseTool.IsConcurrencySafe() }
 func (t *trackedTool) Call(ctx context.Context, input string) (string, error) {
 	l := log.WithField("tool", t.name)
 	if t.skillName != "" {
@@ -129,24 +131,43 @@ func (t *trackedTool) Call(ctx context.Context, input string) (string, error) {
 		errMsg = err.Error()
 	}
 
-	t.tracker.RecordStep(ctx, model.StepToolCall, t.name, input, output, status, errMsg, duration, 0, &model.StepMetadata{
+	meta := &model.StepMetadata{
 		ToolName:  t.name,
 		SkillName: t.skillName,
-	})
+	}
+	if t.name == "sub_agent" {
+		meta.SubAgentDepth = subAgentDepth(ctx) + 1
+	}
+	t.tracker.RecordStep(ctx, model.StepToolCall, t.name, input, output, status, errMsg, duration, 0, meta)
 	return output, err
 }
 
 var _ Tool = (*trackedTool)(nil)
 
-type dynamicTool struct {
-	toolName string
-	toolDesc string
-	params   any
-	handler  func(ctx context.Context, input string) (string, error)
+// concurrencySafeBuiltins 列出可并行执行的内置工具（只读/无副作用）。
+var concurrencySafeBuiltins = map[string]bool{
+	"current_time": true,
+	"read":         true,
+	"grep":         true,
+	"find":         true,
+	"ls":           true,
+	"web_fetch":    true,
+	"sub_agent":    true,
 }
 
-func (t *dynamicTool) Name() string                                           { return t.toolName }
-func (t *dynamicTool) Description() string                                    { return t.toolDesc }
-func (t *dynamicTool) Call(ctx context.Context, input string) (string, error) { return t.handler(ctx, input) }
+type dynamicTool struct {
+	toolName        string
+	toolDesc        string
+	params          any
+	concurrencySafe bool
+	handler         func(ctx context.Context, input string) (string, error)
+}
+
+func (t *dynamicTool) Name() string        { return t.toolName }
+func (t *dynamicTool) Description() string { return t.toolDesc }
+func (t *dynamicTool) Call(ctx context.Context, input string) (string, error) {
+	return t.handler(ctx, input)
+}
+func (t *dynamicTool) IsConcurrencySafe() bool { return t.concurrencySafe }
 
 var _ Tool = (*dynamicTool)(nil)

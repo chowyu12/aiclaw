@@ -114,6 +114,32 @@ func (telegramAdapter) Reply(ctx context.Context, ch ChannelConfig, in *Inbound,
 	return nil
 }
 
+func (telegramAdapter) SendTyping(ctx context.Context, ch ChannelConfig, in *Inbound) error {
+	if in == nil {
+		return nil
+	}
+	token := cfgString(ch.ConfigJSON, "bot_token", "token")
+	if token == "" {
+		return nil
+	}
+	api := "https://api.telegram.org/bot" + token + "/sendChatAction"
+	form := url.Values{}
+	form.Set("chat_id", in.ThreadKey)
+	form.Set("action", "typing")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
+}
+
 type telegramUpdate struct {
 	Message *telegramMessage `json:"message"`
 }

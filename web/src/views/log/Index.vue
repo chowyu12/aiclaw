@@ -67,10 +67,13 @@
                             :timestamp="`${step.duration_ms}ms`"
                             placement="top"
                           >
-                            <div class="step-card">
+                            <div class="step-card" :class="{ 'step-card--subagent': step.name === 'sub_agent' }">
                               <div class="step-title-row">
-                                <el-tag :type="stepTagType(step.step_type)" size="small" effect="dark">
-                                  {{ stepTypeLabel(step.step_type) }}
+                                <el-tag :type="stepTagType(step.step_type, step.name)" size="small" effect="dark">
+                                  {{ stepTypeLabel(step.step_type, step.name) }}
+                                </el-tag>
+                                <el-tag v-if="step.metadata?.sub_agent_depth" size="small" effect="plain" class="depth-tag">
+                                  L{{ step.metadata.sub_agent_depth }}
                                 </el-tag>
                                 <span class="step-name">{{ step.name }}</span>
                                 <el-tag
@@ -285,7 +288,8 @@ function roleLabel(role: string) {
   }
 }
 
-function stepTypeLabel(t: string) {
+function stepTypeLabel(t: string, name?: string) {
+  if (t === 'tool_call' && name === 'sub_agent') return 'Sub Agent'
   switch (t) {
     case 'llm_call': return 'LLM'
     case 'tool_call': return 'Tool'
@@ -295,7 +299,8 @@ function stepTypeLabel(t: string) {
   }
 }
 
-function stepTagType(t: string): '' | 'success' | 'warning' | 'danger' | 'info' {
+function stepTagType(t: string, name?: string): '' | 'success' | 'warning' | 'danger' | 'info' {
+  if (t === 'tool_call' && name === 'sub_agent') return 'success'
   switch (t) {
     case 'llm_call': return ''
     case 'tool_call': return 'warning'
@@ -412,6 +417,14 @@ function formatTime(t: string) {
   border: 1px solid var(--el-border-color-lighter);
   border-radius: 6px;
   padding: 12px 14px;
+}
+.step-card--subagent {
+  border-left: 3px solid #8b5cf6;
+}
+.depth-tag {
+  font-weight: 700;
+  color: #8b5cf6 !important;
+  border-color: rgba(139, 92, 246, 0.3) !important;
 }
 .step-title-row {
   display: flex;

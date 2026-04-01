@@ -68,6 +68,8 @@ type StepMetadata struct {
 	ToolName    string   `json:"tool_name,omitzero"`
 	SkillName   string   `json:"skill_name,omitzero"`
 	SkillTools  []string `json:"skill_tools,omitzero"`
+	// sub_agent 调用时记录嵌套深度（1 = 第一层子 Agent）。
+	SubAgentDepth int `json:"sub_agent_depth,omitzero"`
 	// 以下字段由渠道 Bridge 注入，写入执行步骤 metadata，便于控制台「执行日志」追溯来源。
 	ChannelID        int64  `json:"channel_id,omitzero"`
 	ChannelUUID      string `json:"channel_uuid,omitzero"`
@@ -130,6 +132,8 @@ type ChatResponse struct {
 type StreamChunk struct {
 	ConversationID string          `json:"conversation_id,omitzero"`
 	Delta          string          `json:"delta,omitzero"`
+	Content        string          `json:"content,omitzero"`
+	TokensUsed     int             `json:"tokens_used,omitzero"`
 	Done           bool            `json:"done"`
 	Step           *ExecutionStep  `json:"step,omitzero"`
 	Steps          []ExecutionStep `json:"steps,omitzero"`
