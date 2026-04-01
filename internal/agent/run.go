@@ -266,7 +266,8 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		}
 		if tsMode {
 			preloadSkillTools(ec.toolSkillMap, discovered)
-			ec.l.WithFields(log.Fields{"total_tools": len(allToolDefs), "skill_preloaded": len(discovered)}).Debug("[Execute]    mode = " + tag + "tool-search")
+			preloadEssentialBuiltins(discovered)
+			ec.l.WithFields(log.Fields{"total_tools": len(allToolDefs), "preloaded": len(discovered)}).Debug("[Execute]    mode = " + tag + "tool-search")
 		} else if ec.ag.ToolSearchEnabled && len(allToolDefs) > 0 {
 			ec.l.WithFields(log.Fields{"total_tools": len(allToolDefs), "threshold": ToolSearchAutoFullThreshold}).Debug("[Execute]    mode = " + tag + "tool-augmented (auto full catalog)")
 		} else {
