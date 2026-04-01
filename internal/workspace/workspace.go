@@ -41,6 +41,8 @@ func Init(dir string) error {
 		"cron/logs",
 		"tmp",
 		"sandbox",
+		"agents",
+		"session-memory",
 	} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
 			return fmt.Errorf("create workspace dir %q: %w", sub, err)
@@ -110,6 +112,13 @@ func Sandbox() string {
 		return ""
 	}
 	return filepath.Join(root, "sandbox")
+}
+
+func SessionMemory() string {
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "session-memory")
 }
 
 // AgentDir 返回指定 agent 的工作目录，并尝试创建所需子目录（失败时静默忽略）。

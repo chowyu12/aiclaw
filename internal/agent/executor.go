@@ -37,6 +37,11 @@ type Executor struct {
 	registry        *ToolRegistry
 	memory          *MemoryManager
 	providerFactory ProviderFactory
+	hooks           *HookRegistry
+}
+
+func WithHookRegistry(h *HookRegistry) ExecutorOption {
+	return func(e *Executor) { e.hooks = h }
 }
 
 func NewExecutor(s store.Store, registry *ToolRegistry, opts ...ExecutorOption) *Executor {
@@ -45,12 +50,17 @@ func NewExecutor(s store.Store, registry *ToolRegistry, opts ...ExecutorOption) 
 		registry:        registry,
 		memory:          NewMemoryManager(s),
 		providerFactory: provider.NewFromProvider,
+		hooks:           NewHookRegistry(),
 	}
 	for _, opt := range opts {
 		opt(e)
 	}
+	registry.RegisterBuiltin("sub_agent", e.subAgentHandler)
 	return e
 }
+
+// Hooks 返回执行器的 HookRegistry，允许外部注册生命周期钩子。
+func (e *Executor) Hooks() *HookRegistry { return e.hooks }
 
 // execContext 聚合单次执行所需的全部上下文。
 type execContext struct {
@@ -117,10 +127,17 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 		_ = chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Step: &step})
 	})
 
-	if _, err := e.run(ec.ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true); err != nil {
+	res, err := e.run(ec.ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true)
+	if err != nil {
 		return err
 	}
-	doneChunk := model.StreamChunk{ConversationID: ec.conv.UUID, Done: true}
+	doneChunk := model.StreamChunk{
+		ConversationID: ec.conv.UUID,
+		Done:           true,
+		Content:        res.Content,
+		TokensUsed:     res.TokensUsed,
+		Steps:          res.Steps,
+	}
 	if len(ec.toolFiles) > 0 {
 		doneChunk.Files = ec.toolFiles
 	}
@@ -408,6 +425,14 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, content stri
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "duration": duration, "tokens": tokensUsed}).Info("[Execute] << done")
 
 	storeMemories(ec.userMsg, content, ec.ag)
+
+	var toolNames []string
+	for _, step := range ec.tracker.Steps() {
+		if step.StepType == model.StepToolCall && step.Status == model.StepSuccess {
+			toolNames = append(toolNames, step.Name)
+		}
+	}
+	appendSessionMemory(ec.conv.UUID, ec.userMsg, toolNames, content)
 
 	return &ExecuteResult{
 		ConversationID: ec.conv.UUID,

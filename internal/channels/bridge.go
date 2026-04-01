@@ -90,6 +90,7 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		UserID:         channelUserID(ch, in),
 		Message:        userText,
 		Files:          in.Files,
+		Stream:         true,
 		ExecChannel: &model.ChannelExecTrace{
 			ID:        ch.ID,
 			UUID:      ch.UUID,
@@ -105,8 +106,24 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		"thread_key":        strings.TrimSpace(in.ThreadKey),
 		"sender_id":         strings.TrimSpace(in.SenderID),
 		"user_message":      TruncateRunes(userText, channelLogTextRunes),
-	}).Info("[Channel] executor >> start")
-	res, err := b.executor.Execute(ctx, req)
+	}).Info("[Channel] executor >> start (stream)")
+
+	typingFn := b.resolveTypingFunc(ad, cc, in)
+	var lastTyping time.Time
+	var finalChunk model.StreamChunk
+
+	err = b.executor.ExecuteStream(ctx, req, func(chunk model.StreamChunk) error {
+		if chunk.Delta != "" && typingFn != nil && time.Since(lastTyping) > 3*time.Second {
+			if typingErr := typingFn(ctx); typingErr != nil {
+				log.WithError(typingErr).Debug("[Channel] sendTyping failed")
+			}
+			lastTyping = time.Now()
+		}
+		if chunk.Done {
+			finalChunk = chunk
+		}
+		return nil
+	})
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"channel_id":        ch.ID,
@@ -120,22 +137,22 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		_ = b.sendChannelReply(ctx, ad, cc, in, fallback, nil)
 		return
 	}
-	imageFiles := imageFilesFrom(res.ToolFiles)
+	imageFiles := imageFilesFrom(finalChunk.Files)
 	log.WithFields(log.Fields{
 		"channel_id":        ch.ID,
 		"channel_type":      string(ch.ChannelType),
 		"conversation_uuid": convUUID,
 		"duration_ms":       time.Since(startAt).Milliseconds(),
-		"tokens_used":       res.TokensUsed,
-		"steps_count":       len(res.Steps),
-		"tool_files":        len(res.ToolFiles),
+		"tokens_used":       finalChunk.TokensUsed,
+		"steps_count":       len(finalChunk.Steps),
+		"tool_files":        len(finalChunk.Files),
 		"image_files":       len(imageFiles),
 	}).Info("[Channel] executor << done")
-	if err := b.sendChannelReply(ctx, ad, cc, in, res.Content, imageFiles); err != nil {
+	if err := b.sendChannelReply(ctx, ad, cc, in, finalChunk.Content, imageFiles); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"channel_id":        ch.ID,
 			"conversation_uuid": convUUID,
-			"reply":             TruncateRunes(res.Content, channelLogTextRunes),
+			"reply":             TruncateRunes(finalChunk.Content, channelLogTextRunes),
 		}).Warn("[Channel] reply failed")
 		return
 	}
@@ -144,8 +161,8 @@ func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig
 		"channel_uuid":       ch.UUID,
 		"channel_type":       string(ch.ChannelType),
 		"conversation_uuid":  convUUID,
-		"reply":              TruncateRunes(res.Content, channelLogTextRunes),
-		"reply_runes":        utf8.RuneCountInString(res.Content),
+		"reply":              TruncateRunes(finalChunk.Content, channelLogTextRunes),
+		"reply_runes":        utf8.RuneCountInString(finalChunk.Content),
 		"user_message":       TruncateRunes(userText, channelLogTextRunes),
 		"user_message_runes": utf8.RuneCountInString(userText),
 	}).Info("[Channel] reply ok")
@@ -166,6 +183,16 @@ func (b *Bridge) persistAssistantFallback(ctx context.Context, conversationUUID,
 		return err
 	}
 	return nil
+}
+
+// resolveTypingFunc 确定 typing 发送函数：Hub 渠道优先用 Inbound 注入的回调，其余走 WebhookDriver。
+func (b *Bridge) resolveTypingFunc(ad WebhookDriver, cc ChannelConfig, in *Inbound) func(ctx context.Context) error {
+	if in.SendTypingWith != nil {
+		return in.SendTypingWith
+	}
+	return func(ctx context.Context) error {
+		return ad.SendTyping(ctx, cc, in)
+	}
 }
 
 func (b *Bridge) sendChannelReply(ctx context.Context, ad WebhookDriver, cc ChannelConfig, in *Inbound, text string, images []*model.File) error {

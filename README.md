@@ -1,6 +1,6 @@
 # AiClaw
 
-基于 Go + Vue 3 构建的 AI Agent 管理与执行平台，当前采用**单例 Agent**架构，支持多模型供应商接入、工具调用、技能编排和多轮对话。
+基于 Go + Vue 3 构建的 AI Agent 管理与执行平台，支持**多 Agent 协作**、**子 Agent 嵌套执行**、多模型供应商接入、工具并行调用、技能编排、多渠道接入和多轮对话。
 
 ## 一键安装
 
@@ -22,32 +22,63 @@ aiclaw version    # 查看当前版本
 
 > 如需从源码构建或自定义配置，请参考下方「从源码构建」章节。
 
-## 核心优势
+## 核心架构
 
-### 灵活的 Agent 自定义
+### 子 Agent 系统
 
-每个 Agent 是一个独立的智能体，可自由组合模型、工具、技能和 MCP 服务。通过 Web UI 配置系统提示词、模型参数、关联资源，无需编码即可构建面向不同场景的专属 Agent。支持 Agent Token 直接对外提供 API 服务，方便后端系统集成。
+支持嵌套式 Agent 执行：父 Agent 可通过 `sub_agent` 工具启动子 Agent 处理独立子任务，每个子 Agent 拥有独立会话、推理链和工具集。
 
-### 二阶段技能加载（Two-Phase Skill Loading）
+- 最大嵌套深度 3 层，通过 context 传播深度计数防止无限递归
+- 子 Agent 可使用与父 Agent 相同或不同的 Agent 配置（模型、提示词、工具集）
+- 适用于并行调研、专家分工、复杂任务拆分等场景
+- 子 Agent 的最终回答作为工具输出返回给父 Agent
+
+### 工具并行执行
+
+对同一轮 LLM 返回的多个 tool_calls，自动识别并发安全的工具（`read`、`grep`、`find`、`ls`、`web_fetch`、`current_time`）并行执行，串行工具按顺序执行。共享状态通过 `sync.Mutex` 保护。
+
+### 渐进式上下文压缩
+
+长对话场景下采用三级压缩策略管理消息历史：
+
+- **最近 N 轮**：保留完整内容（含 tool_calls 和 tool 结果）
+- **中间轮次**：轻量压缩 — 保留消息结构但截断过长内容
+- **早期轮次**：重度压缩 — 仅保留 user/assistant 核心内容
+
+在保留关键上下文的同时控制 Token 开销。
+
+### 会话笔记（Session Memory）
+
+每轮执行结束后自动将摘要（用户意图、使用工具、执行结果）追加到 `~/.aiclaw/session-memory/{conversation-uuid}.md`，下轮对话时注入 System Prompt。零 API 开销，纯文件 I/O，帮助 Agent 回顾之前的对话进展。
+
+### Token 预算控制
+
+Agent 级可配置 Token 预算（`token_budget`），单次执行的 Token 消耗超出预算时优雅停止，防止失控的工具循环造成过高成本。0 表示不限制。
+
+### 生命周期 Hook
+
+支持在 Agent 执行的关键节点注入自定义逻辑：
+
+| 事件 | 触发时机 | 可用 Action |
+| --- | --- | --- |
+| `pre_tool_use` | 工具调用前 | Continue / Skip |
+| `post_tool_use` | 工具调用后 | Continue |
+| `pre_llm_call` | LLM 调用前 | Continue / Abort |
+| `post_llm_call` | LLM 调用后 | Continue |
+| `agent_stop` | Agent 循环结束 | — |
+
+### 二阶段技能加载
 
 借鉴 Cursor 的技能加载策略，采用**摘要注入 + 按需读取**的两阶段模式：
 
 - **阶段一**：仅将技能名称、描述和 `SKILL.md` 文件路径注入 System Prompt，不加载完整指令内容
 - **阶段二**：LLM 判断需要使用某项技能时，主动调用 `read` 工具读取 `SKILL.md` 获取详细指令
 
-相比一次性注入所有技能内容，此方案在 Agent 挂载大量技能时可显著降低 System Prompt 长度，减少每次请求的基础 Token 消耗，同时保持技能的完整可用性。
+相比一次性注入所有技能内容，此方案在 Agent 挂载大量技能时可显著降低 System Prompt 长度。
 
 ### Tool Search — 工具按需发现
 
-当 Agent 挂载大量工具时，传统方式会将所有工具的 Function 定义（名称 + 描述 + 参数 Schema）一次性发送给 LLM，随着工具数量增长，Token 开销急剧膨胀且工具选择准确率下降。
-
-开启 **Tool Search** 后，Agent 会加载系统中全部已启用工具（含 MCP / 技能声明工具），但根据**工具条数自动选择模式**
-
-此外，执行器内置**轻量循环检测**（参考 OpenClaw `loop-detection` 思路）：连续相同参数调用、`tool_search` 短时内过多、两工具 ping-pong 交替等模式会触发拦截，向模型返回 `[loop_guard]` 提示，减少无效重复工具调用。
-
-可在 Agent 配置页面一键开启 Tool Search；阈值 `ToolSearchAutoFullThreshold` 见 `internal/agent/tool_search.go`。
-
-> 参考：[OpenAI / Anthropic Tool Search 机制](https://platform.openai.com/docs/guides/function-calling)
+当 Agent 挂载大量工具时，开启 Tool Search 后根据工具条数自动选择模式，避免 Token 开销膨胀。执行器内置轻量循环检测（连续相同参数调用、ping-pong 交替等）触发拦截，减少无效重复工具调用。
 
 ---
 
@@ -55,9 +86,11 @@ aiclaw version    # 查看当前版本
 
 ### Agent 管理
 
-- Agent 配置，支持修改名称、系统提示词、模型参数（温度、最大 token 等）
+- 多 Agent 配置，每个 Agent 可独立设置模型、系统提示词、温度、最大 Token、超时等参数
 - Agent 可关联多个工具（Tools）、技能（Skills）和 MCP 服务
-- 支持工具优先执行策略，Agent 自动判断是否需要调用工具（Function Calling）
+- Token 预算控制（单次执行上限）
+- 支持 Agent Token 直接对外提供 API 服务
+- 支持设为默认 Agent
 
 ### 模型供应商
 
@@ -67,61 +100,58 @@ aiclaw version    # 查看当前版本
 
 ### 渠道接入
 
-支持将 Agent 接入多种消息渠道，实现多平台自动回复：
+支持将 Agent 接入多种消息渠道，实现多平台自动回复。所有渠道均使用流式执行（`ExecuteStream`），支持在 Agent 处理期间发送"正在输入"提示：
 
-
-| 渠道       | 类型标识       | 接入方式          | 说明                                          |
-| -------- | ---------- | ------------- | ------------------------------------------- |
-| 企业微信     | `wecom`    | WebSocket 长连接 | 智能机器人，配置 Bot ID + Secret，服务端自动建连            |
-| 微信       | `wechat`   | iLink 长轮询     | 微信个人号，Web 端扫码登录后自动启动消息监听                    |
-| 飞书       | `feishu`   | Webhook       | 配置 App ID / App Secret / Verification Token |
-| 钉钉       | `dingtalk` | Webhook       | 配置 Webhook URL 到钉钉机器人                       |
-| WhatsApp | `whatsapp` | Webhook       | Meta Cloud API，配置 Verify Token              |
-| Telegram | `telegram` | Webhook       | BotFather Token，自动 setWebhook               |
-
+| 渠道 | 类型标识 | 接入方式 | Typing 支持 |
+| --- | --- | --- | --- |
+| 企业微信 | `wecom` | WebSocket 长连接 | — |
+| 微信 | `wechat` | iLink 长轮询 | SendTyping（周期调用） |
+| 飞书 | `feishu` | Webhook | — |
+| 钉钉 | `dingtalk` | Webhook | — |
+| WhatsApp | `whatsapp` | Webhook | — |
+| Telegram | `telegram` | Webhook | sendChatAction |
 
 渠道管理页面支持一键启用/禁用、查看会话记录和消息明细。
 
 ### 工具系统
 
-15 个内置工具，覆盖文件操作、命令执行、网页交互、桌面自动化和任务调度：
+16 个内置工具，覆盖文件操作、命令执行、网页交互、桌面自动化、任务调度和 Agent 协作：
 
-
-| 工具                 | 说明                                                 |
-| ------------------ | -------------------------------------------------- |
-| `read`             | 读取文件内容，支持按行范围读取                                    |
-| `write`            | 创建或覆盖文件，自动创建父目录                                    |
-| `edit`             | 精确编辑文件（查找并替换）                                      |
-| `grep`             | 按正则表达式搜索文件内容                                       |
-| `find`             | 按 glob 模式查找文件                                      |
-| `ls`               | 列出目录内容                                             |
-| `exec`             | 运行 Shell 命令（无 PTY），支持 shell 回退、`working_dir` 与超时控制 |
-| `process`          | 管理后台命令会话（启动、列出、读取输出、终止）                            |
-| `web_fetch`        | 抓取 URL 并提取可读内容，自动回退浏览器渲染                           |
-| `browser`          | 浏览器自动化：33 种操作（导航、截图、快照、交互、监控、仿真等）                  |
-| `canvas`           | 渲染 HTML/CSS/JS 画布，执行 JS 表达式，截取快照                   |
-| `cron`             | 管理定时任务与唤醒事件（提醒）                                    |
-| `code_interpreter` | 代码解释器：Python/JavaScript/Shell 沙箱执行                 |
-| `current_time`     | 获取当前系统时间                                           |
-
+| 工具 | 说明 |
+| --- | --- |
+| `read` | 读取文件内容，支持按行范围读取，图片自动传入视觉模型 |
+| `write` | 创建或覆盖文件，自动创建父目录 |
+| `edit` | 精确编辑文件（查找并替换） |
+| `grep` | 按正则表达式搜索文件内容 |
+| `find` | 按 glob 模式查找文件 |
+| `ls` | 列出目录内容 |
+| `exec` | 运行 Shell 命令，支持 PTY、working_dir 与超时 |
+| `process` | 管理后台命令会话（启动、列出、读取输出、终止） |
+| `web_fetch` | 抓取 URL 并提取可读内容，自动回退浏览器渲染 |
+| `browser` | 浏览器自动化：33 种操作（导航、截图、快照、交互、监控、仿真等） |
+| `canvas` | 渲染 HTML/CSS/JS 画布，执行 JS 表达式，截取快照 |
+| `cron` | 管理定时任务与唤醒事件 |
+| `code_interpreter` | 代码解释器：Python/JavaScript/Shell 沙箱执行 |
+| `current_time` | 获取当前系统时间 |
+| `sub_agent` | 启动子 Agent 执行独立子任务（最大嵌套 3 层） |
 
 - 支持自定义 HTTP 工具和命令工具（通过 Web UI 或 API 创建）
 - MCP 协议客户端，支持接入 MCP 远程工具服务
 - 工具执行过程全链路追踪
+- 并发安全的只读工具自动并行执行
 
 ### 技能系统
 
-- 采用 OpenClaw 标准格式，每个技能是一个独立目录（`SKILL.md` + `manifest.json` + 可执行代码）
-- 技能来自 Workspace 下 `~/.aiclaw/skills/` 目录扫描（将技能目录放入该文件夹即可；设置页可刷新列表）
-- 技能可在 `manifest.json` 中声明工具定义（parameters），Agent 执行时自动注册为可调用工具
+- 采用标准格式，每个技能是一个独立目录（`SKILL.md` + `manifest.json` + 可执行代码）
+- 技能来自 `~/.aiclaw/skills/` 目录扫描（将技能目录放入该文件夹即可）
+- 技能可在 `manifest.json` 中声明工具定义，Agent 执行时自动注册为可调用工具
 - 支持可执行技能（`index.js` / `index.py`），通过子进程运行工具逻辑
-- 纯指令技能将 `SKILL.md` 内容注入 System Prompt，引导 LLM 按指令推理
-- 预置 5 个内置技能，每个都组合多个工具形成完整工作流：
-  - **深度研究** — `web_fetch` + `browser` + `write`，多源信息采集与研究报告生成
+- 预置 5 个内置技能，均支持 sub_agent 协作模式：
+  - **深度研究** — `sub_agent` + `web_fetch` + `browser` + `write`，通过子 Agent 并行多源采集与研究报告生成
   - **定时任务** — `cron` + `exec` + `write`，自然语言描述自动生成脚本并配置定时执行
-  - **系统运维** — `exec` + `process` + `read` + `grep`，系统健康检查、日志排错、进程管理
-  - **数据处理** — `code_interpreter` + `read` + `write`，CSV/JSON/Excel 数据清洗、转换、统计
-  - **网页采集** — `browser` + `web_fetch` + `code_interpreter` + `write`，结构化提取网页数据
+  - **系统运维** — `sub_agent` + `exec` + `process` + `read` + `grep`，并行诊断系统问题
+  - **数据处理** — `sub_agent` + `code_interpreter` + `read` + `write`，大批量数据分治处理
+  - **网页采集** — `sub_agent` + `browser` + `web_fetch` + `code_interpreter` + `write`，并行多站点结构化数据提取
 
 **技能目录结构：**
 
@@ -161,8 +191,10 @@ aiclaw version    # 查看当前版本
 
 - 支持多轮对话，自动维护上下文
 - 对话历史持久化存储（MySQL / PostgreSQL / SQLite）
+- 会话笔记（Session Memory）：自动记录每轮执行摘要，帮助跨轮次回顾
+- MemOS 长期记忆集成（可选）：将对话存入外部记忆服务，跨会话召回
 - 支持流式（SSE）和阻塞式两种响应模式
-- 流式响应实时展示执行步骤
+- 流式响应实时展示执行步骤，done chunk 包含完整结果
 
 ### 执行日志
 
@@ -173,23 +205,21 @@ aiclaw version    # 查看当前版本
 ### 管理后台
 
 - 现代化 Web UI（Vue 3 + Element Plus）
-- 供应商、Agent、工具、技能等的管理
+- 供应商、Agent、工具、技能、渠道等的管理
 - 对话 Playground（默认首页）
 - 执行日志查看器
 - 前端编译后嵌入 Go 二进制，单文件部署
 
 ## 技术栈
 
-
-| 层级    | 技术                                             |
-| ----- | ---------------------------------------------- |
-| 后端    | Go 1.25、net/http、logrus                        |
-| AI 编排 | Function Calling（openai-go SDK）                |
-| ORM   | GORM（MySQL / PostgreSQL / SQLite）              |
-| 认证    | Web 访问令牌（Bearer）、Agent Token（ag- 前缀）           |
-| 前端    | Vue 3、TypeScript、Element Plus、Pinia、Vue Router |
-| 构建    | Go embed、Vite                                  |
-
+| 层级 | 技术 |
+| --- | --- |
+| 后端 | Go 1.25、net/http、logrus、lumberjack（日志轮转） |
+| AI 编排 | Function Calling（openai-go SDK）、子 Agent 嵌套、工具并行执行 |
+| ORM | GORM（MySQL / PostgreSQL / SQLite） |
+| 认证 | Web 访问令牌（Bearer）、Agent Token（ag- 前缀） |
+| 前端 | Vue 3、TypeScript、Element Plus、Pinia、Vue Router |
+| 构建 | Go embed、Vite |
 
 ## 从源码构建
 
@@ -245,6 +275,7 @@ server:
 
 log:
   level: info
+  max_size: 10  # 日志文件最大 MB，超出自动轮转
 
 auth:
   # 留空则首次启动会自动生成并写回配置文件
@@ -266,11 +297,11 @@ make dev
 
 ### 5. 配置模型供应商
 
-登录后进入「模型供应商」页面，添加至少一个 LLM Provider（如 OpenAI），填入 API Key 和 Base URL。启动时会自动创建默认单例 Agent（内存 + `config.yaml` 的 `agent` 段）；若 `agent.provider_id` 为 0，会绑定到第一个供应商。
+登录后进入「模型供应商」页面，添加至少一个 LLM Provider（如 OpenAI），填入 API Key 和 Base URL。
 
 ### 6. 创建 Agent 开始对话
 
-进入「Agent 管理」创建 Agent，选择模型、配置工具和技能，然后在「对话测试」中体验。
+进入「Agent 管理」创建 Agent，选择模型、配置工具和技能，设置 Token 预算（可选），然后在「对话测试」中体验。
 
 ## 常用命令
 
@@ -286,7 +317,7 @@ make deps             # 整理 Go 依赖
 
 ### Agent Token（后端调用）
 
-系统为唯一的 Agent 自动生成 `ag-` 前缀的 API Token，后端服务可用该 Token 调用 chat 接口（与 Web 控制台的 `web_token` 不同）。Token 可在设置 / Agent 页面查看、复制和重置。
+系统为每个 Agent 自动生成 `ag-` 前缀的 API Token，后端服务可用该 Token 调用 chat 接口（与 Web 控制台的 `web_token` 不同）。Token 可在 Agent 管理页面查看、复制和重置。
 
 **阻塞式调用**
 
@@ -297,8 +328,6 @@ curl -X POST http://localhost:8080/api/v1/chat/completions \
   -d '{"message": "今天天气怎么样？", "user_id": "backend-service"}'
 ```
 
-请求体中无需也不支持 `agent_id` 字段，始终使用当前唯一的 Agent 配置。
-
 **流式调用（SSE）**
 
 ```bash
@@ -307,6 +336,8 @@ curl -N -X POST http://localhost:8080/api/v1/chat/stream \
   -H "Content-Type: application/json" \
   -d '{"message": "帮我写一个排序算法", "user_id": "backend-service"}'
 ```
+
+流式响应的 done chunk 包含完整的 `content`、`tokens_used` 和 `steps`，客户端可直接使用而非拼接 delta。
 
 **带会话上下文的多轮对话**
 
@@ -341,18 +372,6 @@ curl -X POST http://localhost:8080/api/v1/chat/completions \
     "user_id": "backend-service",
     "files": [
       {"type": "document", "transfer_method": "local_file", "upload_file_id": "文件UUID"}
-    ]
-  }'
-
-# 也支持直接传文件 URL
-curl -X POST http://localhost:8080/api/v1/chat/completions \
-  -H "Authorization: Bearer ag-xxxxxxxxxxxxxxxxxxxxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "分析这张图片",
-    "user_id": "backend-service",
-    "files": [
-      {"type": "image", "transfer_method": "remote_url", "url": "https://example.com/image.png"}
     ]
   }'
 ```
@@ -420,13 +439,9 @@ WantedBy=multi-user.target
 ```
 
 ```bash
-# 启用并启动
 sudo systemctl daemon-reload
 sudo systemctl enable aiclaw
 sudo systemctl start aiclaw
-
-# 查看状态 / 日志
-sudo systemctl status aiclaw
 sudo journalctl -u aiclaw -f
 ```
 
@@ -452,52 +467,12 @@ sudo journalctl -u aiclaw -f
   <true/>
   <key>KeepAlive</key>
   <true/>
-  <key>StandardOutPath</key>
-  <string>/tmp/aiclaw.stdout.log</string>
-  <key>StandardErrorPath</key>
-  <string>/tmp/aiclaw.stderr.log</string>
 </dict>
 </plist>
 ```
 
 ```bash
-# 加载并启动
 launchctl load ~/Library/LaunchAgents/com.aiclaw.plist
-
-# 停止并卸载
-launchctl unload ~/Library/LaunchAgents/com.aiclaw.plist
-
-# 查看日志
-tail -f /tmp/aiclaw.stdout.log
-```
-
-#### Windows（服务 / 计划任务）
-
-**方式一：NSSM 注册为 Windows 服务（推荐）**
-
-下载 [NSSM](https://nssm.cc/)，然后：
-
-```powershell
-# 安装服务
-nssm install AiClaw C:\aiclaw\aiclaw.exe
-nssm set AiClaw AppDirectory C:\aiclaw
-nssm set AiClaw DisplayName "AiClaw AI Agent Platform"
-nssm set AiClaw Start SERVICE_AUTO_START
-
-# 启动 / 停止 / 查看状态
-nssm start AiClaw
-nssm stop AiClaw
-nssm status AiClaw
-```
-
-**方式二：计划任务（开机自启）**
-
-```powershell
-# 创建开机启动任务
-schtasks /create /tn "AiClaw" /tr "C:\aiclaw\aiclaw.exe" /sc onstart /ru SYSTEM
-
-# 删除任务
-schtasks /delete /tn "AiClaw" /f
 ```
 
 #### Docker
@@ -510,4 +485,3 @@ docker run -d \
   -v ~/.aiclaw:/root/.aiclaw \
   aiclaw:latest
 ```
-

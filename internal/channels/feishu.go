@@ -224,6 +224,10 @@ func deref(s *string) string {
 	return *s
 }
 
+func (feishuAdapter) SendTyping(_ context.Context, _ ChannelConfig, _ *Inbound) error {
+	return nil
+}
+
 func (feishuAdapter) Reply(ctx context.Context, ch ChannelConfig, in *Inbound, text string) error {
 	if in == nil {
 		return nil

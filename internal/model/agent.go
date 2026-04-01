@@ -69,6 +69,7 @@ type Agent struct {
 	MaxHistory        int        `json:"max_history" gorm:"default:30"`
 	MaxIterations     int        `json:"max_iterations" gorm:"default:50"`
 	Token             string     `json:"token" gorm:"size:100;uniqueIndex"`
+	TokenBudget       int        `json:"token_budget" gorm:"default:0"`
 	ToolSearchEnabled bool       `json:"tool_search_enabled" gorm:"default:false"`
 	MemOSEnabled      bool        `json:"memos_enabled" gorm:"column:memos_enabled;default:false"`
 	MemOSCfg          MemOSConfig `json:"memos_config" gorm:"column:memos_config;type:text"`
@@ -114,6 +115,7 @@ type UpdateAgentReq struct {
 	Timeout           *int         `json:"timeout,omitzero"`
 	MaxHistory        *int         `json:"max_history,omitzero"`
 	MaxIterations     *int         `json:"max_iterations,omitzero"`
+	TokenBudget       *int         `json:"token_budget,omitzero"`
 	ToolSearchEnabled *bool        `json:"tool_search_enabled,omitzero"`
 	MemOSEnabled      *bool        `json:"memos_enabled,omitzero"`
 	MemOSCfg          *MemOSConfig `json:"memos_config,omitzero"`
@@ -132,6 +134,7 @@ type CreateAgentReq struct {
 	Timeout           int         `json:"timeout"`
 	MaxHistory        int         `json:"max_history"`
 	MaxIterations     int         `json:"max_iterations"`
+	TokenBudget       int         `json:"token_budget"`
 	ToolSearchEnabled bool        `json:"tool_search_enabled"`
 	MemOSEnabled      bool        `json:"memos_enabled"`
 	MemOSCfg          MemOSConfig `json:"memos_config"`
