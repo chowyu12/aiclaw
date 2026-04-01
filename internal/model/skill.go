@@ -5,6 +5,7 @@ import "time"
 type SkillSource string
 
 const (
+	SkillSourceBuiltin SkillSource = "builtin"
 	SkillSourceClawHub SkillSource = "clawhub"
 	SkillSourceLocal   SkillSource = "local"
 	SkillSourceCustom  SkillSource = "custom"

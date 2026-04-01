@@ -1,6 +1,6 @@
 import request from './request'
 
-export interface WorkspaceSkillItem {
+export interface SkillItem {
   dir_name: string
   name: string
   description: string
@@ -8,6 +8,7 @@ export interface WorkspaceSkillItem {
   author: string
   slug: string
   main_file: string
+  source: 'builtin' | 'local' | 'clawhub' | 'custom'
 }
 
 export const workspaceSkillApi = {
