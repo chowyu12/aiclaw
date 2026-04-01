@@ -171,13 +171,14 @@
                   <div v-if="msg._showSteps" class="steps-list">
                     <div v-for="step in msg.steps" :key="step.step_order" class="step-row">
                       <div class="step-indicator">
-                        <span class="step-dot" :class="'dot--' + step.step_type"></span>
+                        <span class="step-dot" :class="stepDotClass(step)"></span>
                         <span class="step-line"></span>
                       </div>
                       <div class="step-body">
                         <div class="step-head">
-                          <span class="step-badge" :class="'badge--' + step.step_type">{{ stepTypeLabel(step.step_type) }}</span>
-                          <span class="step-title">{{ step.name }}</span>
+                          <span class="step-badge" :class="stepBadgeClass(step)">{{ stepTypeLabel(step.step_type, step.name) }}</span>
+                          <span v-if="subAgentDepthLabel(step)" class="step-depth">{{ subAgentDepthLabel(step) }}</span>
+                          <span class="step-title">{{ step.name === 'sub_agent' ? (step.metadata?.tool_name || 'sub_agent') : step.name }}</span>
                           <el-tag
                             :type="step.status === 'success' ? 'success' : 'danger'"
                             size="small" round effect="plain"
@@ -231,9 +232,10 @@
               <div v-if="pendingSteps.length > 0 || !streamingContent" class="wf-timeline">
                 <div v-for="(step, idx) in pendingSteps" :key="idx" class="wf-node">
                   <div class="wf-node-head" @click="step._expanded = !step._expanded">
-                    <span class="wf-dot" :class="'wf-dot--' + step.step_type"></span>
-                    <span class="wf-label">{{ stepTypeLabel(step.step_type) }}</span>
-                    <span class="wf-name">{{ step.name }}</span>
+                    <span class="wf-dot" :class="step.name === 'sub_agent' ? 'wf-dot--sub_agent' : ('wf-dot--' + step.step_type)"></span>
+                    <span class="wf-label" :class="{ 'wf-label--sub_agent': step.name === 'sub_agent' }">{{ stepTypeLabel(step.step_type, step.name) }}</span>
+                    <span v-if="subAgentDepthLabel(step)" class="wf-depth">{{ subAgentDepthLabel(step) }}</span>
+                    <span class="wf-name">{{ step.name === 'sub_agent' ? (step.metadata?.tool_name || 'sub_agent') : step.name }}</span>
                     <el-tag v-if="step.status === 'success'" type="success" size="small" round effect="plain">{{ step.duration_ms }}ms</el-tag>
                     <el-tag v-else-if="step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
                     <span v-if="step.tokens_used" class="wf-tokens">{{ step.tokens_used }} tokens</span>
@@ -791,7 +793,8 @@ function formatMessage(text: string): string {
   return md.parse(s) as string
 }
 
-function stepTypeLabel(t: string) {
+function stepTypeLabel(t: string, name?: string) {
+  if (t === 'tool_call' && name === 'sub_agent') return 'Sub Agent'
   switch (t) {
     case 'llm_call': return 'LLM'
     case 'tool_call': return 'Tool'
@@ -799,6 +802,21 @@ function stepTypeLabel(t: string) {
     case 'skill_match': return 'Skill'
     default: return t
   }
+}
+
+function stepBadgeClass(step: any) {
+  if (step.step_type === 'tool_call' && step.name === 'sub_agent') return 'badge--sub_agent'
+  return 'badge--' + step.step_type
+}
+
+function stepDotClass(step: any) {
+  if (step.step_type === 'tool_call' && step.name === 'sub_agent') return 'dot--sub_agent'
+  return 'dot--' + step.step_type
+}
+
+function subAgentDepthLabel(step: any): string {
+  const depth = step.metadata?.sub_agent_depth
+  return depth ? `L${depth}` : ''
 }
 
 function truncateText(text: string, maxLen: number): string {
@@ -1553,6 +1571,9 @@ function truncateText(text: string, maxLen: number): string {
 .dot--tool_call {
   background: #ea580c;
 }
+.dot--sub_agent {
+  background: #8b5cf6;
+}
 .dot--agent_call {
   background: #059669;
 }
@@ -1594,6 +1615,9 @@ function truncateText(text: string, maxLen: number): string {
 .badge--tool_call {
   background: #ea580c;
 }
+.badge--sub_agent {
+  background: #8b5cf6;
+}
 .badge--agent_call {
   background: #059669;
 }
@@ -1608,6 +1632,15 @@ function truncateText(text: string, maxLen: number): string {
 .step-tokens {
   font-size: 11px;
   color: var(--chat-step-muted);
+}
+.step-depth {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
 }
 
 .step-detail,
@@ -1696,6 +1729,9 @@ function truncateText(text: string, maxLen: number): string {
 .wf-dot--tool_call {
   background: #ea580c;
 }
+.wf-dot--sub_agent {
+  background: #8b5cf6;
+}
 .wf-dot--agent_call {
   background: #059669;
 }
@@ -1730,6 +1766,17 @@ function truncateText(text: string, maxLen: number): string {
 .wf-tokens {
   font-size: 11px;
   color: var(--chat-step-muted);
+}
+.wf-depth {
+  font-size: 10px;
+  font-weight: 700;
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.wf-label--sub_agent {
+  color: #8b5cf6;
 }
 .wf-arrow {
   color: var(--chat-step-muted);
