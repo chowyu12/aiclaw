@@ -46,7 +46,7 @@ func BuiltinSkills() []model.Skill {
 			Name:        name,
 			Description: fm["description"],
 			Instruction: strings.TrimSpace(body),
-			Source:      model.SkillSourceLocal,
+			Source:      model.SkillSourceBuiltin,
 			DirName:     dirName,
 			Version:     "1.0.0",
 			Author:      "system",
