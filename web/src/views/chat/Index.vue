@@ -577,15 +577,29 @@ async function loadConversation(conv: Conversation) {
 }
 
 async function reloadCurrentMessages() {
-  await loadConversations()
-  const conv = conversations.value.find(c => c.uuid === conversationId.value)
-  if (conv) {
-    activeConvId.value = conv.id
-    try {
-      const res: any = await chatApi.messages(conv.id, 100, true)
-      messages.value = parseChatMessages(res.data || [])
-    } catch {}
+  let convId = activeConvId.value
+
+  if (!convId && conversationId.value) {
+    await loadConversations()
+    const conv = conversations.value.find(c => c.uuid === conversationId.value)
+    if (conv) convId = conv.id
   }
+
+  if (convId) {
+    try {
+      const res: any = await chatApi.messages(convId, 100, true)
+      messages.value = parseChatMessages(res.data || [])
+    } catch {
+      // retry once after short delay
+      await new Promise(r => setTimeout(r, 500))
+      try {
+        const res: any = await chatApi.messages(convId, 100, true)
+        messages.value = parseChatMessages(res.data || [])
+      } catch {}
+    }
+  }
+
+  loadConversations()
   scrollToBottom()
 }
 
@@ -640,22 +654,10 @@ function stopGeneration() {
     _streamController = null
   }
   if (streaming.value) {
-    if (streamingContent.value) {
-      const steps = [...pendingSteps.value]
-      const tokensUsed = steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
-      messages.value.push(reactive({
-        role: 'assistant',
-        content: streamingContent.value,
-        tokens_used: tokensUsed || undefined,
-        steps,
-        _showSteps: false,
-      }))
-    }
     streamingContent.value = ''
     pendingSteps.value = []
     streaming.value = false
-    scrollToBottom()
-    loadConversations()
+    setTimeout(() => reloadCurrentMessages(), 500)
   }
 }
 
@@ -747,6 +749,26 @@ function sendMessage() {
   pendingSteps.value = []
   scrollToBottom()
 
+  let sendFinished = false
+  const finishSend = async (localMsg?: any) => {
+    if (sendFinished) return
+    sendFinished = true
+    _streamController = null
+    if (localMsg) {
+      messages.value.push(reactive(localMsg))
+      streamingContent.value = ''
+      pendingSteps.value = []
+      streaming.value = false
+      scrollToBottom()
+      loadConversations()
+    } else {
+      await reloadCurrentMessages()
+      streamingContent.value = ''
+      pendingSteps.value = []
+      streaming.value = false
+    }
+  }
+
   _streamController = streamChat(
     { agent_uuid: currentAgent.value?.uuid, conversation_id: conversationId.value, message: text, user_id: 'default', files: chatFiles.length > 0 ? chatFiles : undefined },
     (chunk: StreamChunk) => {
@@ -760,29 +782,11 @@ function sendMessage() {
         const content = chunk.content || streamingContent.value
         const msg: any = { role: 'assistant', content, tokens_used: tokensUsed || undefined, steps, _showSteps: false, id: chunk.message_id || undefined }
         if (chunk.files?.length) msg.files = chunk.files
-        messages.value.push(reactive(msg))
-        streamingContent.value = ''
-        pendingSteps.value = []
-        streaming.value = false
-        _streamController = null
-        scrollToBottom()
-        loadConversations()
+        finishSend(msg)
       }
     },
-    () => {
-      streamingContent.value = ''
-      pendingSteps.value = []
-      streaming.value = false
-      _streamController = null
-      reloadCurrentMessages()
-    },
-    (_err: string) => {
-      streamingContent.value = ''
-      pendingSteps.value = []
-      streaming.value = false
-      _streamController = null
-      reloadCurrentMessages()
-    },
+    () => finishSend(),
+    (_err: string) => finishSend(),
   )
 }
 
@@ -804,11 +808,22 @@ function retryMessage(assistantIdx: number) {
   if (!userMsg) return
 
   if (assistantMsg.id && conversationId.value) {
-    messages.value.splice(userIdx)
+    messages.value.splice(assistantIdx, 1)
     streaming.value = true
     streamingContent.value = ''
     pendingSteps.value = []
     scrollToBottom()
+
+    let retryFinished = false
+    const finishRetry = async () => {
+      if (retryFinished) return
+      retryFinished = true
+      _streamController = null
+      await reloadCurrentMessages()
+      streamingContent.value = ''
+      pendingSteps.value = []
+      streaming.value = false
+    }
 
     _streamController = retryStream(
       { conversation_id: conversationId.value, message_id: assistantMsg.id },
@@ -816,45 +831,10 @@ function retryMessage(assistantIdx: number) {
         if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
         if (chunk.steps?.length) { for (const s of chunk.steps) pendingSteps.value.push(reactive({ ...s, _expanded: false })) }
         else if (chunk.step) pendingSteps.value.push(reactive({ ...chunk.step, _expanded: false }))
-        if (chunk.done) {
-          const steps = chunk.steps?.length ? chunk.steps : [...pendingSteps.value]
-          const tokensUsed = chunk.tokens_used || steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
-          const content = chunk.content || streamingContent.value
-          const msg: any = { role: 'assistant', content, tokens_used: tokensUsed || undefined, steps, _showSteps: false, id: chunk.message_id || undefined }
-          if (chunk.files?.length) msg.files = chunk.files
-          messages.value.push(reactive({ role: 'user', content: userMsg.content }))
-          messages.value.push(reactive(msg))
-          streamingContent.value = ''
-          pendingSteps.value = []
-          streaming.value = false
-          _streamController = null
-          scrollToBottom()
-          loadConversations()
-        }
+        if (chunk.done) finishRetry()
       },
-      () => {
-        if (streaming.value && (streamingContent.value || pendingSteps.value.length > 0)) {
-          const steps = [...pendingSteps.value]
-          const tokensUsed = steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
-          messages.value.push(reactive({ role: 'user', content: userMsg.content }))
-          messages.value.push(reactive({ role: 'assistant', content: streamingContent.value, tokens_used: tokensUsed || undefined, steps, _showSteps: false }))
-          streamingContent.value = ''
-          pendingSteps.value = []
-        }
-        streaming.value = false
-        _streamController = null
-        loadConversations()
-      },
-      (err: string) => {
-        const steps = [...pendingSteps.value]
-        messages.value.push(reactive({ role: 'user', content: userMsg.content }))
-        messages.value.push(reactive({ role: 'assistant', content: `[错误] ${err}`, steps, _showSteps: steps.length > 0 }))
-        streamingContent.value = ''
-        pendingSteps.value = []
-        streaming.value = false
-        _streamController = null
-        scrollToBottom()
-      },
+      () => finishRetry(),
+      (_err: string) => finishRetry(),
     )
   } else {
     const userText = userMsg.content

@@ -160,6 +160,11 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		if err != nil {
 			ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur}).WithError(err).Error("[LLM] << failed")
 			ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, err.Error(), iterDur, 0, ec.stepMeta())
+			if st.llmRetries < maxLLMRetries && isTransientLLMError(err) {
+				st.llmRetries++
+				ec.l.WithFields(log.Fields{"retry": st.llmRetries, "max": maxLLMRetries}).Warn("[LLM] transient error, retrying")
+				continue
+			}
 			return nil, fmt.Errorf("generate content: %w", err)
 		}
 
@@ -225,6 +230,7 @@ type agentRunState struct {
 	mu          sync.Mutex
 	loopDet     *toolLoopDetector
 	calledTools map[string]bool
+	llmRetries  int
 }
 
 func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, streaming bool) (*agentRunState, error) {
@@ -313,6 +319,32 @@ func toolsSentToLLM(tsMode bool, allDefs []openai.Tool, discovered map[string]bo
 		return buildToolSearchDefs(allDefs, discovered)
 	}
 	return allDefs
+}
+
+// ── LLM 瞬态错误重试 ─────────────────────────────────────────
+
+const maxLLMRetries = 2
+
+// isTransientLLMError 判断 LLM 错误是否为可自动重试的瞬态错误。
+func isTransientLLMError(err error) bool {
+	var apiErr *openai.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.HTTPStatusCode {
+		case 429, 500, 502, 503, 504:
+			return true
+		}
+	}
+	var reqErr *openai.RequestError
+	if errors.As(err, &reqErr) {
+		switch reqErr.HTTPStatusCode {
+		case 429, 500, 502, 503, 504:
+			return true
+		}
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "too many empty messages") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "unexpected EOF")
 }
 
 // ── 工具函数 ────────────────────────────────────────────────
