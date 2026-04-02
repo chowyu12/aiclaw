@@ -61,66 +61,103 @@
                       <div v-if="msg._showSteps" class="steps-body">
                         <el-timeline>
                           <el-timeline-item
-                            v-for="step in msg.steps"
-                            :key="step.id"
-                            :type="step.status === 'success' ? 'success' : 'danger'"
-                            :timestamp="`${step.duration_ms}ms`"
+                            v-for="node in groupSteps(msg.steps || [])"
+                            :key="node.step.id"
+                            :type="node.step.status === 'success' ? 'success' : 'danger'"
+                            :timestamp="`${node.step.duration_ms}ms`"
                             placement="top"
                           >
-                            <div class="step-card" :class="{ 'step-card--subagent': step.name === 'sub_agent' }">
+                            <div class="step-card" :class="{ 'step-card--subagent': node.step.name === 'sub_agent' }">
                               <div class="step-title-row">
-                                <el-tag :type="stepTagType(step.step_type, step.name)" size="small" effect="dark">
-                                  {{ stepTypeLabel(step.step_type, step.name) }}
+                                <el-tag :type="stepTagType(node.step.step_type, node.step.name)" size="small" effect="dark">
+                                  {{ stepTypeLabel(node.step.step_type, node.step.name) }}
                                 </el-tag>
-                                <el-tag v-if="step.metadata?.sub_agent_depth" size="small" effect="plain" class="depth-tag">
-                                  L{{ step.metadata.sub_agent_depth }}
+                                <el-tag v-if="node.step.sub_agent_depth" size="small" effect="plain" class="depth-tag">
+                                  L{{ node.step.sub_agent_depth }}
                                 </el-tag>
-                                <span class="step-name">{{ step.name }}</span>
+                                <span class="step-name">{{ node.step.name }}</span>
                                 <el-tag
-                                  :type="step.status === 'success' ? 'success' : 'danger'"
+                                  :type="node.step.status === 'success' ? 'success' : 'danger'"
                                   size="small" round
-                                >{{ step.status }}</el-tag>
+                                >{{ node.step.status }}</el-tag>
+                                <el-tag
+                                  v-if="node.children.length"
+                                  size="small" effect="plain" class="depth-tag depth-tag--toggle"
+                                  @click.stop="node.step._childrenOpen = node.step._childrenOpen === false ? true : false"
+                                >
+                                  {{ node.children.length }} 步
+                                  <el-icon class="depth-tag-arrow" :class="{ open: node.step._childrenOpen !== false }"><ArrowRight /></el-icon>
+                                </el-tag>
                               </div>
 
-                              <div v-if="step.input" class="step-block">
+                              <div v-if="node.step.input" class="step-block">
                                 <div class="step-block-label">输入</div>
-                                <pre class="step-block-code">{{ truncate(step.input, 1000) }}</pre>
+                                <pre class="step-block-code">{{ truncate(node.step.input, 1000) }}</pre>
                               </div>
-                              <div v-if="step.output" class="step-block">
+                              <div v-if="node.step.output" class="step-block">
                                 <div class="step-block-label">输出</div>
-                                <pre class="step-block-code">{{ truncate(step.output, 1000) }}</pre>
+                                <pre class="step-block-code">{{ truncate(node.step.output, 1000) }}</pre>
                               </div>
-                              <div v-if="step.error" class="step-block">
+                              <div v-if="node.step.error" class="step-block">
                                 <div class="step-block-label error-label">错误</div>
-                                <pre class="step-block-code error-code">{{ step.error }}</pre>
+                                <pre class="step-block-code error-code">{{ node.step.error }}</pre>
                               </div>
 
-                              <div v-if="step.metadata" class="step-meta-row">
-                                <span v-if="step.metadata.channel_type">
+                              <div v-if="node.step.metadata" class="step-meta-row">
+                                <span v-if="node.step.metadata.channel_type">
                                   <el-icon size="12"><ChatDotRound /></el-icon>
-                                  渠道 {{ step.metadata.channel_type }}<template v-if="step.metadata.channel_id"> #{{ step.metadata.channel_id }}</template>
-                                  <template v-if="step.metadata.channel_thread_key"> · {{ step.metadata.channel_thread_key }}</template>
-                                  <template v-if="step.metadata.channel_sender_id"> · {{ step.metadata.channel_sender_id }}</template>
+                                  渠道 {{ node.step.metadata.channel_type }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
+                                  <template v-if="node.step.metadata.channel_thread_key"> · {{ node.step.metadata.channel_thread_key }}</template>
+                                  <template v-if="node.step.metadata.channel_sender_id"> · {{ node.step.metadata.channel_sender_id }}</template>
                                 </span>
-                                <span v-if="step.metadata.provider">
-                                  <el-icon size="12"><Connection /></el-icon> {{ step.metadata.provider }}
+                                <span v-if="node.step.metadata.provider">
+                                  <el-icon size="12"><Connection /></el-icon> {{ node.step.metadata.provider }}
                                 </span>
-                                <span v-if="step.metadata.model">
-                                  <el-icon size="12"><Cpu /></el-icon> {{ step.metadata.model }}
+                                <span v-if="node.step.metadata.model">
+                                  <el-icon size="12"><Cpu /></el-icon> {{ node.step.metadata.model }}
                                 </span>
-                                <span v-if="step.metadata.temperature !== undefined">
-                                  Temp: {{ step.metadata.temperature }}
+                                <span v-if="node.step.metadata.temperature !== undefined">
+                                  Temp: {{ node.step.metadata.temperature }}
                                 </span>
-                                <span v-if="step.metadata.tool_name">
-                                  Tool: {{ step.metadata.tool_name }}
+                                <span v-if="node.step.metadata.tool_name">
+                                  Tool: {{ node.step.metadata.tool_name }}
                                 </span>
-                                <span v-if="step.metadata.skill_name">
-                                  Skill: {{ step.metadata.skill_name }}
+                                <span v-if="node.step.metadata.skill_name">
+                                  Skill: {{ node.step.metadata.skill_name }}
                                 </span>
-                                <span v-if="step.metadata.skill_tools?.length">
-                                  Skill Tools: {{ step.metadata.skill_tools.join(', ') }}
+                                <span v-if="node.step.metadata.skill_tools?.length">
+                                  Skill Tools: {{ node.step.metadata.skill_tools.join(', ') }}
                                 </span>
                               </div>
+
+                              <!-- sub_agent 内部步骤（可折叠） -->
+                              <transition name="fold">
+                              <div v-if="node.children.length && node.step._childrenOpen !== false" class="sub-agent-children">
+                                <div v-for="child in node.children" :key="child.step.id" class="child-step-card">
+                                  <div class="step-title-row">
+                                    <el-tag :type="stepTagType(child.step.step_type, child.step.name)" size="small" effect="dark">
+                                      {{ stepTypeLabel(child.step.step_type, child.step.name) }}
+                                    </el-tag>
+                                    <span class="step-name">{{ child.step.name }}</span>
+                                    <el-tag :type="child.step.status === 'success' ? 'success' : 'danger'" size="small" round>{{ child.step.status }}</el-tag>
+                                    <span class="child-duration">{{ child.step.duration_ms }}ms</span>
+                                    <span v-if="child.step.tokens_used" class="child-tokens">{{ child.step.tokens_used }} tokens</span>
+                                  </div>
+                                  <div v-if="child.step.input" class="step-block">
+                                    <div class="step-block-label">输入</div>
+                                    <pre class="step-block-code">{{ truncate(child.step.input, 500) }}</pre>
+                                  </div>
+                                  <div v-if="child.step.output" class="step-block">
+                                    <div class="step-block-label">输出</div>
+                                    <pre class="step-block-code">{{ truncate(child.step.output, 500) }}</pre>
+                                  </div>
+                                  <div v-if="child.step.error" class="step-block">
+                                    <div class="step-block-label error-label">错误</div>
+                                    <pre class="step-block-code error-code">{{ child.step.error }}</pre>
+                                  </div>
+                                </div>
+                              </div>
+                              </transition>
                             </div>
                           </el-timeline-item>
                         </el-timeline>
@@ -178,7 +215,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { chatApi, type Conversation, type Message, type ExecutionStep } from '../../api/chat'
+import { chatApi, type Conversation, type Message, type ExecutionStep, type StepNode } from '../../api/chat'
 import { agentApi, type Agent } from '../../api/agent'
 import { useRoute } from 'vue-router'
 
@@ -314,6 +351,42 @@ function totalDuration(steps: ExecutionStep[]) {
   return steps.reduce((sum, s) => sum + s.duration_ms, 0)
 }
 
+function groupSteps(steps: ExecutionStep[]): StepNode[] {
+  // Phase 1: group children by sub_agent_call_id (order-independent)
+  const childrenByCall = new Map<string, ExecutionStep[]>()
+  const parentCalls = new Map<string, ExecutionStep>()
+
+  for (const s of steps) {
+    const cid = s.sub_agent_call_id
+    if (!cid) continue
+    if (s.name === 'sub_agent' && s.step_type === 'tool_call') {
+      parentCalls.set(cid, s)
+    } else {
+      if (!childrenByCall.has(cid)) childrenByCall.set(cid, [])
+      childrenByCall.get(cid)!.push(s)
+    }
+  }
+
+  const consumed = new Set<number>()
+  for (const [cid] of parentCalls) {
+    for (const c of childrenByCall.get(cid) || []) consumed.add(c.step_order)
+  }
+
+  // Phase 2: build result, grouping matched children under parents
+  const result: StepNode[] = []
+  for (const s of steps) {
+    if (consumed.has(s.step_order)) continue
+    const cid = s.sub_agent_call_id
+    if (s.name === 'sub_agent' && s.step_type === 'tool_call' && cid && parentCalls.has(cid)) {
+      const children = (childrenByCall.get(cid) || []).map(c => ({ step: c, children: [] as StepNode[] }))
+      result.push({ step: s, children })
+    } else {
+      result.push({ step: s, children: [] })
+    }
+  }
+  return result
+}
+
 function truncate(text: string, maxLen: number) {
   if (!text) return ''
   if (text.length <= maxLen) return text
@@ -426,6 +499,33 @@ function formatTime(t: string) {
   color: #8b5cf6 !important;
   border-color: rgba(139, 92, 246, 0.3) !important;
 }
+.depth-tag--toggle {
+  cursor: pointer;
+  user-select: none;
+}
+.depth-tag--toggle:hover {
+  background: rgba(139, 92, 246, 0.15) !important;
+}
+.depth-tag-arrow {
+  font-size: 10px;
+  margin-left: 2px;
+  transition: transform 0.2s ease;
+}
+.depth-tag-arrow.open {
+  transform: rotate(90deg);
+}
+.fold-enter-active, .fold-leave-active {
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+.fold-enter-from, .fold-leave-to {
+  opacity: 0;
+  max-height: 0;
+}
+.fold-enter-to, .fold-leave-from {
+  opacity: 1;
+  max-height: 2000px;
+}
 .step-title-row {
   display: flex;
   align-items: center;
@@ -482,6 +582,29 @@ function formatTime(t: string) {
   display: flex;
   align-items: center;
   gap: 3px;
+}
+
+.sub-agent-children {
+  margin-top: 10px;
+  padding-left: 12px;
+  border-left: 2px solid rgba(139, 92, 246, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.child-step-card {
+  background: var(--el-fill-color-lighter);
+  border: 1px solid var(--el-border-color-extra-light);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.child-duration {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+}
+.child-tokens {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
 }
 
 .slide-enter-active, .slide-leave-active {

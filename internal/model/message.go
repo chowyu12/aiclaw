@@ -58,6 +58,8 @@ type ExecutionStep struct {
 	DurationMs     int        `json:"duration_ms" gorm:"default:0"`
 	TokensUsed     int        `json:"tokens_used" gorm:"default:0"`
 	Metadata       JSON       `json:"metadata,omitzero" gorm:"type:text"`
+	SubAgentCallID string     `json:"sub_agent_call_id,omitzero" gorm:"size:100;index"`
+	SubAgentDepth  int        `json:"sub_agent_depth,omitzero" gorm:"default:0"`
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
@@ -68,8 +70,6 @@ type StepMetadata struct {
 	ToolName    string   `json:"tool_name,omitzero"`
 	SkillName   string   `json:"skill_name,omitzero"`
 	SkillTools  []string `json:"skill_tools,omitzero"`
-	// sub_agent 调用时记录嵌套深度（1 = 第一层子 Agent）。
-	SubAgentDepth int `json:"sub_agent_depth,omitzero"`
 	// 以下字段由渠道 Bridge 注入，写入执行步骤 metadata，便于控制台「执行日志」追溯来源。
 	ChannelID        int64  `json:"channel_id,omitzero"`
 	ChannelUUID      string `json:"channel_uuid,omitzero"`

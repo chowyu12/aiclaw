@@ -169,47 +169,90 @@
                 </div>
                 <transition name="fold">
                   <div v-if="msg._showSteps" class="steps-list">
-                    <div v-for="step in msg.steps" :key="step.step_order" class="step-row">
+                    <div v-for="node in groupSteps(msg.steps || [])" :key="node.step.step_order" class="step-row">
                       <div class="step-indicator">
-                        <span class="step-dot" :class="stepDotClass(step)"></span>
+                        <span class="step-dot" :class="stepDotClass(node.step)"></span>
                         <span class="step-line"></span>
                       </div>
                       <div class="step-body">
-                        <div class="step-head">
-                          <span class="step-badge" :class="stepBadgeClass(step)">{{ stepTypeLabel(step.step_type, step.name) }}</span>
-                          <span v-if="subAgentDepthLabel(step)" class="step-depth">{{ subAgentDepthLabel(step) }}</span>
-                          <span class="step-title">{{ step.name === 'sub_agent' ? (step.metadata?.tool_name || 'sub_agent') : step.name }}</span>
+                        <div class="step-head" :class="{ 'step-head--clickable': node.children.length > 0 }" @click="node.children.length > 0 && (node.step._childrenOpen = node.step._childrenOpen === false ? true : false)">
+                          <span class="step-badge" :class="stepBadgeClass(node.step)">{{ stepTypeLabel(node.step.step_type, node.step.name) }}</span>
+                          <span v-if="subAgentDepthLabel(node.step)" class="step-depth">{{ subAgentDepthLabel(node.step) }}</span>
+                          <span class="step-title">{{ node.step.name === 'sub_agent' ? (node.step.metadata?.tool_name || 'sub_agent') : node.step.name }}</span>
                           <el-tag
-                            :type="step.status === 'success' ? 'success' : 'danger'"
+                            :type="node.step.status === 'success' ? 'success' : 'danger'"
                             size="small" round effect="plain"
-                          >{{ step.status === 'success' ? step.duration_ms + 'ms' : 'failed' }}</el-tag>
-                          <span v-if="step.tokens_used" class="step-tokens">{{ step.tokens_used }} tokens</span>
+                          >{{ node.step.status === 'success' ? node.step.duration_ms + 'ms' : 'failed' }}</el-tag>
+                          <span v-if="node.step.tokens_used" class="step-tokens">{{ node.step.tokens_used }} tokens</span>
+                          <span v-if="node.children.length" class="step-child-count">{{ node.children.length }} 步</span>
+                          <el-icon v-if="node.children.length" class="step-child-arrow" :class="{ open: node.step._childrenOpen !== false }"><ArrowRight /></el-icon>
                         </div>
                         <div class="step-detail">
-                          <template v-if="step.input">
+                          <template v-if="node.step.input">
                             <div class="detail-label">Input</div>
-                            <pre class="detail-code">{{ truncateText(step.input, 500) }}</pre>
+                            <pre class="detail-code">{{ truncateText(node.step.input, 500) }}</pre>
                           </template>
-                          <template v-if="step.output">
+                          <template v-if="node.step.output">
                             <div class="detail-label">Output</div>
-                            <pre class="detail-code">{{ truncateText(step.output, 500) }}</pre>
+                            <pre class="detail-code">{{ truncateText(node.step.output, 500) }}</pre>
                           </template>
-                          <template v-if="step.error">
+                          <template v-if="node.step.error">
                             <div class="detail-label detail-label--err">Error</div>
-                            <pre class="detail-code detail-code--err">{{ step.error }}</pre>
+                            <pre class="detail-code detail-code--err">{{ node.step.error }}</pre>
                           </template>
-                          <div class="detail-meta" v-if="step.metadata">
-                            <span v-if="step.metadata.channel_type" class="step-channel">
-                              渠道 {{ step.metadata.channel_type }}<template v-if="step.metadata.channel_id"> #{{ step.metadata.channel_id }}</template>
-                              <template v-if="step.metadata.channel_thread_key"> · {{ step.metadata.channel_thread_key }}</template>
-                              <template v-if="step.metadata.channel_sender_id"> · {{ step.metadata.channel_sender_id }}</template>
+                          <div class="detail-meta" v-if="node.step.metadata">
+                            <span v-if="node.step.metadata.channel_type" class="step-channel">
+                              渠道 {{ node.step.metadata.channel_type }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
+                              <template v-if="node.step.metadata.channel_thread_key"> · {{ node.step.metadata.channel_thread_key }}</template>
+                              <template v-if="node.step.metadata.channel_sender_id"> · {{ node.step.metadata.channel_sender_id }}</template>
                             </span>
-                            <span v-if="step.metadata.provider">{{ step.metadata.provider }}</span>
-                            <span v-if="step.metadata.model">{{ step.metadata.model }}</span>
-                            <span v-if="step.metadata.skill_name">Skill: {{ step.metadata.skill_name }}</span>
-                            <span v-if="step.metadata.skill_tools?.length">{{ step.metadata.skill_tools.join(', ') }}</span>
+                            <span v-if="node.step.metadata.provider">{{ node.step.metadata.provider }}</span>
+                            <span v-if="node.step.metadata.model">{{ node.step.metadata.model }}</span>
+                            <span v-if="node.step.metadata.skill_name">Skill: {{ node.step.metadata.skill_name }}</span>
+                            <span v-if="node.step.metadata.skill_tools?.length">{{ node.step.metadata.skill_tools.join(', ') }}</span>
                           </div>
                         </div>
+                        <!-- sub_agent 内部步骤（可折叠） -->
+                        <transition name="fold">
+                          <div v-if="node.children.length && node.step._childrenOpen !== false" class="sub-steps">
+                            <div v-for="child in node.children" :key="child.step.step_order" class="step-row step-row--nested">
+                              <div class="step-indicator">
+                                <span class="step-dot" :class="stepDotClass(child.step)"></span>
+                                <span class="step-line"></span>
+                              </div>
+                              <div class="step-body">
+                                <div class="step-head">
+                                  <span class="step-badge" :class="stepBadgeClass(child.step)">{{ stepTypeLabel(child.step.step_type, child.step.name) }}</span>
+                                  <span class="step-title">{{ child.step.name }}</span>
+                                  <el-tag
+                                    :type="child.step.status === 'success' ? 'success' : 'danger'"
+                                    size="small" round effect="plain"
+                                  >{{ child.step.status === 'success' ? child.step.duration_ms + 'ms' : 'failed' }}</el-tag>
+                                  <span v-if="child.step.tokens_used" class="step-tokens">{{ child.step.tokens_used }} tokens</span>
+                                </div>
+                                <div class="step-detail">
+                                  <template v-if="child.step.input">
+                                    <div class="detail-label">Input</div>
+                                    <pre class="detail-code">{{ truncateText(child.step.input, 500) }}</pre>
+                                  </template>
+                                  <template v-if="child.step.output">
+                                    <div class="detail-label">Output</div>
+                                    <pre class="detail-code">{{ truncateText(child.step.output, 500) }}</pre>
+                                  </template>
+                                  <template v-if="child.step.error">
+                                    <div class="detail-label detail-label--err">Error</div>
+                                    <pre class="detail-code detail-code--err">{{ child.step.error }}</pre>
+                                  </template>
+                                  <div class="detail-meta" v-if="child.step.metadata">
+                                    <span v-if="child.step.metadata.provider">{{ child.step.metadata.provider }}</span>
+                                    <span v-if="child.step.metadata.model">{{ child.step.metadata.model }}</span>
+                                    <span v-if="child.step.metadata.skill_name">Skill: {{ child.step.metadata.skill_name }}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </transition>
                       </div>
                     </div>
                   </div>
@@ -230,41 +273,60 @@
 
               <!-- 实时步骤时间线 -->
               <div v-if="pendingSteps.length > 0 || !streamingContent" class="wf-timeline">
-                <div v-for="(step, idx) in pendingSteps" :key="idx" class="wf-node">
-                  <div class="wf-node-head" @click="step._expanded = !step._expanded">
-                    <span class="wf-dot" :class="step.name === 'sub_agent' ? 'wf-dot--sub_agent' : ('wf-dot--' + step.step_type)"></span>
-                    <span class="wf-label" :class="{ 'wf-label--sub_agent': step.name === 'sub_agent' }">{{ stepTypeLabel(step.step_type, step.name) }}</span>
-                    <span v-if="subAgentDepthLabel(step)" class="wf-depth">{{ subAgentDepthLabel(step) }}</span>
-                    <span class="wf-name">{{ step.name === 'sub_agent' ? (step.metadata?.tool_name || 'sub_agent') : step.name }}</span>
-                    <el-tag v-if="step.status === 'success'" type="success" size="small" round effect="plain">{{ step.duration_ms }}ms</el-tag>
-                    <el-tag v-else-if="step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
-                    <span v-if="step.tokens_used" class="wf-tokens">{{ step.tokens_used }} tokens</span>
-                    <el-icon class="wf-arrow" :class="{ open: step._expanded }"><ArrowRight /></el-icon>
+                <div v-for="node in groupSteps(pendingSteps as ExecutionStep[])" :key="node.step.step_order" class="wf-node">
+                  <div class="wf-node-head" @click="node.step._expanded = !node.step._expanded">
+                    <span class="wf-dot" :class="node.step.name === 'sub_agent' ? 'wf-dot--sub_agent' : ('wf-dot--' + node.step.step_type)"></span>
+                    <span class="wf-label" :class="{ 'wf-label--sub_agent': node.step.name === 'sub_agent' }">{{ stepTypeLabel(node.step.step_type, node.step.name) }}</span>
+                    <span v-if="subAgentDepthLabel(node.step)" class="wf-depth">{{ subAgentDepthLabel(node.step) }}</span>
+                    <span class="wf-name">{{ node.step.name === 'sub_agent' ? (node.step.metadata?.tool_name || 'sub_agent') : node.step.name }}</span>
+                    <el-tag v-if="node.step.status === 'success'" type="success" size="small" round effect="plain">{{ node.step.duration_ms }}ms</el-tag>
+                    <el-tag v-else-if="node.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
+                    <span v-if="node.step.tokens_used" class="wf-tokens">{{ node.step.tokens_used }} tokens</span>
+                    <span v-if="node.children.length" class="wf-child-count" @click.stop="node.step._childrenOpen = node.step._childrenOpen === false ? true : false">
+                      {{ node.children.length }} 步
+                      <el-icon class="step-child-arrow" :class="{ open: node.step._childrenOpen !== false }"><ArrowRight /></el-icon>
+                    </span>
+                    <el-icon class="wf-arrow" :class="{ open: node.step._expanded }"><ArrowRight /></el-icon>
                   </div>
                   <transition name="fold">
-                    <div v-if="step._expanded" class="wf-node-body">
-                      <template v-if="step.input">
+                    <div v-if="node.step._expanded" class="wf-node-body">
+                      <template v-if="node.step.input">
                         <div class="detail-label">Input</div>
-                        <pre class="detail-code">{{ truncateText(step.input, 500) }}</pre>
+                        <pre class="detail-code">{{ truncateText(node.step.input, 500) }}</pre>
                       </template>
-                      <template v-if="step.output">
+                      <template v-if="node.step.output">
                         <div class="detail-label">Output</div>
-                        <pre class="detail-code">{{ truncateText(step.output, 500) }}</pre>
+                        <pre class="detail-code">{{ truncateText(node.step.output, 500) }}</pre>
                       </template>
-                      <template v-if="step.error">
+                      <template v-if="node.step.error">
                         <div class="detail-label detail-label--err">Error</div>
-                        <pre class="detail-code detail-code--err">{{ step.error }}</pre>
+                        <pre class="detail-code detail-code--err">{{ node.step.error }}</pre>
                       </template>
-                      <div class="detail-meta" v-if="step.metadata">
-                        <span v-if="step.metadata.channel_type" class="step-channel">
-                          渠道 {{ step.metadata.channel_type }}<template v-if="step.metadata.channel_id"> #{{ step.metadata.channel_id }}</template>
-                          <template v-if="step.metadata.channel_thread_key"> · {{ step.metadata.channel_thread_key }}</template>
-                          <template v-if="step.metadata.channel_sender_id"> · {{ step.metadata.channel_sender_id }}</template>
+                      <div class="detail-meta" v-if="node.step.metadata">
+                        <span v-if="node.step.metadata.channel_type" class="step-channel">
+                          渠道 {{ node.step.metadata.channel_type }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
+                          <template v-if="node.step.metadata.channel_thread_key"> · {{ node.step.metadata.channel_thread_key }}</template>
+                          <template v-if="node.step.metadata.channel_sender_id"> · {{ node.step.metadata.channel_sender_id }}</template>
                         </span>
-                        <span v-if="step.metadata.provider">{{ step.metadata.provider }}</span>
-                        <span v-if="step.metadata.model">{{ step.metadata.model }}</span>
-                        <span v-if="step.metadata.skill_name">Skill: {{ step.metadata.skill_name }}</span>
-                        <span v-if="step.metadata.skill_tools?.length">{{ step.metadata.skill_tools.join(', ') }}</span>
+                        <span v-if="node.step.metadata.provider">{{ node.step.metadata.provider }}</span>
+                        <span v-if="node.step.metadata.model">{{ node.step.metadata.model }}</span>
+                        <span v-if="node.step.metadata.skill_name">Skill: {{ node.step.metadata.skill_name }}</span>
+                        <span v-if="node.step.metadata.skill_tools?.length">{{ node.step.metadata.skill_tools.join(', ') }}</span>
+                      </div>
+                    </div>
+                  </transition>
+                  <!-- sub_agent 内部步骤（独立折叠） -->
+                  <transition name="fold">
+                    <div v-if="node.children.length && node.step._childrenOpen !== false" class="wf-sub-steps">
+                      <div v-for="child in node.children" :key="child.step.step_order" class="wf-node wf-node--child">
+                        <div class="wf-node-head">
+                          <span class="wf-dot" :class="'wf-dot--' + child.step.step_type"></span>
+                          <span class="wf-label">{{ stepTypeLabel(child.step.step_type, child.step.name) }}</span>
+                          <span class="wf-name">{{ child.step.name }}</span>
+                          <el-tag v-if="child.step.status === 'success'" type="success" size="small" round effect="plain">{{ child.step.duration_ms }}ms</el-tag>
+                          <el-tag v-else-if="child.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
+                          <span v-if="child.step.tokens_used" class="wf-tokens">{{ child.step.tokens_used }} tokens</span>
+                        </div>
                       </div>
                     </div>
                   </transition>
@@ -376,7 +438,7 @@
 
 <script lang="ts">
 import { ref } from 'vue'
-import type { ExecutionStep, FileInfo } from '../../api/chat'
+import type { ExecutionStep, FileInfo, StepNode } from '../../api/chat'
 
 interface ChatMessage {
   id?: number
@@ -873,12 +935,48 @@ function stepDotClass(step: any) {
 }
 
 function subAgentDepthLabel(step: any): string {
-  const depth = step.metadata?.sub_agent_depth
+  const depth = step.sub_agent_depth
   return depth ? `L${depth}` : ''
 }
 
 function truncateText(text: string, maxLen: number): string {
   return text.length <= maxLen ? text : text.slice(0, maxLen) + '...[truncated]'
+}
+
+function groupSteps(steps: ExecutionStep[]): StepNode[] {
+  // Phase 1: group children by sub_agent_call_id (order-independent)
+  const childrenByCall = new Map<string, ExecutionStep[]>()
+  const parentCalls = new Map<string, ExecutionStep>()
+
+  for (const s of steps) {
+    const cid = s.sub_agent_call_id
+    if (!cid) continue
+    if (s.name === 'sub_agent' && s.step_type === 'tool_call') {
+      parentCalls.set(cid, s)
+    } else {
+      if (!childrenByCall.has(cid)) childrenByCall.set(cid, [])
+      childrenByCall.get(cid)!.push(s)
+    }
+  }
+
+  const consumed = new Set<number>()
+  for (const [cid] of parentCalls) {
+    for (const c of childrenByCall.get(cid) || []) consumed.add(c.step_order)
+  }
+
+  // Phase 2: build result, grouping matched children under parents
+  const result: StepNode[] = []
+  for (const s of steps) {
+    if (consumed.has(s.step_order)) continue
+    const cid = s.sub_agent_call_id
+    if (s.name === 'sub_agent' && s.step_type === 'tool_call' && cid && parentCalls.has(cid)) {
+      const children = (childrenByCall.get(cid) || []).map(c => ({ step: c, children: [] as StepNode[] }))
+      result.push({ step: s, children })
+    } else {
+      result.push({ step: s, children: [] })
+    }
+  }
+  return result
 }
 </script>
 <style scoped>
@@ -1700,6 +1798,49 @@ function truncateText(text: string, maxLen: number): string {
   border-radius: 4px;
   letter-spacing: 0.04em;
 }
+.step-child-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.step-child-count:hover {
+  background: rgba(139, 92, 246, 0.2);
+}
+.step-head--clickable {
+  cursor: pointer;
+}
+.step-head--clickable:hover .step-child-count {
+  background: rgba(139, 92, 246, 0.2);
+}
+.step-child-arrow {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+}
+.step-child-arrow.open {
+  transform: rotate(90deg);
+}
+.sub-steps {
+  margin-top: 10px;
+  padding-left: 10px;
+  border-left: 2px solid rgba(139, 92, 246, 0.25);
+}
+.step-row--nested {
+  margin-bottom: 0;
+}
+.step-row--nested .step-body {
+  padding-bottom: 8px;
+}
+.step-row--nested:last-child .step-line {
+  display: none;
+}
 
 .step-detail,
 .wf-node-body {
@@ -1846,6 +1987,25 @@ function truncateText(text: string, maxLen: number): string {
 }
 .wf-node-body {
   padding: 2px 0 10px 20px;
+}
+.wf-sub-steps {
+  margin-top: 8px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(139, 92, 246, 0.25);
+}
+.wf-node--child {
+  margin-bottom: 0;
+}
+.wf-node--child .wf-node-head {
+  padding: 3px 8px 3px 0;
+}
+.wf-child-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: #8b5cf6;
+  background: rgba(139, 92, 246, 0.1);
+  padding: 1px 6px;
+  border-radius: 4px;
 }
 .wf-node--thinking {
   display: flex;

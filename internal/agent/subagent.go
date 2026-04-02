@@ -7,8 +7,6 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 	log "github.com/sirupsen/logrus"
-
-	"github.com/chowyu12/aiclaw/internal/model"
 )
 
 const maxSubAgentDepth = 3
@@ -46,6 +44,43 @@ func subAgentRoundCount(ctx context.Context) int {
 	return 0
 }
 
+// ── 父执行上下文传递 ─────────────────────────────────────────
+// sub_agent handler 通过 context 获取父 tracker 和会话 ID，
+// 使子 agent 的执行步骤记录在父会话中，而非创建独立会话。
+
+type parentExecInfoKey struct{}
+
+type parentExecInfo struct {
+	tracker *StepTracker
+	convID  int64
+}
+
+func withParentExecInfo(ctx context.Context, tracker *StepTracker, convID int64) context.Context {
+	return context.WithValue(ctx, parentExecInfoKey{}, &parentExecInfo{tracker: tracker, convID: convID})
+}
+
+func parentExecInfoFromCtx(ctx context.Context) (*StepTracker, int64) {
+	if v, ok := ctx.Value(parentExecInfoKey{}).(*parentExecInfo); ok && v != nil {
+		return v.tracker, v.convID
+	}
+	return nil, 0
+}
+
+// subAgentCallIDKey 标识当前 sub_agent 调用对应的父级 tool_call_id，
+// 使同一 sub_agent 内的所有步骤可以关联到具体的调用。
+type subAgentCallIDKey struct{}
+
+func withSubAgentCallID(ctx context.Context, callID string) context.Context {
+	return context.WithValue(ctx, subAgentCallIDKey{}, callID)
+}
+
+func subAgentCallID(ctx context.Context) string {
+	if v, ok := ctx.Value(subAgentCallIDKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
 func (e *Executor) subAgentHandler(ctx context.Context, args string) (string, error) {
 	depth := subAgentDepth(ctx) + 1
 	if depth > maxSubAgentDepth {
@@ -63,7 +98,7 @@ func (e *Executor) subAgentHandler(ctx context.Context, args string) (string, er
 		return "", fmt.Errorf("prompt is required")
 	}
 
-	// 本轮只有 1 个 sub_agent 调用：走轻量 inline 路径，避免完整 Execute 开销
+	// 单个 sub_agent 走轻量 inline 路径（无工具、无会话）
 	if subAgentRoundCount(ctx) <= 1 {
 		log.WithFields(log.Fields{
 			"depth":  depth,
@@ -72,6 +107,7 @@ func (e *Executor) subAgentHandler(ctx context.Context, args string) (string, er
 		return e.inlineSubAgentCall(ctx, params.Prompt, params.AgentUUID)
 	}
 
+	// 多并发 sub_agent：完整工具支持，步骤记录在父会话
 	log.WithFields(log.Fields{
 		"depth":      depth,
 		"agent_uuid": params.AgentUUID,
@@ -79,24 +115,38 @@ func (e *Executor) subAgentHandler(ctx context.Context, args string) (string, er
 	}).Info("[SubAgent] >> spawning (parallel)")
 
 	childCtx := withSubAgentDepth(ctx, depth)
-	req := model.ChatRequest{
-		AgentUUID: params.AgentUUID,
-		Message:   params.Prompt,
-		UserID:    fmt.Sprintf("sub_agent:depth_%d", depth),
-	}
+	return e.executeAsSubAgent(childCtx, params.Prompt, params.AgentUUID)
+}
 
-	result, err := e.Execute(childCtx, req)
+// executeAsSubAgent 在父会话上下文内执行子 agent：
+//   - 使用父 tracker 记录步骤（带 SubAgentDepth 标记）
+//   - 不创建独立会话、不持久化消息
+//   - 完整加载工具/MCP/skills
+func (e *Executor) executeAsSubAgent(ctx context.Context, prompt, agentUUID string) (string, error) {
+	if err := e.checkShutdown(); err != nil {
+		return "", err
+	}
+	defer e.activeExecs.Done()
+
+	ec, err := e.prepareSubAgent(ctx, prompt, agentUUID)
 	if err != nil {
-		log.WithError(err).WithField("depth", depth).Warn("[SubAgent] << failed")
+		return "", fmt.Errorf("sub_agent prepare: %w", err)
+	}
+	defer ec.closeMCP()
+
+	ec.l.Debug("[SubAgent] >> executeAsSubAgent start")
+
+	res, err := e.run(ec.ctx, ec, blockingCaller(ec.llmProv), false)
+	if err != nil {
+		ec.l.WithError(err).Warn("[SubAgent] << failed")
 		return fmt.Sprintf("sub-agent execution failed: %s", err), nil
 	}
 
-	log.WithFields(log.Fields{
-		"depth":  depth,
-		"tokens": result.TokensUsed,
-		"len":    len(result.Content),
+	ec.l.WithFields(log.Fields{
+		"tokens": res.TokensUsed,
+		"len":    len(res.Content),
 	}).Info("[SubAgent] << done")
-	return result.Content, nil
+	return res.Content, nil
 }
 
 // inlineSubAgentCall 轻量子任务执行：单次 LLM 调用，不创建 conversation、不加载工具/MCP/skills。

@@ -100,6 +100,10 @@ type execContext struct {
 	toolSkillMap map[string]string
 
 	toolFiles []*model.File
+
+	// ephemeral 为 true 时跳过消息持久化（sub_agent 模式），
+	// 步骤仍通过 tracker 记录在父会话中。
+	ephemeral bool
 }
 
 func (ec *execContext) hasTools() bool {
@@ -209,7 +213,11 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 }
 
 // saveErrorMessage 执行失败时保存一条错误 assistant 消息，确保刷新页面后能看到失败记录。
+// ephemeral 模式（sub_agent）下跳过持久化，错误通过返回值传递。
 func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
+	if ec.ephemeral {
+		return
+	}
 	content := fmt.Sprintf("[错误] %s", execErr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -512,6 +520,18 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 }
 
 func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRunState, content string, tokensUsed int, duration time.Duration) (*ExecuteResult, error) {
+	// ephemeral 模式（sub_agent）：只记录执行步骤，跳过消息持久化和 HookAgentDone
+	if ec.ephemeral {
+		ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, content, model.StepSuccess, "", duration, tokensUsed, ec.stepMeta())
+		ec.l.WithFields(log.Fields{"duration": duration, "tokens": tokensUsed}).Info("[SubAgent] << saveResult (ephemeral)")
+		return &ExecuteResult{
+			Content:    content,
+			TokensUsed: tokensUsed,
+			Steps:      ec.tracker.Steps(),
+			ToolFiles:  append([]*model.File(nil), ec.toolFiles...),
+		}, nil
+	}
+
 	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, tokensUsed)
 	if err != nil {
 		ec.l.WithError(err).Error("[Execute] save assistant message failed")
@@ -550,5 +570,80 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 		TokensUsed:     tokensUsed,
 		Steps:          ec.tracker.Steps(),
 		ToolFiles:      append([]*model.File(nil), ec.toolFiles...),
+	}, nil
+}
+
+// prepareSubAgent 为 sub_agent 构建 execContext：
+//   - 复用父 tracker（步骤记录在父会话中）
+//   - 不创建独立会话、不持久化消息
+//   - 完整加载工具/MCP/skills
+func (e *Executor) prepareSubAgent(ctx context.Context, prompt, agentUUID string) (*execContext, error) {
+	parentTracker, parentConvID := parentExecInfoFromCtx(ctx)
+	if parentTracker == nil {
+		return nil, errors.New("sub_agent: parent tracker not found in context")
+	}
+
+	ag, err := e.loadAgent(ctx, agentUUID)
+	if err != nil {
+		return nil, fmt.Errorf("sub_agent: agent not found: %w", err)
+	}
+	ctx = workspace.WithWorkdirScope(ctx, ag.UUID)
+	if e.ws != nil {
+		ctx = workspace.WithWorkspace(ctx, e.ws)
+	}
+
+	prov, err := e.store.GetProvider(ctx, ag.ProviderID)
+	if err != nil {
+		return nil, fmt.Errorf("sub_agent: provider not found: %w", err)
+	}
+
+	l := log.WithFields(log.Fields{
+		"agent": ag.Name, "provider": prov.Name, "model": ag.ModelName,
+		"sub_agent": fmt.Sprintf("L%d", subAgentDepth(ctx)),
+	})
+
+	llmProv, err := e.providerFactory(prov)
+	if err != nil {
+		return nil, fmt.Errorf("sub_agent: create provider: %w", err)
+	}
+
+	agentTools, toolSkillMap, err := e.collectTools(ctx, ag)
+	if err != nil {
+		return nil, err
+	}
+
+	skills, err := e.loadWorkspaceSkills()
+	if err != nil {
+		l.WithError(err).Warn("[SubAgent] load skills failed, continuing without skills")
+		skills = nil
+	}
+
+	mcpServers, err := e.store.ListMCPServers(ctx)
+	if err != nil {
+		l.WithError(err).Warn("[SubAgent] list MCP servers failed, continuing without MCP")
+		mcpServers = nil
+	}
+	mcpManager, mcpTools := e.connectMCPServers(ctx, mcpServers, parentTracker, toolSkillMap)
+	skillTools := e.buildSkillManifestTools(skills, parentTracker, toolSkillMap)
+
+	// 使用父会话 ID 构造最小 Conversation，仅用于 persistToolFile 等场景
+	conv := &model.Conversation{ID: parentConvID}
+
+	return &execContext{
+		ctx:          ctx,
+		ag:           ag,
+		prov:         prov,
+		llmProv:      llmProv,
+		conv:         conv,
+		skills:       skills,
+		tracker:      parentTracker,
+		userMsg:      prompt,
+		l:            l,
+		agentTools:   agentTools,
+		mcpTools:     mcpTools,
+		skillTools:   skillTools,
+		mcpManager:   mcpManager,
+		toolSkillMap: toolSkillMap,
+		ephemeral:    true,
 	}, nil
 }
