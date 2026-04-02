@@ -586,15 +586,22 @@ async function reloadCurrentMessages() {
   }
 
   if (convId) {
-    try {
+    const load = async () => {
       const res: any = await chatApi.messages(convId, 100, true)
-      messages.value = parseChatMessages(res.data || [])
+      return parseChatMessages(res.data || [])
+    }
+    try {
+      let parsed = await load()
+      if (parsed.length === 0 && conversationId.value) {
+        await new Promise(r => setTimeout(r, 800))
+        parsed = await load()
+      }
+      if (parsed.length > 0) messages.value = parsed
     } catch {
-      // retry once after short delay
-      await new Promise(r => setTimeout(r, 500))
+      await new Promise(r => setTimeout(r, 800))
       try {
-        const res: any = await chatApi.messages(convId, 100, true)
-        messages.value = parseChatMessages(res.data || [])
+        const parsed = await load()
+        if (parsed.length > 0) messages.value = parsed
       } catch {}
     }
   }
@@ -651,13 +658,6 @@ function resetChat() {
 function stopGeneration() {
   if (_streamController) {
     _streamController.abort()
-    _streamController = null
-  }
-  if (streaming.value) {
-    streamingContent.value = ''
-    pendingSteps.value = []
-    streaming.value = false
-    setTimeout(() => reloadCurrentMessages(), 500)
   }
 }
 
