@@ -23,6 +23,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/daemon"
 	"github.com/chowyu12/aiclaw/internal/server"
+	skillspkg "github.com/chowyu12/aiclaw/internal/skills"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/chowyu12/aiclaw/internal/tools/browser"
 	"github.com/chowyu12/aiclaw/internal/workspace"
@@ -62,6 +63,8 @@ func Run(opts Options) {
 		log.WithError(err).Fatal("init workspace failed")
 	}
 	log.WithField("path", workspace.Root()).Info("workspace initialized")
+
+	skillspkg.SyncBuiltinsToDisk(workspace.Skills())
 
 	logFile := cfg.Log.File
 	if logFile == "" && daemon.IsChild() {
