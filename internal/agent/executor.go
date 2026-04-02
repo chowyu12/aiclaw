@@ -18,6 +18,7 @@ import (
 
 type ExecuteResult struct {
 	ConversationID string
+	MessageID      int64
 	Content        string
 	TokensUsed     int
 	Steps          []model.ExecutionStep
@@ -55,6 +56,7 @@ func NewExecutor(s store.Store, registry *ToolRegistry, opts ...ExecutorOption) 
 	for _, opt := range opts {
 		opt(e)
 	}
+	registerDefaultHooks(e.hooks)
 	registry.RegisterBuiltin("sub_agent", e.subAgentHandler)
 	return e
 }
@@ -133,6 +135,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 	}
 	doneChunk := model.StreamChunk{
 		ConversationID: ec.conv.UUID,
+		MessageID:      res.MessageID,
 		Done:           true,
 		Content:        res.Content,
 		TokensUsed:     res.TokensUsed,
@@ -411,7 +414,7 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 	return agentTools, toolSkillMap, nil
 }
 
-func (e *Executor) saveResult(ctx context.Context, ec *execContext, content string, tokensUsed int, duration time.Duration) (*ExecuteResult, error) {
+func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRunState, content string, tokensUsed int, duration time.Duration) (*ExecuteResult, error) {
 	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, tokensUsed)
 	if err != nil {
 		ec.l.WithError(err).Error("[Execute] save assistant message failed")
@@ -427,18 +430,24 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, content stri
 
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "duration": duration, "tokens": tokensUsed}).Info("[Execute] << done")
 
-	storeMemories(ec.userMsg, content, ec.ag)
-
-	var toolNames []string
-	for _, step := range ec.tracker.Steps() {
-		if step.StepType == model.StepToolCall && step.Status == model.StepSuccess {
-			toolNames = append(toolNames, step.Name)
-		}
-	}
-	appendSessionMemory(ec.conv.UUID, ec.userMsg, toolNames, content)
+	e.hooks.Fire(ctx, HookAgentDone, &HookPayload{
+		Model:        ec.ag.ModelName,
+		Tokens:       tokensUsed,
+		ConvUUID:     ec.conv.UUID,
+		UserMsg:      ec.userMsg,
+		Content:      content,
+		TotalTokens:  tokensUsed,
+		Duration:     duration,
+		Agent:        ec.ag,
+		Skills:       ec.skills,
+		CalledTools:  st.calledTools,
+		ToolSkillMap: ec.toolSkillMap,
+		Tracker:      ec.tracker,
+	})
 
 	return &ExecuteResult{
 		ConversationID: ec.conv.UUID,
+		MessageID:      msgID,
 		Content:        content,
 		TokensUsed:     tokensUsed,
 		Steps:          ec.tracker.Steps(),

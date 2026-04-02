@@ -122,6 +122,11 @@ type ChatRequest struct {
 	ExecChannel *ChannelExecTrace `json:"-"`
 }
 
+type RetryRequest struct {
+	ConversationID string `json:"conversation_id"`
+	MessageID      int64  `json:"message_id"`
+}
+
 type ChatResponse struct {
 	ConversationID string          `json:"conversation_id"`
 	Message        string          `json:"message"`
@@ -131,6 +136,7 @@ type ChatResponse struct {
 
 type StreamChunk struct {
 	ConversationID string          `json:"conversation_id,omitzero"`
+	MessageID      int64           `json:"message_id,omitzero"`
 	Delta          string          `json:"delta,omitzero"`
 	Content        string          `json:"content,omitzero"`
 	TokensUsed     int             `json:"tokens_used,omitzero"`

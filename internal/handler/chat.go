@@ -25,6 +25,7 @@ func NewChatHandler(s store.Store, executor *agent.Executor) *ChatHandler {
 func (h *ChatHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/chat/completions", h.Complete)
 	mux.HandleFunc("POST /api/v1/chat/stream", h.Stream)
+	mux.HandleFunc("POST /api/v1/chat/retry", h.RetryStream)
 	mux.HandleFunc("GET /api/v1/conversations", h.ListConversations)
 	mux.HandleFunc("GET /api/v1/conversations/{id}/messages", h.ListMessages)
 	mux.HandleFunc("DELETE /api/v1/conversations/{id}", h.DeleteConversation)
@@ -95,6 +96,79 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return sseWriter.WriteJSON("message", chunk)
 	})
 	if err != nil {
+		sseWriter.WriteJSON("error", map[string]string{"error": err.Error()})
+		return
+	}
+	sseWriter.WriteDone()
+}
+
+// RetryStream 重试指定的 assistant 消息：删除该轮对话数据后重新执行。
+// 请求体：{ "conversation_id": "uuid", "message_id": 123 }
+// message_id 为要重试的 assistant 消息 ID。
+func (h *ChatHandler) RetryStream(w http.ResponseWriter, r *http.Request) {
+	var req model.RetryRequest
+	if err := httputil.BindJSON(r, &req); err != nil {
+		httputil.BadRequest(w, "invalid request body")
+		return
+	}
+	if req.ConversationID == "" || req.MessageID == 0 {
+		httputil.BadRequest(w, "conversation_id and message_id are required")
+		return
+	}
+
+	conv, err := h.store.GetConversationByUUID(r.Context(), req.ConversationID)
+	if err != nil {
+		httputil.NotFound(w, "conversation not found")
+		return
+	}
+
+	assistantMsg, err := h.store.GetMessage(r.Context(), req.MessageID)
+	if err != nil || assistantMsg.ConversationID != conv.ID || assistantMsg.Role != "assistant" {
+		httputil.BadRequest(w, "invalid assistant message")
+		return
+	}
+
+	msgs, err := h.store.ListMessages(r.Context(), conv.ID, 500)
+	if err != nil {
+		httputil.InternalError(w, "load messages failed")
+		return
+	}
+	var userMsg *model.Message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].ID < assistantMsg.ID && msgs[i].Role == "user" {
+			userMsg = &msgs[i]
+			break
+		}
+	}
+	if userMsg == nil {
+		httputil.BadRequest(w, "user message not found for retry")
+		return
+	}
+
+	userText := userMsg.Content
+	if err := h.store.DeleteMessagesFrom(r.Context(), conv.ID, userMsg.ID); err != nil {
+		httputil.InternalError(w, "cleanup old messages failed")
+		return
+	}
+
+	chatReq := model.ChatRequest{
+		ConversationID: req.ConversationID,
+		Message:        userText,
+	}
+	fillIdentity(r, &chatReq)
+	if chatReq.UserID == "" {
+		chatReq.UserID = "anonymous"
+	}
+
+	sseWriter, ok := sse.NewWriter(w)
+	if !ok {
+		httputil.InternalError(w, "streaming not supported")
+		return
+	}
+
+	if err := h.executor.ExecuteStream(r.Context(), chatReq, func(chunk model.StreamChunk) error {
+		return sseWriter.WriteJSON("message", chunk)
+	}); err != nil {
 		sseWriter.WriteJSON("error", map[string]string{"error": err.Error()})
 		return
 	}
