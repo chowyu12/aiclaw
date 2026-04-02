@@ -69,42 +69,46 @@ var dangerousCodePatterns = map[string][]string{
 const maxOutput = 10_000
 const maxTimeout = 120
 
+func fail(r codeResult) (string, error) {
+	return marshalResult(r), fmt.Errorf("%s", r.Error)
+}
+
 func Handler(ctx context.Context, args string) (string, error) {
 	var p codeParams
 	if err := json.Unmarshal([]byte(args), &p); err != nil {
-		return marshalResult(codeResult{OK: false, Error: "invalid parameters: " + err.Error()}), nil
+		return fail(codeResult{OK: false, Error: "invalid parameters: " + err.Error()})
 	}
 
 	p.Language = strings.TrimSpace(strings.ToLower(p.Language))
 	p.Code = strings.TrimSpace(p.Code)
 
 	if p.Code == "" {
-		return marshalResult(codeResult{OK: false, Error: "code is required"}), nil
+		return fail(codeResult{OK: false, Error: "code is required"})
 	}
 
 	rt, ok := runtimes[p.Language]
 	if !ok {
-		return marshalResult(codeResult{
+		return fail(codeResult{
 			OK:    false,
 			Error: fmt.Sprintf("unsupported language %q, supported: python, javascript, shell", p.Language),
-		}), nil
+		})
 	}
 
 	if _, err := exec.LookPath(rt.Command); err != nil {
-		return marshalResult(codeResult{
+		return fail(codeResult{
 			OK:       false,
 			Language: p.Language,
 			Error:    fmt.Sprintf("runtime %q not found, please install it first", rt.Command),
-		}), nil
+		})
 	}
 
 	if err := checkDangerousCode(p.Language, p.Code); err != nil {
 		log.WithFields(log.Fields{"language": p.Language, "reason": err}).Warn("[CodeInterpreter] code blocked by safety check")
-		return marshalResult(codeResult{
+		return fail(codeResult{
 			OK:       false,
 			Language: p.Language,
 			Error:    err.Error(),
-		}), nil
+		})
 	}
 
 	timeout := rt.DefaultTimeout
@@ -114,7 +118,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 
 	sandboxDir := workspace.AgentSandboxFromCtx(ctx)
 	if sandboxDir == "" {
-		return marshalResult(codeResult{OK: false, Error: "workspace not initialized"}), nil
+		return fail(codeResult{OK: false, Error: "workspace not initialized"})
 	}
 
 	shortID := uuid.New().String()[:8]
@@ -122,11 +126,11 @@ func Handler(ctx context.Context, args string) (string, error) {
 	filePath := filepath.Join(sandboxDir, filename)
 
 	if err := os.WriteFile(filePath, []byte(p.Code), 0o644); err != nil {
-		return marshalResult(codeResult{
+		return fail(codeResult{
 			OK:       false,
 			Language: p.Language,
 			Error:    "write code file: " + err.Error(),
-		}), nil
+		})
 	}
 
 	log.WithFields(log.Fields{
@@ -165,13 +169,13 @@ func Handler(ctx context.Context, args string) (string, error) {
 			"language": p.Language, "file": filename,
 			"exit_code": result.ExitCode, "error": err,
 		}).Warn("[CodeInterpreter] << execution failed")
-	} else {
-		log.WithFields(log.Fields{
-			"language": p.Language, "file": filename,
-			"duration_ms": result.DurationMs,
-		}).Info("[CodeInterpreter] << execution ok")
+		return fail(result)
 	}
 
+	log.WithFields(log.Fields{
+		"language": p.Language, "file": filename,
+		"duration_ms": result.DurationMs,
+	}).Info("[CodeInterpreter] << execution ok")
 	return marshalResult(result), nil
 }
 

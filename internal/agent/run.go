@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -146,7 +147,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 
 		req := openai.ChatCompletionRequest{
 			Model:    ec.ag.ModelName,
-			Messages: ensureContentPresent(st.Messages),
+			Messages: sanitizeMessages(st.Messages),
 			Tools:    toolsSentToLLM(st.TSMode, st.AllToolDefs, st.Discovered),
 		}
 		applyModelCaps(&req, ec.ag, ec.l)
@@ -382,15 +383,21 @@ func truncateLog(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
-// ensureContentPresent 确保每条消息的 Content 不为空字符串。
-// go-openai SDK 使用 `json:"content,omitempty"`，空 Content 会导致序列化时
-// content 字段被省略，而部分供应商（如通义千问 Qwen）要求 content 字段必须存在。
-func ensureContentPresent(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+// sanitizeMessages 对发送给 LLM 的消息做必要的修正：
+//  1. 确保 Content 不为空（部分 provider 要求 content 字段必须存在）
+//  2. 修复 tool_call arguments 中的残损 JSON（避免 provider 400 拒绝）
+func sanitizeMessages(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
 	out := make([]openai.ChatCompletionMessage, len(msgs))
 	copy(out, msgs)
 	for i := range out {
 		if out[i].Content == "" && len(out[i].MultiContent) == 0 {
 			out[i].Content = " "
+		}
+		for j := range out[i].ToolCalls {
+			args := out[i].ToolCalls[j].Function.Arguments
+			if args != "" && !json.Valid([]byte(args)) {
+				out[i].ToolCalls[j].Function.Arguments = "{}"
+			}
 		}
 	}
 	return out
