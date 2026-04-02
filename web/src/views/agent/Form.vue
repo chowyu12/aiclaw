@@ -13,7 +13,52 @@
     <div class="aic-page-body">
       <div class="af-layout" v-loading="agentLoading">
         <el-form :model="agentForm" label-position="top" class="af-layout-inner">
-          <!-- ======== 左栏：核心编辑区 ======== -->
+          <!-- ======== 左栏：能力配置 ======== -->
+          <div class="af-sidebar af-sidebar--left">
+            <div class="af-sidebar-inner">
+              <!-- 工具 -->
+              <div class="af-panel">
+                <h4 class="af-panel-title">工具</h4>
+                <div class="af-row">
+                  <span class="af-row-label">Tool Search</span>
+                  <el-switch v-model="agentForm.tool_search_enabled" @change="onToolSearchChange" size="small" />
+                </div>
+                <div v-if="agentForm.tool_search_enabled" class="af-row-hint">开启后自动加载全部已启用工具</div>
+                <div v-if="!agentForm.tool_search_enabled" style="margin-top:8px">
+                  <el-select v-model="agentForm.tool_ids" multiple filterable collapse-tags collapse-tags-tooltip style="width:100%" placeholder="选择工具" size="small">
+                    <el-option v-for="t in allTools" :key="t.id" :label="t.name" :value="t.id" />
+                  </el-select>
+                </div>
+              </div>
+
+              <!-- MemOS -->
+              <div class="af-panel">
+                <h4 class="af-panel-title">MemOS 长期记忆</h4>
+                <div class="af-row">
+                  <span class="af-row-label">启用</span>
+                  <el-switch v-model="agentForm.memos_enabled" size="small" />
+                </div>
+                <template v-if="agentForm.memos_enabled">
+                  <div class="af-memos-fields">
+                    <el-input v-model="agentForm.memos_config.api_key" show-password size="small" placeholder="API Key (mpg-...)" />
+                    <el-input v-model="agentForm.memos_config.base_url" size="small" placeholder="Base URL（可选）" style="margin-top:8px" />
+                  </div>
+                </template>
+              </div>
+
+              <!-- 其他 -->
+              <div class="af-panel">
+                <h4 class="af-panel-title">其他</h4>
+                <div class="af-row">
+                  <span class="af-row-label">设为默认</span>
+                  <el-switch v-model="agentForm.is_default" size="small" />
+                </div>
+                <div class="af-row-hint">未指定 Agent 的请求将使用此 Agent</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ======== 中栏：核心编辑区 ======== -->
           <div class="af-main">
             <el-form-item label="名称" required>
               <el-input v-model="agentForm.name" placeholder="Agent 显示名称" />
@@ -52,15 +97,14 @@
               <el-input v-model="agentForm.system_prompt" type="textarea" :autosize="{ minRows: 8, maxRows: 24 }" placeholder="为 Agent 编写系统提示词，定义其角色、行为和约束" class="af-prompt-input" />
             </el-form-item>
 
-            <!-- 操作栏 -->
             <div class="af-actions">
               <el-button type="primary" :loading="agentSaving" @click="saveAgent">{{ isEdit ? '保存配置' : '创建 Agent' }}</el-button>
               <el-button @click="$router.push('/agents')">取消</el-button>
             </div>
           </div>
 
-          <!-- ======== 右栏：配置面板 ======== -->
-          <div class="af-sidebar">
+          <!-- ======== 右栏：推理配置 ======== -->
+          <div class="af-sidebar af-sidebar--right">
             <div class="af-sidebar-inner">
               <!-- 推理参数 -->
               <div class="af-panel">
@@ -96,36 +140,6 @@
                 </div>
               </div>
 
-              <!-- 工具 -->
-              <div class="af-panel">
-                <h4 class="af-panel-title">工具</h4>
-                <div class="af-row">
-                  <span class="af-row-label">Tool Search</span>
-                  <el-switch v-model="agentForm.tool_search_enabled" @change="onToolSearchChange" size="small" />
-                </div>
-                <div v-if="agentForm.tool_search_enabled" class="af-row-hint">开启后自动加载全部已启用工具</div>
-                <div v-if="!agentForm.tool_search_enabled" style="margin-top:8px">
-                  <el-select v-model="agentForm.tool_ids" multiple filterable collapse-tags collapse-tags-tooltip style="width:100%" placeholder="选择工具" size="small">
-                    <el-option v-for="t in allTools" :key="t.id" :label="t.name" :value="t.id" />
-                  </el-select>
-                </div>
-              </div>
-
-              <!-- MemOS -->
-              <div class="af-panel">
-                <h4 class="af-panel-title">MemOS 长期记忆</h4>
-                <div class="af-row">
-                  <span class="af-row-label">启用</span>
-                  <el-switch v-model="agentForm.memos_enabled" size="small" />
-                </div>
-                <template v-if="agentForm.memos_enabled">
-                  <div class="af-memos-fields">
-                    <el-input v-model="agentForm.memos_config.api_key" show-password size="small" placeholder="API Key (mpg-...)" />
-                    <el-input v-model="agentForm.memos_config.base_url" size="small" placeholder="Base URL（可选）" style="margin-top:8px" />
-                  </div>
-                </template>
-              </div>
-
               <!-- API Token -->
               <div v-if="isEdit" class="af-panel">
                 <h4 class="af-panel-title">API Token</h4>
@@ -141,16 +155,6 @@
                     </template>
                   </el-popconfirm>
                 </div>
-              </div>
-
-              <!-- 其他 -->
-              <div class="af-panel">
-                <h4 class="af-panel-title">其他</h4>
-                <div class="af-row">
-                  <span class="af-row-label">设为默认</span>
-                  <el-switch v-model="agentForm.is_default" size="small" />
-                </div>
-                <div class="af-row-hint">未指定 Agent 的请求将使用此 Agent</div>
               </div>
             </div>
           </div>
@@ -378,24 +382,28 @@ onMounted(() => reloadAgent())
 <style scoped>
 .aic-sub-compact { margin-top: 6px; font-size: 13px; line-height: 1.45; }
 
-/* ===== 双栏布局 ===== */
+/* ===== 三栏布局 ===== */
 .af-layout { min-height: 120px; }
 
 .af-layout-inner {
   display: flex;
-  gap: 24px;
+  gap: 20px;
   align-items: flex-start;
 }
 
 .af-main {
   flex: 1;
   min-width: 0;
+  order: 1;
 }
 
 .af-sidebar {
-  width: 340px;
+  width: 260px;
   flex-shrink: 0;
 }
+
+.af-sidebar--left { order: 3; }
+.af-sidebar--right { order: 2; }
 
 .af-sidebar-inner {
   position: sticky;
@@ -547,13 +555,14 @@ onMounted(() => reloadAgent())
 .ml8 { margin-left: 8px; }
 
 /* ===== 响应式 ===== */
-@media (max-width: 920px) {
+@media (max-width: 1100px) {
   .af-layout-inner {
-    flex-direction: column;
+    flex-wrap: wrap;
   }
-  .af-sidebar {
-    width: 100%;
-  }
+  .af-sidebar { width: 100%; }
+  .af-sidebar--left { order: 2; }
+  .af-main { order: 1; width: 100%; flex-basis: 100%; }
+  .af-sidebar--right { order: 3; }
   .af-sidebar-inner {
     position: static;
     flex-direction: row;
@@ -561,7 +570,7 @@ onMounted(() => reloadAgent())
   }
   .af-panel {
     flex: 1;
-    min-width: 260px;
+    min-width: 240px;
   }
 }
 </style>
