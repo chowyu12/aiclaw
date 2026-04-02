@@ -3,6 +3,9 @@ package agent
 import (
 	"context"
 	"sync"
+	"time"
+
+	"github.com/chowyu12/aiclaw/internal/model"
 )
 
 // HookEvent 表示可被拦截的 Agent 生命周期事件。
@@ -13,7 +16,7 @@ const (
 	HookPostToolUse HookEvent = "post_tool_use"
 	HookPreLLMCall  HookEvent = "pre_llm_call"
 	HookPostLLMCall HookEvent = "post_llm_call"
-	HookAgentStop   HookEvent = "agent_stop"
+	HookAgentDone   HookEvent = "agent_done"
 )
 
 // HookAction 控制事件触发后的执行走向。
@@ -27,13 +30,28 @@ const (
 
 // HookPayload 传递给 Hook 函数的上下文数据。
 type HookPayload struct {
+	// 工具上下文 (pre/post_tool_use)
 	ToolName string
 	ToolArgs string
 	Result   string
 	Error    error
-	Model    string
-	Round    int
-	Tokens   int
+
+	// LLM 调用上下文 (pre/post_llm_call)
+	Model  string
+	Round  int
+	Tokens int
+
+	// Agent 完成上下文 (agent_done)
+	ConvUUID     string
+	UserMsg      string
+	Content      string
+	TotalTokens  int
+	Duration     time.Duration
+	Agent        *model.Agent
+	Skills       []model.Skill
+	CalledTools  map[string]bool
+	ToolSkillMap map[string]string
+	Tracker      *StepTracker
 }
 
 // HookFunc 签名：返回 HookAction 决定后续行为。
