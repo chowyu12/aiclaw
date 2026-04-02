@@ -276,7 +276,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 	}
 
 	memosCtx := recallMemories(ctx, ec.userMsg, ec.ag)
-	sessionMem := loadSessionMemory(ec.conv.UUID)
+	sessionMem := loadSessionMemory(ec.ag.UUID, ec.conv.UUID)
 
 	var msgTools []model.Tool
 	var msgToolSkillMap map[string]string

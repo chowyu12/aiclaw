@@ -15,8 +15,11 @@ func TestResolveBrowserUploadPath_UnderWorkspace(t *testing.T) {
 	}
 	t.Cleanup(workspace.ResetRootForTesting)
 
-	rel := filepath.Join("tmp", "browser_upload_test.txt")
-	full := filepath.Join(dir, rel)
+	tmpDir := filepath.Join(dir, "tmp")
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	full := filepath.Join(tmpDir, "browser_upload_test.txt")
 	if err := os.WriteFile(full, []byte("ok"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 var root string
+var agentDirOnce sync.Map
 
 type ctxKey struct{}
 
@@ -39,10 +41,8 @@ func Init(dir string) error {
 		"skills",
 		"cron/scripts",
 		"cron/logs",
-		"tmp",
-		"sandbox",
 		"agents",
-		"session-memory",
+		"logs",
 	} {
 		if err := os.MkdirAll(filepath.Join(root, sub), 0o755); err != nil {
 			return fmt.Errorf("create workspace dir %q: %w", sub, err)
@@ -63,6 +63,13 @@ func Uploads() string {
 		return ""
 	}
 	return filepath.Join(root, "uploads")
+}
+
+func Logs() string {
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "logs")
 }
 
 func CronDir() string {
@@ -100,35 +107,32 @@ func SkillDir(dirName string) string {
 	return filepath.Join(root, "skills", dirName)
 }
 
-func Tmp() string {
-	if root == "" {
+func AgentSessionMemory(uuid string) string {
+	d := AgentDir(uuid)
+	if d == "" {
 		return ""
 	}
-	return filepath.Join(root, "tmp")
+	return filepath.Join(d, "session-memory")
 }
 
-func Sandbox() string {
-	if root == "" {
-		return ""
+// AgentSessionMemoryFromCtx 从 context 中的 WorkdirScope 返回对应 session-memory 目录。
+func AgentSessionMemoryFromCtx(ctx context.Context) string {
+	if id := workdirScopeFromContext(ctx); id != "" {
+		return AgentSessionMemory(id)
 	}
-	return filepath.Join(root, "sandbox")
+	return ""
 }
 
-func SessionMemory() string {
-	if root == "" {
-		return ""
-	}
-	return filepath.Join(root, "session-memory")
-}
-
-// AgentDir 返回指定 agent 的工作目录，并尝试创建所需子目录（失败时静默忽略）。
+// AgentDir 返回指定 agent 的工作目录；首次调用时创建子目录，后续直接返回缓存路径。
 func AgentDir(uuid string) string {
 	if root == "" || uuid == "" {
 		return ""
 	}
 	dir := filepath.Join(root, "agents", uuid)
-	for _, sub := range []string{"", "sandbox", "tmp"} {
-		_ = os.MkdirAll(filepath.Join(dir, sub), 0o755)
+	if _, loaded := agentDirOnce.LoadOrStore(uuid, struct{}{}); !loaded {
+		for _, sub := range []string{"", "sandbox", "tmp", "session-memory"} {
+			_ = os.MkdirAll(filepath.Join(dir, sub), 0o755)
+		}
 	}
 	return dir
 }
@@ -136,7 +140,7 @@ func AgentDir(uuid string) string {
 func AgentSandbox(uuid string) string {
 	d := AgentDir(uuid)
 	if d == "" {
-		return Sandbox()
+		return ""
 	}
 	return filepath.Join(d, "sandbox")
 }
@@ -144,7 +148,7 @@ func AgentSandbox(uuid string) string {
 func AgentTmp(uuid string) string {
 	d := AgentDir(uuid)
 	if d == "" {
-		return Tmp()
+		return ""
 	}
 	return filepath.Join(d, "tmp")
 }
@@ -154,7 +158,7 @@ func AgentSandboxFromCtx(ctx context.Context) string {
 	if id := workdirScopeFromContext(ctx); id != "" {
 		return AgentSandbox(id)
 	}
-	return Sandbox()
+	return ""
 }
 
 // AgentTmpFromCtx 从 context 中的 WorkdirScope 返回对应 tmp 目录。
@@ -162,5 +166,5 @@ func AgentTmpFromCtx(ctx context.Context) string {
 	if id := workdirScopeFromContext(ctx); id != "" {
 		return AgentTmp(id)
 	}
-	return Tmp()
+	return ""
 }

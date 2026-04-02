@@ -21,7 +21,12 @@ func dataDir() string {
 }
 
 func PidFile() string { return filepath.Join(dataDir(), "aiclaw.pid") }
-func LogFile() string { return filepath.Join(dataDir(), "aiclaw.log") }
+
+func LogFile() string {
+	dir := filepath.Join(dataDir(), "logs")
+	os.MkdirAll(dir, 0o755)
+	return filepath.Join(dir, "aiclaw.log")
+}
 func IsChild() bool   { return os.Getenv(envKey) == "1" }
 
 func launchdPlist() string {
