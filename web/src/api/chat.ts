@@ -213,7 +213,9 @@ function streamRequest(
     }
     onDone()
   }).catch((err) => {
-    if (err.name !== 'AbortError') {
+    if (err.name === 'AbortError') {
+      onDone()
+    } else {
       onError(err.message)
     }
   }).finally(() => {
