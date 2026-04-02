@@ -416,13 +416,16 @@ func truncateLog(s string, maxLen int) string {
 }
 
 // sanitizeMessages 对发送给 LLM 的消息做必要的修正：
-//  1. 确保 Content 不为空（部分 provider 要求 content 字段必须存在）
+//  1. tool 角色和带 tool_calls 的 assistant 必须有 content（部分 provider 的硬性要求，
+//     go-openai SDK 用 omitempty 会省略空字符串导致 400）
 //  2. 修复 tool_call arguments 中的残损 JSON（避免 provider 400 拒绝）
 func sanitizeMessages(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
 	out := make([]openai.ChatCompletionMessage, len(msgs))
 	copy(out, msgs)
 	for i := range out {
-		if out[i].Content == "" && len(out[i].MultiContent) == 0 {
+		needContent := out[i].Role == openai.ChatMessageRoleTool ||
+			(out[i].Role == openai.ChatMessageRoleAssistant && len(out[i].ToolCalls) > 0)
+		if needContent && out[i].Content == "" && len(out[i].MultiContent) == 0 {
 			out[i].Content = " "
 		}
 		for j := range out[i].ToolCalls {
