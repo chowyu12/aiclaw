@@ -65,7 +65,7 @@ func memosHook(_ context.Context, _ HookEvent, p *HookPayload) HookAction {
 
 // sessionMemoryHook 将本轮执行摘要追加到会话笔记文件。
 func sessionMemoryHook(_ context.Context, _ HookEvent, p *HookPayload) HookAction {
-	if p.ConvUUID == "" {
+	if p.ConvUUID == "" || p.Agent == nil {
 		return HookContinue
 	}
 	var toolNames []string
@@ -76,6 +76,6 @@ func sessionMemoryHook(_ context.Context, _ HookEvent, p *HookPayload) HookActio
 			}
 		}
 	}
-	appendSessionMemory(p.ConvUUID, p.UserMsg, toolNames, p.Content)
+	appendSessionMemory(p.Agent.UUID, p.ConvUUID, p.UserMsg, toolNames, p.Content)
 	return HookContinue
 }

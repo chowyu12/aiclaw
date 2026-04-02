@@ -14,8 +14,8 @@ import (
 
 const sessionMemoryMaxRunes = 2000
 
-func sessionMemoryPath(convUUID string) string {
-	dir := workspace.SessionMemory()
+func sessionMemoryPath(agentUUID, convUUID string) string {
+	dir := workspace.AgentSessionMemory(agentUUID)
 	if dir == "" || convUUID == "" {
 		return ""
 	}
@@ -23,8 +23,8 @@ func sessionMemoryPath(convUUID string) string {
 }
 
 // appendSessionMemory 将本轮执行摘要追加到会话笔记文件。
-func appendSessionMemory(convUUID, userMsg string, toolNames []string, outcome string) {
-	path := sessionMemoryPath(convUUID)
+func appendSessionMemory(agentUUID, convUUID, userMsg string, toolNames []string, outcome string) {
+	path := sessionMemoryPath(agentUUID, convUUID)
 	if path == "" {
 		return
 	}
@@ -60,8 +60,8 @@ func appendSessionMemory(convUUID, userMsg string, toolNames []string, outcome s
 }
 
 // loadSessionMemory 读取会话笔记文件，返回截断后的内容供注入 system prompt。
-func loadSessionMemory(convUUID string) string {
-	path := sessionMemoryPath(convUUID)
+func loadSessionMemory(agentUUID, convUUID string) string {
+	path := sessionMemoryPath(agentUUID, convUUID)
 	if path == "" {
 		return ""
 	}

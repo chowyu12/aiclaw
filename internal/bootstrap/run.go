@@ -57,9 +57,17 @@ func Run(opts Options) {
 		}
 	}
 
+	if err := workspace.Init(cfg.Workspace); err != nil {
+		log.WithError(err).Fatal("init workspace failed")
+	}
+	log.WithField("path", workspace.Root()).Info("workspace initialized")
+
 	logFile := cfg.Log.File
 	if logFile == "" && daemon.IsChild() {
 		logFile = daemon.LogFile()
+	}
+	if logFile == "" && workspace.Logs() != "" {
+		logFile = filepath.Join(workspace.Logs(), "aiclaw.log")
 	}
 	if logFile != "" {
 		log.SetOutput(&lumberjack.Logger{
@@ -68,12 +76,8 @@ func Run(opts Options) {
 			MaxBackups: 3,
 			Compress:   true,
 		})
+		log.WithField("file", logFile).Info("log output to file")
 	}
-
-	if err := workspace.Init(cfg.Workspace); err != nil {
-		log.WithError(err).Fatal("init workspace failed")
-	}
-	log.WithField("path", workspace.Root()).Info("workspace initialized")
 
 	if cfg.Upload.Dir == "" || cfg.Upload.Dir == "./uploads" {
 		cfg.Upload.Dir = workspace.Uploads()
