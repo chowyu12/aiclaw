@@ -87,6 +87,9 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	ec.l.WithFields(log.Fields{"tool": toolName, "args": truncateLog(toolArgs, 200)}).Info("[Tool] >> invoke")
 	toolCtx, toolDone := toolCallContext(ctx)
 	defer toolDone()
+	if toolName == "sub_agent" {
+		toolCtx = withSubAgentCallID(toolCtx, tc.ID)
+	}
 	callStart := time.Now()
 	output, callErr := tool.Call(toolCtx, toolArgs)
 	callDur := time.Since(callStart)
@@ -159,6 +162,9 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 	tcs := assistant.ToolCalls
 	n := len(tcs)
 
+	// 注入父执行信息，供 sub_agent handler 获取父 tracker 和会话 ID
+	ctx = withParentExecInfo(ctx, ec.tracker, ec.conv.ID)
+
 	// 统计本轮 sub_agent 调用数量，注入 context 供 handler 决定走完整/轻量路径
 	subAgentCnt := 0
 	for _, tc := range tcs {
@@ -228,8 +234,10 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 		}
 	}
 
-	if err := e.memory.SaveToolCallRound(ctx, ec.conv.ID, assistant.Content, assistant.ToolCalls, toolResults); err != nil {
-		ec.l.WithError(err).Warn("[Memory] save tool call round failed")
+	if !ec.ephemeral {
+		if err := e.memory.SaveToolCallRound(ctx, ec.conv.ID, assistant.Content, assistant.ToolCalls, toolResults); err != nil {
+			ec.l.WithError(err).Warn("[Memory] save tool call round failed")
+		}
 	}
 	if len(pendingParts) > 0 {
 		parts := append([]openai.ChatMessagePart{

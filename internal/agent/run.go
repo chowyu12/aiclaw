@@ -237,15 +237,19 @@ type agentRunState struct {
 }
 
 func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, streaming bool) (*agentRunState, error) {
-	history, err := e.memory.LoadHistory(ctx, ec.conv.ID, ec.ag.HistoryLimit())
-	if err != nil {
-		ec.l.WithError(err).Error("[LLM] load history failed")
-		return nil, err
-	}
+	var history []openai.ChatCompletionMessage
+	if !ec.ephemeral {
+		var err error
+		history, err = e.memory.LoadHistory(ctx, ec.conv.ID, ec.ag.HistoryLimit())
+		if err != nil {
+			ec.l.WithError(err).Error("[LLM] load history failed")
+			return nil, err
+		}
 
-	if _, err := e.memory.SaveUserMessage(ctx, ec.conv.ID, ec.userMsg, ec.files); err != nil {
-		ec.l.WithError(err).Error("[LLM] save user message failed")
-		return nil, err
+		if _, err := e.memory.SaveUserMessage(ctx, ec.conv.ID, ec.userMsg, ec.files); err != nil {
+			ec.l.WithError(err).Error("[LLM] save user message failed")
+			return nil, err
+		}
 	}
 
 	var toolMap map[string]Tool
