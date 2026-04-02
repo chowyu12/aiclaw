@@ -11,143 +11,120 @@
     </div>
 
     <div class="aic-page-body">
-      <div class="af-layout" v-loading="agentLoading">
-        <el-form :model="agentForm" label-position="top" class="af-layout-inner">
-          <!-- ======== 左栏：能力配置 ======== -->
-          <div class="af-sidebar af-sidebar--left">
-            <div class="af-sidebar-inner">
-              <!-- 工具 -->
-              <div class="af-panel">
-                <h4 class="af-panel-title">工具</h4>
-                <div class="af-row">
-                  <span class="af-row-label">Tool Search</span>
-                  <el-switch v-model="agentForm.tool_search_enabled" @change="onToolSearchChange" size="small" />
-                </div>
-                <div v-if="agentForm.tool_search_enabled" class="af-row-hint">开启后自动加载全部已启用工具</div>
-                <div v-if="!agentForm.tool_search_enabled" style="margin-top:8px">
-                  <el-select v-model="agentForm.tool_ids" multiple filterable collapse-tags collapse-tags-tooltip style="width:100%" placeholder="选择工具" size="small">
-                    <el-option v-for="t in allTools" :key="t.id" :label="t.name" :value="t.id" />
-                  </el-select>
-                </div>
-              </div>
-
-              <!-- MemOS -->
-              <div class="af-panel">
-                <h4 class="af-panel-title">MemOS 长期记忆</h4>
-                <div class="af-row">
-                  <span class="af-row-label">启用</span>
-                  <el-switch v-model="agentForm.memos_enabled" size="small" />
-                </div>
-                <template v-if="agentForm.memos_enabled">
-                  <div class="af-memos-fields">
-                    <el-input v-model="agentForm.memos_config.api_key" show-password size="small" placeholder="API Key (mpg-...)" />
-                    <el-input v-model="agentForm.memos_config.base_url" size="small" placeholder="Base URL（可选）" style="margin-top:8px" />
-                  </div>
-                </template>
-              </div>
-
-              <!-- 其他 -->
-              <div class="af-panel">
-                <h4 class="af-panel-title">其他</h4>
-                <div class="af-row">
-                  <span class="af-row-label">设为默认</span>
-                  <el-switch v-model="agentForm.is_default" size="small" />
-                </div>
-                <div class="af-row-hint">未指定 Agent 的请求将使用此 Agent</div>
-              </div>
+      <el-form :model="agentForm" label-position="top" class="af-root" v-loading="agentLoading">
+        <div class="af-cols">
+          <!-- ====== 左栏：主编辑区 ====== -->
+          <div class="af-left">
+            <div class="af-row-inline">
+              <el-form-item label="名称" required class="af-cell af-cell--name">
+                <el-input v-model="agentForm.name" placeholder="显示名称" />
+              </el-form-item>
+              <el-form-item label="描述" class="af-cell af-cell--desc">
+                <el-input v-model="agentForm.description" placeholder="简要描述用途（可选）" />
+              </el-form-item>
             </div>
-          </div>
 
-          <!-- ======== 中栏：核心编辑区 ======== -->
-          <div class="af-main">
-            <el-form-item label="名称" required>
-              <el-input v-model="agentForm.name" placeholder="Agent 显示名称" />
-            </el-form-item>
-            <el-form-item label="描述">
-              <el-input v-model="agentForm.description" placeholder="简要描述该 Agent 的用途" />
-            </el-form-item>
-
-            <el-row :gutter="16">
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="供应商" required>
-                  <el-select v-model="agentForm.provider_id" filterable style="width: 100%" @change="onProviderChange" placeholder="选择供应商">
-                    <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id">
-                      <span>{{ p.name }}</span>
-                      <el-tag size="small" class="ml8" type="info">{{ p.type }}</el-tag>
-                    </el-option>
-                  </el-select>
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="12">
-                <el-form-item label="模型" required>
-                  <el-select v-model="agentForm.model_name" filterable allow-create default-first-option style="width: 100%" :loading="modelLoading" :disabled="!agentForm.provider_id" @focus="onModelFocus" placeholder="选择或输入模型名">
-                    <el-option-group v-if="remoteModels.length > 0" label="远程模型">
-                      <el-option v-for="m in remoteModels" :key="'r-'+m" :label="m" :value="m" />
-                    </el-option-group>
-                    <el-option-group v-if="localOnlyModels.length > 0" :label="remoteModels.length ? '本地配置' : '模型列表'">
-                      <el-option v-for="m in localOnlyModels" :key="'l-'+m" :label="m" :value="m" />
-                    </el-option-group>
-                  </el-select>
-                  <div v-if="remoteFetchError" class="af-hint warn">{{ remoteFetchError }}</div>
-                </el-form-item>
-              </el-col>
-            </el-row>
+            <div class="af-row-inline">
+              <el-form-item label="供应商" required class="af-cell">
+                <el-select v-model="agentForm.provider_id" filterable style="width:100%" @change="onProviderChange" placeholder="选择">
+                  <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id">
+                    <span>{{ p.name }}</span>
+                    <el-tag size="small" style="margin-left:8px" type="info">{{ p.type }}</el-tag>
+                  </el-option>
+                </el-select>
+              </el-form-item>
+              <el-form-item label="模型" required class="af-cell">
+                <el-select v-model="agentForm.model_name" filterable allow-create default-first-option style="width:100%" :loading="modelLoading" :disabled="!agentForm.provider_id" @focus="onModelFocus" placeholder="选择或输入">
+                  <el-option-group v-if="remoteModels.length > 0" label="远程模型">
+                    <el-option v-for="m in remoteModels" :key="'r-'+m" :label="m" :value="m" />
+                  </el-option-group>
+                  <el-option-group v-if="localOnlyModels.length > 0" :label="remoteModels.length ? '本地配置' : '模型列表'">
+                    <el-option v-for="m in localOnlyModels" :key="'l-'+m" :label="m" :value="m" />
+                  </el-option-group>
+                </el-select>
+                <div v-if="remoteFetchError" class="af-hint warn">{{ remoteFetchError }}</div>
+              </el-form-item>
+            </div>
 
             <el-form-item label="System Prompt">
-              <el-input v-model="agentForm.system_prompt" type="textarea" :autosize="{ minRows: 8, maxRows: 24 }" placeholder="为 Agent 编写系统提示词，定义其角色、行为和约束" class="af-prompt-input" />
+              <el-input v-model="agentForm.system_prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 28 }" placeholder="为 Agent 编写系统提示词" class="af-prompt" />
             </el-form-item>
 
             <div class="af-actions">
-              <el-button type="primary" :loading="agentSaving" @click="saveAgent">{{ isEdit ? '保存配置' : '创建 Agent' }}</el-button>
+              <el-button type="primary" :loading="agentSaving" @click="saveAgent">{{ isEdit ? '保存' : '创建' }}</el-button>
               <el-button @click="$router.push('/agents')">取消</el-button>
             </div>
           </div>
 
-          <!-- ======== 右栏：推理配置 ======== -->
-          <div class="af-sidebar af-sidebar--right">
-            <div class="af-sidebar-inner">
+          <!-- ====== 右栏：配置面板 ====== -->
+          <div class="af-right">
+            <div class="af-right-inner">
               <!-- 推理参数 -->
-              <div class="af-panel">
-                <h4 class="af-panel-title">推理参数</h4>
-                <div class="af-field">
-                  <span class="af-field-label">温度</span>
-                  <div class="af-slider-row">
-                    <el-slider v-model="agentForm.temperature" :min="0" :max="2" :step="0.1" :disabled="isTemperatureDisabled" class="af-slider" />
-                    <span class="af-slider-val">{{ agentForm.temperature.toFixed(1) }}</span>
+              <section class="af-card">
+                <h4 class="af-card-head">推理参数</h4>
+                <label class="af-kv">
+                  <span class="af-kv-k">温度</span>
+                  <div class="af-kv-v af-temp">
+                    <el-slider v-model="agentForm.temperature" :min="0" :max="2" :step="0.1" :disabled="isTemperatureDisabled" class="af-temp-slider" />
+                    <span class="af-temp-val">{{ agentForm.temperature.toFixed(1) }}</span>
                   </div>
+                </label>
+                <div class="af-grid2">
+                  <label class="af-kv">
+                    <span class="af-kv-k">Max Tokens</span>
+                    <el-input-number v-model="agentForm.max_tokens" :min="1" :max="128000" controls-position="right" size="small" class="af-kv-num" />
+                  </label>
+                  <label class="af-kv">
+                    <span class="af-kv-k">超时 (s)</span>
+                    <el-input-number v-model="agentForm.timeout" :min="0" controls-position="right" size="small" class="af-kv-num" />
+                  </label>
+                  <label class="af-kv">
+                    <span class="af-kv-k">历史条数</span>
+                    <el-input-number v-model="agentForm.max_history" :min="1" :max="500" controls-position="right" size="small" class="af-kv-num" />
+                  </label>
+                  <label class="af-kv">
+                    <span class="af-kv-k">最大迭代</span>
+                    <el-input-number v-model="agentForm.max_iterations" :min="1" :max="200" controls-position="right" size="small" class="af-kv-num" />
+                  </label>
                 </div>
-                <div class="af-field-grid">
-                  <div class="af-field">
-                    <span class="af-field-label">Max Tokens</span>
-                    <el-input-number v-model="agentForm.max_tokens" :min="1" :max="128000" controls-position="right" size="small" class="af-field-num" />
-                  </div>
-                  <div class="af-field">
-                    <span class="af-field-label">超时 (s)</span>
-                    <el-input-number v-model="agentForm.timeout" :min="0" controls-position="right" size="small" class="af-field-num" />
-                  </div>
-                  <div class="af-field">
-                    <span class="af-field-label">历史条数</span>
-                    <el-input-number v-model="agentForm.max_history" :min="1" :max="500" controls-position="right" size="small" class="af-field-num" />
-                  </div>
-                  <div class="af-field">
-                    <span class="af-field-label">最大迭代</span>
-                    <el-input-number v-model="agentForm.max_iterations" :min="1" :max="200" controls-position="right" size="small" class="af-field-num" />
-                  </div>
+                <label class="af-kv">
+                  <span class="af-kv-k">Token 预算 <span class="af-kv-sub">0 = 不限</span></span>
+                  <el-input-number v-model="agentForm.token_budget" :min="0" :max="10000000" :step="10000" controls-position="right" size="small" class="af-kv-num" />
+                </label>
+              </section>
+
+              <!-- 工具 -->
+              <section class="af-card">
+                <h4 class="af-card-head">工具</h4>
+                <div class="af-switch-line">
+                  <span>Tool Search</span>
+                  <el-switch v-model="agentForm.tool_search_enabled" @change="onToolSearchChange" size="small" />
                 </div>
-                <div class="af-field">
-                  <span class="af-field-label">Token 预算 <span class="af-field-sub">0 = 不限制</span></span>
-                  <el-input-number v-model="agentForm.token_budget" :min="0" :max="10000000" :step="10000" controls-position="right" size="small" class="af-field-num" />
+                <div v-if="agentForm.tool_search_enabled" class="af-hint">开启后自动加载全部已启用工具</div>
+                <el-select v-if="!agentForm.tool_search_enabled" v-model="agentForm.tool_ids" multiple filterable collapse-tags collapse-tags-tooltip style="width:100%;margin-top:8px" placeholder="选择工具" size="small">
+                  <el-option v-for="t in allTools" :key="t.id" :label="t.name" :value="t.id" />
+                </el-select>
+              </section>
+
+              <!-- MemOS -->
+              <section class="af-card">
+                <h4 class="af-card-head">MemOS 长期记忆</h4>
+                <div class="af-switch-line">
+                  <span>启用</span>
+                  <el-switch v-model="agentForm.memos_enabled" size="small" />
                 </div>
-              </div>
+                <template v-if="agentForm.memos_enabled">
+                  <el-input v-model="agentForm.memos_config.api_key" show-password size="small" placeholder="API Key (mpg-...)" style="margin-top:8px" />
+                  <el-input v-model="agentForm.memos_config.base_url" size="small" placeholder="Base URL（可选）" style="margin-top:6px" />
+                </template>
+              </section>
 
               <!-- API Token -->
-              <div v-if="isEdit" class="af-panel">
-                <h4 class="af-panel-title">API Token</h4>
-                <div class="af-token-row">
-                  <code v-if="agentForm.token" class="af-token-code">{{ agentForm.token }}</code>
-                  <span v-else class="af-hint" style="margin:0">尚未生成</span>
-                </div>
-                <div class="af-token-actions">
+              <section v-if="isEdit" class="af-card">
+                <h4 class="af-card-head">API Token</h4>
+                <code v-if="agentForm.token" class="af-token">{{ agentForm.token }}</code>
+                <span v-else class="af-hint" style="margin:0">尚未生成</span>
+                <div class="af-token-btns">
                   <el-button v-if="agentForm.token" link type="primary" size="small" @click="copyToken(agentForm.token)">复制</el-button>
                   <el-popconfirm title="重置后旧 Token 将失效" @confirm="doResetToken">
                     <template #reference>
@@ -155,11 +132,21 @@
                     </template>
                   </el-popconfirm>
                 </div>
-              </div>
+              </section>
+
+              <!-- 其他 -->
+              <section class="af-card">
+                <h4 class="af-card-head">其他</h4>
+                <div class="af-switch-line">
+                  <span>设为默认 Agent</span>
+                  <el-switch v-model="agentForm.is_default" size="small" />
+                </div>
+                <div class="af-hint">未指定 Agent 的请求将使用此 Agent</div>
+              </section>
             </div>
           </div>
-        </el-form>
-      </div>
+        </div>
+      </el-form>
     </div>
   </div>
 </template>
@@ -320,10 +307,7 @@ async function reloadAgent() {
 }
 
 async function saveAgent() {
-  if (!agentForm.value.name) {
-    ElMessage.warning('请填写名称')
-    return
-  }
+  if (!agentForm.value.name) { ElMessage.warning('请填写名称'); return }
   agentSaving.value = true
   try {
     const payload = {
@@ -382,195 +366,143 @@ onMounted(() => reloadAgent())
 <style scoped>
 .aic-sub-compact { margin-top: 6px; font-size: 13px; line-height: 1.45; }
 
-/* ===== 三栏布局 ===== */
-.af-layout { min-height: 120px; }
+/* ===== 双栏骨架 ===== */
+.af-root { min-height: 120px; }
 
-.af-layout-inner {
+.af-cols {
   display: flex;
-  gap: 20px;
+  gap: 28px;
   align-items: flex-start;
 }
 
-.af-main {
+.af-left {
   flex: 1;
   min-width: 0;
-  order: 1;
 }
 
-.af-sidebar {
-  width: 260px;
+.af-right {
+  width: 380px;
   flex-shrink: 0;
 }
 
-.af-sidebar--left { order: 3; }
-.af-sidebar--right { order: 2; }
-
-.af-sidebar-inner {
+.af-right-inner {
   position: sticky;
   top: 16px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
-/* ===== 右栏面板 ===== */
-.af-panel {
+/* ===== 左栏：行内排列 ===== */
+.af-row-inline {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.af-cell { flex: 1; min-width: 0; margin-bottom: 0 !important; }
+.af-cell--name { max-width: 220px; flex: 0 0 220px; }
+.af-cell--desc { flex: 1; }
+
+.af-left :deep(.el-form-item) { margin-bottom: 16px; }
+.af-left :deep(.el-form-item__label) { font-size: 13px; font-weight: 500; padding-bottom: 4px; }
+
+.af-prompt :deep(.el-textarea__inner) { font-size: 13px; line-height: 1.6; }
+
+/* ===== 操作栏 ===== */
+.af-actions {
+  position: sticky; bottom: -1px; z-index: 3;
+  display: flex; gap: 12px;
+  padding: 14px 0 4px;
+  background: linear-gradient(to top, var(--aic-app-main-bg, var(--el-bg-color)) 70%, transparent);
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
+/* ===== 右栏卡片 ===== */
+.af-card {
   padding: 14px 16px;
   border-radius: 10px;
   border: 1px solid var(--el-border-color-lighter);
   background: var(--el-fill-color-blank);
 }
 
-.af-panel-title {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+.af-card-head {
+  font-size: 11px; font-weight: 600;
+  letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--el-text-color-secondary);
   margin: 0 0 12px;
 }
 
-/* ===== 参数字段 ===== */
-.af-field {
-  margin-bottom: 10px;
-}
+/* ===== KV 字段 ===== */
+.af-kv { display: block; margin-bottom: 10px; }
+.af-kv:last-child { margin-bottom: 0; }
 
-.af-field:last-child { margin-bottom: 0; }
-
-.af-field-label {
-  display: block;
-  font-size: 12px;
+.af-kv-k {
+  display: block; font-size: 12px;
   color: var(--el-text-color-regular);
   margin-bottom: 4px;
 }
 
-.af-field-sub {
-  color: var(--el-text-color-secondary);
-  font-weight: normal;
-}
+.af-kv-sub { color: var(--el-text-color-secondary); font-weight: normal; }
+.af-kv-num { width: 100%; }
 
-.af-field-num { width: 100%; }
-
-.af-field-grid {
+.af-grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-bottom: 10px;
 }
 
-/* ===== 滑块行 ===== */
-.af-slider-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+.af-grid2 .af-kv { margin-bottom: 0; }
 
-.af-slider { flex: 1; min-width: 0; }
-
-.af-slider-val {
-  font-size: 13px;
-  font-weight: 600;
+/* ===== 温度 ===== */
+.af-temp { display: flex; align-items: center; gap: 10px; }
+.af-temp-slider { flex: 1; min-width: 0; }
+.af-temp-val {
+  font-size: 13px; font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--el-text-color-primary);
-  min-width: 28px;
-  text-align: right;
+  min-width: 28px; text-align: right;
 }
 
 /* ===== Switch 行 ===== */
-.af-row {
-  display: flex;
-  align-items: center;
+.af-switch-line {
+  display: flex; align-items: center;
   justify-content: space-between;
+  font-size: 13px; color: var(--el-text-color-regular);
   min-height: 28px;
 }
 
-.af-row-label {
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-}
-
-.af-row-hint {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-  line-height: 1.35;
-}
-
-/* ===== MemOS ===== */
-.af-memos-fields { margin-top: 10px; }
-
 /* ===== Token ===== */
-.af-token-row { margin-bottom: 6px; }
-
-.af-token-code {
+.af-token {
   display: block;
   font-family: ui-monospace, 'SF Mono', monospace;
   font-size: 11px;
   background: var(--aic-sub-code-bg, var(--el-fill-color-light));
   color: var(--aic-sub-code-color, var(--el-text-color-primary));
-  padding: 6px 8px;
-  border-radius: 6px;
-  word-break: break-all;
-  line-height: 1.5;
+  padding: 6px 8px; border-radius: 6px;
+  word-break: break-all; line-height: 1.5;
+  margin-bottom: 6px;
 }
 
-.af-token-actions {
-  display: flex;
-  gap: 8px;
-}
+.af-token-btns { display: flex; gap: 8px; }
 
-/* ===== System Prompt ===== */
-.af-prompt-input :deep(.el-textarea__inner) {
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-/* ===== 操作栏 ===== */
-.af-actions {
-  position: sticky;
-  bottom: -1px;
-  z-index: 3;
-  display: flex;
-  gap: 12px;
-  margin-top: 4px;
-  padding: 14px 0 4px;
-  background: linear-gradient(to top, var(--aic-app-main-bg, var(--el-bg-color)) 70%, transparent);
-  border-top: 1px solid var(--el-border-color-lighter);
-}
-
-/* ===== 提示文字 ===== */
+/* ===== 提示 ===== */
 .af-hint {
-  font-size: 12px;
-  color: var(--el-text-color-secondary);
-  margin-top: 4px;
-  line-height: 1.4;
+  font-size: 12px; color: var(--el-text-color-secondary);
+  margin-top: 4px; line-height: 1.35;
 }
-
 .af-hint.warn { color: #e6a23c; }
 
-/* ===== 表单微调 ===== */
-.af-main :deep(.el-form-item) { margin-bottom: 16px; }
-.af-main :deep(.el-form-item__label) { font-size: 13px; font-weight: 500; padding-bottom: 4px; }
-
-.ml8 { margin-left: 8px; }
-
 /* ===== 响应式 ===== */
-@media (max-width: 1100px) {
-  .af-layout-inner {
-    flex-wrap: wrap;
-  }
-  .af-sidebar { width: 100%; }
-  .af-sidebar--left { order: 2; }
-  .af-main { order: 1; width: 100%; flex-basis: 100%; }
-  .af-sidebar--right { order: 3; }
-  .af-sidebar-inner {
+@media (max-width: 960px) {
+  .af-cols { flex-direction: column; }
+  .af-right { width: 100%; }
+  .af-right-inner {
     position: static;
-    flex-direction: row;
-    flex-wrap: wrap;
+    flex-direction: row; flex-wrap: wrap;
   }
-  .af-panel {
-    flex: 1;
-    min-width: 240px;
-  }
+  .af-card { flex: 1; min-width: 260px; }
+  .af-cell--name { max-width: none; flex: 1; }
 }
 </style>

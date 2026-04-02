@@ -217,6 +217,22 @@ func preloadSkillTools(toolSkillMap map[string]string, discovered map[string]boo
 	}
 }
 
+// essentialBuiltins 在 Tool Search 模式下始终可见的内置工具。
+// 这些工具是 Agent 核心能力，不应依赖 tool_search 发现。
+var essentialBuiltins = []string{
+	"sub_agent",
+	"read",
+	"write",
+	"exec",
+	"web_fetch",
+}
+
+func preloadEssentialBuiltins(discovered map[string]bool) {
+	for _, name := range essentialBuiltins {
+		discovered[name] = true
+	}
+}
+
 func (e *Executor) handleToolSearch(ctx context.Context, ec *execContext, tc openai.ToolCall, st *agentRunState) openai.ChatCompletionMessage {
 	var args struct {
 		Query string `json:"query"`
