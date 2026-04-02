@@ -534,6 +534,32 @@ function syncActiveConvId() {
   activeConvId.value = match ? match.id : 0
 }
 
+function parseChatMessages(msgs: Message[]): ChatMessage[] {
+  return msgs
+    .filter(m => {
+      if (m.role === 'user') return true
+      if (m.role === 'assistant') {
+        if (!m.content?.trim()) return false
+        if (m.tool_calls && typeof m.tool_calls === 'string') {
+          try { const tc = JSON.parse(m.tool_calls); if (Array.isArray(tc) && tc.length > 0) return false } catch {}
+        } else if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+          return false
+        }
+        return true
+      }
+      return false
+    })
+    .map(m => reactive({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      tokens_used: m.tokens_used,
+      steps: m.steps,
+      files: m.files,
+      _showSteps: false,
+    }))
+}
+
 async function loadConversation(conv: Conversation) {
   if (activeConvId.value === conv.id) return
   activeConvId.value = conv.id
@@ -541,28 +567,26 @@ async function loadConversation(conv: Conversation) {
   loadingHistory.value = true
   try {
     const res: any = await chatApi.messages(conv.id, 100, true)
-    const msgs: Message[] = res.data || []
-    messages.value = msgs
-      .filter(m => {
-        if (m.role === 'user') return true
-        if (m.role === 'assistant') return !!(m.content?.trim())
-        return false
-      })
-      .map(m => reactive({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        tokens_used: m.tokens_used,
-        steps: m.steps,
-        files: m.files,
-        _showSteps: false,
-      }))
+    messages.value = parseChatMessages(res.data || [])
     scrollToBottom()
   } catch {
     ElMessage.error('加载会话失败')
   } finally {
     loadingHistory.value = false
   }
+}
+
+async function reloadCurrentMessages() {
+  await loadConversations()
+  const conv = conversations.value.find(c => c.uuid === conversationId.value)
+  if (conv) {
+    activeConvId.value = conv.id
+    try {
+      const res: any = await chatApi.messages(conv.id, 100, true)
+      messages.value = parseChatMessages(res.data || [])
+    } catch {}
+  }
+  scrollToBottom()
 }
 
 async function deleteConv(id: number) {
@@ -746,25 +770,18 @@ function sendMessage() {
       }
     },
     () => {
-      if (streaming.value && (streamingContent.value || pendingSteps.value.length > 0)) {
-        const steps = [...pendingSteps.value]
-        const tokensUsed = steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
-        messages.value.push(reactive({ role: 'assistant', content: streamingContent.value, tokens_used: tokensUsed || undefined, steps, _showSteps: false }))
-        streamingContent.value = ''
-        pendingSteps.value = []
-      }
-      streaming.value = false
-      _streamController = null
-      loadConversations()
-    },
-    (err: string) => {
-      const steps = [...pendingSteps.value]
-      messages.value.push(reactive({ role: 'assistant', content: `[错误] ${err}`, steps, _showSteps: steps.length > 0 }))
       streamingContent.value = ''
       pendingSteps.value = []
       streaming.value = false
       _streamController = null
-      scrollToBottom()
+      reloadCurrentMessages()
+    },
+    (_err: string) => {
+      streamingContent.value = ''
+      pendingSteps.value = []
+      streaming.value = false
+      _streamController = null
+      reloadCurrentMessages()
     },
   )
 }

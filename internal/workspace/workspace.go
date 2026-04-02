@@ -18,7 +18,7 @@ func WithWorkdirScope(ctx context.Context, scopeID string) context.Context {
 	return context.WithValue(ctx, ctxKey{}, scopeID)
 }
 
-func workdirScopeFromContext(ctx context.Context) string {
+func WorkdirScopeFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(ctxKey{}).(string); ok {
 		return v
 	}
@@ -117,7 +117,7 @@ func AgentSessionMemory(uuid string) string {
 
 // AgentSessionMemoryFromCtx 从 context 中的 WorkdirScope 返回对应 session-memory 目录。
 func AgentSessionMemoryFromCtx(ctx context.Context) string {
-	if id := workdirScopeFromContext(ctx); id != "" {
+	if id := WorkdirScopeFromContext(ctx); id != "" {
 		return AgentSessionMemory(id)
 	}
 	return ""
@@ -155,7 +155,7 @@ func AgentTmp(uuid string) string {
 
 // AgentSandboxFromCtx 从 context 中的 WorkdirScope 返回对应 sandbox 目录。
 func AgentSandboxFromCtx(ctx context.Context) string {
-	if id := workdirScopeFromContext(ctx); id != "" {
+	if id := WorkdirScopeFromContext(ctx); id != "" {
 		return AgentSandbox(id)
 	}
 	return ""
@@ -163,7 +163,7 @@ func AgentSandboxFromCtx(ctx context.Context) string {
 
 // AgentTmpFromCtx 从 context 中的 WorkdirScope 返回对应 tmp 目录。
 func AgentTmpFromCtx(ctx context.Context) string {
-	if id := workdirScopeFromContext(ctx); id != "" {
+	if id := WorkdirScopeFromContext(ctx); id != "" {
 		return AgentTmp(id)
 	}
 	return ""

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -70,12 +71,17 @@ func Run(opts Options) {
 		logFile = filepath.Join(workspace.Logs(), "aiclaw.log")
 	}
 	if logFile != "" {
-		log.SetOutput(&lumberjack.Logger{
+		fileWriter := &lumberjack.Logger{
 			Filename:   logFile,
 			MaxSize:    cfg.Log.MaxSize,
 			MaxBackups: 3,
 			Compress:   true,
-		})
+		}
+		if daemon.IsChild() || cfg.Log.File != "" {
+			log.SetOutput(fileWriter)
+		} else {
+			log.SetOutput(io.MultiWriter(os.Stdout, fileWriter))
+		}
 		log.WithField("file", logFile).Info("log output to file")
 	}
 
