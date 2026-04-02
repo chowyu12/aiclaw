@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sync/singleflight"
 
 	"github.com/chowyu12/aiclaw/internal/agent"
+	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
 )
@@ -27,13 +28,14 @@ var channelThreadFlight singleflight.Group
 type Bridge struct {
 	store    store.Store
 	executor *agent.Executor
+	rt       *config.RuntimeConfig
 }
 
-func newBridge(s store.Store, exec *agent.Executor) *Bridge {
+func newBridge(s store.Store, exec *agent.Executor, rt *config.RuntimeConfig) *Bridge {
 	if s == nil || exec == nil {
 		return nil
 	}
-	return &Bridge{store: s, executor: exec}
+	return &Bridge{store: s, executor: exec, rt: rt}
 }
 
 // HandleInboundAsync 在 goroutine 中执行 Agent 并回复；Webhook 应先返回适配器同步响应。

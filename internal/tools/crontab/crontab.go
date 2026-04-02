@@ -43,53 +43,53 @@ var (
 	eventsMu sync.RWMutex
 )
 
-func Handler(_ context.Context, args string) (string, error) {
+func Handler(ctx context.Context, args string) (string, error) {
 	var p cronArgs
 	if err := json.Unmarshal([]byte(args), &p); err != nil {
 		return "", fmt.Errorf("invalid arguments: %w", err)
 	}
+	ws := workspace.FromContext(ctx)
 
 	switch p.Action {
 	case "schedule":
-		return schedule(p)
+		return schedule(ws, p)
 	case "list":
 		return listJobs()
 	case "remove":
 		return removeJob(p)
 	case "add_event":
-		return addEvent(p)
+		return addEvent(ws, p)
 	case "list_events":
-		return listEvents()
+		return listEvents(ws)
 	case "remove_event":
-		return removeEvent(p)
+		return removeEvent(ws, p)
 	default:
 		return "", fmt.Errorf("unknown action %q, supported: schedule, list, remove, add_event, list_events, remove_event", p.Action)
 	}
 }
 
-func scriptDir() string {
-	if d := workspace.CronScripts(); d != "" {
-		return d
+func scriptDir(ws *workspace.Workspace) string {
+	if ws != nil {
+		return ws.CronScripts()
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".aiclaw", "cron", "scripts")
 }
 
-func logDir() string {
-	if d := workspace.CronLogs(); d != "" {
-		return d
+func logDir(ws *workspace.Workspace) string {
+	if ws != nil {
+		return ws.CronLogs()
 	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".aiclaw", "cron", "logs")
 }
 
-func eventsFile() string {
-	cronDir := workspace.CronDir()
-	if cronDir == "" {
-		home, _ := os.UserHomeDir()
-		cronDir = filepath.Join(home, ".aiclaw", "cron")
+func eventsFile(ws *workspace.Workspace) string {
+	if ws != nil {
+		return filepath.Join(ws.CronDir(), "events.json")
 	}
-	return filepath.Join(cronDir, "events.json")
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".aiclaw", "cron", "events.json")
 }
 
 func defaultPath() string {
@@ -99,21 +99,21 @@ func defaultPath() string {
 	return "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 }
 
-func schedule(p cronArgs) (string, error) {
+func schedule(ws *workspace.Workspace, p cronArgs) (string, error) {
 	if p.Expression == "" {
 		return "", fmt.Errorf("expression is required")
 	}
 
 	if p.Content != "" {
-		return scheduleScript(p)
+		return scheduleScript(ws, p)
 	}
 	if p.Command != "" {
-		return addCronJob(p)
+		return addCronJob(ws, p)
 	}
 	return "", fmt.Errorf("either command or content (script) is required")
 }
 
-func scheduleScript(p cronArgs) (string, error) {
+func scheduleScript(ws *workspace.Workspace, p cronArgs) (string, error) {
 	if p.Name == "" {
 		return "", fmt.Errorf("name is required when providing script content")
 	}
@@ -126,7 +126,7 @@ func scheduleScript(p cronArgs) (string, error) {
 		return "", fmt.Errorf("invalid cron expression %q: %w", p.Expression, err)
 	}
 
-	dir := scriptDir()
+	dir := scriptDir(ws)
 	os.MkdirAll(dir, 0o755)
 
 	name := sanitizeName(p.Name)
@@ -145,14 +145,14 @@ func scheduleScript(p cronArgs) (string, error) {
 	}
 
 	p.Command = filePath
-	result, err := addCronJob(p)
+	result, err := addCronJob(ws, p)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("Script saved: %s\n%s", filePath, result), nil
 }
 
-func addCronJob(p cronArgs) (string, error) {
+func addCronJob(ws *workspace.Workspace, p cronArgs) (string, error) {
 	if strings.HasPrefix(p.Expression, "@every") {
 		return "", fmt.Errorf("@every is not supported by system crontab; use a standard 5-field expression")
 	}
@@ -164,10 +164,10 @@ func addCronJob(p cronArgs) (string, error) {
 
 	command := p.Command
 	if p.LogOutput {
-		os.MkdirAll(logDir(), 0o755)
+		os.MkdirAll(logDir(ws), 0o755)
 		logName := sanitizeName(filepath.Base(command))
 		logName = strings.TrimSuffix(logName, ".sh")
-		logFile := filepath.Join(logDir(), logName+".log")
+		logFile := filepath.Join(logDir(ws), logName+".log")
 		command = fmt.Sprintf("%s >> %s 2>&1", command, logFile)
 	}
 
@@ -190,7 +190,7 @@ func addCronJob(p cronArgs) (string, error) {
 	return fmt.Sprintf("Cron job added:\n  %s", entry), nil
 }
 
-func addEvent(p cronArgs) (string, error) {
+func addEvent(ws *workspace.Workspace, p cronArgs) (string, error) {
 	if p.SystemEvent == "" {
 		return "", fmt.Errorf("system_event is required for add_event")
 	}
@@ -221,18 +221,18 @@ func addEvent(p cronArgs) (string, error) {
 	}
 
 	eventsMu.Lock()
-	loadEventsLocked()
+	loadEventsLocked(ws)
 	events = append(events, evt)
-	saveEventsLocked()
+	saveEventsLocked(ws)
 	eventsMu.Unlock()
 
 	return fmt.Sprintf("Wake event created:\n  ID: %s\n  Schedule: %s\n  Next fire: %s\n  Event: %s",
 		evt.ID, expr, nextFire, evt.SystemEvent), nil
 }
 
-func listEvents() (string, error) {
+func listEvents(ws *workspace.Workspace) (string, error) {
 	eventsMu.RLock()
-	loadEventsLocked()
+	loadEventsLocked(ws)
 	list := make([]wakeEvent, len(events))
 	copy(list, events)
 	eventsMu.RUnlock()
@@ -250,14 +250,14 @@ func listEvents() (string, error) {
 	return sb.String(), nil
 }
 
-func removeEvent(p cronArgs) (string, error) {
+func removeEvent(ws *workspace.Workspace, p cronArgs) (string, error) {
 	if p.EventID == "" {
 		return "", fmt.Errorf("event_id is required for remove_event")
 	}
 
 	eventsMu.Lock()
 	defer eventsMu.Unlock()
-	loadEventsLocked()
+	loadEventsLocked(ws)
 
 	found := false
 	filtered := events[:0]
@@ -274,22 +274,23 @@ func removeEvent(p cronArgs) (string, error) {
 	}
 
 	events = filtered
-	saveEventsLocked()
+	saveEventsLocked(ws)
 	return fmt.Sprintf("Event %s removed.", p.EventID), nil
 }
 
-func loadEventsLocked() {
-	data, err := os.ReadFile(eventsFile())
+func loadEventsLocked(ws *workspace.Workspace) {
+	data, err := os.ReadFile(eventsFile(ws))
 	if err != nil {
 		return
 	}
 	json.Unmarshal(data, &events)
 }
 
-func saveEventsLocked() {
+func saveEventsLocked(ws *workspace.Workspace) {
 	data, _ := json.MarshalIndent(events, "", "  ")
-	os.MkdirAll(filepath.Dir(eventsFile()), 0o755)
-	os.WriteFile(eventsFile(), data, 0o644)
+	ef := eventsFile(ws)
+	os.MkdirAll(filepath.Dir(ef), 0o755)
+	os.WriteFile(ef, data, 0o644)
 }
 
 func ensureEnvHeader(existing string) string {

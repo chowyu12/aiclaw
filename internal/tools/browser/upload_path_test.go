@@ -10,10 +10,10 @@ import (
 
 func TestResolveBrowserUploadPath_UnderWorkspace(t *testing.T) {
 	dir := t.TempDir()
-	if err := workspace.Init(dir); err != nil {
+	ws, err := workspace.New(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(workspace.ResetRootForTesting)
 
 	tmpDir := filepath.Join(dir, "tmp")
 	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
@@ -24,7 +24,7 @@ func TestResolveBrowserUploadPath_UnderWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resolved, err := resolveBrowserUploadPath(full)
+	resolved, err := resolveBrowserUploadPath(ws, full)
 	if err != nil {
 		t.Fatalf("resolveBrowserUploadPath: %v", err)
 	}
@@ -35,10 +35,10 @@ func TestResolveBrowserUploadPath_UnderWorkspace(t *testing.T) {
 
 func TestResolveBrowserUploadPath_RejectsOutsideWorkspace(t *testing.T) {
 	dir := t.TempDir()
-	if err := workspace.Init(dir); err != nil {
+	ws, err := workspace.New(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(workspace.ResetRootForTesting)
 
 	outsideRoot := t.TempDir()
 	outFile := filepath.Join(outsideRoot, "secret.txt")
@@ -46,7 +46,7 @@ func TestResolveBrowserUploadPath_RejectsOutsideWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := resolveBrowserUploadPath(outFile)
+	_, err = resolveBrowserUploadPath(ws, outFile)
 	if err == nil {
 		t.Fatal("expected error for path outside workspace root")
 	}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 
@@ -18,7 +19,7 @@ import (
 func TestBuildSystemPrompt(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		ag := &model.Agent{}
-		result := buildSystemPrompt(ag, nil, nil, nil, false)
+		result := buildSystemPrompt(ag, nil, nil, nil, false, nil)
 		if result == "" {
 			t.Error("expected default base prompt when system_prompt is empty")
 		}
@@ -29,7 +30,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	t.Run("with_prompt", func(t *testing.T) {
 		ag := &model.Agent{SystemPrompt: "你是助手"}
-		result := buildSystemPrompt(ag, nil, nil, nil, false)
+		result := buildSystemPrompt(ag, nil, nil, nil, false, nil)
 		if result != "你是助手" {
 			t.Errorf("expected '你是助手', got %q", result)
 		}
@@ -38,7 +39,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	t.Run("with_skills", func(t *testing.T) {
 		ag := &model.Agent{SystemPrompt: "base"}
 		skills := []model.Skill{{Name: "翻译", Description: "翻译技能描述"}}
-		result := buildSystemPrompt(ag, skills, nil, nil, false)
+		result := buildSystemPrompt(ag, skills, nil, nil, false, nil)
 		if !strings.Contains(result, "翻译") || !strings.Contains(result, "翻译技能描述") {
 			t.Errorf("skill not included: %q", result)
 		}
@@ -50,7 +51,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "read", Description: "读取文件内容", Enabled: true},
 			{Name: "exec", Description: "运行命令", Enabled: true},
 		}
-		result := buildSystemPrompt(ag, nil, tools, nil, false)
+		result := buildSystemPrompt(ag, nil, tools, nil, false, nil)
 		if !strings.Contains(result, "执行策略") {
 			t.Errorf("missing strategy section: %q", result)
 		}
@@ -66,7 +67,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "translate_api", Description: "文本翻译", Enabled: true},
 		}
 		toolSkillMap := map[string]string{"translate_api": "翻译"}
-		result := buildSystemPrompt(ag, skills, tools, toolSkillMap, false)
+		result := buildSystemPrompt(ag, skills, tools, toolSkillMap, false, nil)
 		if !strings.Contains(result, "关联工具: translate_api") {
 			t.Errorf("missing skill-tool association: %q", result)
 		}
@@ -81,7 +82,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "enabled_tool", Description: "可用", Enabled: true},
 			{Name: "disabled_tool", Description: "禁用", Enabled: false},
 		}
-		result := buildSystemPrompt(ag, nil, tools, nil, false)
+		result := buildSystemPrompt(ag, nil, tools, nil, false, nil)
 		if !strings.Contains(result, "工具优先") {
 			t.Errorf("expected tool strategy when tools present: %q", result)
 		}
@@ -93,7 +94,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		tools := []model.Tool{
 			{Name: "test_tool", Description: "测试工具", Enabled: true},
 		}
-		result := buildSystemPrompt(ag, skills, tools, nil, false)
+		result := buildSystemPrompt(ag, skills, tools, nil, false, nil)
 		if !strings.Contains(result, "base prompt") {
 			t.Error("missing base prompt")
 		}
@@ -460,12 +461,12 @@ func TestExecute_ToolNotFoundByLLM(t *testing.T) {
 }
 
 func TestExecute_WithSkills(t *testing.T) {
-	t.Cleanup(workspace.ResetRootForTesting)
 	tmpRoot := t.TempDir()
-	if err := workspace.Init(tmpRoot); err != nil {
+	ws, err := workspace.New(tmpRoot)
+	if err != nil {
 		t.Fatal(err)
 	}
-	skillDir := filepath.Join(workspace.Skills(), "test-translate")
+	skillDir := filepath.Join(ws.Skills(), "test-translate")
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -479,7 +480,7 @@ func TestExecute_WithSkills(t *testing.T) {
 	ctx := t.Context()
 
 	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{textResp("translated content")}}
-	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+	exec := newTestExecutorWithWS(s, NewToolRegistry(), mockLLM, ws)
 
 	result, err := exec.Execute(ctx, model.ChatRequest{
 		UserID: "u1", Message: "translate this",
@@ -1140,6 +1141,28 @@ func TestMockStore_ListConversations(t *testing.T) {
 	}
 	if len(list) != 1 || list[0].Title != "其他对话" {
 		t.Errorf("unexpected result: %v", list)
+	}
+}
+
+func TestExecutor_Shutdown(t *testing.T) {
+	s := newMockStore()
+	seedAgent(t, s)
+	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{textResp("done")}}
+	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+
+	exec.Shutdown(1 * time.Second)
+
+	_, err := exec.Execute(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"})
+	if err == nil {
+		t.Fatal("expected error after shutdown")
+	}
+	if !strings.Contains(err.Error(), "shutting down") {
+		t.Errorf("expected 'shutting down' error, got: %v", err)
+	}
+
+	err = exec.ExecuteStream(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"}, func(_ model.StreamChunk) error { return nil })
+	if err == nil {
+		t.Fatal("expected error after shutdown for stream")
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
 )
@@ -93,7 +95,9 @@ func (t *StepTracker) RecordStep(ctx context.Context, stepType model.StepType, n
 		Metadata:       metaJSON,
 	}
 
-	t.store.CreateExecutionStep(ctx, step)
+	if err := t.store.CreateExecutionStep(ctx, step); err != nil {
+		log.WithError(err).WithField("step_type", string(step.StepType)).Warn("[Tracker] save execution step failed")
+	}
 
 	t.mu.Lock()
 	t.steps = append(t.steps, *step)

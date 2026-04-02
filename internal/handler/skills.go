@@ -9,10 +9,12 @@ import (
 	"github.com/chowyu12/aiclaw/pkg/httputil"
 )
 
-type SkillsHandler struct{}
+type SkillsHandler struct {
+	ws *workspace.Workspace
+}
 
-func NewSkillsHandler() *SkillsHandler {
-	return &SkillsHandler{}
+func NewSkillsHandler(ws *workspace.Workspace) *SkillsHandler {
+	return &SkillsHandler{ws: ws}
 }
 
 func (h *SkillsHandler) Register(mux *http.ServeMux) {
@@ -50,7 +52,7 @@ func (h *SkillsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var localItems []skillItem
-	skillsDir := workspace.Skills()
+	skillsDir := h.ws.Skills()
 	if skillsDir != "" {
 		infos, err := skills.ScanAll(skillsDir)
 		if err != nil {

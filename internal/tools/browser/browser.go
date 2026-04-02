@@ -914,17 +914,16 @@ func (bm *browserManager) updateTabInfo(runCtx context.Context, tabID string) {
 	}
 }
 
-// resolveBrowserUploadPath 将路径解析为绝对路径，并限制在 workspace.Root() 之下（未初始化 workspace 时仅做 Clean/Abs，供测试等场景）。
-func resolveBrowserUploadPath(path string) (string, error) {
+// resolveBrowserUploadPath 将路径解析为绝对路径，并限制在 workspace root 之下（ws == nil 时仅做 Clean/Abs）。
+func resolveBrowserUploadPath(ws *workspace.Workspace, path string) (string, error) {
 	clean, err := filepath.Abs(filepath.Clean(path))
 	if err != nil {
 		return "", fmt.Errorf("invalid upload path: %w", err)
 	}
-	root := workspace.Root()
-	if root == "" {
+	if ws == nil {
 		return clean, nil
 	}
-	rootAbs, err := filepath.Abs(root)
+	rootAbs, err := filepath.Abs(ws.Root())
 	if err != nil {
 		return "", fmt.Errorf("workspace root: %w", err)
 	}

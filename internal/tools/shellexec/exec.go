@@ -21,6 +21,9 @@ type execParams struct {
 	WorkingDir string `json:"working_dir"`
 }
 
+// dangerousPatterns 是一个尽力而为（best-effort）的黑名单，通过子字符串匹配拦截
+// 明显的高危命令。注意：这不是安全沙箱。攻击者可通过转义、base64 编码、变量拼接、
+// eval/source 等方式绕过。若需严格隔离，应在容器/seccomp 等系统级沙箱中运行。
 var dangerousPatterns = []string{
 	"rm -rf /", "rm -rf /*", "rm -rf ~", "mkfs", "dd if=", ":(){:|:&};:",
 	"> /dev/sda", "chmod -R 777 /", "chown -R", "shutdown", "reboot",

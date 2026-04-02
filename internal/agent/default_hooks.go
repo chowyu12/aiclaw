@@ -76,6 +76,6 @@ func sessionMemoryHook(_ context.Context, _ HookEvent, p *HookPayload) HookActio
 			}
 		}
 	}
-	appendSessionMemory(p.Agent.UUID, p.ConvUUID, p.UserMsg, toolNames, p.Content)
+	appendSessionMemory(p.WS, p.Agent.UUID, p.ConvUUID, p.UserMsg, toolNames, p.Content)
 	return HookContinue
 }

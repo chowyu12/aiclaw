@@ -11,6 +11,8 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/kb"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
 func (bm *browserManager) actionClick(reqCtx context.Context, p browserParams) (string, error) {
@@ -391,7 +393,7 @@ func (bm *browserManager) actionUpload(reqCtx context.Context, p browserParams) 
 
 	resolvedPaths := make([]string, 0, len(p.Paths))
 	for _, path := range p.Paths {
-		resolved, pathErr := resolveBrowserUploadPath(path)
+		resolved, pathErr := resolveBrowserUploadPath(workspace.FromContext(reqCtx), path)
 		if pathErr != nil {
 			return "", pathErr
 		}

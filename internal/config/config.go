@@ -77,6 +77,7 @@ type DatabaseConfig struct {
 	DSN          string `yaml:"dsn,omitempty"`
 	MaxOpenConns int    `yaml:"max_open_conns,omitempty"`
 	MaxIdleConns int    `yaml:"max_idle_conns,omitempty"`
+	AutoMigrate  *bool  `yaml:"auto_migrate,omitempty"`
 }
 
 type LogConfig struct {
@@ -135,7 +136,7 @@ func (c *Config) Save(path string) error {
 
 func setDefaults(cfg *Config) {
 	if cfg.Server.Port == 0 {
-		cfg.Server.Port = 8080
+		cfg.Server.Port = 10789
 	}
 	if cfg.Database.Driver == "sqlite" && cfg.Database.DSN == "" {
 		if home, err := os.UserHomeDir(); err == nil {

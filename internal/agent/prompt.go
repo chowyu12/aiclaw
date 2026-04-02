@@ -27,10 +27,11 @@ type messagesBuildInput struct {
 	MemosContext   string
 	SessionMemory  string
 	ToolSearchMode bool
+	WS             *workspace.Workspace
 }
 
 func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
-	systemPrompt := buildSystemPrompt(in.Agent, in.Skills, in.AgentTools, in.ToolSkillMap, in.ToolSearchMode)
+	systemPrompt := buildSystemPrompt(in.Agent, in.Skills, in.AgentTools, in.ToolSkillMap, in.ToolSearchMode, in.WS)
 
 	if in.MemosContext != "" {
 		systemPrompt += "\n\n## 相关记忆\n以下是从长期记忆中检索到的与当前对话相关的信息，请参考但不要盲目依赖：\n<memories>\n" + in.MemosContext + "\n</memories>"
@@ -109,7 +110,7 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 	return messages
 }
 
-func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model.Tool, toolSkillMap map[string]string, toolSearchMode bool) string {
+func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model.Tool, toolSkillMap map[string]string, toolSearchMode bool, ws *workspace.Workspace) string {
 	l := log.WithField("agent", ag.Name)
 
 	var sb strings.Builder
@@ -161,8 +162,10 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 			if sk.Description != "" {
 				sb.WriteString(sk.Description + "\n")
 			}
-			if skillDir := workspace.SkillDir(sk.DirName); skillDir != "" {
-				sb.WriteString("详细指令: " + filepath.Join(skillDir, "SKILL.md") + "\n")
+			if ws != nil {
+				if skillDir := ws.SkillDir(sk.DirName); skillDir != "" {
+					sb.WriteString("详细指令: " + filepath.Join(skillDir, "SKILL.md") + "\n")
+				}
 			}
 			l.WithField("skill", sk.Name).Debug("[Prompt]  skill summary injected (two-phase)")
 

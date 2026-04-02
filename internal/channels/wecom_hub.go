@@ -9,7 +9,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/pkg/wecomaibot"
 )
@@ -206,7 +205,7 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 				log.WithError(err).Error("[wecom] ReplyText failed")
 				return err
 			}
-			publicURL := config.PublicURL()
+			publicURL := bridge.rt.PublicURL()
 			for _, img := range images {
 				if publicURL == "" || img.UUID == "" {
 					log.WithFields(log.Fields{

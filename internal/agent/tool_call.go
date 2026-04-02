@@ -122,10 +122,11 @@ func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolRes
 		return nil
 	}
 
-	uploadsDir := workspace.Uploads()
-	if uploadsDir == "" {
+	ws := workspace.FromContext(ec.ctx)
+	if ws == nil {
 		return nil
 	}
+	uploadsDir := ws.Uploads()
 
 	fileUUID := uuid.New().String()
 	ext := filepath.Ext(fr.Path)
@@ -157,6 +158,17 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 	st.Messages = append(st.Messages, assistant)
 	tcs := assistant.ToolCalls
 	n := len(tcs)
+
+	// 统计本轮 sub_agent 调用数量，注入 context 供 handler 决定走完整/轻量路径
+	subAgentCnt := 0
+	for _, tc := range tcs {
+		if tc.Function.Name == "sub_agent" {
+			subAgentCnt++
+		}
+	}
+	if subAgentCnt > 0 {
+		ctx = withSubAgentRoundCount(ctx, subAgentCnt)
+	}
 
 	type callResult struct {
 		toolMsg   openai.ChatCompletionMessage
