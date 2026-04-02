@@ -142,8 +142,10 @@ func (w *Workspace) CleanupAgentTmpFiles(maxAge time.Duration) {
 
 // --------------- Context keys ---------------
 
-type scopeKey struct{}
-type wsKey struct{}
+type (
+	scopeKey struct{}
+	wsKey    struct{}
+)
 
 // WithWorkdirScope 将 agent UUID 注入 context，供 sandbox/tmp 等工具解析。
 func WithWorkdirScope(ctx context.Context, scopeID string) context.Context {
