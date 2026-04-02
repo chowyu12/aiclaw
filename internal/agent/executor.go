@@ -113,7 +113,12 @@ func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*Execute
 
 	ec.l.WithField("user", req.UserID).Debug("[Execute] >> start")
 
-	return e.run(ec.ctx, ec, blockingCaller(ec.llmProv), false)
+	res, err := e.run(ec.ctx, ec, blockingCaller(ec.llmProv), false)
+	if err != nil {
+		e.saveErrorMessage(ec, err)
+		return nil, err
+	}
+	return res, nil
 }
 
 func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error) error {
@@ -131,6 +136,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 
 	res, err := e.run(ec.ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true)
 	if err != nil {
+		e.saveErrorMessage(ec, err)
 		return err
 	}
 	doneChunk := model.StreamChunk{
@@ -145,6 +151,18 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 		doneChunk.Files = ec.toolFiles
 	}
 	return chunkHandler(doneChunk)
+}
+
+// saveErrorMessage 执行失败时保存一条错误 assistant 消息，确保刷新页面后能看到失败记录。
+func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
+	content := fmt.Sprintf("[错误] %s", execErr)
+	msgID, err := e.memory.SaveAssistantMessage(context.Background(), ec.conv.ID, content, 0)
+	if err != nil {
+		ec.l.WithError(err).Error("[Execute] save error message failed")
+		return
+	}
+	ec.tracker.SetMessageID(msgID)
+	ec.l.WithFields(log.Fields{"msg_id": msgID, "error": execErr}).Warn("[Execute] << error saved")
 }
 
 func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execContext, error) {

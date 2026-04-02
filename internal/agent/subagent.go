@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
 const maxSubAgentDepth = 3
@@ -30,6 +31,9 @@ func propagateAgentValues(parent context.Context) context.Context {
 	ctx := context.Background()
 	if d := subAgentDepth(parent); d > 0 {
 		ctx = withSubAgentDepth(ctx, d)
+	}
+	if id := workspace.WorkdirScopeFromContext(parent); id != "" {
+		ctx = workspace.WithWorkdirScope(ctx, id)
 	}
 	return ctx
 }

@@ -103,6 +103,7 @@ export interface Message {
   conversation_id: number
   role: string
   content: string
+  tool_calls?: any
   tokens_used?: number
   steps?: ExecutionStep[]
   files?: FileInfo[]
