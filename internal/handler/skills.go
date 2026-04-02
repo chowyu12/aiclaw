@@ -44,6 +44,11 @@ func (h *SkillsHandler) List(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	builtinDirs := make(map[string]bool, len(builtinSkills))
+	for _, s := range builtinSkills {
+		builtinDirs[s.DirName] = true
+	}
+
 	var localItems []skillItem
 	skillsDir := workspace.Skills()
 	if skillsDir != "" {
@@ -54,6 +59,9 @@ func (h *SkillsHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 		localItems = make([]skillItem, 0, len(infos))
 		for _, info := range infos {
+			if builtinDirs[info.DirName] {
+				continue
+			}
 			localItems = append(localItems, skillItem{
 				DirName:     info.DirName,
 				Name:        info.Name,
