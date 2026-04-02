@@ -202,9 +202,6 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		e.appendAssistantToolRound(ctx, ec, st, asst)
 	}
 
-	// AgentStop hook
-	e.hooks.Fire(ctx, HookAgentStop, &HookPayload{Model: ec.ag.ModelName, Tokens: totalTokens})
-
 	if !completed {
 		ec.l.WithField("max_iterations", maxIter).Error("[Execute] max iterations reached")
 		errMsg := fmt.Sprintf("已达到最大迭代次数 %d，Agent 未能给出最终回答", maxIter)
@@ -212,10 +209,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		return nil, errors.New(errMsg)
 	}
 
-	if ec.hasTools() {
-		e.recordUsedSkillSteps(ctx, ec.skills, ec.toolSkillMap, st.calledTools, ec.tracker)
-	}
-	return e.saveResult(ctx, ec, finalContent, totalTokens, time.Since(totalStart))
+	return e.saveResult(ctx, ec, st, finalContent, totalTokens, time.Since(totalStart))
 }
 
 // ── bootstrapAgentTurn ──────────────────────────────────────
@@ -344,34 +338,6 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, l *log.E
 	}
 }
 
-func (e *Executor) recordUsedSkillSteps(ctx context.Context, skills []model.Skill, toolSkillMap map[string]string, calledTools map[string]bool, tracker *StepTracker) {
-	usedSkills := make(map[string]bool)
-	for toolName := range calledTools {
-		if skillName, ok := toolSkillMap[toolName]; ok {
-			usedSkills[skillName] = true
-		}
-	}
-	for _, sk := range skills {
-		if !usedSkills[sk.Name] {
-			continue
-		}
-		var calledToolNames []string
-		for toolName, skillName := range toolSkillMap {
-			if skillName == sk.Name && calledTools[toolName] {
-				calledToolNames = append(calledToolNames, toolName)
-			}
-		}
-		input := sk.Instruction
-		if input == "" {
-			input = "(no instruction)"
-		}
-		output := fmt.Sprintf("used %d tools: %s", len(calledToolNames), strings.Join(calledToolNames, ", "))
-		tracker.RecordStep(ctx, model.StepSkillMatch, sk.Name, input, output, model.StepSuccess, "", 0, 0, &model.StepMetadata{
-			SkillName: sk.Name, SkillTools: calledToolNames,
-		})
-		log.WithFields(log.Fields{"skill": sk.Name, "used_tools": calledToolNames}).Info("[Skill] skill used")
-	}
-}
 
 func logResourceSummary(l *log.Entry, agentTools []model.Tool, skills []model.Skill) {
 	toolNames := make([]string, 0, len(agentTools))

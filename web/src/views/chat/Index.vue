@@ -379,6 +379,7 @@ import { ref } from 'vue'
 import type { ExecutionStep, FileInfo } from '../../api/chat'
 
 interface ChatMessage {
+  id?: number
   role: string
   content: string
   tokens_used?: number
@@ -401,7 +402,7 @@ let _streamController: AbortController | null = null
 import { computed, onMounted, nextTick, reactive } from 'vue'
 import { type Agent } from '../../api/agent'
 import { useAgentStore } from '../../stores/agent'
-import { chatApi, streamChat, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
+import { chatApi, streamChat, retryStream, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Marked } from 'marked'
 import hljs from 'highlight.js/lib/core'
@@ -548,6 +549,7 @@ async function loadConversation(conv: Conversation) {
         return false
       })
       .map(m => reactive({
+        id: m.id,
         role: m.role,
         content: m.content,
         tokens_used: m.tokens_used,
@@ -732,7 +734,7 @@ function sendMessage() {
         const steps = chunk.steps?.length ? chunk.steps : [...pendingSteps.value]
         const tokensUsed = chunk.tokens_used || steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
         const content = chunk.content || streamingContent.value
-        const msg: any = { role: 'assistant', content, tokens_used: tokensUsed || undefined, steps, _showSteps: false }
+        const msg: any = { role: 'assistant', content, tokens_used: tokensUsed || undefined, steps, _showSteps: false, id: chunk.message_id || undefined }
         if (chunk.files?.length) msg.files = chunk.files
         messages.value.push(reactive(msg))
         streamingContent.value = ''
@@ -776,14 +778,73 @@ function copyMessage(msg: ChatMessage, idx: number) {
 
 function retryMessage(assistantIdx: number) {
   if (streaming.value) return
+  const assistantMsg = messages.value[assistantIdx]
+  if (!assistantMsg || assistantMsg.role !== 'assistant') return
+
   let userIdx = assistantIdx - 1
   while (userIdx >= 0 && messages.value[userIdx]?.role !== 'user') userIdx--
   const userMsg = messages.value[userIdx]
   if (!userMsg) return
-  const userText = userMsg.content
-  messages.value.splice(userIdx, assistantIdx - userIdx + 1)
-  inputMessage.value = userText
-  nextTick(() => sendMessage())
+
+  if (assistantMsg.id && conversationId.value) {
+    messages.value.splice(userIdx)
+    streaming.value = true
+    streamingContent.value = ''
+    pendingSteps.value = []
+    scrollToBottom()
+
+    _streamController = retryStream(
+      { conversation_id: conversationId.value, message_id: assistantMsg.id },
+      (chunk: StreamChunk) => {
+        if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
+        if (chunk.steps?.length) { for (const s of chunk.steps) pendingSteps.value.push(reactive({ ...s, _expanded: false })) }
+        else if (chunk.step) pendingSteps.value.push(reactive({ ...chunk.step, _expanded: false }))
+        if (chunk.done) {
+          const steps = chunk.steps?.length ? chunk.steps : [...pendingSteps.value]
+          const tokensUsed = chunk.tokens_used || steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
+          const content = chunk.content || streamingContent.value
+          const msg: any = { role: 'assistant', content, tokens_used: tokensUsed || undefined, steps, _showSteps: false, id: chunk.message_id || undefined }
+          if (chunk.files?.length) msg.files = chunk.files
+          messages.value.push(reactive({ role: 'user', content: userMsg.content }))
+          messages.value.push(reactive(msg))
+          streamingContent.value = ''
+          pendingSteps.value = []
+          streaming.value = false
+          _streamController = null
+          scrollToBottom()
+          loadConversations()
+        }
+      },
+      () => {
+        if (streaming.value && (streamingContent.value || pendingSteps.value.length > 0)) {
+          const steps = [...pendingSteps.value]
+          const tokensUsed = steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
+          messages.value.push(reactive({ role: 'user', content: userMsg.content }))
+          messages.value.push(reactive({ role: 'assistant', content: streamingContent.value, tokens_used: tokensUsed || undefined, steps, _showSteps: false }))
+          streamingContent.value = ''
+          pendingSteps.value = []
+        }
+        streaming.value = false
+        _streamController = null
+        loadConversations()
+      },
+      (err: string) => {
+        const steps = [...pendingSteps.value]
+        messages.value.push(reactive({ role: 'user', content: userMsg.content }))
+        messages.value.push(reactive({ role: 'assistant', content: `[错误] ${err}`, steps, _showSteps: steps.length > 0 }))
+        streamingContent.value = ''
+        pendingSteps.value = []
+        streaming.value = false
+        _streamController = null
+        scrollToBottom()
+      },
+    )
+  } else {
+    const userText = userMsg.content
+    messages.value.splice(userIdx, assistantIdx - userIdx + 1)
+    inputMessage.value = userText
+    nextTick(() => sendMessage())
+  }
 }
 
 function formatMessage(text: string): string {

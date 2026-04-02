@@ -90,6 +90,26 @@ func (s *GormStore) DeleteConversation(ctx context.Context, id int64) error {
 	})
 }
 
+func (s *GormStore) GetMessage(ctx context.Context, id int64) (*model.Message, error) {
+	var m model.Message
+	if err := s.db.WithContext(ctx).First(&m, id).Error; err != nil {
+		return nil, notFound(err)
+	}
+	return &m, nil
+}
+
+// DeleteMessagesFrom 删除指定会话中 id >= fromMessageID 的所有消息及其关联的步骤和文件。
+func (s *GormStore) DeleteMessagesFrom(ctx context.Context, conversationID, fromMessageID int64) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		cond := "conversation_id = ? AND id >= ?"
+		msgCond := "conversation_id = ? AND message_id IN (?)"
+		subQuery := tx.Model(&model.Message{}).Select("id").Where(cond, conversationID, fromMessageID)
+		tx.Where(msgCond, conversationID, subQuery).Delete(&model.File{})
+		tx.Where(msgCond, conversationID, subQuery).Delete(&model.ExecutionStep{})
+		return tx.Where(cond, conversationID, fromMessageID).Delete(&model.Message{}).Error
+	})
+}
+
 func (s *GormStore) CreateMessage(ctx context.Context, m *model.Message) error {
 	return s.db.WithContext(ctx).Create(m).Error
 }

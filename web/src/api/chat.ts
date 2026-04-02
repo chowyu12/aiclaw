@@ -71,6 +71,7 @@ export interface ChatResponse {
 
 export interface StreamChunk {
   conversation_id?: string
+  message_id?: number
   delta?: string
   content?: string
   tokens_used?: number
@@ -126,8 +127,14 @@ export const fileApi = {
   delete: (uuid: string) => request.delete(`/files/${uuid}`),
 }
 
-export function streamChat(
-  data: ChatRequest,
+export interface RetryRequest {
+  conversation_id: string
+  message_id: number
+}
+
+function streamRequest(
+  url: string,
+  data: unknown,
   onChunk: (chunk: StreamChunk) => void,
   onDone: () => void,
   onError: (err: string) => void,
@@ -146,7 +153,7 @@ export function streamChat(
   resetIdleTimer()
 
   const token = localStorage.getItem('token') || ''
-  fetch('/api/v1/chat/stream', {
+  fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify(data),
@@ -213,4 +220,22 @@ export function streamChat(
   })
 
   return controller
+}
+
+export function streamChat(
+  data: ChatRequest,
+  onChunk: (chunk: StreamChunk) => void,
+  onDone: () => void,
+  onError: (err: string) => void,
+) {
+  return streamRequest('/api/v1/chat/stream', data, onChunk, onDone, onError)
+}
+
+export function retryStream(
+  data: RetryRequest,
+  onChunk: (chunk: StreamChunk) => void,
+  onDone: () => void,
+  onError: (err: string) => void,
+) {
+  return streamRequest('/api/v1/chat/retry', data, onChunk, onDone, onError)
 }

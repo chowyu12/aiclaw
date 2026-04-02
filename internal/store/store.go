@@ -82,6 +82,8 @@ type ConversationStore interface {
 	CreateMessages(ctx context.Context, msgs []*model.Message) error
 	ListMessages(ctx context.Context, conversationID int64, limit int) ([]model.Message, error)
 	CountMessages(ctx context.Context, conversationID int64) (int64, error)
+	GetMessage(ctx context.Context, id int64) (*model.Message, error)
+	DeleteMessagesFrom(ctx context.Context, conversationID, fromMessageID int64) error
 
 	CreateExecutionStep(ctx context.Context, step *model.ExecutionStep) error
 	UpdateStepsMessageID(ctx context.Context, conversationID, messageID int64) error

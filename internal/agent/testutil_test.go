@@ -246,6 +246,33 @@ func (s *mockStore) ListMessages(_ context.Context, conversationID int64, limit 
 	copy(result, msgs)
 	return result, nil
 }
+func (s *mockStore) GetMessage(_ context.Context, id int64) (*model.Message, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, msgs := range s.messages {
+		for i := range msgs {
+			if msgs[i].ID == id {
+				return &msgs[i], nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("message %d not found", id)
+}
+
+func (s *mockStore) DeleteMessagesFrom(_ context.Context, conversationID, fromMessageID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	msgs := s.messages[conversationID]
+	var kept []model.Message
+	for _, m := range msgs {
+		if m.ID < fromMessageID {
+			kept = append(kept, m)
+		}
+	}
+	s.messages[conversationID] = kept
+	return nil
+}
+
 func (s *mockStore) CreateExecutionStep(_ context.Context, step *model.ExecutionStep) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
