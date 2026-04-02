@@ -414,16 +414,20 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name:        "sub_agent",
-			Description: "启动子 Agent 执行独立子任务。子 Agent 拥有独立会话和推理链，适用于需要独立思考的子问题，如并行调研、专家分工等。",
+			Name: "sub_agent",
+			Description: "启动子 Agent 并行执行多个独立子任务。" +
+				"仅当需要同时并行处理 2 个及以上独立子任务时才使用（如同时调研多个方向、对比多个方案）。" +
+				"如果只有 1 个子任务，请直接处理而非启动 sub_agent。",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     600,
 			FunctionDef: mustJSON(map[string]any{
 				"name": "sub_agent",
-				"description": "Launch a sub-agent for an independent subtask. " +
-					"The sub-agent has its own conversation, tools, and reasoning chain. " +
-					"Use for: parallel research, expert delegation, or isolating complex subtasks. " +
+				"description": "Launch sub-agents to execute MULTIPLE independent subtasks IN PARALLEL. " +
+					"Each sub-agent has its own conversation, tools, and reasoning chain. " +
+					"IMPORTANT: Only use when you need 2+ sub-agents running concurrently " +
+					"(e.g. parallel research, comparing multiple approaches, expert delegation to different specialists). " +
+					"If you only have a single subtask, handle it directly — do NOT launch a single sub_agent. " +
 					"Max nesting depth: 3.",
 				"parameters": map[string]any{
 					"type": "object",

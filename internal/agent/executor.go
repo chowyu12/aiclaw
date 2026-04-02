@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -33,25 +35,39 @@ func WithProviderFactory(f ProviderFactory) ExecutorOption {
 	return func(e *Executor) { e.providerFactory = f }
 }
 
+type skillCache struct {
+	mu   sync.RWMutex
+	data []model.Skill
+	ts   time.Time
+}
+
 type Executor struct {
 	store           store.Store
 	registry        *ToolRegistry
 	memory          *MemoryManager
 	providerFactory ProviderFactory
 	hooks           *HookRegistry
+	ws              *workspace.Workspace
+	sc              *skillCache
+
+	shutdownMu   sync.Mutex
+	shutdownDone bool
+	activeExecs  sync.WaitGroup
 }
 
 func WithHookRegistry(h *HookRegistry) ExecutorOption {
 	return func(e *Executor) { e.hooks = h }
 }
 
-func NewExecutor(s store.Store, registry *ToolRegistry, opts ...ExecutorOption) *Executor {
+func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace, opts ...ExecutorOption) *Executor {
 	e := &Executor{
 		store:           s,
 		registry:        registry,
 		memory:          NewMemoryManager(s),
 		providerFactory: provider.NewFromProvider,
 		hooks:           NewHookRegistry(),
+		ws:              ws,
+		sc:              &skillCache{},
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -104,7 +120,41 @@ func (ec *execContext) stepMeta() *model.StepMetadata {
 	}
 }
 
+func (e *Executor) checkShutdown() error {
+	e.shutdownMu.Lock()
+	defer e.shutdownMu.Unlock()
+	if e.shutdownDone {
+		return errors.New("executor is shutting down")
+	}
+	e.activeExecs.Add(1)
+	return nil
+}
+
+// Shutdown 通知 Executor 停止接受新请求并等待活跃执行完成。
+func (e *Executor) Shutdown(timeout time.Duration) {
+	e.shutdownMu.Lock()
+	e.shutdownDone = true
+	e.shutdownMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		e.activeExecs.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		log.Info("[Executor] all active executions completed gracefully")
+	case <-time.After(timeout):
+		log.WithField("timeout", timeout).Warn("[Executor] shutdown timeout, some executions may be interrupted")
+	}
+}
+
 func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*ExecuteResult, error) {
+	if err := e.checkShutdown(); err != nil {
+		return nil, err
+	}
+	defer e.activeExecs.Done()
+
 	ec, err := e.prepare(ctx, req)
 	if err != nil {
 		return nil, err
@@ -122,6 +172,11 @@ func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*Execute
 }
 
 func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error) error {
+	if err := e.checkShutdown(); err != nil {
+		return err
+	}
+	defer e.activeExecs.Done()
+
 	ec, err := e.prepare(ctx, req)
 	if err != nil {
 		return err
@@ -156,7 +211,9 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 // saveErrorMessage 执行失败时保存一条错误 assistant 消息，确保刷新页面后能看到失败记录。
 func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
 	content := fmt.Sprintf("[错误] %s", execErr)
-	msgID, err := e.memory.SaveAssistantMessage(context.Background(), ec.conv.ID, content, 0)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, 0)
 	if err != nil {
 		ec.l.WithError(err).Error("[Execute] save error message failed")
 		return
@@ -172,6 +229,9 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 		return nil, fmt.Errorf("agent not found: %w", err)
 	}
 	ctx = workspace.WithWorkdirScope(ctx, ag.UUID)
+	if e.ws != nil {
+		ctx = workspace.WithWorkspace(ctx, e.ws)
+	}
 
 	prov, err := e.store.GetProvider(ctx, ag.ProviderID)
 	if err != nil {
@@ -196,7 +256,7 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 		return nil, err
 	}
 
-	skills, err := loadWorkspaceSkills()
+	skills, err := e.loadWorkspaceSkills()
 	if err != nil {
 		l.WithError(err).Warn("[Execute] load workspace skills failed, continuing without skills")
 		skills = nil
@@ -278,15 +338,26 @@ func normalizeAgent(a *model.Agent) {
 	}
 }
 
-func loadWorkspaceSkills() ([]model.Skill, error) {
+const skillCacheTTL = 30 * time.Second
+
+func (e *Executor) loadWorkspaceSkills() ([]model.Skill, error) {
+	e.sc.mu.RLock()
+	if e.sc.data != nil && time.Since(e.sc.ts) < skillCacheTTL {
+		result := make([]model.Skill, len(e.sc.data))
+		copy(result, e.sc.data)
+		e.sc.mu.RUnlock()
+		return result, nil
+	}
+	e.sc.mu.RUnlock()
+
 	out := skills.BuiltinSkills()
 	seen := make(map[string]bool, len(out))
 	for _, s := range out {
 		seen[s.DirName] = true
 	}
 
-	dir := workspace.Skills()
-	if dir != "" {
+	if e.ws != nil {
+		dir := e.ws.Skills()
 		infos, err := skills.ScanAll(dir)
 		if err != nil {
 			return out, err
@@ -300,6 +371,12 @@ func loadWorkspaceSkills() ([]model.Skill, error) {
 			out = append(out, *s)
 		}
 	}
+
+	e.sc.mu.Lock()
+	e.sc.data = make([]model.Skill, len(out))
+	copy(e.sc.data, out)
+	e.sc.ts = time.Now()
+	e.sc.mu.Unlock()
 
 	return out, nil
 }
@@ -322,7 +399,6 @@ func (e *Executor) connectMCPServers(ctx context.Context, servers []model.MCPSer
 	infos := mgr.Tools()
 	mcpTools := make([]Tool, 0, len(infos))
 	for _, info := range infos {
-		info := info
 		toolSkillMap[info.Name] = "mcp:" + info.ServerName
 		base := &dynamicTool{
 			toolName: info.Name,
@@ -355,12 +431,11 @@ func (e *Executor) buildSkillManifestTools(skillList []model.Skill, tracker *Ste
 			continue
 		}
 		for _, td := range toolDefs {
-			td := td
 			toolSkillMap[td.Name] = sk.Name
 			var handler func(ctx context.Context, input string) (string, error)
 
-			if sk.MainFile != "" {
-				skillDir := workspace.SkillDir(sk.DirName)
+			if sk.MainFile != "" && e.ws != nil {
+				skillDir := e.ws.SkillDir(sk.DirName)
 				if skillDir != "" {
 					mainFile := sk.MainFile
 					handler = func(ctx context.Context, input string) (string, error) {
@@ -403,9 +478,13 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 	}
 
 	if ag.ToolSearchEnabled {
-		items, _, err := e.store.ListTools(ctx, model.ListQuery{Page: 1, PageSize: 10000})
+		items, total, err := e.store.ListTools(ctx, model.ListQuery{Page: 1, PageSize: 10000})
 		if err != nil {
 			return nil, nil, fmt.Errorf("list all tools: %w", err)
+		}
+		if int64(len(items)) < total {
+			log.WithFields(log.Fields{"fetched": len(items), "total": total}).
+				Warn("[Execute] tool count exceeds single-page limit, some tools may be unavailable")
 		}
 		for _, t := range items {
 			if t.Enabled && !seenName[t.Name] {
@@ -461,6 +540,7 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 		CalledTools:  st.calledTools,
 		ToolSkillMap: ec.toolSkillMap,
 		Tracker:      ec.tracker,
+		WS:           e.ws,
 	})
 
 	return &ExecuteResult{

@@ -139,7 +139,7 @@ func sanitizeToolCallSequence(messages []openai.ChatCompletionMessage) []openai.
 
 	// Phase 3: remove orphaned tool responses and empty assistant messages
 	// left behind after stripping their tool_calls.
-	result := messages[:0]
+	result := make([]openai.ChatCompletionMessage, 0, len(messages))
 	for _, msg := range messages {
 		if msg.Role == openai.ChatMessageRoleTool && msg.ToolCallID != "" && !validCallIDs[msg.ToolCallID] {
 			log.WithField("tool_call_id", msg.ToolCallID).Debug("[Memory] dropping orphaned tool response")

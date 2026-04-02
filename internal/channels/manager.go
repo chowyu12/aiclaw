@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
+	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
 )
@@ -19,10 +20,10 @@ type Manager struct {
 }
 
 // NewManager 创建 Manager 并执行首次 Refresh。
-func NewManager(s store.Store, exec *agentpkg.Executor) *Manager {
+func NewManager(s store.Store, exec *agentpkg.Executor, rt *config.RuntimeConfig) *Manager {
 	m := &Manager{
 		store:  s,
-		bridge: newBridge(s, exec),
+		bridge: newBridge(s, exec, rt),
 	}
 	m.Refresh(context.Background())
 	return m

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
 // HookEvent 表示可被拦截的 Agent 生命周期事件。
@@ -52,6 +53,7 @@ type HookPayload struct {
 	CalledTools  map[string]bool
 	ToolSkillMap map[string]string
 	Tracker      *StepTracker
+	WS           *workspace.Workspace
 }
 
 // HookFunc 签名：返回 HookAction 决定后续行为。

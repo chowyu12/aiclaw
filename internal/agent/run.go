@@ -148,7 +148,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		req := openai.ChatCompletionRequest{
 			Model:    ec.ag.ModelName,
 			Messages: sanitizeMessages(st.Messages),
-			Tools:    toolsSentToLLM(st.TSMode, st.AllToolDefs, st.Discovered),
+			Tools:    toolsSentToLLM(st),
 		}
 		applyModelCaps(&req, ec.ag, ec.l)
 
@@ -231,6 +231,9 @@ type agentRunState struct {
 	loopDet     *toolLoopDetector
 	calledTools map[string]bool
 	llmRetries  int
+
+	lastDiscoveredLen int
+	cachedLLMDefs     []openai.Tool
 }
 
 func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, streaming bool) (*agentRunState, error) {
@@ -283,7 +286,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 	}
 
 	memosCtx := recallMemories(ctx, ec.userMsg, ec.ag)
-	sessionMem := loadSessionMemory(ec.ag.UUID, ec.conv.UUID)
+	sessionMem := loadSessionMemory(e.ws, ec.ag.UUID, ec.conv.UUID)
 
 	var msgTools []model.Tool
 	var msgToolSkillMap map[string]string
@@ -302,6 +305,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		MemosContext:   memosCtx,
 		SessionMemory:  sessionMem,
 		ToolSearchMode: tsMode,
+		WS:             e.ws,
 	})
 	logMessages(ec.l, messages)
 
@@ -314,11 +318,16 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 	}, nil
 }
 
-func toolsSentToLLM(tsMode bool, allDefs []openai.Tool, discovered map[string]bool) []openai.Tool {
-	if tsMode {
-		return buildToolSearchDefs(allDefs, discovered)
+func toolsSentToLLM(st *agentRunState) []openai.Tool {
+	if !st.TSMode {
+		return st.AllToolDefs
 	}
-	return allDefs
+	if st.cachedLLMDefs != nil && len(st.Discovered) == st.lastDiscoveredLen {
+		return st.cachedLLMDefs
+	}
+	st.cachedLLMDefs = buildToolSearchDefs(st.AllToolDefs, st.Discovered)
+	st.lastDiscoveredLen = len(st.Discovered)
+	return st.cachedLLMDefs
 }
 
 // ── LLM 瞬态错误重试 ─────────────────────────────────────────
@@ -419,7 +428,31 @@ func truncateLog(s string, maxLen int) string {
 //  1. tool 角色和带 tool_calls 的 assistant 必须有 content（部分 provider 的硬性要求，
 //     go-openai SDK 用 omitempty 会省略空字符串导致 400）
 //  2. 修复 tool_call arguments 中的残损 JSON（避免 provider 400 拒绝）
+//
+// 先扫描一遍判断是否真的需要修正，避免每轮都完整拷贝消息数组。
 func sanitizeMessages(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage {
+	needsFix := false
+	for i := range msgs {
+		needContent := msgs[i].Role == openai.ChatMessageRoleTool ||
+			(msgs[i].Role == openai.ChatMessageRoleAssistant && len(msgs[i].ToolCalls) > 0)
+		if needContent && msgs[i].Content == "" && len(msgs[i].MultiContent) == 0 {
+			needsFix = true
+			break
+		}
+		for j := range msgs[i].ToolCalls {
+			if a := msgs[i].ToolCalls[j].Function.Arguments; a != "" && !json.Valid([]byte(a)) {
+				needsFix = true
+				break
+			}
+		}
+		if needsFix {
+			break
+		}
+	}
+	if !needsFix {
+		return msgs
+	}
+
 	out := make([]openai.ChatCompletionMessage, len(msgs))
 	copy(out, msgs)
 	for i := range out {

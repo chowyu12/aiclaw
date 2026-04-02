@@ -59,19 +59,20 @@ func Run(opts Options) {
 		}
 	}
 
-	if err := workspace.Init(cfg.Workspace); err != nil {
+	ws, err := workspace.New(cfg.Workspace)
+	if err != nil {
 		log.WithError(err).Fatal("init workspace failed")
 	}
-	log.WithField("path", workspace.Root()).Info("workspace initialized")
+	log.WithField("path", ws.Root()).Info("workspace initialized")
 
-	skillspkg.SyncBuiltinsToDisk(workspace.Skills())
+	skillspkg.SyncBuiltinsToDisk(ws.Skills())
 
 	logFile := cfg.Log.File
 	if logFile == "" && daemon.IsChild() {
 		logFile = daemon.LogFile()
 	}
-	if logFile == "" && workspace.Logs() != "" {
-		logFile = filepath.Join(workspace.Logs(), "aiclaw.log")
+	if logFile == "" && ws.Logs() != "" {
+		logFile = filepath.Join(ws.Logs(), "aiclaw.log")
 	}
 	if logFile != "" {
 		fileWriter := &lumberjack.Logger{
@@ -89,7 +90,7 @@ func Run(opts Options) {
 	}
 
 	if cfg.Upload.Dir == "" || cfg.Upload.Dir == "./uploads" {
-		cfg.Upload.Dir = workspace.Uploads()
+		cfg.Upload.Dir = ws.Uploads()
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -106,7 +107,7 @@ func Run(opts Options) {
 		log.Info("database configured, continuing startup...")
 	}
 
-	config.SetRuntime(cfgPath, cfg)
+	rt := config.NewRuntimeConfig(cfgPath, cfg)
 
 	generated, err := config.EnsureAuthWebToken(cfg, cfgPath)
 	if err != nil {
@@ -128,9 +129,9 @@ func Run(opts Options) {
 	server.ApplyBrowserToolConfig(cfg.Browser)
 
 	registry := agentpkg.NewToolRegistry()
-	executor := agentpkg.NewExecutor(store, registry)
+	executor := agentpkg.NewExecutor(store, registry, ws)
 
-	channelMgr := channels.NewManager(store, executor)
+	channelMgr := channels.NewManager(store, executor, rt)
 	defer channelMgr.Stop()
 
 	mux := http.NewServeMux()
@@ -141,6 +142,7 @@ func Run(opts Options) {
 		DatabaseConfigured: !cfg.NeedsDatabaseSetup(),
 		Upload:             cfg.Upload,
 		Version:            cmp.Or(opts.Version, "dev"),
+		WS:                 ws,
 	})
 	server.MountEmbeddedFrontend(mux)
 
@@ -161,13 +163,15 @@ func Run(opts Options) {
 		}
 	}()
 
-	startConfigHotReload(cfgPath)
+	startConfigHotReload(rt)
+	startTmpCleanup(ws)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Info("shutting down server...")
 
+	executor.Shutdown(30 * time.Second)
 	browser.Shutdown()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -178,29 +182,28 @@ func Run(opts Options) {
 	log.Info("server stopped")
 }
 
-func startConfigHotReload(cfgPath string) {
-	abs, err := filepath.Abs(cfgPath)
+func startConfigHotReload(rt *config.RuntimeConfig) {
+	abs, err := filepath.Abs(rt.Path())
 	if err != nil {
 		log.WithError(err).Warn("config hot reload disabled: abs path failed")
 		return
 	}
 	_, err = config.StartConfigWatcher(abs, func() error {
-		if err := config.ReplaceRuntimeFromDisk(); err != nil {
+		if err := rt.ReplaceFromDisk(); err != nil {
 			return err
 		}
-		config.RT.Mu.RLock()
-		c := config.RT.Cfg
-		config.RT.Mu.RUnlock()
-		if c == nil {
-			return nil
-		}
-		auth.SetWebToken(c.Auth.WebToken)
-		if c.Log.Level != "" {
-			if lvl, err := log.ParseLevel(c.Log.Level); err == nil {
-				log.SetLevel(lvl)
+		rt.WithReadLock(func(c *config.Config) {
+			if c == nil {
+				return
 			}
-		}
-		server.ApplyBrowserToolConfig(c.Browser)
+			auth.SetWebToken(c.Auth.WebToken)
+			if c.Log.Level != "" {
+				if lvl, err := log.ParseLevel(c.Log.Level); err == nil {
+					log.SetLevel(lvl)
+				}
+			}
+			server.ApplyBrowserToolConfig(c.Browser)
+		})
 		return nil
 	})
 	if err != nil {
@@ -208,6 +211,16 @@ func startConfigHotReload(cfgPath string) {
 		return
 	}
 	log.WithField("path", abs).Info("config hot reload enabled")
+}
+
+func startTmpCleanup(ws *workspace.Workspace) {
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			ws.CleanupAgentTmpFiles(24 * time.Hour)
+		}
+	}()
 }
 
 func webConsoleURL(host string, port int, token string) string {

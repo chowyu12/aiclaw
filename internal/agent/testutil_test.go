@@ -13,6 +13,8 @@ import (
 
 	openai "github.com/sashabaranov/go-openai"
 
+	"github.com/chowyu12/aiclaw/internal/workspace"
+
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/provider"
 )
@@ -616,8 +618,17 @@ func seedToolForAgent(t *testing.T, s *mockStore, agentID int64, name, desc stri
 	return tool
 }
 
-func newTestExecutor(s *mockStore, registry *ToolRegistry, mockLLM *mockLLMProvider) *Executor {
-	return NewExecutor(s, registry, WithProviderFactory(
+func newTestExecutor(s *mockStore, registry *ToolRegistry, mockLLM *mockLLMProvider, opts ...ExecutorOption) *Executor {
+	allOpts := append([]ExecutorOption{WithProviderFactory(
+		func(_ *model.Provider) (provider.LLMProvider, error) {
+			return mockLLM, nil
+		},
+	)}, opts...)
+	return NewExecutor(s, registry, nil, allOpts...)
+}
+
+func newTestExecutorWithWS(s *mockStore, registry *ToolRegistry, mockLLM *mockLLMProvider, ws *workspace.Workspace) *Executor {
+	return NewExecutor(s, registry, ws, WithProviderFactory(
 		func(_ *model.Provider) (provider.LLMProvider, error) {
 			return mockLLM, nil
 		},

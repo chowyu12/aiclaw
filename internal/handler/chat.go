@@ -58,8 +58,10 @@ func (h *ChatHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		req.UserID = "anonymous"
 	}
 
+	Metrics.IncChat()
 	result, err := h.executor.Execute(r.Context(), req)
 	if err != nil {
+		Metrics.IncErr()
 		httputil.InternalError(w, err.Error())
 		return
 	}
@@ -92,10 +94,12 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	Metrics.IncChat()
 	err := h.executor.ExecuteStream(r.Context(), req, func(chunk model.StreamChunk) error {
 		return sseWriter.WriteJSON("message", chunk)
 	})
 	if err != nil {
+		Metrics.IncErr()
 		sseWriter.WriteJSON("error", map[string]string{"error": err.Error()})
 		return
 	}

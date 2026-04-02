@@ -278,6 +278,9 @@ func detectImageMIME(name, declared string, data []byte) (string, bool) {
 	return "", false
 }
 
+// TODO(perf): 图片先以 []byte 完整读入内存，再 base64 编码生成约 1.33 倍大小的字符串，
+// 峰值内存约为图片原始大小的 2.3 倍。如果服务有公网地址，可改为先写入 uploads 目录、
+// 通过 HTTP URL 引用，避免 base64 内联。当前受限于 openai SDK 的 data URL 方式。
 func imagePartFromData(name, mimeType string, data []byte) (openai.ChatMessagePart, error) {
 	actual, ok := detectImageMIME(name, mimeType, data)
 	if !ok {

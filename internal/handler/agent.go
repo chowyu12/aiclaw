@@ -15,10 +15,11 @@ import (
 
 type AgentHandler struct {
 	store store.Store
+	ws    *workspace.Workspace
 }
 
-func NewAgentHandler(s store.Store) *AgentHandler {
-	return &AgentHandler{store: s}
+func NewAgentHandler(s store.Store, ws *workspace.Workspace) *AgentHandler {
+	return &AgentHandler{store: s, ws: ws}
 }
 
 func (h *AgentHandler) Register(mux *http.ServeMux) {
@@ -84,7 +85,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		httputil.InternalError(w, err.Error())
 		return
 	}
-	workspace.AgentDir(a.UUID)
+	h.ws.AgentDir(a.UUID)
 	httputil.OK(w, a)
 }
 

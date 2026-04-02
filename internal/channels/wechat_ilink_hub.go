@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/pkg/wechatlink"
 )
@@ -205,7 +204,7 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 		},
 		ReplyWith: func(ctx context.Context, reply string, images []*model.File) error {
 			replyClientID := uuid.New().String()
-			publicURL := config.PublicURL()
+			publicURL := bridge.rt.PublicURL()
 			if len(images) == 0 || publicURL == "" {
 				return client.SendMessage(ctx, fromUser, contextToken, replyClientID, reply)
 			}

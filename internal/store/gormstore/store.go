@@ -53,10 +53,14 @@ func New(cfg config.DatabaseConfig) (*GormStore, error) {
 		sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	}
 
-	if err := autoMigrate(db); err != nil {
-		return nil, fmt.Errorf("auto migrate: %w", err)
+	if cfg.AutoMigrate == nil || *cfg.AutoMigrate {
+		if err := autoMigrate(db); err != nil {
+			return nil, fmt.Errorf("auto migrate: %w", err)
+		}
+		log.WithField("driver", cfg.Driver).Info("database connected and migrated")
+	} else {
+		log.WithField("driver", cfg.Driver).Info("database connected (auto_migrate disabled)")
 	}
-	log.WithField("driver", cfg.Driver).Info("database connected and migrated")
 
 	return &GormStore{db: db}, nil
 }
@@ -130,7 +134,22 @@ func paginate(q model.ListQuery) (offset, limit int) {
 	return (page - 1) * size, size
 }
 
+func isValidSQLIdentifier(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
 func setRelation(tx *gorm.DB, table, col1, col2 string, id int64, relIDs []int64) error {
+	if !isValidSQLIdentifier(table) || !isValidSQLIdentifier(col1) || !isValidSQLIdentifier(col2) {
+		return fmt.Errorf("invalid SQL identifier in setRelation: table=%q col1=%q col2=%q", table, col1, col2)
+	}
 	if err := tx.Exec("DELETE FROM "+table+" WHERE "+col1+" = ?", id).Error; err != nil {
 		return err
 	}
