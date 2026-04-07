@@ -155,7 +155,11 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		if err != nil {
 			return nil, fmt.Errorf("read request body: %w", err)
 		}
+
+		bodyBytes = injectEnableThinking(bodyBytes)
+
 		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+		req.ContentLength = int64(len(bodyBytes))
 
 		logBody := string(bodyBytes)
 		if len(logBody) > 50*1024 {
@@ -185,4 +189,30 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	l.WithFields(log.Fields{"status": resp.StatusCode, "body": string(respBody)}).Trace("[LLM-HTTP] << response")
 	return resp, nil
+}
+
+// injectEnableThinking 读取 chat_template_kwargs.enable_thinking，将其提升为顶级 enable_thinking 字段。
+// vLLM 使用 chat_template_kwargs，DashScope 使用顶级 enable_thinking，OpenAI 使用 reasoning_effort。
+func injectEnableThinking(body []byte) []byte {
+	var m map[string]any
+	if json.Unmarshal(body, &m) != nil {
+		return body
+	}
+	kwargs, ok := m["chat_template_kwargs"].(map[string]any)
+	if !ok {
+		return body
+	}
+	enabled, ok := kwargs["enable_thinking"].(bool)
+	if !ok {
+		return body
+	}
+	m["enable_thinking"] = enabled
+	if !enabled {
+		delete(m, "reasoning_effort")
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return body
+	}
+	return out
 }

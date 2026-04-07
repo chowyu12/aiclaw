@@ -91,6 +91,11 @@
                   <span class="af-kv-k">Token 预算 <span class="af-kv-sub">0 = 不限</span></span>
                   <el-input-number v-model="agentForm.token_budget" :min="0" :max="10000000" :step="10000" controls-position="right" size="small" class="af-kv-num" />
                 </label>
+                <div class="af-switch-line" style="margin-top:8px">
+                  <span>关闭深度思考</span>
+                  <el-switch v-model="agentForm.disable_thinking" size="small" />
+                </div>
+                <div class="af-hint">默认开启，关闭后模型将跳过推理直接回复</div>
               </section>
 
               <!-- 工具 -->
@@ -193,6 +198,7 @@ const agentForm = ref({
   max_history: 30,
   max_iterations: 50,
   token_budget: 0,
+  disable_thinking: false,
   tool_search_enabled: false,
   memos_enabled: false,
   memos_config: { base_url: '', api_key: '', user_id: '', top_k: 10, async: true },
@@ -267,6 +273,7 @@ function applyAgentDetail(detail: Agent) {
     max_history: detail.max_history ?? 30,
     max_iterations: detail.max_iterations ?? 50,
     token_budget: detail.token_budget ?? 0,
+    disable_thinking: !!detail.disable_thinking,
     tool_search_enabled: !!detail.tool_search_enabled,
     memos_enabled: !!detail.memos_enabled,
     memos_config: {
@@ -322,6 +329,7 @@ async function saveAgent() {
       max_history: agentForm.value.max_history,
       max_iterations: agentForm.value.max_iterations,
       token_budget: agentForm.value.token_budget,
+      disable_thinking: agentForm.value.disable_thinking,
       tool_search_enabled: agentForm.value.tool_search_enabled,
       memos_enabled: agentForm.value.memos_enabled,
       memos_config: agentForm.value.memos_config,
