@@ -107,6 +107,9 @@ func (s *GormStore) UpdateAgent(ctx context.Context, id int64, req *model.Update
 	if req.MaxIterations != nil {
 		updates["max_iterations"] = *req.MaxIterations
 	}
+	if req.DisableThinking != nil {
+		updates["disable_thinking"] = *req.DisableThinking
+	}
 	if req.ToolSearchEnabled != nil {
 		updates["tool_search_enabled"] = *req.ToolSearchEnabled
 	}

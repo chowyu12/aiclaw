@@ -382,8 +382,16 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, l *log.E
 	if ag.MaxTokens > 0 {
 		req.MaxCompletionTokens = ag.MaxTokens
 	}
-}
 
+	if ag.DisableThinking {
+		req.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+		l.WithField("model", ag.ModelName).Debug("[LLM] thinking disabled")
+	} else {
+		req.ReasoningEffort = "medium"
+		req.ChatTemplateKwargs = map[string]any{"enable_thinking": true}
+		l.WithField("model", ag.ModelName).Debug("[LLM] thinking enabled")
+	}
+}
 
 func logResourceSummary(l *log.Entry, agentTools []model.Tool, skills []model.Skill) {
 	toolNames := make([]string, 0, len(agentTools))

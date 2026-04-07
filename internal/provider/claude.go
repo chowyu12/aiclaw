@@ -40,6 +40,12 @@ type claudeRequest struct {
 	Tools       []claudeTool     `json:"tools,omitempty"`
 	Stream      bool             `json:"stream,omitempty"`
 	Temperature *float32         `json:"temperature,omitempty"`
+	Thinking    *claudeThinking  `json:"thinking,omitempty"`
+}
+
+type claudeThinking struct {
+	Type        string `json:"type"`
+	BudgetToken int    `json:"budget_tokens"`
 }
 
 type claudeMessage struct {
@@ -80,7 +86,14 @@ func buildClaudeRequest(req openai.ChatCompletionRequest) claudeRequest {
 	if cr.MaxTokens == 0 {
 		cr.MaxTokens = 4096
 	}
-	if req.Temperature > 0 {
+	if req.ReasoningEffort != "" {
+		budget := cr.MaxTokens / 2
+		if budget < 1024 {
+			budget = 1024
+		}
+		cr.Thinking = &claudeThinking{Type: "enabled", BudgetToken: budget}
+		cr.Temperature = nil
+	} else if req.Temperature > 0 {
 		cr.Temperature = &req.Temperature
 	}
 

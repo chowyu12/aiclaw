@@ -32,10 +32,15 @@ func newGeminiAdapter(apiKey, baseURL string) *geminiAdapter {
 // ── OpenAI → Gemini request conversion ──────────────────────────
 
 type geminiRequest struct {
-	Contents          []geminiContent      `json:"contents"`
-	SystemInstruction *geminiContent       `json:"systemInstruction,omitempty"`
-	Tools             []geminiToolDecl     `json:"tools,omitempty"`
-	GenerationConfig  *geminiGenConfig     `json:"generationConfig,omitempty"`
+	Contents          []geminiContent       `json:"contents"`
+	SystemInstruction *geminiContent        `json:"systemInstruction,omitempty"`
+	Tools             []geminiToolDecl      `json:"tools,omitempty"`
+	GenerationConfig  *geminiGenConfig      `json:"generationConfig,omitempty"`
+	ThinkingConfig    *geminiThinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+type geminiThinkingConfig struct {
+	ThinkingBudget int `json:"thinkingBudget,omitempty"`
 }
 
 type geminiContent struct {
@@ -92,6 +97,17 @@ func buildGeminiRequest(req openai.ChatCompletionRequest) geminiRequest {
 			gr.GenerationConfig = &geminiGenConfig{}
 		}
 		gr.GenerationConfig.MaxOutputTokens = req.MaxCompletionTokens
+	}
+
+	if req.ReasoningEffort != "" {
+		budget := 8192
+		if req.MaxCompletionTokens > 0 {
+			budget = req.MaxCompletionTokens / 2
+			if budget < 1024 {
+				budget = 1024
+			}
+		}
+		gr.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: budget}
 	}
 
 	gr.SystemInstruction, gr.Contents = convertToGeminiContents(req.Messages)
