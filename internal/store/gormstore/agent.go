@@ -110,6 +110,12 @@ func (s *GormStore) UpdateAgent(ctx context.Context, id int64, req *model.Update
 	if req.DisableThinking != nil {
 		updates["disable_thinking"] = *req.DisableThinking
 	}
+	if req.ReasoningEffort != nil {
+		updates["reasoning_effort"] = *req.ReasoningEffort
+	}
+	if req.EnableWebSearch != nil {
+		updates["enable_web_search"] = *req.EnableWebSearch
+	}
 	if req.ToolSearchEnabled != nil {
 		updates["tool_search_enabled"] = *req.ToolSearchEnabled
 	}

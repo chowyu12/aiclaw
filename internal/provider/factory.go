@@ -127,7 +127,7 @@ func NewFromProvider(p *model.Provider) (LLMProvider, error) {
 	config := openai.DefaultConfig(p.APIKey)
 	config.BaseURL = baseURL
 	config.HTTPClient = &http.Client{
-		Transport: &loggingTransport{inner: http.DefaultTransport},
+		Transport: &loggingTransport{inner: http.DefaultTransport, providerType: p.Type},
 	}
 
 	client := openai.NewClientWithConfig(config)
@@ -135,7 +135,8 @@ func NewFromProvider(p *model.Provider) (LLMProvider, error) {
 }
 
 type loggingTransport struct {
-	inner http.RoundTripper
+	inner        http.RoundTripper
+	providerType model.ProviderType
 }
 
 var base64DataRe = regexp.MustCompile(`"data:[^"]{0,50};base64,[A-Za-z0-9+/=]{200,}"`)
@@ -156,7 +157,7 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			return nil, fmt.Errorf("read request body: %w", err)
 		}
 
-		bodyBytes = injectEnableThinking(bodyBytes)
+		bodyBytes = injectExtraParams(bodyBytes, t.providerType)
 
 		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		req.ContentLength = int64(len(bodyBytes))
@@ -191,9 +192,8 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return resp, nil
 }
 
-// injectEnableThinking 读取 chat_template_kwargs.enable_thinking，将其提升为顶级 enable_thinking 字段。
-// vLLM 使用 chat_template_kwargs，DashScope 使用顶级 enable_thinking，OpenAI 使用 reasoning_effort。
-func injectEnableThinking(body []byte) []byte {
+// injectExtraParams 读取 chat_template_kwargs，按供应商格式将扩展字段提升为 API 所需的顶级参数。
+func injectExtraParams(body []byte, pt model.ProviderType) []byte {
 	var m map[string]any
 	if json.Unmarshal(body, &m) != nil {
 		return body
@@ -202,17 +202,47 @@ func injectEnableThinking(body []byte) []byte {
 	if !ok {
 		return body
 	}
-	enabled, ok := kwargs["enable_thinking"].(bool)
-	if !ok {
-		return body
+	changed := false
+
+	// enable_thinking → 顶级（DashScope / vLLM 格式）
+	if enabled, ok := kwargs["enable_thinking"].(bool); ok {
+		m["enable_thinking"] = enabled
+		changed = true
 	}
-	m["enable_thinking"] = enabled
-	if !enabled {
-		delete(m, "reasoning_effort")
+
+	// enable_search → 仅对显式支持的供应商注入
+	if search, ok := kwargs["enable_search"].(bool); ok && search {
+		switch pt {
+		case model.ProviderQwen:
+			m["enable_search"] = true
+			changed = true
+		case model.ProviderOpenAI:
+			m["web_search_options"] = map[string]any{
+				"search_context_size": "medium",
+				"user_location":      map[string]any{"type": "approximate"},
+			}
+			changed = true
+		}
+	}
+
+	if !changed {
+		return body
 	}
 	out, err := json.Marshal(m)
 	if err != nil {
 		return body
 	}
 	return out
+}
+
+// effortBudgetRatio 将 reasoning_effort 级别映射为 thinking budget 占 max_tokens 的比例。
+func effortBudgetRatio(effort string) float64 {
+	switch effort {
+	case "low":
+		return 0.25
+	case "high":
+		return 0.75
+	default:
+		return 0.5
+	}
 }

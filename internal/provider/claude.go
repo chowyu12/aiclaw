@@ -26,7 +26,7 @@ func newClaudeAdapter(apiKey, baseURL string) *claudeAdapter {
 	return &claudeAdapter{
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport}},
+		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport, providerType: "claude"}},
 	}
 }
 
@@ -87,7 +87,7 @@ func buildClaudeRequest(req openai.ChatCompletionRequest) claudeRequest {
 		cr.MaxTokens = 4096
 	}
 	if req.ReasoningEffort != "" {
-		budget := cr.MaxTokens / 2
+		budget := int(float64(cr.MaxTokens) * effortBudgetRatio(req.ReasoningEffort))
 		if budget < 1024 {
 			budget = 1024
 		}
