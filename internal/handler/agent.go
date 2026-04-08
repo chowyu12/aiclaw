@@ -11,6 +11,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/store"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 	"github.com/chowyu12/aiclaw/pkg/httputil"
+	"github.com/chowyu12/aiclaw/pkg/modelcaps"
 )
 
 type AgentHandler struct {
@@ -29,6 +30,7 @@ func (h *AgentHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/agents/{id}", h.Update)
 	mux.HandleFunc("DELETE /api/v1/agents/{id}", h.Delete)
 	mux.HandleFunc("POST /api/v1/agents/{id}/reset-token", h.ResetToken)
+	mux.HandleFunc("GET /api/v1/model-caps", h.GetModelCaps)
 }
 
 func (h *AgentHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -64,6 +66,8 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		MaxHistory:        req.MaxHistory,
 		MaxIterations:     req.MaxIterations,
 		DisableThinking:   req.DisableThinking,
+		ReasoningEffort:   req.ReasoningEffort,
+		EnableWebSearch:   req.EnableWebSearch,
 		ToolSearchEnabled: req.ToolSearchEnabled,
 		MemOSEnabled:      req.MemOSEnabled,
 		MemOSCfg:          req.MemOSCfg,
@@ -162,6 +166,16 @@ func (h *AgentHandler) ResetToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.OK(w, map[string]string{"token": newToken})
+}
+
+func (h *AgentHandler) GetModelCaps(w http.ResponseWriter, r *http.Request) {
+	modelName := r.URL.Query().Get("model")
+	if modelName == "" {
+		httputil.BadRequest(w, "model parameter is required")
+		return
+	}
+	caps := modelcaps.GetModelCaps(modelName)
+	httputil.OK(w, caps)
 }
 
 // ---- helpers ----

@@ -25,7 +25,7 @@ func newGeminiAdapter(apiKey, baseURL string) *geminiAdapter {
 	return &geminiAdapter{
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport}},
+		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport, providerType: "gemini"}},
 	}
 }
 
@@ -72,6 +72,7 @@ type geminiFuncResp struct {
 
 type geminiToolDecl struct {
 	FunctionDeclarations []geminiFuncDecl `json:"functionDeclarations,omitempty"`
+	GoogleSearch         *struct{}        `json:"googleSearch,omitempty"`
 }
 
 type geminiFuncDecl struct {
@@ -100,18 +101,26 @@ func buildGeminiRequest(req openai.ChatCompletionRequest) geminiRequest {
 	}
 
 	if req.ReasoningEffort != "" {
-		budget := 8192
+		ratio := effortBudgetRatio(req.ReasoningEffort)
+		var budget int
 		if req.MaxCompletionTokens > 0 {
-			budget = req.MaxCompletionTokens / 2
-			if budget < 1024 {
-				budget = 1024
-			}
+			budget = int(float64(req.MaxCompletionTokens) * ratio)
+		} else {
+			budget = int(8192 * ratio / 0.5) // 基准 8192 对应 medium(0.5)
+		}
+		if budget < 1024 {
+			budget = 1024
 		}
 		gr.ThinkingConfig = &geminiThinkingConfig{ThinkingBudget: budget}
 	}
 
 	gr.SystemInstruction, gr.Contents = convertToGeminiContents(req.Messages)
 	gr.Tools = convertToGeminiTools(req.Tools)
+
+	if search, ok := req.ChatTemplateKwargs["enable_search"].(bool); ok && search {
+		gr.Tools = append(gr.Tools, geminiToolDecl{GoogleSearch: &struct{}{}})
+	}
+
 	return gr
 }
 

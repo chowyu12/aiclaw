@@ -59,9 +59,9 @@
           <!-- ====== 右栏：配置面板 ====== -->
           <div class="af-right">
             <div class="af-right-inner">
-              <!-- 推理参数 -->
+              <!-- 模型参数 -->
               <section class="af-card">
-                <h4 class="af-card-head">推理参数</h4>
+                <h4 class="af-card-head">模型参数</h4>
                 <label class="af-kv">
                   <span class="af-kv-k">温度</span>
                   <div class="af-kv-v af-temp">
@@ -69,33 +69,28 @@
                     <span class="af-temp-val">{{ agentForm.temperature.toFixed(1) }}</span>
                   </div>
                 </label>
-                <div class="af-grid2">
-                  <label class="af-kv">
-                    <span class="af-kv-k">Max Tokens</span>
-                    <el-input-number v-model="agentForm.max_tokens" :min="1" :max="128000" controls-position="right" size="small" class="af-kv-num" />
-                  </label>
-                  <label class="af-kv">
-                    <span class="af-kv-k">超时 (s)</span>
-                    <el-input-number v-model="agentForm.timeout" :min="0" controls-position="right" size="small" class="af-kv-num" />
-                  </label>
-                  <label class="af-kv">
-                    <span class="af-kv-k">历史条数</span>
-                    <el-input-number v-model="agentForm.max_history" :min="1" :max="500" controls-position="right" size="small" class="af-kv-num" />
-                  </label>
-                  <label class="af-kv">
-                    <span class="af-kv-k">最大迭代</span>
-                    <el-input-number v-model="agentForm.max_iterations" :min="1" :max="200" controls-position="right" size="small" class="af-kv-num" />
-                  </label>
-                </div>
                 <label class="af-kv">
-                  <span class="af-kv-k">Token 预算 <span class="af-kv-sub">0 = 不限</span></span>
-                  <el-input-number v-model="agentForm.token_budget" :min="0" :max="10000000" :step="10000" controls-position="right" size="small" class="af-kv-num" />
+                  <span class="af-kv-k">Max Tokens</span>
+                  <el-input-number v-model="agentForm.max_tokens" :min="1" :max="128000" controls-position="right" size="small" class="af-kv-num" />
                 </label>
-                <div class="af-switch-line" style="margin-top:8px">
-                  <span>关闭深度思考</span>
-                  <el-switch v-model="agentForm.disable_thinking" size="small" />
+                <div class="af-switch-line" style="margin-top:4px">
+                  <span>深度思考</span>
+                  <el-switch v-model="thinkingEnabled" size="small" :disabled="isAlwaysThinking" />
                 </div>
-                <div class="af-hint">默认开启，关闭后模型将跳过推理直接回复</div>
+                <div v-if="isAlwaysThinking" class="af-hint warn">推理模型，始终开启</div>
+                <label v-if="thinkingEnabled || isAlwaysThinking" class="af-kv" style="margin-top:6px">
+                  <span class="af-kv-k">推理强度</span>
+                  <el-select v-model="agentForm.reasoning_effort" size="small" style="width:100%">
+                    <el-option label="低 (Low)" value="low" />
+                    <el-option label="中 (Medium)" value="medium" />
+                    <el-option label="高 (High)" value="high" />
+                  </el-select>
+                </label>
+                <div class="af-switch-line" style="margin-top:4px">
+                  <span>联网搜索</span>
+                  <el-switch v-model="agentForm.enable_web_search" size="small" :disabled="!supportsWebSearch" />
+                </div>
+                <div v-if="!supportsWebSearch" class="af-hint">当前模型不支持</div>
               </section>
 
               <!-- 工具 -->
@@ -111,42 +106,72 @@
                 </el-select>
               </section>
 
-              <!-- MemOS -->
-              <section class="af-card">
-                <h4 class="af-card-head">MemOS 长期记忆</h4>
-                <div class="af-switch-line">
-                  <span>启用</span>
-                  <el-switch v-model="agentForm.memos_enabled" size="small" />
+              <!-- 高级设置（可折叠） -->
+              <section class="af-card af-card--fold">
+                <h4 class="af-card-head af-card-head--toggle" @click="openSections.advanced = !openSections.advanced">
+                  <span>高级设置</span>
+                  <el-icon class="af-fold-arrow" :class="{ open: openSections.advanced }"><ArrowRight /></el-icon>
+                </h4>
+                <div v-show="openSections.advanced" class="af-card-body">
+                  <div class="af-grid2">
+                    <label class="af-kv">
+                      <span class="af-kv-k">超时 (s)</span>
+                      <el-input-number v-model="agentForm.timeout" :min="0" controls-position="right" size="small" class="af-kv-num" />
+                    </label>
+                    <label class="af-kv">
+                      <span class="af-kv-k">历史条数</span>
+                      <el-input-number v-model="agentForm.max_history" :min="1" :max="500" controls-position="right" size="small" class="af-kv-num" />
+                    </label>
+                    <label class="af-kv">
+                      <span class="af-kv-k">最大迭代</span>
+                      <el-input-number v-model="agentForm.max_iterations" :min="1" :max="200" controls-position="right" size="small" class="af-kv-num" />
+                    </label>
+                    <label class="af-kv">
+                      <span class="af-kv-k">Token 预算 <span class="af-kv-sub">0=不限</span></span>
+                      <el-input-number v-model="agentForm.token_budget" :min="0" :max="10000000" :step="10000" controls-position="right" size="small" class="af-kv-num" />
+                    </label>
+                  </div>
+                  <div class="af-switch-line">
+                    <span>设为默认 Agent</span>
+                    <el-switch v-model="agentForm.is_default" size="small" />
+                  </div>
+                  <div class="af-hint">未指定 Agent 的请求将使用此 Agent</div>
                 </div>
-                <template v-if="agentForm.memos_enabled">
-                  <el-input v-model="agentForm.memos_config.api_key" show-password size="small" placeholder="API Key (mpg-...)" style="margin-top:8px" />
+              </section>
+
+              <!-- MemOS（可折叠） -->
+              <section class="af-card af-card--fold">
+                <h4 class="af-card-head af-card-head--toggle" @click="openSections.memos = !openSections.memos">
+                  <span>MemOS 长期记忆</span>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <el-switch v-model="agentForm.memos_enabled" size="small" @click.stop />
+                    <el-icon class="af-fold-arrow" :class="{ open: openSections.memos }"><ArrowRight /></el-icon>
+                  </div>
+                </h4>
+                <div v-show="openSections.memos && agentForm.memos_enabled" class="af-card-body">
+                  <el-input v-model="agentForm.memos_config.api_key" show-password size="small" placeholder="API Key (mpg-...)" />
                   <el-input v-model="agentForm.memos_config.base_url" size="small" placeholder="Base URL（可选）" style="margin-top:6px" />
-                </template>
-              </section>
-
-              <!-- API Token -->
-              <section v-if="isEdit" class="af-card">
-                <h4 class="af-card-head">API Token</h4>
-                <code v-if="agentForm.token" class="af-token">{{ agentForm.token }}</code>
-                <span v-else class="af-hint" style="margin:0">尚未生成</span>
-                <div class="af-token-btns">
-                  <el-button v-if="agentForm.token" link type="primary" size="small" @click="copyToken(agentForm.token)">复制</el-button>
-                  <el-popconfirm title="重置后旧 Token 将失效" @confirm="doResetToken">
-                    <template #reference>
-                      <el-button type="warning" link size="small">重置</el-button>
-                    </template>
-                  </el-popconfirm>
                 </div>
               </section>
 
-              <!-- 其他 -->
-              <section class="af-card">
-                <h4 class="af-card-head">其他</h4>
-                <div class="af-switch-line">
-                  <span>设为默认 Agent</span>
-                  <el-switch v-model="agentForm.is_default" size="small" />
+              <!-- API Token（可折叠，仅编辑模式） -->
+              <section v-if="isEdit" class="af-card af-card--fold">
+                <h4 class="af-card-head af-card-head--toggle" @click="openSections.token = !openSections.token">
+                  <span>API Token</span>
+                  <el-icon class="af-fold-arrow" :class="{ open: openSections.token }"><ArrowRight /></el-icon>
+                </h4>
+                <div v-show="openSections.token" class="af-card-body">
+                  <code v-if="agentForm.token" class="af-token">{{ agentForm.token }}</code>
+                  <span v-else class="af-hint" style="margin:0">尚未生成</span>
+                  <div class="af-token-btns">
+                    <el-button v-if="agentForm.token" link type="primary" size="small" @click="copyToken(agentForm.token)">复制</el-button>
+                    <el-popconfirm title="重置后旧 Token 将失效" @confirm="doResetToken">
+                      <template #reference>
+                        <el-button type="warning" link size="small">重置</el-button>
+                      </template>
+                    </el-popconfirm>
+                  </div>
                 </div>
-                <div class="af-hint">未指定 Agent 的请求将使用此 Agent</div>
               </section>
             </div>
           </div>
@@ -157,10 +182,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { agentApi, type Agent } from '@/api/agent'
+import { agentApi, defaultModelCaps, type Agent, type ModelCaps } from '@/api/agent'
 import { providerApi, type Provider } from '@/api/provider'
 import { toolApi, type Tool } from '@/api/tool'
 import { useAgentStore } from '@/stores/agent'
@@ -199,6 +224,8 @@ const agentForm = ref({
   max_iterations: 50,
   token_budget: 0,
   disable_thinking: false,
+  reasoning_effort: 'medium',
+  enable_web_search: false,
   tool_search_enabled: false,
   memos_enabled: false,
   memos_config: { base_url: '', api_key: '', user_id: '', top_k: 10, async: true },
@@ -207,15 +234,33 @@ const agentForm = ref({
   is_default: false,
 })
 
-const noTemperaturePrefixes = ['o1-', 'o3-', 'o4-mini', 'gpt-5.', 'deepseek-reasoner']
-const noTemperatureExact = new Set(['o1', 'o3', 'o4-mini'])
+const modelCaps = ref<ModelCaps>({ ...defaultModelCaps })
 
-const isTemperatureDisabled = computed(() => {
-  const m = agentForm.value.model_name
-  if (!m) return false
-  if (noTemperatureExact.has(m)) return true
-  return noTemperaturePrefixes.some((p) => m.startsWith(p))
+let capsAbort: AbortController | null = null
+async function fetchModelCaps(model: string) {
+  capsAbort?.abort()
+  if (!model) { modelCaps.value = { ...defaultModelCaps }; return }
+  capsAbort = new AbortController()
+  try {
+    const res: any = await agentApi.getModelCaps(model)
+    modelCaps.value = res.data ?? { ...defaultModelCaps }
+  } catch {
+    modelCaps.value = { ...defaultModelCaps }
+  }
+}
+
+watch(() => agentForm.value.model_name, (m) => fetchModelCaps(m))
+
+const isTemperatureDisabled = computed(() => modelCaps.value.no_temperature)
+const isAlwaysThinking = computed(() => modelCaps.value.always_thinking)
+const supportsWebSearch = computed(() => modelCaps.value.web_search)
+
+const thinkingEnabled = computed({
+  get: () => !agentForm.value.disable_thinking,
+  set: (v: boolean) => { agentForm.value.disable_thinking = !v },
 })
+
+const openSections = ref({ advanced: false, memos: false, token: false })
 
 const localOnlyModels = computed(() => {
   const remoteSet = new Set(remoteModels.value)
@@ -274,6 +319,8 @@ function applyAgentDetail(detail: Agent) {
     max_iterations: detail.max_iterations ?? 50,
     token_budget: detail.token_budget ?? 0,
     disable_thinking: !!detail.disable_thinking,
+    reasoning_effort: detail.reasoning_effort || 'medium',
+    enable_web_search: !!detail.enable_web_search,
     tool_search_enabled: !!detail.tool_search_enabled,
     memos_enabled: !!detail.memos_enabled,
     memos_config: {
@@ -330,6 +377,8 @@ async function saveAgent() {
       max_iterations: agentForm.value.max_iterations,
       token_budget: agentForm.value.token_budget,
       disable_thinking: agentForm.value.disable_thinking,
+      reasoning_effort: agentForm.value.reasoning_effort,
+      enable_web_search: agentForm.value.enable_web_search,
       tool_search_enabled: agentForm.value.tool_search_enabled,
       memos_enabled: agentForm.value.memos_enabled,
       memos_config: agentForm.value.memos_config,
@@ -440,6 +489,20 @@ onMounted(() => reloadAgent())
   color: var(--el-text-color-secondary);
   margin: 0 0 12px;
 }
+
+.af-card--fold > .af-card-head { margin-bottom: 0; }
+.af-card--fold > .af-card-body { margin-top: 12px; }
+
+.af-card-head--toggle {
+  display: flex; align-items: center; justify-content: space-between;
+  cursor: pointer; user-select: none;
+}
+
+.af-fold-arrow {
+  font-size: 12px; transition: transform 0.2s;
+  color: var(--el-text-color-placeholder);
+}
+.af-fold-arrow.open { transform: rotate(90deg); }
 
 /* ===== KV 字段 ===== */
 .af-kv { display: block; margin-bottom: 10px; }

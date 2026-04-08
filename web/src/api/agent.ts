@@ -24,6 +24,8 @@ export interface Agent {
   max_iterations: number
   token_budget: number
   disable_thinking: boolean
+  reasoning_effort: string
+  enable_web_search: boolean
   tool_search_enabled: boolean
   memos_enabled: boolean
   memos_config: MemOSConfig
@@ -48,6 +50,8 @@ export interface UpdateAgentPayload {
   max_iterations?: number
   token_budget?: number
   disable_thinking?: boolean
+  reasoning_effort?: string
+  enable_web_search?: boolean
   tool_search_enabled?: boolean
   memos_enabled?: boolean
   memos_config?: MemOSConfig
@@ -68,11 +72,35 @@ export interface CreateAgentPayload {
   max_iterations?: number
   token_budget?: number
   disable_thinking?: boolean
+  reasoning_effort?: string
+  enable_web_search?: boolean
   tool_search_enabled?: boolean
   memos_enabled?: boolean
   memos_config?: MemOSConfig
   tool_ids?: number[]
   is_default?: boolean
+}
+
+export interface ModelCaps {
+  no_temperature: boolean
+  no_top_p: boolean
+  no_streaming: boolean
+  always_thinking: boolean
+  vision: boolean
+  function_calling: boolean
+  web_search: boolean
+  context_window: number
+}
+
+export const defaultModelCaps: ModelCaps = {
+  no_temperature: false,
+  no_top_p: false,
+  no_streaming: false,
+  always_thinking: false,
+  vision: false,
+  function_calling: true,
+  web_search: false,
+  context_window: 128000,
 }
 
 export const agentApi = {
@@ -88,4 +116,6 @@ export const agentApi = {
     request.delete(`/agents/${id}`),
   resetTokenById: (id: number) =>
     request.post<any, { data: { token: string } }>(`/agents/${id}/reset-token`),
+  getModelCaps: (model: string) =>
+    request.get<any, { data: ModelCaps }>('/model-caps', { params: { model } }),
 }

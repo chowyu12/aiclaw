@@ -15,6 +15,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/provider"
+	"github.com/chowyu12/aiclaw/pkg/modelcaps"
 )
 
 // ── LLM 调用抽象 ─────────────────────────────────────────────
@@ -370,7 +371,7 @@ func extractContent(resp openai.ChatCompletionResponse) string {
 }
 
 func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, l *log.Entry) {
-	caps := model.GetModelCaps(ag.ModelName)
+	caps := modelcaps.GetModelCaps(ag.ModelName)
 	if caps.NoTemperature || caps.NoTopP {
 		l.WithFields(log.Fields{
 			"model": ag.ModelName, "no_temperature": caps.NoTemperature, "no_top_p": caps.NoTopP,
@@ -383,13 +384,27 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, l *log.E
 		req.MaxCompletionTokens = ag.MaxTokens
 	}
 
-	if ag.DisableThinking {
+	effort := ag.EffectiveReasoningEffort()
+
+	switch {
+	case caps.AlwaysThinking:
+		req.ReasoningEffort = effort
+		l.WithFields(log.Fields{"model": ag.ModelName, "effort": effort}).Debug("[LLM] always-thinking model, effort applied")
+	case ag.DisableThinking:
 		req.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 		l.WithField("model", ag.ModelName).Debug("[LLM] thinking disabled")
-	} else {
-		req.ReasoningEffort = "medium"
+	default:
+		req.ReasoningEffort = effort
 		req.ChatTemplateKwargs = map[string]any{"enable_thinking": true}
-		l.WithField("model", ag.ModelName).Debug("[LLM] thinking enabled")
+		l.WithFields(log.Fields{"model": ag.ModelName, "effort": effort}).Debug("[LLM] thinking enabled")
+	}
+
+	if ag.EnableWebSearch && caps.WebSearch {
+		if req.ChatTemplateKwargs == nil {
+			req.ChatTemplateKwargs = map[string]any{}
+		}
+		req.ChatTemplateKwargs["enable_search"] = true
+		l.WithField("model", ag.ModelName).Debug("[LLM] web search enabled")
 	}
 }
 

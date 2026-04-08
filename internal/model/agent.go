@@ -71,6 +71,8 @@ type Agent struct {
 	Token             string     `json:"token" gorm:"size:100;uniqueIndex"`
 	TokenBudget       int        `json:"token_budget" gorm:"default:0"`
 	DisableThinking   bool       `json:"disable_thinking" gorm:"default:false"`
+	ReasoningEffort   string     `json:"reasoning_effort" gorm:"size:20;default:medium"`
+	EnableWebSearch   bool       `json:"enable_web_search" gorm:"default:false"`
 	ToolSearchEnabled bool       `json:"tool_search_enabled" gorm:"default:false"`
 	MemOSEnabled      bool        `json:"memos_enabled" gorm:"column:memos_enabled;default:false"`
 	MemOSCfg          MemOSConfig `json:"memos_config" gorm:"column:memos_config;type:text"`
@@ -105,6 +107,15 @@ func (a *Agent) IterationLimit() int {
 	return DefaultAgentMaxIterations
 }
 
+func (a *Agent) EffectiveReasoningEffort() string {
+	switch a.ReasoningEffort {
+	case "low", "medium", "high":
+		return a.ReasoningEffort
+	default:
+		return "medium"
+	}
+}
+
 type UpdateAgentReq struct {
 	Name              *string      `json:"name,omitzero"`
 	Description       *string      `json:"description,omitzero"`
@@ -118,6 +129,8 @@ type UpdateAgentReq struct {
 	MaxIterations     *int         `json:"max_iterations,omitzero"`
 	TokenBudget       *int         `json:"token_budget,omitzero"`
 	DisableThinking   *bool        `json:"disable_thinking,omitzero"`
+	ReasoningEffort   *string      `json:"reasoning_effort,omitzero"`
+	EnableWebSearch   *bool        `json:"enable_web_search,omitzero"`
 	ToolSearchEnabled *bool        `json:"tool_search_enabled,omitzero"`
 	MemOSEnabled      *bool        `json:"memos_enabled,omitzero"`
 	MemOSCfg          *MemOSConfig `json:"memos_config,omitzero"`
@@ -138,6 +151,8 @@ type CreateAgentReq struct {
 	MaxIterations     int         `json:"max_iterations"`
 	TokenBudget       int         `json:"token_budget"`
 	DisableThinking   bool        `json:"disable_thinking"`
+	ReasoningEffort   string      `json:"reasoning_effort"`
+	EnableWebSearch   bool        `json:"enable_web_search"`
 	ToolSearchEnabled bool        `json:"tool_search_enabled"`
 	MemOSEnabled      bool        `json:"memos_enabled"`
 	MemOSCfg          MemOSConfig `json:"memos_config"`

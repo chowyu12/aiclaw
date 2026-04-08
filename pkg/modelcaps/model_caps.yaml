@@ -1,0 +1,498 @@
+# 模型能力配置
+# patterns 支持 glob 通配符（* 匹配任意字符序列），按顺序匹配，命中即停。
+# 未匹配到的模型使用 defaults。
+#
+# thinking 取值:
+#   none     — 模型不支持深度思考
+#   optional — 模型支持思考，用户可开关
+#   always   — 推理模型，思考始终开启，无法关闭
+
+defaults:
+  temperature: true
+  top_p: true
+  streaming: true
+  thinking: optional
+  vision: false
+  function_calling: true
+  web_search: false
+  context_window: 128000
+
+models:
+  # ═══════════════════════════════════════════
+  #  OpenAI — Reasoning 系列
+  # ═══════════════════════════════════════════
+
+  # o1
+  - patterns: ["o1", "openai/o1"]
+    temperature: false
+    top_p: false
+    thinking: always
+    context_window: 200000
+
+  - patterns: ["o1-*", "openai/o1-*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    context_window: 200000
+
+  # o3
+  - patterns: ["o3", "openai/o3"]
+    temperature: false
+    top_p: false
+    thinking: always
+    vision: true
+    context_window: 200000
+
+  - patterns: ["o3-*", "openai/o3-*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    context_window: 200000
+
+  # o4-mini — 支持 vision
+  - patterns: ["o4-mini*", "openai/o4-mini*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    vision: true
+    context_window: 200000
+
+  # ═══════════════════════════════════════════
+  #  OpenAI — GPT-5 系列
+  # ═══════════════════════════════════════════
+
+  - patterns: ["gpt-5*", "openai/gpt-5*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    vision: true
+    context_window: 400000
+
+  # ═══════════════════════════════════════════
+  #  OpenAI — GPT-4.1 系列 (~1M context)
+  # ═══════════════════════════════════════════
+
+  - patterns: ["gpt-4.1*", "openai/gpt-4.1*"]
+    vision: true
+    thinking: none
+    context_window: 1047576
+
+  # ═══════════════════════════════════════════
+  #  OpenAI — GPT-4o 系列
+  # ═══════════════════════════════════════════
+
+  - patterns: ["gpt-4o*", "openai/gpt-4o*"]
+    vision: true
+    thinking: none
+    context_window: 128000
+
+  # ═══════════════════════════════════════════
+  #  OpenAI — GPT-4 / GPT-3.5
+  # ═══════════════════════════════════════════
+
+  - patterns: ["gpt-4*", "openai/gpt-4*"]
+    thinking: none
+    context_window: 128000
+
+  - patterns: ["gpt-3.5*", "openai/gpt-3.5*"]
+    thinking: none
+    context_window: 16384
+
+  # ═══════════════════════════════════════════
+  #  DeepSeek
+  # ═══════════════════════════════════════════
+
+  - patterns: ["deepseek-reasoner*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    context_window: 128000
+
+  - patterns: ["deepseek-chat*", "deepseek-v*"]
+    thinking: none
+    context_window: 128000
+
+  # ═══════════════════════════════════════════
+  #  百炼 / 阿里云 DashScope (通义千问)
+  #  参考: https://help.aliyun.com/zh/model-studio/getting-started/models
+  # ═══════════════════════════════════════════
+
+  # ── QwQ 推理系列 — 始终推理，无 temperature ──
+  - patterns: ["qwq-plus*"]
+    temperature: false
+    thinking: always
+    context_window: 131072
+
+  - patterns: ["qwq-*"]
+    temperature: false
+    thinking: always
+    context_window: 131072
+
+  # ── QVQ 视觉推理 — 始终推理 + vision ──
+  - patterns: ["qvq-*"]
+    temperature: false
+    thinking: always
+    vision: true
+    context_window: 131072
+
+  # ── Qwen3.6 系列 — 最新版本，vision + 思考 + 联网搜索，1M context ──
+  - patterns: ["qwen3.6-*"]
+    thinking: optional
+    vision: true
+    web_search: true
+    context_window: 1000000
+
+  # ── Qwen3.5 系列 — vision + 思考 + 联网搜索，1M context ──
+  - patterns: ["qwen3.5-*"]
+    thinking: optional
+    vision: true
+    web_search: true
+    context_window: 1000000
+
+  # ── Qwen3-max — 联网搜索，262K context ──
+  - patterns: ["qwen3-max*"]
+    thinking: optional
+    web_search: true
+    context_window: 262144
+
+  # ── Qwen3 Coder 系列 — 1M context ──
+  - patterns: ["qwen3-coder-*"]
+    thinking: optional
+    context_window: 1000000
+
+  # ── Qwen3 VL（视觉语言）— vision + 思考 ──
+  - patterns: ["qwen3-vl-*"]
+    thinking: optional
+    vision: true
+    context_window: 131072
+
+  # ── Qwen3 Omni（多模态）——
+  - patterns: ["qwen3-omni-*"]
+    thinking: optional
+    vision: true
+    context_window: 131072
+
+  # ── Qwen3 其他（开源系列）— 支持 enable_thinking ──
+  - patterns: ["qwen3-*"]
+    thinking: optional
+    context_window: 131072
+
+  # ── Qwen 商业化版本 (qwen-plus / qwen-max) — 联网搜索 + 思考，1M context ──
+  - patterns: ["qwen-plus*"]
+    thinking: optional
+    web_search: true
+    context_window: 1000000
+
+  - patterns: ["qwen-max*"]
+    thinking: optional
+    web_search: true
+    context_window: 1000000
+
+  # ── qwen-turbo — 联网搜索 + 思考 ──
+  - patterns: ["qwen-turbo*"]
+    thinking: optional
+    web_search: true
+    context_window: 131072
+
+  # ── qwen-flash — 轻量级快速模型 ──
+  - patterns: ["qwen-flash*"]
+    thinking: optional
+    web_search: true
+    context_window: 131072
+
+  # ── qwen-long — 超长上下文（10M tokens）──
+  - patterns: ["qwen-long*"]
+    thinking: none
+    context_window: 10000000
+
+  # ── qwen-vl（视觉语言）— vision ──
+  - patterns: ["qwen-vl-*"]
+    vision: true
+    thinking: none
+    context_window: 131072
+
+  # ── qwen-coder — 代码模型 ──
+  - patterns: ["qwen-coder-*"]
+    thinking: none
+    context_window: 131072
+
+  # ── qwen-math — 数学模型 ──
+  - patterns: ["qwen-math-*"]
+    thinking: none
+    context_window: 131072
+
+  # ── qwen-mt — 翻译模型 ──
+  - patterns: ["qwen-mt-*"]
+    thinking: none
+    context_window: 131072
+
+  # ── Qwen2.5 VL（视觉语言）──
+  - patterns: ["qwen2.5-vl-*"]
+    vision: true
+    context_window: 131072
+
+  # ── Qwen2.5 Coder ──
+  - patterns: ["qwen2.5-coder-*"]
+    thinking: none
+    context_window: 131072
+
+  # ── Qwen2.5 其他 ──
+  - patterns: ["qwen2.5*", "qwen2*"]
+    web_search: true
+    context_window: 131072
+
+  # ── 百炼托管的第三方模型 ──
+
+  # DeepSeek R1（百炼托管）
+  - patterns: ["deepseek-r1*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    context_window: 128000
+
+  # DeepSeek V3.x（百炼托管）
+  - patterns: ["deepseek-v3*"]
+    thinking: none
+    context_window: 128000
+
+  # Kimi K2（百炼托管，含大写 Moonshot-Kimi-K2-Instruct 格式）
+  - patterns: ["kimi-k2*", "Moonshot-Kimi-K2*"]
+    thinking: optional
+    context_window: 131072
+
+  # GLM-5 / GLM-4.7（百炼托管）
+  - patterns: ["glm-5*"]
+    thinking: optional
+    context_window: 128000
+
+  - patterns: ["glm-4*"]
+    thinking: none
+    context_window: 128000
+
+  # MiniMax M2.5（百炼托管）
+  - patterns: ["MiniMax-M2*"]
+    thinking: optional
+    context_window: 131072
+
+  # 通义法睿（法律模型）
+  - patterns: ["farui-*"]
+    thinking: none
+    context_window: 131072
+
+  # ═══════════════════════════════════════════
+  #  Claude (Anthropic)
+  # ═══════════════════════════════════════════
+
+  # Claude 4 / Sonnet 4 — thinking + vision + 1M context
+  - patterns:
+      [
+        "claude-sonnet-4*",
+        "claude-4*",
+        "anthropic/claude-sonnet-4*",
+        "anthropic/claude-4*",
+      ]
+    thinking: optional
+    vision: true
+    context_window: 1000000
+
+  # Claude 3.7 Sonnet — thinking + vision
+  - patterns:
+      [
+        "claude-3-7*",
+        "claude-3.7*",
+        "anthropic/claude-3-7*",
+        "anthropic/claude-3.7*",
+      ]
+    thinking: optional
+    vision: true
+    context_window: 200000
+
+  # Claude 3.5 Sonnet / Haiku — vision，无 thinking
+  - patterns:
+      [
+        "claude-3-5*",
+        "claude-3.5*",
+        "anthropic/claude-3-5*",
+        "anthropic/claude-3.5*",
+      ]
+    vision: true
+    thinking: none
+    context_window: 200000
+
+  # Claude 3 Opus / Sonnet / Haiku
+  - patterns: ["claude-3*", "anthropic/claude-3*"]
+    vision: true
+    thinking: none
+    context_window: 200000
+
+  # Claude 兜底
+  - patterns: ["claude-*", "anthropic/claude-*"]
+    vision: true
+    context_window: 200000
+
+  # ═══════════════════════════════════════════
+  #  Gemini (Google)
+  # ═══════════════════════════════════════════
+
+  # Gemini 2.5 — thinking + vision + grounding(联网搜索) + 1M context
+  - patterns: ["gemini-2.5*", "google/gemini-2.5*"]
+    thinking: optional
+    vision: true
+    web_search: true
+    context_window: 1048576
+
+  # Gemini 2.0 / 2.x
+  - patterns: ["gemini-2*", "google/gemini-2*"]
+    vision: true
+    thinking: none
+    web_search: true
+    context_window: 1048576
+
+  # Gemini 1.5
+  - patterns: ["gemini-1.5*", "google/gemini-1.5*"]
+    vision: true
+    thinking: none
+    context_window: 1048576
+
+  # Gemini 兜底
+  - patterns: ["gemini-*", "google/gemini-*"]
+    vision: true
+    context_window: 128000
+
+  # ═══════════════════════════════════════════
+  #  Moonshot / Kimi
+  # ═══════════════════════════════════════════
+
+  - patterns: ["moonshot-*", "kimi-*"]
+    thinking: none
+    context_window: 128000
+
+  # ═══════════════════════════════════════════
+  #  SiliconFlow 托管模型
+  # ═══════════════════════════════════════════
+
+  - patterns: ["deepseek-ai/DeepSeek-R1*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    context_window: 128000
+
+  - patterns: ["deepseek-ai/DeepSeek-V*"]
+    thinking: none
+    context_window: 128000
+
+  - patterns: ["Qwen/QwQ-*", "Qwen/QVQ-*"]
+    temperature: false
+    thinking: always
+    context_window: 131072
+
+  - patterns: ["Qwen/Qwen3-*"]
+    thinking: optional
+    context_window: 131072
+
+  - patterns: ["Qwen/Qwen2.5-VL-*"]
+    vision: true
+    context_window: 131072
+
+  - patterns: ["Qwen/Qwen2.5-*"]
+    context_window: 131072
+
+  # ═══════════════════════════════════════════
+  #  OpenRouter 路由模型（provider/model 格式）
+  # ═══════════════════════════════════════════
+
+  - patterns: ["openai/o1*", "openai/o3*", "openai/o4*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    context_window: 200000
+
+  - patterns: ["openai/gpt-5*"]
+    temperature: false
+    top_p: false
+    thinking: always
+    vision: true
+    context_window: 400000
+
+  - patterns: ["openai/gpt-4.1*"]
+    vision: true
+    thinking: none
+    context_window: 1047576
+
+  - patterns: ["openai/gpt-4o*"]
+    vision: true
+    thinking: none
+    context_window: 128000
+
+  - patterns: ["anthropic/claude-sonnet-4*", "anthropic/claude-4*"]
+    thinking: optional
+    vision: true
+    context_window: 1000000
+
+  - patterns: ["anthropic/claude-3.5*", "anthropic/claude-3-5*"]
+    vision: true
+    thinking: none
+    context_window: 200000
+
+  - patterns: ["google/gemini-2.5*"]
+    thinking: optional
+    vision: true
+    web_search: true
+    context_window: 1048576
+
+  - patterns: ["meta-llama/llama-*", "meta-llama/Llama-*"]
+    thinking: none
+    context_window: 131072
+
+  # ═══════════════════════════════════════════
+  #  Mistral
+  # ═══════════════════════════════════════════
+
+  - patterns: ["mistral-large*", "mistral/mistral-large*"]
+    vision: true
+    thinking: none
+    context_window: 131072
+
+  - patterns: ["mistral-*", "mixtral-*", "mistral/*"]
+    thinking: none
+    context_window: 32768
+
+  # ═══════════════════════════════════════════
+  #  其他常见模型
+  # ═══════════════════════════════════════════
+
+  - patterns: ["llama-*"]
+    thinking: none
+    context_window: 131072
+
+  - patterns: ["yi-*"]
+    thinking: none
+    context_window: 200000
+
+  - patterns: ["glm-4*", "chatglm*"]
+    thinking: none
+    context_window: 128000
+
+  - patterns: ["hunyuan-*"]
+    thinking: none
+    context_window: 256000
+
+  - patterns: ["step-*"]
+    thinking: none
+    context_window: 128000
+
+  - patterns: ["spark-*"]
+    thinking: none
+    context_window: 128000
+
+  - patterns: ["ernie-*"]
+    thinking: none
+    context_window: 128000
+
+  - patterns: ["doubao-*"]
+    thinking: none
+    context_window: 128000
+
+  - patterns: ["abab*", "minimax-*"]
+    thinking: none
+    context_window: 131072
