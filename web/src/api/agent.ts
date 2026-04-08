@@ -23,7 +23,7 @@ export interface Agent {
   max_history: number
   max_iterations: number
   token_budget: number
-  disable_thinking: boolean
+  enable_thinking: boolean
   reasoning_effort: string
   enable_web_search: boolean
   tool_search_enabled: boolean
@@ -49,7 +49,7 @@ export interface UpdateAgentPayload {
   max_history?: number
   max_iterations?: number
   token_budget?: number
-  disable_thinking?: boolean
+  enable_thinking?: boolean
   reasoning_effort?: string
   enable_web_search?: boolean
   tool_search_enabled?: boolean
@@ -71,7 +71,7 @@ export interface CreateAgentPayload {
   max_history?: number
   max_iterations?: number
   token_budget?: number
-  disable_thinking?: boolean
+  enable_thinking?: boolean
   reasoning_effort?: string
   enable_web_search?: boolean
   tool_search_enabled?: boolean

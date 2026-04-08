@@ -65,7 +65,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Timeout:           req.Timeout,
 		MaxHistory:        req.MaxHistory,
 		MaxIterations:     req.MaxIterations,
-		DisableThinking:   req.DisableThinking,
+		EnableThinking:    req.EnableThinking,
 		ReasoningEffort:   req.ReasoningEffort,
 		EnableWebSearch:   req.EnableWebSearch,
 		ToolSearchEnabled: req.ToolSearchEnabled,
