@@ -390,7 +390,7 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, l *log.E
 	case caps.AlwaysThinking:
 		req.ReasoningEffort = effort
 		l.WithFields(log.Fields{"model": ag.ModelName, "effort": effort}).Debug("[LLM] always-thinking model, effort applied")
-	case ag.DisableThinking:
+	case !ag.EnableThinking:
 		req.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 		l.WithField("model", ag.ModelName).Debug("[LLM] thinking disabled")
 	default:

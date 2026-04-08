@@ -70,7 +70,7 @@ type Agent struct {
 	MaxIterations     int        `json:"max_iterations" gorm:"default:50"`
 	Token             string     `json:"token" gorm:"size:100;uniqueIndex"`
 	TokenBudget       int        `json:"token_budget" gorm:"default:0"`
-	DisableThinking   bool       `json:"disable_thinking" gorm:"default:false"`
+	EnableThinking    bool       `json:"enable_thinking" gorm:"default:true"`
 	ReasoningEffort   string     `json:"reasoning_effort" gorm:"size:20;default:medium"`
 	EnableWebSearch   bool       `json:"enable_web_search" gorm:"default:false"`
 	ToolSearchEnabled bool       `json:"tool_search_enabled" gorm:"default:false"`
@@ -128,7 +128,7 @@ type UpdateAgentReq struct {
 	MaxHistory        *int         `json:"max_history,omitzero"`
 	MaxIterations     *int         `json:"max_iterations,omitzero"`
 	TokenBudget       *int         `json:"token_budget,omitzero"`
-	DisableThinking   *bool        `json:"disable_thinking,omitzero"`
+	EnableThinking    *bool        `json:"enable_thinking,omitzero"`
 	ReasoningEffort   *string      `json:"reasoning_effort,omitzero"`
 	EnableWebSearch   *bool        `json:"enable_web_search,omitzero"`
 	ToolSearchEnabled *bool        `json:"tool_search_enabled,omitzero"`
@@ -150,7 +150,7 @@ type CreateAgentReq struct {
 	MaxHistory        int         `json:"max_history"`
 	MaxIterations     int         `json:"max_iterations"`
 	TokenBudget       int         `json:"token_budget"`
-	DisableThinking   bool        `json:"disable_thinking"`
+	EnableThinking    bool        `json:"enable_thinking"`
 	ReasoningEffort   string      `json:"reasoning_effort"`
 	EnableWebSearch   bool        `json:"enable_web_search"`
 	ToolSearchEnabled bool        `json:"tool_search_enabled"`

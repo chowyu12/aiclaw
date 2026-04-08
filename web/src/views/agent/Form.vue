@@ -223,7 +223,7 @@ const agentForm = ref({
   max_history: 30,
   max_iterations: 50,
   token_budget: 0,
-  disable_thinking: false,
+  enable_thinking: true,
   reasoning_effort: 'medium',
   enable_web_search: false,
   tool_search_enabled: false,
@@ -256,8 +256,8 @@ const isAlwaysThinking = computed(() => modelCaps.value.always_thinking)
 const supportsWebSearch = computed(() => modelCaps.value.web_search)
 
 const thinkingEnabled = computed({
-  get: () => !agentForm.value.disable_thinking,
-  set: (v: boolean) => { agentForm.value.disable_thinking = !v },
+  get: () => agentForm.value.enable_thinking,
+  set: (v: boolean) => { agentForm.value.enable_thinking = v },
 })
 
 const openSections = ref({ advanced: false, memos: false, token: false })
@@ -318,7 +318,7 @@ function applyAgentDetail(detail: Agent) {
     max_history: detail.max_history ?? 30,
     max_iterations: detail.max_iterations ?? 50,
     token_budget: detail.token_budget ?? 0,
-    disable_thinking: !!detail.disable_thinking,
+    enable_thinking: detail.enable_thinking !== false,
     reasoning_effort: detail.reasoning_effort || 'medium',
     enable_web_search: !!detail.enable_web_search,
     tool_search_enabled: !!detail.tool_search_enabled,
@@ -376,7 +376,7 @@ async function saveAgent() {
       max_history: agentForm.value.max_history,
       max_iterations: agentForm.value.max_iterations,
       token_budget: agentForm.value.token_budget,
-      disable_thinking: agentForm.value.disable_thinking,
+      enable_thinking: agentForm.value.enable_thinking,
       reasoning_effort: agentForm.value.reasoning_effort,
       enable_web_search: agentForm.value.enable_web_search,
       tool_search_enabled: agentForm.value.tool_search_enabled,
