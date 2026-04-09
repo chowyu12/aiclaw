@@ -1,8 +1,9 @@
 module github.com/chowyu12/aiclaw
 
-go 1.25.0
+go 1.25.3
 
 require (
+	github.com/chowyu12/go-openai v1.0.0
 	github.com/chromedp/cdproto v0.0.0-20250803210736-d308e07a266d
 	github.com/chromedp/chromedp v0.14.2
 	github.com/fsnotify/fsnotify v1.9.0
@@ -13,7 +14,6 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/mark3labs/mcp-go v0.45.0
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/sashabaranov/go-openai v1.41.2
 	github.com/sirupsen/logrus v1.9.4
 	github.com/xuri/excelize/v2 v2.10.1
 	golang.org/x/net v0.51.0

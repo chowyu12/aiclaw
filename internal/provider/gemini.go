@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 )
 
 type geminiAdapter struct {
@@ -25,7 +25,7 @@ func newGeminiAdapter(apiKey, baseURL string) *geminiAdapter {
 	return &geminiAdapter{
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport, providerType: "gemini"}},
+		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport}},
 	}
 }
 

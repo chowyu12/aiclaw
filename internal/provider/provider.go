@@ -3,7 +3,7 @@ package provider
 import (
 	"context"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 )
 
 type ChatStream interface {

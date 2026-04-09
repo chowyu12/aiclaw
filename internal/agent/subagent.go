@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -183,7 +183,7 @@ func (e *Executor) inlineSubAgentCall(ctx context.Context, prompt, agentUUID str
 		Model:    ag.ModelName,
 		Messages: messages,
 	}
-	applyModelCaps(&req, ag, l)
+	applyModelCaps(&req, ag, prov.Type, l)
 
 	resp, err := llmProv.CreateChatCompletion(ctx, req)
 	if err != nil {

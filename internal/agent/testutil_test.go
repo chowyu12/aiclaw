@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 
 	"github.com/chowyu12/aiclaw/internal/workspace"
 
