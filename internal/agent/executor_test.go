@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/workspace"

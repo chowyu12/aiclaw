@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/model"
@@ -151,7 +151,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 			Messages: sanitizeMessages(st.Messages),
 			Tools:    toolsSentToLLM(st),
 		}
-		applyModelCaps(&req, ec.ag, ec.l)
+		applyModelCaps(&req, ec.ag, ec.prov.Type, ec.l)
 
 		ec.l.WithFields(log.Fields{"round": i + 1, "model": ec.ag.ModelName}).Info("[LLM] >> call")
 		iterStart := time.Now()
@@ -370,7 +370,7 @@ func extractContent(resp openai.ChatCompletionResponse) string {
 	return resp.Choices[0].Message.Content
 }
 
-func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, l *log.Entry) {
+func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, pt model.ProviderType, l *log.Entry) {
 	caps := modelcaps.GetModelCaps(ag.ModelName)
 	if caps.NoTemperature || caps.NoTopP {
 		l.WithFields(log.Fields{
@@ -384,6 +384,7 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, l *log.E
 		req.MaxCompletionTokens = ag.MaxTokens
 	}
 
+	extra := map[string]any{}
 	effort := ag.EffectiveReasoningEffort()
 
 	switch {
@@ -391,21 +392,43 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, l *log.E
 		req.ReasoningEffort = effort
 		l.WithFields(log.Fields{"model": ag.ModelName, "effort": effort}).Debug("[LLM] always-thinking model, effort applied")
 	case !ag.EnableThinking:
+		extra["enable_thinking"] = false
 		req.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
 		l.WithField("model", ag.ModelName).Debug("[LLM] thinking disabled")
 	default:
 		req.ReasoningEffort = effort
+		extra["enable_thinking"] = true
 		req.ChatTemplateKwargs = map[string]any{"enable_thinking": true}
 		l.WithFields(log.Fields{"model": ag.ModelName, "effort": effort}).Debug("[LLM] thinking enabled")
 	}
 
 	if ag.EnableWebSearch && caps.WebSearch {
-		if req.ChatTemplateKwargs == nil {
-			req.ChatTemplateKwargs = map[string]any{}
+		switch pt {
+		case model.ProviderQwen:
+			extra["enable_search"] = true
+		case model.ProviderOpenAI:
+			extra["web_search_options"] = map[string]any{
+				"search_context_size": "medium",
+				"user_location":      map[string]any{"type": "approximate"},
+			}
 		}
-		req.ChatTemplateKwargs["enable_search"] = true
+		req.ChatTemplateKwargs = mergeMap(req.ChatTemplateKwargs, map[string]any{"enable_search": true})
 		l.WithField("model", ag.ModelName).Debug("[LLM] web search enabled")
 	}
+
+	if len(extra) > 0 {
+		req.ExtraBody = extra
+	}
+}
+
+func mergeMap(dst, src map[string]any) map[string]any {
+	if dst == nil {
+		return src
+	}
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 func logResourceSummary(l *log.Entry, agentTools []model.Tool, skills []model.Skill) {

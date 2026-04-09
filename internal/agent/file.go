@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/chowyu12/aiclaw/internal/tools"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/parser"
+	"github.com/chowyu12/aiclaw/internal/tools"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 

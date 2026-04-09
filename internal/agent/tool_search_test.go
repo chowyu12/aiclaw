@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 )
 
 func makeDefs(tools ...struct{ name, desc string }) []openai.Tool {

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/model"
@@ -127,7 +127,7 @@ func NewFromProvider(p *model.Provider) (LLMProvider, error) {
 	config := openai.DefaultConfig(p.APIKey)
 	config.BaseURL = baseURL
 	config.HTTPClient = &http.Client{
-		Transport: &loggingTransport{inner: http.DefaultTransport, providerType: p.Type},
+		Transport: &loggingTransport{inner: http.DefaultTransport},
 	}
 
 	client := openai.NewClientWithConfig(config)
@@ -135,8 +135,7 @@ func NewFromProvider(p *model.Provider) (LLMProvider, error) {
 }
 
 type loggingTransport struct {
-	inner        http.RoundTripper
-	providerType model.ProviderType
+	inner http.RoundTripper
 }
 
 var base64DataRe = regexp.MustCompile(`"data:[^"]{0,50};base64,[A-Za-z0-9+/=]{200,}"`)
@@ -156,8 +155,6 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		if err != nil {
 			return nil, fmt.Errorf("read request body: %w", err)
 		}
-
-		bodyBytes = injectExtraParams(bodyBytes, t.providerType)
 
 		req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		req.ContentLength = int64(len(bodyBytes))
@@ -190,49 +187,6 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 	l.WithFields(log.Fields{"status": resp.StatusCode, "body": string(respBody)}).Trace("[LLM-HTTP] << response")
 	return resp, nil
-}
-
-// injectExtraParams 读取 chat_template_kwargs，按供应商格式将扩展字段提升为 API 所需的顶级参数。
-func injectExtraParams(body []byte, pt model.ProviderType) []byte {
-	var m map[string]any
-	if json.Unmarshal(body, &m) != nil {
-		return body
-	}
-	kwargs, ok := m["chat_template_kwargs"].(map[string]any)
-	if !ok {
-		return body
-	}
-	changed := false
-
-	// enable_thinking → 顶级（DashScope / vLLM 格式）
-	if enabled, ok := kwargs["enable_thinking"].(bool); ok {
-		m["enable_thinking"] = enabled
-		changed = true
-	}
-
-	// enable_search → 仅对显式支持的供应商注入
-	if search, ok := kwargs["enable_search"].(bool); ok && search {
-		switch pt {
-		case model.ProviderQwen:
-			m["enable_search"] = true
-			changed = true
-		case model.ProviderOpenAI:
-			m["web_search_options"] = map[string]any{
-				"search_context_size": "medium",
-				"user_location":      map[string]any{"type": "approximate"},
-			}
-			changed = true
-		}
-	}
-
-	if !changed {
-		return body
-	}
-	out, err := json.Marshal(m)
-	if err != nil {
-		return body
-	}
-	return out
 }
 
 // effortBudgetRatio 将 reasoning_effort 级别映射为 thinking budget 占 max_tokens 的比例。

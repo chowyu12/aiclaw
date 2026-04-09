@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	openai "github.com/sashabaranov/go-openai"
+	openai "github.com/chowyu12/go-openai"
 )
 
 const claudeAPIVersion = "2023-06-01"
@@ -26,7 +26,7 @@ func newClaudeAdapter(apiKey, baseURL string) *claudeAdapter {
 	return &claudeAdapter{
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport, providerType: "claude"}},
+		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport}},
 	}
 }
 
