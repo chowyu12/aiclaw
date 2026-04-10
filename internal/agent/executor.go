@@ -16,6 +16,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/store"
 	"github.com/chowyu12/aiclaw/internal/tools/mcp"
 	"github.com/chowyu12/aiclaw/internal/tools/sessionsearch"
+	"github.com/chowyu12/aiclaw/internal/tools/todotool"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -290,6 +291,8 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 	if isNewConv {
 		e.memory.AutoSetTitle(ctx, conv.ID, req.Message)
 	}
+
+	ctx = todotool.WithTodoStore(ctx, todotool.GetOrCreateStore(conv.UUID))
 
 	tracker := NewStepTracker(e.store, conv.ID)
 	if req.ExecChannel != nil {

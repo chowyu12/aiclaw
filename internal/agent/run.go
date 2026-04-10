@@ -146,6 +146,11 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 			return nil, errors.New("agent execution aborted by hook")
 		}
 
+		// 每轮刷新 system prompt 中的 todo 列表
+		if i > 0 && !ec.ephemeral {
+			refreshTodoInSystemMessage(st.Messages, ec.conv.UUID)
+		}
+
 		req := openai.ChatCompletionRequest{
 			Model:    ec.ag.ModelName,
 			Messages: sanitizeMessages(st.Messages),
@@ -293,6 +298,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 	memosCtx := recallMemories(ctx, ec.userMsg, ec.ag)
 	sessionMem := loadSessionMemory(e.ws, ec.ag.UUID, ec.conv.UUID)
 	persistentMem := loadPersistentMemory(e.ws)
+	todoBlock := loadTodoBlock(ec.conv.UUID)
 
 	var msgTools []model.Tool
 	var msgToolSkillMap map[string]string
@@ -311,6 +317,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		PersistentMemory: persistentMem,
 		MemosContext:     memosCtx,
 		SessionMemory:    sessionMem,
+		TodoBlock:        todoBlock,
 		ToolSearchMode:   tsMode,
 		WS:               e.ws,
 	})
@@ -323,6 +330,24 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		TSMode:      tsMode,
 		Discovered:  discovered,
 	}, nil
+}
+
+// refreshTodoInSystemMessage 在每轮 LLM 调用前，用最新的 todo 列表替换 system prompt 中的 todo 段落。
+func refreshTodoInSystemMessage(messages []openai.ChatCompletionMessage, convUUID string) {
+	if len(messages) == 0 || messages[0].Role != openai.ChatMessageRoleSystem {
+		return
+	}
+	newBlock := loadTodoBlock(convUUID)
+	content := messages[0].Content
+
+	const todoHeader = "\n\n## 当前任务\n"
+	if idx := strings.Index(content, todoHeader); idx >= 0 {
+		content = content[:idx]
+	}
+	if newBlock != "" {
+		content += "\n\n" + newBlock
+	}
+	messages[0].Content = content
 }
 
 func toolsSentToLLM(st *agentRunState) []openai.Tool {

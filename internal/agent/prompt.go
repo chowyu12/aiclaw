@@ -27,6 +27,7 @@ type messagesBuildInput struct {
 	PersistentMemory string
 	MemosContext     string
 	SessionMemory    string
+	TodoBlock        string
 	ToolSearchMode   bool
 	WS               *workspace.Workspace
 }
@@ -44,6 +45,10 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 
 	if in.SessionMemory != "" {
 		systemPrompt += "\n\n## 会话笔记\n以下是本次会话的历史执行摘要，可帮助回顾之前的对话进展：\n<session_notes>\n" + in.SessionMemory + "\n</session_notes>"
+	}
+
+	if in.TodoBlock != "" {
+		systemPrompt += "\n\n" + in.TodoBlock
 	}
 
 	var messages []openai.ChatCompletionMessage
@@ -200,6 +205,9 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 	}
 	if hasTools {
 		strategies = append(strategies,
+			"**任务规划**: 收到复杂请求时（涉及 3+ 步骤），先用 todo 工具创建任务列表，再逐项执行。完成每步后及时标记完成",
+			"**探索优先**: 不确定代码位置或架构时，先用 sub_agent(mode=explore) 并行探索收集信息，再动手修改",
+			"**并行利用**: 多个独立子任务可通过 sub_agent 的 tasks 数组并行执行，提高效率",
 			"**组合调用**: 复杂问题可串联或并行调用多个工具",
 			"**结果驱动**: 基于工具返回的真实数据生成回答，不编造或臆测信息",
 		)

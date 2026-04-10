@@ -8,6 +8,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/tools/canvas"
 	"github.com/chowyu12/aiclaw/internal/tools/codeinterp"
 	"github.com/chowyu12/aiclaw/internal/tools/memorytool"
+	"github.com/chowyu12/aiclaw/internal/tools/todotool"
 	"github.com/chowyu12/aiclaw/internal/scheduler"
 	"github.com/chowyu12/aiclaw/internal/tools/editfile"
 	"github.com/chowyu12/aiclaw/internal/tools/findfile"
@@ -40,6 +41,7 @@ func DefaultBuiltins() map[string]func(context.Context, string) (string, error) 
 	m["canvas"] = canvas.Handler
 	m["code_interpreter"] = codeinterp.Handler
 	m["memory"] = memorytool.Handler
+	m["todo"] = todotool.Handler
 	m["cron"] = scheduler.ToolHandler
 	return m
 }
