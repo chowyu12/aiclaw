@@ -2,7 +2,7 @@
   <div class="aic-page">
     <div class="aic-page-head">
       <h1 class="aic-title">工具</h1>
-      <p class="aic-sub">管理 Agent 可调用的内置、HTTP、命令行等工具；与 Agent 设置中的「关联工具」联动。</p>
+      <p class="aic-sub">管理 Agent 可调用的 HTTP、脚本等工具；与 Agent 设置中的「关联工具」联动。</p>
     </div>
     <div class="aic-page-body">
     <el-card class="aic-card" shadow="never">
@@ -82,11 +82,11 @@ const pageSize = ref(20)
 const keyword = ref('')
 
 function handlerTagType(type: string) {
-  const m: Record<string, string> = { builtin: 'success', http: 'warning', command: '', script: 'info' }
+  const m: Record<string, string> = { builtin: '', http: 'warning', command: '', script: 'info' }
   return m[type] || 'info'
 }
 function handlerLabel(type: string) {
-  const m: Record<string, string> = { builtin: 'builtin', http: 'http', command: 'command', script: 'script' }
+  const m: Record<string, string> = { builtin: '内置', http: 'HTTP', command: '命令行', script: '脚本' }
   return m[type] || type
 }
 

@@ -67,3 +67,8 @@ type CommandHandlerConfig struct {
 	Timeout    int    `json:"timeout,omitzero"`
 	Shell      string `json:"shell,omitzero"`
 }
+
+type ScriptHandlerConfig struct {
+	Language string `json:"language"`
+	Content  string `json:"content"`
+}

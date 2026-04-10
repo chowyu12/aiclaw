@@ -95,8 +95,16 @@ func (r *ToolRegistry) buildTool(td model.Tool) Tool {
 			handler:  tools.NewCommandHandler(cfg, td.TimeoutSeconds()),
 		}
 	case model.HandlerScript:
-		log.WithField("tool", td.Name).Warn("handler_type script is not implemented; use builtin/command/http")
-		return nil
+		var cfg model.ScriptHandlerConfig
+		if err := json.Unmarshal(td.HandlerConfig, &cfg); err != nil {
+			log.WithError(err).WithField("tool", td.Name).Warn("[Tool] invalid script handler config, skipping")
+			return nil
+		}
+		return &dynamicTool{
+			toolName: td.Name,
+			toolDesc: td.Description,
+			handler:  tools.NewScriptHandler(cfg, td.TimeoutSeconds()),
+		}
 	default:
 		log.WithFields(log.Fields{"tool": td.Name, "handler_type": td.HandlerType}).Warn("unsupported handler type")
 		return nil
