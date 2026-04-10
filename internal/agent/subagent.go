@@ -4,12 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
+	"time"
 
 	openai "github.com/chowyu12/go-openai"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/chowyu12/aiclaw/internal/model"
 )
 
 const maxSubAgentDepth = 3
+
+// ── sub-agent 嵌套深度 ──────────────────────────────────────
 
 type subAgentDepthKey struct{}
 
@@ -30,23 +36,36 @@ func propagateAgentValues(parent context.Context) context.Context {
 	return context.WithoutCancel(parent)
 }
 
-// subAgentRoundCountKey 传递本轮 sub_agent 调用总数，供 handler 决定是否走轻量路径。
-type subAgentRoundCountKey struct{}
+// ── 工具 blocklist ──────────────────────────────────────────
 
-func withSubAgentRoundCount(ctx context.Context, count int) context.Context {
-	return context.WithValue(ctx, subAgentRoundCountKey{}, count)
+type blockedToolsKey struct{}
+
+func withBlockedTools(ctx context.Context, blocked []string) context.Context {
+	if len(blocked) == 0 {
+		return ctx
+	}
+	m := make(map[string]bool, len(blocked))
+	for _, name := range blocked {
+		m[name] = true
+	}
+	// 合并父级的 blocklist
+	if parent, ok := ctx.Value(blockedToolsKey{}).(map[string]bool); ok {
+		for k, v := range parent {
+			m[k] = v
+		}
+	}
+	return context.WithValue(ctx, blockedToolsKey{}, m)
 }
 
-func subAgentRoundCount(ctx context.Context) int {
-	if v, ok := ctx.Value(subAgentRoundCountKey{}).(int); ok {
-		return v
+// IsToolBlocked 检查工具是否被当前 sub-agent 上下文 block。
+func IsToolBlocked(ctx context.Context, toolName string) bool {
+	if m, ok := ctx.Value(blockedToolsKey{}).(map[string]bool); ok {
+		return m[toolName]
 	}
-	return 0
+	return false
 }
 
 // ── 父执行上下文传递 ─────────────────────────────────────────
-// sub_agent handler 通过 context 获取父 tracker 和会话 ID，
-// 使子 agent 的执行步骤记录在父会话中，而非创建独立会话。
 
 type parentExecInfoKey struct{}
 
@@ -66,8 +85,8 @@ func parentExecInfoFromCtx(ctx context.Context) (*StepTracker, int64) {
 	return nil, 0
 }
 
-// subAgentCallIDKey 标识当前 sub_agent 调用对应的父级 tool_call_id，
-// 使同一 sub_agent 内的所有步骤可以关联到具体的调用。
+// ── sub_agent call ID ──────────────────────────────────────
+
 type subAgentCallIDKey struct{}
 
 func withSubAgentCallID(ctx context.Context, callID string) context.Context {
@@ -81,77 +100,197 @@ func subAgentCallID(ctx context.Context) string {
 	return ""
 }
 
+// ── sub_agent 本轮调用计数 ──────────────────────────────────
+
+type subAgentRoundCountKey struct{}
+
+func withSubAgentRoundCount(ctx context.Context, count int) context.Context {
+	return context.WithValue(ctx, subAgentRoundCountKey{}, count)
+}
+
+func subAgentRoundCount(ctx context.Context) int {
+	if v, ok := ctx.Value(subAgentRoundCountKey{}).(int); ok {
+		return v
+	}
+	return 0
+}
+
+// ── 任务参数和结果 ──────────────────────────────────────────
+
+// subAgentTask 对应 tasks 数组中的单个子任务。
+type subAgentTask struct {
+	Goal         string   `json:"goal"`
+	Context      string   `json:"context,omitempty"`
+	AgentUUID    string   `json:"agent_uuid,omitempty"`
+	BlockedTools []string `json:"blocked_tools,omitempty"`
+}
+
+type subAgentTaskResult struct {
+	TaskIndex       int      `json:"task_index"`
+	Goal            string   `json:"goal"`
+	Status          string   `json:"status"`
+	Summary         string   `json:"summary"`
+	TokensUsed      int      `json:"tokens_used"`
+	ToolsUsed       []string `json:"tools_used,omitempty"`
+	DurationSeconds float64  `json:"duration_seconds"`
+	ExitReason      string   `json:"exit_reason"`
+}
+
+type subAgentBatchResult struct {
+	Status  string               `json:"status"`
+	Results []subAgentTaskResult `json:"results"`
+}
+
+// ── 默认 blocklist ─────────────────────────────────────────
+
+// defaultSubAgentBlockedTools 子 Agent 默认不可用的工具。
+var defaultSubAgentBlockedTools = []string{
+	"sub_agent", // 除非显式解除，子 agent 默认不能再递归委派
+}
+
+// ── handler 入口 ────────────────────────────────────────────
+
 func (e *Executor) subAgentHandler(ctx context.Context, args string) (string, error) {
 	depth := subAgentDepth(ctx) + 1
 	if depth > maxSubAgentDepth {
-		return "", fmt.Errorf("sub-agent depth limit (%d) reached, cannot create deeper sub-agents", maxSubAgentDepth)
+		return "", fmt.Errorf("sub-agent depth limit (%d) reached", maxSubAgentDepth)
 	}
 
-	var params struct {
-		Prompt    string `json:"prompt"`
-		AgentUUID string `json:"agent_uuid,omitempty"`
+	// 兼容旧版 {prompt, agent_uuid} 格式
+	var raw struct {
+		Tasks     []subAgentTask `json:"tasks"`
+		Prompt    string         `json:"prompt,omitempty"`
+		AgentUUID string         `json:"agent_uuid,omitempty"`
 	}
-	if err := json.Unmarshal([]byte(args), &params); err != nil {
+	if err := json.Unmarshal([]byte(args), &raw); err != nil {
 		return "", fmt.Errorf("parse sub_agent arguments: %w", err)
 	}
-	if params.Prompt == "" {
-		return "", fmt.Errorf("prompt is required")
+
+	tasks := raw.Tasks
+	if len(tasks) == 0 && raw.Prompt != "" {
+		tasks = []subAgentTask{{Goal: raw.Prompt, AgentUUID: raw.AgentUUID}}
+	}
+	if len(tasks) == 0 {
+		return "", fmt.Errorf("at least one task is required (provide 'tasks' array or 'prompt' string)")
 	}
 
-	// 单个 sub_agent 走轻量 inline 路径（无工具、无会话）
-	if subAgentRoundCount(ctx) <= 1 {
+	ctx = withSubAgentDepth(ctx, depth)
+
+	// 单任务 → inline 轻量路径
+	if len(tasks) == 1 {
+		t := tasks[0]
 		log.WithFields(log.Fields{
-			"depth":  depth,
-			"prompt": truncateLog(params.Prompt, 200),
-		}).Info("[SubAgent] >> inline (single sub_agent, skipping full Execute)")
-		return e.inlineSubAgentCall(ctx, params.Prompt, params.AgentUUID)
+			"depth": depth,
+			"goal":  truncateLog(t.Goal, 200),
+		}).Info("[SubAgent] >> inline (single task)")
+
+		blocked := mergeBlockedTools(t.BlockedTools, depth)
+		prompt := buildSubAgentPrompt(t)
+		return e.inlineSubAgentCall(ctx, prompt, t.AgentUUID, blocked)
 	}
 
-	// 多并发 sub_agent：完整工具支持，步骤记录在父会话
+	// 多任务 → 并行执行
 	log.WithFields(log.Fields{
 		"depth":      depth,
-		"agent_uuid": params.AgentUUID,
-		"prompt":     truncateLog(params.Prompt, 200),
-	}).Info("[SubAgent] >> spawning (parallel)")
+		"task_count": len(tasks),
+	}).Info("[SubAgent] >> batch parallel")
 
-	childCtx := withSubAgentDepth(ctx, depth)
-	return e.executeAsSubAgent(childCtx, params.Prompt, params.AgentUUID)
+	return e.executeTaskBatch(ctx, tasks, depth)
 }
 
-// executeAsSubAgent 在父会话上下文内执行子 agent：
-//   - 使用父 tracker 记录步骤（带 SubAgentDepth 标记）
-//   - 不创建独立会话、不持久化消息
-//   - 完整加载工具/MCP/skills
-func (e *Executor) executeAsSubAgent(ctx context.Context, prompt, agentUUID string) (string, error) {
+// ── 批量并行执行 ────────────────────────────────────────────
+
+func (e *Executor) executeTaskBatch(ctx context.Context, tasks []subAgentTask, depth int) (string, error) {
+	results := make([]subAgentTaskResult, len(tasks))
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	allOK := true
+
+	for i, t := range tasks {
+		wg.Go(func() {
+			start := time.Now()
+			blocked := mergeBlockedTools(t.BlockedTools, depth)
+			prompt := buildSubAgentPrompt(t)
+
+			log.WithFields(log.Fields{
+				"depth":    depth,
+				"task_idx": i,
+				"goal":     truncateLog(t.Goal, 120),
+			}).Info("[SubAgent] >> task start")
+
+			summary, tokens, toolsUsed, err := e.executeOneTask(ctx, prompt, t.AgentUUID, blocked)
+			dur := time.Since(start)
+
+			r := subAgentTaskResult{
+				TaskIndex:       i,
+				Goal:            t.Goal,
+				TokensUsed:      tokens,
+				ToolsUsed:       toolsUsed,
+				DurationSeconds: dur.Seconds(),
+			}
+			if err != nil {
+				r.Status = "failed"
+				r.Summary = err.Error()
+				r.ExitReason = "error"
+				mu.Lock()
+				allOK = false
+				mu.Unlock()
+			} else {
+				r.Status = "completed"
+				r.Summary = summary
+				r.ExitReason = "completed"
+			}
+			results[i] = r
+
+			log.WithFields(log.Fields{
+				"depth":    depth,
+				"task_idx": i,
+				"status":   r.Status,
+				"tokens":   tokens,
+				"duration": dur,
+			}).Info("[SubAgent] << task done")
+		})
+	}
+	wg.Wait()
+
+	batchStatus := "completed"
+	if !allOK {
+		batchStatus = "partial_failure"
+	}
+
+	out, _ := json.Marshal(subAgentBatchResult{
+		Status:  batchStatus,
+		Results: results,
+	})
+	return string(out), nil
+}
+
+// executeOneTask 执行单个子任务，返回 (summary, tokens, toolsUsed, error)。
+func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string, blocked []string) (string, int, []string, error) {
 	if err := e.checkShutdown(); err != nil {
-		return "", err
+		return "", 0, nil, err
 	}
 	defer e.activeExecs.Done()
 
+	ctx = withBlockedTools(ctx, blocked)
 	ec, err := e.prepareSubAgent(ctx, prompt, agentUUID)
 	if err != nil {
-		return "", fmt.Errorf("sub_agent prepare: %w", err)
+		return "", 0, nil, fmt.Errorf("sub_agent prepare: %w", err)
 	}
 	defer ec.closeMCP()
 
-	ec.l.Debug("[SubAgent] >> executeAsSubAgent start")
-
 	res, err := e.run(ec.ctx, ec, blockingCaller(ec.llmProv), false)
 	if err != nil {
-		ec.l.WithError(err).Warn("[SubAgent] << failed")
-		return fmt.Sprintf("sub-agent execution failed: %s", err), nil
+		return "", 0, nil, err
 	}
 
-	ec.l.WithFields(log.Fields{
-		"tokens": res.TokensUsed,
-		"len":    len(res.Content),
-	}).Info("[SubAgent] << done")
-	return res.Content, nil
+	toolsUsed := extractToolsUsed(res.Steps)
+	return res.Content, res.TokensUsed, toolsUsed, nil
 }
 
-// inlineSubAgentCall 轻量子任务执行：单次 LLM 调用，不创建 conversation、不加载工具/MCP/skills。
-// 适用于只有 1 个 sub_agent 的场景，避免完整 Execute 流程的大量开销。
-func (e *Executor) inlineSubAgentCall(ctx context.Context, prompt, agentUUID string) (string, error) {
+// ── inline 轻量路径 ─────────────────────────────────────────
+
+func (e *Executor) inlineSubAgentCall(ctx context.Context, prompt, agentUUID string, blocked []string) (string, error) {
 	ag, err := e.loadAgent(ctx, agentUUID)
 	if err != nil {
 		return "", fmt.Errorf("inline sub_agent: load agent: %w", err)
@@ -185,15 +324,83 @@ func (e *Executor) inlineSubAgentCall(ctx context.Context, prompt, agentUUID str
 	}
 	applyModelCaps(&req, ag, prov.Type, l)
 
+	start := time.Now()
 	resp, err := llmProv.CreateChatCompletion(ctx, req)
+	dur := time.Since(start)
 	if err != nil {
 		return "", fmt.Errorf("inline sub_agent: LLM call: %w", err)
 	}
 
 	content := extractContent(resp)
+
+	result := subAgentTaskResult{
+		TaskIndex:       0,
+		Status:          "completed",
+		Summary:         content,
+		TokensUsed:      resp.Usage.TotalTokens,
+		DurationSeconds: dur.Seconds(),
+		ExitReason:      "completed",
+	}
+
 	l.WithFields(log.Fields{
-		"tokens": resp.Usage.TotalTokens,
-		"len":    len(content),
+		"tokens":   resp.Usage.TotalTokens,
+		"duration": dur,
 	}).Info("[SubAgent] << inline done")
-	return content, nil
+
+	out, _ := json.Marshal(subAgentBatchResult{
+		Status:  "completed",
+		Results: []subAgentTaskResult{result},
+	})
+	return string(out), nil
+}
+
+// ── 辅助函数 ────────────────────────────────────────────────
+
+// buildSubAgentPrompt 将 task 的 goal 和 context 合并为完整 prompt。
+func buildSubAgentPrompt(t subAgentTask) string {
+	if t.Context == "" {
+		return t.Goal
+	}
+	return fmt.Sprintf("## 背景信息\n%s\n\n## 任务目标\n%s", t.Context, t.Goal)
+}
+
+// mergeBlockedTools 将用户指定的 blocklist 与深度相关的默认 blocklist 合并。
+func mergeBlockedTools(userBlocked []string, depth int) []string {
+	seen := make(map[string]bool, len(defaultSubAgentBlockedTools)+len(userBlocked))
+	var merged []string
+	for _, name := range defaultSubAgentBlockedTools {
+		if !seen[name] {
+			merged = append(merged, name)
+			seen[name] = true
+		}
+	}
+	for _, name := range userBlocked {
+		if !seen[name] {
+			merged = append(merged, name)
+			seen[name] = true
+		}
+	}
+	// 深度 >= 2 时额外 block 高风险工具
+	if depth >= 2 {
+		for _, name := range []string{"execute", "browser"} {
+			if !seen[name] {
+				merged = append(merged, name)
+				seen[name] = true
+			}
+		}
+	}
+	return merged
+}
+
+// extractToolsUsed 从执行步骤中提取不重复的工具名列表。
+func extractToolsUsed(steps []model.ExecutionStep) []string {
+	seen := make(map[string]bool)
+	var result []string
+	for _, s := range steps {
+		if s.StepType == model.StepToolCall && s.Name != "" && !seen[s.Name] {
+			seen[s.Name] = true
+			result = append(result, s.Name)
+		}
+	}
+	return result
 }

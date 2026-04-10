@@ -316,70 +316,6 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "cron",
-			Description: "管理定时任务与唤醒事件。支持创建/列出/删除 cron 定时任务，以及设置提醒唤醒事件。" +
-				"设置提醒时，systemEvent 文本需符合提醒触发时的阅读场景，根据时间间隔标注提醒属性，必要时补充上下文。",
-			HandlerType: model.HandlerBuiltin,
-			Enabled:     true,
-			FunctionDef: mustJSON(map[string]any{
-				"name": "cron",
-				"description": "Manage cron jobs and wake events. " +
-					"schedule: create a cron job (optionally with inline script); " +
-					"list: show crontab entries; " +
-					"remove: delete entries by pattern; " +
-					"add_event: set a wake/reminder event with systemEvent text; " +
-					"list_events: show all wake events; " +
-					"remove_event: delete a wake event.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"action": map[string]any{
-							"type":        "string",
-							"enum":        []string{"schedule", "list", "remove", "add_event", "list_events", "remove_event"},
-							"description": "Action to perform",
-						},
-						"expression": map[string]any{
-							"type":        "string",
-							"description": "Cron expression, e.g. '0 9 * * *', '*/5 * * * *', '@daily'",
-						},
-						"command": map[string]any{
-							"type":        "string",
-							"description": "Command to schedule (for schedule action)",
-						},
-						"name": map[string]any{
-							"type":        "string",
-							"description": "Script name when providing inline content (for schedule)",
-						},
-						"content": map[string]any{
-							"type":        "string",
-							"description": "Shell script content (for schedule with inline script)",
-						},
-						"pattern": map[string]any{
-							"type":        "string",
-							"description": "Text pattern for matching crontab entries (for remove)",
-						},
-						"log_output": map[string]any{
-							"type":        "boolean",
-							"description": "Redirect stdout/stderr to log file (for schedule)",
-						},
-						"system_event": map[string]any{
-							"type":        "string",
-							"description": "Wake event text for reminders. Should read naturally at trigger time, include reminder context.",
-						},
-						"interval": map[string]any{
-							"type":        "string",
-							"description": "Interval for wake events, e.g. '30m', '2h', '1d' (alternative to expression for add_event)",
-						},
-						"event_id": map[string]any{
-							"type":        "string",
-							"description": "Event ID for remove_event",
-						},
-					},
-					"required": []string{"action"},
-				},
-			}),
-		},
-		{
 			Name: "code_interpreter",
 			Description: "代码解释器，支持编写并执行 Python/JavaScript/Shell 代码。" +
 				"Agent 传入语言类型和代码，工具自动在沙箱目录中创建文件并执行，返回 stdout/stderr 结果。" +
@@ -413,38 +349,217 @@ func DefaultBuiltinDefs() []model.Tool {
 				},
 			}),
 		},
-		{
-			Name: "sub_agent",
-			Description: "启动子 Agent 并行执行多个独立子任务。" +
-				"仅当需要同时并行处理 2 个及以上独立子任务时才使用（如同时调研多个方向、对比多个方案）。" +
-				"如果只有 1 个子任务，请直接处理而非启动 sub_agent。",
-			HandlerType: model.HandlerBuiltin,
-			Enabled:     true,
-			Timeout:     600,
-			FunctionDef: mustJSON(map[string]any{
-				"name": "sub_agent",
-				"description": "Launch sub-agents to execute MULTIPLE independent subtasks IN PARALLEL. " +
-					"Each sub-agent has its own conversation, tools, and reasoning chain. " +
-					"IMPORTANT: Only use when you need 2+ sub-agents running concurrently " +
-					"(e.g. parallel research, comparing multiple approaches, expert delegation to different specialists). " +
-					"If you only have a single subtask, handle it directly — do NOT launch a single sub_agent. " +
-					"Max nesting depth: 3.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"prompt": map[string]any{
-							"type":        "string",
-							"description": "The task description / instructions for the sub-agent",
-						},
-						"agent_uuid": map[string]any{
-							"type":        "string",
-							"description": "Optional: use a different agent by UUID (default: same agent as parent)",
+	{
+		Name: "sub_agent",
+		Description: "将复杂任务拆分为多个独立子任务，分派给子 Agent 并行执行。" +
+			"每个子 Agent 拥有独立的推理链和工具集。" +
+			"适用场景：并行调研多个方向、对比多个方案、专家分工协作。" +
+			"返回结构化 JSON 结果，包含每个子任务的状态、摘要、耗时和 token 用量。",
+		HandlerType: model.HandlerBuiltin,
+		Enabled:     true,
+		Timeout:     600,
+		FunctionDef: mustJSON(map[string]any{
+			"name": "sub_agent",
+			"description": "Delegate tasks to sub-agents for parallel execution. " +
+				"Each sub-agent has its own reasoning chain, tools, and isolated context. " +
+				"Returns structured JSON with status, summary, tokens, and duration for each task. " +
+				"Use cases: parallel research, comparing approaches, expert delegation. " +
+				"Max nesting depth: 3.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"tasks": map[string]any{
+						"type":        "array",
+						"description": "Array of tasks to execute in parallel. Each task runs as an independent sub-agent.",
+						"minItems":    1,
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"goal": map[string]any{
+									"type":        "string",
+									"description": "Clear, specific goal for this sub-agent to accomplish",
+								},
+								"context": map[string]any{
+									"type":        "string",
+									"description": "Optional background context or constraints the sub-agent should be aware of",
+								},
+								"agent_uuid": map[string]any{
+									"type":        "string",
+									"description": "Optional: delegate to a specific agent by UUID (default: same agent as parent)",
+								},
+								"blocked_tools": map[string]any{
+									"type":        "array",
+									"description": "Optional: list of tool names the sub-agent is NOT allowed to use",
+									"items":       map[string]any{"type": "string"},
+								},
+							},
+							"required": []string{"goal"},
 						},
 					},
-					"required": []string{"prompt"},
 				},
-			}),
-		},
+				"required": []string{"tasks"},
+			},
+		}),
+	},
+	{
+		Name: "memory",
+		Description: "持久记忆工具，跨会话保存重要信息。" +
+			"两个存储目标：memory（你的个人笔记：环境事实、项目惯例、工具使用经验）和 user（用户画像：偏好、沟通风格、工作习惯）。" +
+			"主动保存：用户纠正你时、用户分享偏好/习惯时、发现环境特征时、学到有用经验时。",
+		HandlerType: model.HandlerBuiltin,
+		Enabled:     true,
+		FunctionDef: mustJSON(map[string]any{
+			"name": "memory",
+			"description": "Save durable information to persistent memory that survives across sessions. " +
+				"Memory is injected into future system prompts, so keep entries compact and factual.\n\n" +
+				"WHEN TO SAVE (proactively, don't wait to be asked):\n" +
+				"- User corrects you or says 'remember this'\n" +
+				"- User shares a preference, habit, or personal detail\n" +
+				"- You discover something about the environment (OS, tools, project structure)\n" +
+				"- You learn a convention or workflow specific to this user\n\n" +
+				"TWO TARGETS:\n" +
+				"- 'user': who the user is — name, role, preferences, communication style\n" +
+				"- 'memory': your notes — environment facts, project conventions, lessons learned\n\n" +
+				"ACTIONS: add (new entry), replace (update existing via old_text match), remove (delete via old_text match), read (view current entries).\n\n" +
+				"Do NOT save task progress, temporary TODO state, or trivial/obvious information.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"add", "replace", "remove", "read"},
+						"description": "The action to perform",
+					},
+					"target": map[string]any{
+						"type":        "string",
+						"enum":        []string{"memory", "user"},
+						"description": "Which memory store: 'memory' for personal notes, 'user' for user profile",
+					},
+					"content": map[string]any{
+						"type":        "string",
+						"description": "The entry content. Required for 'add' and 'replace'",
+					},
+					"old_text": map[string]any{
+						"type":        "string",
+						"description": "Short unique substring identifying the entry to replace or remove",
+					},
+				},
+				"required": []string{"action", "target"},
+			},
+		}),
+	},
+	{
+		Name: "cron",
+		Description: "定时任务调度器。支持定时执行 Agent 提示词或 Shell 命令。" +
+			"支持秒级精度 cron 表达式、最大运行次数限制、执行日志查看、启用/禁用切换。",
+		HandlerType: model.HandlerBuiltin,
+		Enabled:     true,
+		FunctionDef: mustJSON(map[string]any{
+			"name": "cron",
+			"description": "In-process task scheduler. Schedule agent prompts or commands with cron expressions.\n\n" +
+				"ACTIONS:\n" +
+				"- add: Create a new scheduled job (cron expression + prompt or command)\n" +
+				"- list: Show all scheduled jobs with status\n" +
+				"- remove: Delete a job by ID\n" +
+				"- toggle: Enable/disable a job\n" +
+				"- logs: View execution history for a job\n\n" +
+				"Supports 6-field cron expressions (sec min hour dom month dow) and descriptors like @daily, @hourly, @every 30m.\n\n" +
+				"Examples:\n" +
+				"- '0 0 9 * * *' = daily at 9:00 AM\n" +
+				"- '0 */5 * * * *' = every 5 minutes\n" +
+				"- '@every 30m' = every 30 minutes\n" +
+				"- '@daily' = once a day at midnight",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"add", "list", "remove", "toggle", "logs"},
+						"description": "Action to perform",
+					},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Human-readable name for the job (for add)",
+					},
+					"expression": map[string]any{
+						"type":        "string",
+						"description": "Cron expression (6-field: sec min hour dom month dow) or descriptor (@daily, @hourly, @every 30m)",
+					},
+					"type": map[string]any{
+						"type":        "string",
+						"enum":        []string{"prompt", "command"},
+						"description": "Job type: 'prompt' to send a message to an agent, 'command' to run a shell command (default: prompt)",
+					},
+					"agent_uuid": map[string]any{
+						"type":        "string",
+						"description": "Target agent UUID for prompt-type jobs",
+					},
+					"prompt": map[string]any{
+						"type":        "string",
+						"description": "The prompt to send to the agent (for prompt-type jobs)",
+					},
+					"command": map[string]any{
+						"type":        "string",
+						"description": "Shell command to execute (for command-type jobs)",
+					},
+					"job_id": map[string]any{
+						"type":        "string",
+						"description": "Job ID for remove/toggle/logs actions",
+					},
+					"enabled": map[string]any{
+						"type":        "boolean",
+						"description": "Enable (true) or disable (false) the job (for toggle action)",
+					},
+					"max_runs": map[string]any{
+						"type":        "integer",
+						"description": "Max number of times to run (0 = unlimited). Job auto-disables after reaching limit.",
+					},
+					"description": map[string]any{
+						"type":        "string",
+						"description": "Description of what this job does",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Max log entries to return (for logs action, default: 10)",
+					},
+				},
+				"required": []string{"action"},
+			},
+		}),
+	},
+	{
+		Name: "session_search",
+		Description: "搜索过去的对话历史，跨会话回忆。" +
+			"两种模式：无查询时返回最近会话列表（零 LLM 成本），有关键词时全文搜索并返回匹配片段。" +
+			"主动使用：用户说'上次'、'记得吗'、'我们之前'等时。",
+		HandlerType: model.HandlerBuiltin,
+		Enabled:     true,
+		FunctionDef: mustJSON(map[string]any{
+			"name": "session_search",
+			"description": "Search past conversation history for long-term recall.\n\n" +
+				"TWO MODES:\n" +
+				"1. Recent sessions (no query): browse recent conversations with titles and previews. Zero cost.\n" +
+				"2. Keyword search (with query): full-text search across all past messages, returns matching snippets with context.\n\n" +
+				"USE PROACTIVELY when:\n" +
+				"- User says 'we did this before', 'remember when', 'last time'\n" +
+				"- User references a topic from a previous session\n" +
+				"- You want to check if a similar problem was solved before",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"query": map[string]any{
+						"type":        "string",
+						"description": "Search keywords. Omit to browse recent sessions",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Max results to return (default: 5, max: 20)",
+					},
+				},
+				"required": []string{},
+			},
+		}),
+	},
 	}
 }
 

@@ -292,6 +292,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 
 	memosCtx := recallMemories(ctx, ec.userMsg, ec.ag)
 	sessionMem := loadSessionMemory(e.ws, ec.ag.UUID, ec.conv.UUID)
+	persistentMem := loadPersistentMemory(e.ws)
 
 	var msgTools []model.Tool
 	var msgToolSkillMap map[string]string
@@ -300,17 +301,18 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		msgToolSkillMap = ec.toolSkillMap
 	}
 	messages := buildMessages(messagesBuildInput{
-		Agent:          ec.ag,
-		Skills:         ec.skills,
-		History:        history,
-		UserMsg:        ec.userMsg,
-		AgentTools:     msgTools,
-		ToolSkillMap:   msgToolSkillMap,
-		Files:          ec.files,
-		MemosContext:   memosCtx,
-		SessionMemory:  sessionMem,
-		ToolSearchMode: tsMode,
-		WS:             e.ws,
+		Agent:            ec.ag,
+		Skills:           ec.skills,
+		History:          history,
+		UserMsg:          ec.userMsg,
+		AgentTools:       msgTools,
+		ToolSkillMap:     msgToolSkillMap,
+		Files:            ec.files,
+		PersistentMemory: persistentMem,
+		MemosContext:     memosCtx,
+		SessionMemory:    sessionMem,
+		ToolSearchMode:   tsMode,
+		WS:               e.ws,
 	})
 	logMessages(ec.l, messages)
 

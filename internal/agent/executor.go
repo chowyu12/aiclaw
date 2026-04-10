@@ -15,6 +15,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/skills"
 	"github.com/chowyu12/aiclaw/internal/store"
 	"github.com/chowyu12/aiclaw/internal/tools/mcp"
+	"github.com/chowyu12/aiclaw/internal/tools/sessionsearch"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -49,6 +50,7 @@ type Executor struct {
 	hooks           *HookRegistry
 	ws              *workspace.Workspace
 	sc              *skillCache
+	schedCtxFn      func(context.Context) context.Context
 
 	shutdownMu   sync.Mutex
 	shutdownDone bool
@@ -74,11 +76,17 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 	}
 	registerDefaultHooks(e.hooks)
 	registry.RegisterBuiltin("sub_agent", e.subAgentHandler)
+	registry.RegisterBuiltin("session_search", sessionsearch.NewHandler(s))
 	return e
 }
 
 // Hooks 返回执行器的 HookRegistry，允许外部注册生命周期钩子。
 func (e *Executor) Hooks() *HookRegistry { return e.hooks }
+
+// SetSchedulerContextFunc 设置调度器 context 注入函数。
+func (e *Executor) SetSchedulerContextFunc(fn func(context.Context) context.Context) {
+	e.schedCtxFn = fn
+}
 
 // execContext 聚合单次执行所需的全部上下文。
 type execContext struct {
@@ -239,6 +247,9 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 	ctx = workspace.WithWorkdirScope(ctx, ag.UUID)
 	if e.ws != nil {
 		ctx = workspace.WithWorkspace(ctx, e.ws)
+	}
+	if e.schedCtxFn != nil {
+		ctx = e.schedCtxFn(ctx)
 	}
 
 	prov, err := e.store.GetProvider(ctx, ag.ProviderID)
@@ -577,6 +588,7 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 //   - 复用父 tracker（步骤记录在父会话中）
 //   - 不创建独立会话、不持久化消息
 //   - 完整加载工具/MCP/skills
+//   - 根据 blocklist 过滤子 agent 可用工具
 func (e *Executor) prepareSubAgent(ctx context.Context, prompt, agentUUID string) (*execContext, error) {
 	parentTracker, parentConvID := parentExecInfoFromCtx(ctx)
 	if parentTracker == nil {
@@ -612,6 +624,9 @@ func (e *Executor) prepareSubAgent(ctx context.Context, prompt, agentUUID string
 		return nil, err
 	}
 
+	// 应用 blocklist 过滤
+	agentTools = filterBlockedTools(ctx, agentTools, l)
+
 	skills, err := e.loadWorkspaceSkills()
 	if err != nil {
 		l.WithError(err).Warn("[SubAgent] load skills failed, continuing without skills")
@@ -626,7 +641,6 @@ func (e *Executor) prepareSubAgent(ctx context.Context, prompt, agentUUID string
 	mcpManager, mcpTools := e.connectMCPServers(ctx, mcpServers, parentTracker, toolSkillMap)
 	skillTools := e.buildSkillManifestTools(skills, parentTracker, toolSkillMap)
 
-	// 使用父会话 ID 构造最小 Conversation，仅用于 persistToolFile 等场景
 	conv := &model.Conversation{ID: parentConvID}
 
 	return &execContext{
@@ -646,4 +660,21 @@ func (e *Executor) prepareSubAgent(ctx context.Context, prompt, agentUUID string
 		toolSkillMap: toolSkillMap,
 		ephemeral:    true,
 	}, nil
+}
+
+// filterBlockedTools 从工具列表中移除被 blocklist 禁止的工具。
+func filterBlockedTools(ctx context.Context, tools []model.Tool, l *log.Entry) []model.Tool {
+	var filtered []model.Tool
+	var blocked []string
+	for _, t := range tools {
+		if IsToolBlocked(ctx, t.Name) {
+			blocked = append(blocked, t.Name)
+			continue
+		}
+		filtered = append(filtered, t)
+	}
+	if len(blocked) > 0 {
+		l.WithField("blocked", blocked).Debug("[SubAgent] tools filtered by blocklist")
+	}
+	return filtered
 }

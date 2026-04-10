@@ -9,6 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/chowyu12/aiclaw/internal/tools/memorytool"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -59,6 +60,22 @@ func appendSessionMemory(ws *workspace.Workspace, agentUUID, convUUID, userMsg s
 	if _, err := f.WriteString(sb.String()); err != nil {
 		log.WithError(err).Debug("[SessionMemory] write failed")
 	}
+}
+
+// loadPersistentMemory 加载冻结的持久记忆快照，注入 system prompt。
+func loadPersistentMemory(ws *workspace.Workspace) string {
+	memBlock, userBlock := memorytool.LoadSnapshot(ws)
+	var parts []string
+	if memBlock != "" {
+		parts = append(parts, memBlock)
+	}
+	if userBlock != "" {
+		parts = append(parts, userBlock)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func loadSessionMemory(ws *workspace.Workspace, agentUUID, convUUID string) string {

@@ -17,21 +17,26 @@ import (
 )
 
 type messagesBuildInput struct {
-	Agent          *model.Agent
-	Skills         []model.Skill
-	History        []openai.ChatCompletionMessage
-	UserMsg        string
-	AgentTools     []model.Tool
-	ToolSkillMap   map[string]string
-	Files          []*model.File
-	MemosContext   string
-	SessionMemory  string
-	ToolSearchMode bool
-	WS             *workspace.Workspace
+	Agent            *model.Agent
+	Skills           []model.Skill
+	History          []openai.ChatCompletionMessage
+	UserMsg          string
+	AgentTools       []model.Tool
+	ToolSkillMap     map[string]string
+	Files            []*model.File
+	PersistentMemory string
+	MemosContext     string
+	SessionMemory    string
+	ToolSearchMode   bool
+	WS               *workspace.Workspace
 }
 
 func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 	systemPrompt := buildSystemPrompt(in.Agent, in.Skills, in.AgentTools, in.ToolSkillMap, in.ToolSearchMode, in.WS)
+
+	if in.PersistentMemory != "" {
+		systemPrompt += "\n\n" + in.PersistentMemory
+	}
 
 	if in.MemosContext != "" {
 		systemPrompt += "\n\n## 相关记忆\n以下是从长期记忆中检索到的与当前对话相关的信息，请参考但不要盲目依赖：\n<memories>\n" + in.MemosContext + "\n</memories>"
