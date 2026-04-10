@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -19,9 +20,11 @@ import (
 
 	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
 	"github.com/chowyu12/aiclaw/internal/auth"
+	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/channels"
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/daemon"
+	"github.com/chowyu12/aiclaw/internal/scheduler"
 	"github.com/chowyu12/aiclaw/internal/server"
 	skillspkg "github.com/chowyu12/aiclaw/internal/skills"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
@@ -126,10 +129,17 @@ func Run(opts Options) {
 	}
 	defer store.Close()
 
+	store.InitFTS5()
+
 	server.ApplyBrowserToolConfig(cfg.Browser)
 
 	registry := agentpkg.NewToolRegistry()
 	executor := agentpkg.NewExecutor(store, registry, ws)
+
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	sched := startScheduler(appCtx, ws, executor, store)
+	defer sched.Stop()
 
 	channelMgr := channels.NewManager(store, executor, rt)
 	defer channelMgr.Stop()
@@ -211,6 +221,49 @@ func startConfigHotReload(rt *config.RuntimeConfig) {
 		return
 	}
 	log.WithField("path", abs).Info("config hot reload enabled")
+}
+
+func startScheduler(ctx context.Context, ws *workspace.Workspace, executor *agentpkg.Executor, store *gormstore.GormStore) *scheduler.Scheduler {
+	jobExecutor := func(ctx context.Context, job *scheduler.Job) (string, error) {
+		switch job.Type {
+		case scheduler.JobTypePrompt:
+			agentUUID := job.AgentUUID
+			if agentUUID == "" {
+				agents, _, err := store.ListAgents(ctx, model.ListQuery{Page: 1, PageSize: 1})
+				if err != nil || len(agents) == 0 {
+					return "", fmt.Errorf("no agent found for scheduled job")
+				}
+				agentUUID = agents[0].UUID
+			}
+			req := model.ChatRequest{
+				AgentUUID: agentUUID,
+				UserID:    "scheduler:" + job.ID,
+				Message:   job.Prompt,
+			}
+			result, err := executor.Execute(ctx, req)
+			if err != nil {
+				return "", err
+			}
+			return result.Content, nil
+
+		case scheduler.JobTypeCommand:
+			cmd := exec.CommandContext(ctx, "sh", "-c", job.Command)
+			output, err := cmd.CombinedOutput()
+			return string(output), err
+
+		default:
+			return "", fmt.Errorf("unknown job type: %s", job.Type)
+		}
+	}
+
+	sched := scheduler.New(ws, jobExecutor)
+	sched.Start(ctx)
+
+	executor.SetSchedulerContextFunc(func(c context.Context) context.Context {
+		return scheduler.WithScheduler(c, sched)
+	})
+
+	return sched
 }
 
 func startTmpCleanup(ws *workspace.Workspace) {
