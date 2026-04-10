@@ -392,6 +392,16 @@ func DefaultBuiltinDefs() []model.Tool {
 									"description": "Optional: list of tool names the sub-agent is NOT allowed to use",
 									"items":       map[string]any{"type": "string"},
 								},
+								"mode": map[string]any{
+									"type":        "string",
+									"enum":        []string{"auto", "explore", "shell"},
+									"description": "Execution mode. 'auto': full tool access (default). 'explore': read-only, fast codebase exploration (read/grep/find/ls only). 'shell': command execution only (exec/process/read/ls).",
+								},
+								"model": map[string]any{
+									"type":        "string",
+									"enum":        []string{"default", "fast"},
+									"description": "Model selection. 'default': same model as parent (default). 'fast': use lighter/cheaper model for simple tasks.",
+								},
 							},
 							"required": []string{"goal"},
 						},
@@ -521,6 +531,70 @@ func DefaultBuiltinDefs() []model.Tool {
 					"limit": map[string]any{
 						"type":        "integer",
 						"description": "Max log entries to return (for logs action, default: 10)",
+					},
+				},
+				"required": []string{"action"},
+			},
+		}),
+	},
+	{
+		Name: "todo",
+		Description: "结构化任务规划工具，用于拆解和追踪复杂任务。" +
+			"收到复杂请求时（涉及 3+ 步骤），先创建任务列表再逐项执行。每完成一步及时更新状态。",
+		HandlerType: model.HandlerBuiltin,
+		Enabled:     true,
+		FunctionDef: mustJSON(map[string]any{
+			"name": "todo",
+			"description": "Structured task planning and tracking tool.\n\n" +
+				"USE PROACTIVELY for:\n" +
+				"1. Complex multi-step tasks (3+ distinct steps)\n" +
+				"2. Non-trivial tasks requiring careful planning\n" +
+				"3. User provides multiple tasks (numbered/comma-separated)\n\n" +
+				"SKIP for:\n" +
+				"1. Single, straightforward tasks\n" +
+				"2. Tasks completable in < 3 trivial steps\n" +
+				"3. Purely informational requests\n\n" +
+				"ACTIONS:\n" +
+				"- create: Create task list (merge=false replaces all, merge=true adds/updates)\n" +
+				"- update: Update task statuses (merge by id)\n" +
+				"- read: View current task list\n" +
+				"- clear: Remove all tasks\n\n" +
+				"STATUSES: pending, in_progress, completed, cancelled\n" +
+				"RULES: Only ONE task should be in_progress at a time. Mark complete IMMEDIATELY after finishing.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"create", "update", "read", "clear"},
+						"description": "Action to perform",
+					},
+					"todos": map[string]any{
+						"type":        "array",
+						"description": "Array of TODO items to create or update",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"id": map[string]any{
+									"type":        "string",
+									"description": "Unique identifier for this TODO item",
+								},
+								"content": map[string]any{
+									"type":        "string",
+									"description": "Description of the task",
+								},
+								"status": map[string]any{
+									"type":        "string",
+									"enum":        []string{"pending", "in_progress", "completed", "cancelled"},
+									"description": "Current status",
+								},
+							},
+							"required": []string{"id", "content", "status"},
+						},
+					},
+					"merge": map[string]any{
+						"type":        "boolean",
+						"description": "If true, merge with existing todos by id. If false, replace all todos. Default: false",
 					},
 				},
 				"required": []string{"action"},

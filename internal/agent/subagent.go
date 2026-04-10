@@ -1,13 +1,14 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
-	openai "github.com/chowyu12/go-openai"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/model"
@@ -123,6 +124,8 @@ type subAgentTask struct {
 	Context      string   `json:"context,omitempty"`
 	AgentUUID    string   `json:"agent_uuid,omitempty"`
 	BlockedTools []string `json:"blocked_tools,omitempty"`
+	Mode         string   `json:"mode,omitempty"`  // auto, explore, shell
+	Model        string   `json:"model,omitempty"` // "", "fast"
 }
 
 type subAgentTaskResult struct {
@@ -146,6 +149,17 @@ type subAgentBatchResult struct {
 // defaultSubAgentBlockedTools 子 Agent 默认不可用的工具。
 var defaultSubAgentBlockedTools = []string{
 	"sub_agent", // 除非显式解除，子 agent 默认不能再递归委派
+}
+
+// 模式白名单：explore 和 shell 模式只允许使用列出的工具，其余全部 block。
+var modeAllowedTools = map[string]map[string]bool{
+	"explore": {
+		"read": true, "grep": true, "find": true, "ls": true,
+		"web_fetch": true, "current_time": true, "session_search": true,
+	},
+	"shell": {
+		"exec": true, "process": true, "read": true, "ls": true, "current_time": true,
+	},
 }
 
 // ── handler 入口 ────────────────────────────────────────────
@@ -176,24 +190,18 @@ func (e *Executor) subAgentHandler(ctx context.Context, args string) (string, er
 
 	ctx = withSubAgentDepth(ctx, depth)
 
-	// 单任务 → inline 轻量路径
 	if len(tasks) == 1 {
-		t := tasks[0]
 		log.WithFields(log.Fields{
 			"depth": depth,
-			"goal":  truncateLog(t.Goal, 200),
-		}).Info("[SubAgent] >> inline (single task)")
-
-		blocked := mergeBlockedTools(t.BlockedTools, depth)
-		prompt := buildSubAgentPrompt(t)
-		return e.inlineSubAgentCall(ctx, prompt, t.AgentUUID, blocked)
+			"goal":  truncateLog(tasks[0].Goal, 200),
+			"mode":  cmp.Or(tasks[0].Mode, "auto"),
+		}).Info("[SubAgent] >> single task")
+	} else {
+		log.WithFields(log.Fields{
+			"depth":      depth,
+			"task_count": len(tasks),
+		}).Info("[SubAgent] >> batch parallel")
 	}
-
-	// 多任务 → 并行执行
-	log.WithFields(log.Fields{
-		"depth":      depth,
-		"task_count": len(tasks),
-	}).Info("[SubAgent] >> batch parallel")
 
 	return e.executeTaskBatch(ctx, tasks, depth)
 }
@@ -209,16 +217,17 @@ func (e *Executor) executeTaskBatch(ctx context.Context, tasks []subAgentTask, d
 	for i, t := range tasks {
 		wg.Go(func() {
 			start := time.Now()
-			blocked := mergeBlockedTools(t.BlockedTools, depth)
+			blocked := mergeBlockedToolsWithMode(t.BlockedTools, depth, t.Mode)
 			prompt := buildSubAgentPrompt(t)
 
 			log.WithFields(log.Fields{
 				"depth":    depth,
 				"task_idx": i,
+				"mode":     cmp.Or(t.Mode, "auto"),
 				"goal":     truncateLog(t.Goal, 120),
 			}).Info("[SubAgent] >> task start")
 
-			summary, tokens, toolsUsed, err := e.executeOneTask(ctx, prompt, t.AgentUUID, blocked)
+			summary, tokens, toolsUsed, err := e.executeOneTask(ctx, prompt, t.AgentUUID, blocked, t.Model)
 			dur := time.Since(start)
 
 			r := subAgentTaskResult{
@@ -266,7 +275,7 @@ func (e *Executor) executeTaskBatch(ctx context.Context, tasks []subAgentTask, d
 }
 
 // executeOneTask 执行单个子任务，返回 (summary, tokens, toolsUsed, error)。
-func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string, blocked []string) (string, int, []string, error) {
+func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string, blocked []string, modelHint string) (string, int, []string, error) {
 	if err := e.checkShutdown(); err != nil {
 		return "", 0, nil, err
 	}
@@ -279,6 +288,15 @@ func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string,
 	}
 	defer ec.closeMCP()
 
+	// 根据 model hint 覆盖模型
+	if modelHint == "fast" && ec.ag.FastModelName != "" {
+		ec.l.WithFields(log.Fields{
+			"original": ec.ag.ModelName,
+			"fast":     ec.ag.FastModelName,
+		}).Debug("[SubAgent] using fast model")
+		ec.ag.ModelName = ec.ag.FastModelName
+	}
+
 	res, err := e.run(ec.ctx, ec, blockingCaller(ec.llmProv), false)
 	if err != nil {
 		return "", 0, nil, err
@@ -288,84 +306,29 @@ func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string,
 	return res.Content, res.TokensUsed, toolsUsed, nil
 }
 
-// ── inline 轻量路径 ─────────────────────────────────────────
-
-func (e *Executor) inlineSubAgentCall(ctx context.Context, prompt, agentUUID string, blocked []string) (string, error) {
-	ag, err := e.loadAgent(ctx, agentUUID)
-	if err != nil {
-		return "", fmt.Errorf("inline sub_agent: load agent: %w", err)
-	}
-
-	prov, err := e.store.GetProvider(ctx, ag.ProviderID)
-	if err != nil {
-		return "", fmt.Errorf("inline sub_agent: provider not found: %w", err)
-	}
-
-	llmProv, err := e.providerFactory(prov)
-	if err != nil {
-		return "", fmt.Errorf("inline sub_agent: create provider: %w", err)
-	}
-
-	systemPrompt := ag.SystemPrompt
-	if systemPrompt == "" {
-		systemPrompt = "你是一个运行在 Aiclaw 内部的个人助手。"
-	}
-
-	messages := []openai.ChatCompletionMessage{
-		{Role: openai.ChatMessageRoleSystem, Content: systemPrompt},
-		{Role: openai.ChatMessageRoleUser, Content: prompt},
-	}
-
-	l := log.WithFields(log.Fields{"agent": ag.Name, "model": ag.ModelName})
-
-	req := openai.ChatCompletionRequest{
-		Model:    ag.ModelName,
-		Messages: messages,
-	}
-	applyModelCaps(&req, ag, prov.Type, l)
-
-	start := time.Now()
-	resp, err := llmProv.CreateChatCompletion(ctx, req)
-	dur := time.Since(start)
-	if err != nil {
-		return "", fmt.Errorf("inline sub_agent: LLM call: %w", err)
-	}
-
-	content := extractContent(resp)
-
-	result := subAgentTaskResult{
-		TaskIndex:       0,
-		Status:          "completed",
-		Summary:         content,
-		TokensUsed:      resp.Usage.TotalTokens,
-		DurationSeconds: dur.Seconds(),
-		ExitReason:      "completed",
-	}
-
-	l.WithFields(log.Fields{
-		"tokens":   resp.Usage.TotalTokens,
-		"duration": dur,
-	}).Info("[SubAgent] << inline done")
-
-	out, _ := json.Marshal(subAgentBatchResult{
-		Status:  "completed",
-		Results: []subAgentTaskResult{result},
-	})
-	return string(out), nil
-}
-
 // ── 辅助函数 ────────────────────────────────────────────────
 
 // buildSubAgentPrompt 将 task 的 goal 和 context 合并为完整 prompt。
 func buildSubAgentPrompt(t subAgentTask) string {
-	if t.Context == "" {
-		return t.Goal
+	var sb strings.Builder
+
+	switch t.Mode {
+	case "explore":
+		sb.WriteString("## 约束\n你处于只读探索模式，仅可使用 read/grep/find/ls/web_fetch 等工具查看信息，不得修改任何文件。\n\n")
+	case "shell":
+		sb.WriteString("## 约束\n你处于命令执行模式，仅可使用 exec/process/read/ls 工具运行命令和查看结果。\n\n")
 	}
-	return fmt.Sprintf("## 背景信息\n%s\n\n## 任务目标\n%s", t.Context, t.Goal)
+
+	if t.Context != "" {
+		sb.WriteString(fmt.Sprintf("## 背景信息\n%s\n\n", t.Context))
+	}
+	sb.WriteString(fmt.Sprintf("## 任务目标\n%s", t.Goal))
+	return sb.String()
 }
 
-// mergeBlockedTools 将用户指定的 blocklist 与深度相关的默认 blocklist 合并。
-func mergeBlockedTools(userBlocked []string, depth int) []string {
+// mergeBlockedToolsWithMode 根据模式、深度和用户 blocklist 生成最终的工具黑名单。
+// explore/shell 模式通过白名单反转为 blocklist（block 所有不在白名单中的内置工具）。
+func mergeBlockedToolsWithMode(userBlocked []string, depth int, mode string) []string {
 	seen := make(map[string]bool, len(defaultSubAgentBlockedTools)+len(userBlocked))
 	var merged []string
 	for _, name := range defaultSubAgentBlockedTools {
@@ -380,7 +343,6 @@ func mergeBlockedTools(userBlocked []string, depth int) []string {
 			seen[name] = true
 		}
 	}
-	// 深度 >= 2 时额外 block 高风险工具
 	if depth >= 2 {
 		for _, name := range []string{"execute", "browser"} {
 			if !seen[name] {
@@ -389,6 +351,23 @@ func mergeBlockedTools(userBlocked []string, depth int) []string {
 			}
 		}
 	}
+
+	// 模式白名单：block 所有不在白名单中的已知内置工具
+	if allowed, ok := modeAllowedTools[mode]; ok {
+		allBuiltins := []string{
+			"read", "write", "edit", "grep", "find", "ls",
+			"exec", "process", "web_fetch", "browser", "canvas",
+			"code_interpreter", "memory", "cron", "todo",
+			"session_search", "sub_agent",
+		}
+		for _, name := range allBuiltins {
+			if !allowed[name] && !seen[name] {
+				merged = append(merged, name)
+				seen[name] = true
+			}
+		}
+	}
+
 	return merged
 }
 

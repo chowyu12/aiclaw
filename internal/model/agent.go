@@ -63,6 +63,7 @@ type Agent struct {
 	SystemPrompt      string     `json:"system_prompt" gorm:"type:text"`
 	ProviderID        int64      `json:"provider_id" gorm:"default:0"`
 	ModelName         string     `json:"model_name" gorm:"size:200"`
+	FastModelName     string     `json:"fast_model_name" gorm:"size:200"`
 	Temperature       float64    `json:"temperature" gorm:"default:0.7"`
 	MaxTokens         int        `json:"max_tokens" gorm:"default:4096"`
 	Timeout           int        `json:"timeout" gorm:"default:0"`
@@ -122,6 +123,7 @@ type UpdateAgentReq struct {
 	SystemPrompt      *string      `json:"system_prompt,omitzero"`
 	ProviderID        *int64       `json:"provider_id,omitzero"`
 	ModelName         *string      `json:"model_name,omitzero"`
+	FastModelName     *string      `json:"fast_model_name,omitzero"`
 	Temperature       *float64     `json:"temperature,omitzero"`
 	MaxTokens         *int         `json:"max_tokens,omitzero"`
 	Timeout           *int         `json:"timeout,omitzero"`
@@ -144,6 +146,7 @@ type CreateAgentReq struct {
 	SystemPrompt      string      `json:"system_prompt"`
 	ProviderID        int64       `json:"provider_id"`
 	ModelName         string      `json:"model_name"`
+	FastModelName     string      `json:"fast_model_name"`
 	Temperature       float64     `json:"temperature"`
 	MaxTokens         int         `json:"max_tokens"`
 	Timeout           int         `json:"timeout"`
