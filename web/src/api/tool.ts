@@ -1,12 +1,14 @@
 import request, { type ListQuery } from './request'
 
+export type HandlerType = 'builtin' | 'http' | 'script' | 'command'
+
 export interface Tool {
   id: number
   uuid: string
   name: string
   description: string
   function_def: any
-  handler_type: string
+  handler_type: HandlerType
   handler_config: any
   enabled: boolean
   timeout: number
@@ -14,12 +16,24 @@ export interface Tool {
   updated_at: string
 }
 
+export interface ScriptHandlerConfig {
+  language: 'python' | 'javascript' | 'shell' | 'go'
+  content: string
+}
+
+export interface HTTPHandlerConfig {
+  url: string
+  method: string
+  headers?: Record<string, string>
+  body?: string
+}
+
 export interface CreateToolReq {
   name: string
   description?: string
   function_def?: any
-  handler_type: string
-  handler_config?: any
+  handler_type: HandlerType
+  handler_config?: HTTPHandlerConfig | ScriptHandlerConfig
   enabled?: boolean
   timeout?: number
 }

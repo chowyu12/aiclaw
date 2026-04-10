@@ -39,6 +39,7 @@ func (h *ToolHandler) Create(w http.ResponseWriter, r *http.Request) {
 		HandlerType:   req.HandlerType,
 		HandlerConfig: req.HandlerConfig,
 		Enabled:       true,
+		Timeout:       req.Timeout,
 	}
 	if req.Enabled != nil {
 		t.Enabled = *req.Enabled

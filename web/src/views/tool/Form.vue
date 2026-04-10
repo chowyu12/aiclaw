@@ -24,10 +24,8 @@
         </el-form-item>
         <el-form-item label="处理器类型" required>
           <el-select v-model="form.handler_type" placeholder="选择类型" style="width: 100%">
-            <el-option label="内置函数 (builtin)" value="builtin" />
-            <el-option label="HTTP 回调 (http)" value="http" />
-            <el-option label="命令行 (command)" value="command" />
-            <el-option label="脚本 (script)" value="script" />
+            <el-option label="HTTP 回调" value="http" />
+            <el-option label="脚本" value="script" />
           </el-select>
         </el-form-item>
         <el-row :gutter="24">
@@ -57,17 +55,25 @@
           </el-form-item>
         </template>
 
-        <template v-if="form.handler_type === 'command'">
-          <el-divider content-position="left">命令配置</el-divider>
-          <el-form-item label="命令模板" required>
-            <el-input v-model="cmdConfig.command" placeholder="ls -la {path}" />
-            <div class="form-hint">使用 {参数名} 引用 LLM 传入的参数值</div>
+        <template v-if="form.handler_type === 'script'">
+          <el-divider content-position="left">脚本配置</el-divider>
+          <el-form-item label="脚本语言" required>
+            <el-select v-model="scriptConfig.language" style="width: 100%">
+              <el-option label="Python" value="python" />
+              <el-option label="JavaScript" value="javascript" />
+              <el-option label="Shell" value="shell" />
+              <el-option label="Go" value="go" />
+            </el-select>
           </el-form-item>
-          <el-form-item label="工作目录">
-            <el-input v-model="cmdConfig.working_dir" placeholder="留空使用默认目录" />
-          </el-form-item>
-          <el-form-item label="Shell">
-            <el-input v-model="cmdConfig.shell" placeholder="/bin/sh" />
+          <el-form-item label="脚本内容" required>
+            <el-input
+              v-model="scriptConfig.content"
+              type="textarea"
+              :rows="12"
+              placeholder="#!/bin/sh&#10;echo &quot;Hello {name}, your query is: {query}&quot;"
+              style="font-family: monospace"
+            />
+            <div class="form-hint">使用 {参数名} 引用 LLM 传入的参数值，执行时会自动替换</div>
           </el-form-item>
         </template>
 
@@ -175,13 +181,13 @@ const rawJsonError = ref('')
 const form = ref({
   name: '',
   description: '',
-  handler_type: 'builtin',
+  handler_type: 'http',
   enabled: true,
   timeout: 30,
 })
 
 const httpConfig = reactive({ url: '', method: 'GET', headers: {} as Record<string, string> })
-const cmdConfig = reactive({ command: '', working_dir: '', shell: '/bin/sh' })
+const scriptConfig = reactive({ language: 'python', content: '' })
 
 const llmDescription = ref('')
 const params = ref<ParamItem[]>([])
@@ -283,8 +289,8 @@ async function loadTool() {
     if (detail.handler_type === 'http' && detail.handler_config) {
       Object.assign(httpConfig, { url: '', method: 'GET', headers: {}, ...detail.handler_config })
     }
-    if (detail.handler_type === 'command' && detail.handler_config) {
-      Object.assign(cmdConfig, { command: '', working_dir: '', shell: '/bin/sh', ...detail.handler_config })
+    if (detail.handler_type === 'script' && detail.handler_config) {
+      Object.assign(scriptConfig, { language: 'python', content: '', ...detail.handler_config })
     }
     parseFunctionDef(detail.function_def)
   } finally {
@@ -311,8 +317,8 @@ async function handleSubmit() {
     data.function_def = buildFunctionDef()
     if (data.handler_type === 'http') {
       data.handler_config = { ...httpConfig }
-    } else if (data.handler_type === 'command') {
-      data.handler_config = { ...cmdConfig }
+    } else if (data.handler_type === 'script') {
+      data.handler_config = { ...scriptConfig }
     }
 
     if (isEdit.value) {
