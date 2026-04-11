@@ -7,6 +7,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/channels"
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/handler"
+	"github.com/chowyu12/aiclaw/internal/scheduler"
 	"github.com/chowyu12/aiclaw/internal/store"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 	"github.com/chowyu12/aiclaw/pkg/httputil"
@@ -21,6 +22,7 @@ type APIParams struct {
 	Upload             config.UploadConfig
 	Version            string
 	WS                 *workspace.Workspace
+	Scheduler          *scheduler.Scheduler
 }
 
 // RegisterAPIRoutes 注册全部 /api/v1 业务路由（不含全局中间件）。
@@ -35,6 +37,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, p APIParams) {
 	handler.NewChatHandler(p.Store, p.Executor).Register(mux)
 	handler.NewFileHandler(p.Store, p.Upload).Register(mux)
 	handler.NewMetricsHandler().Register(mux)
+	handler.NewSchedulerHandler(p.Scheduler).Register(mux)
 
 	ver := p.Version
 	mux.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, _ *http.Request) {

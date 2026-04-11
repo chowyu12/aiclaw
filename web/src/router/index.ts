@@ -59,6 +59,7 @@ const router = createRouter({
         { path: 'tools', name: 'Tools', component: () => import('../views/tool/Index.vue') },
         { path: 'tools/create', name: 'ToolCreate', component: () => import('../views/tool/Form.vue') },
         { path: 'tools/:id/edit', name: 'ToolEdit', component: () => import('../views/tool/Form.vue') },
+        { path: 'scheduler', name: 'Scheduler', component: () => import('../views/scheduler/Index.vue') },
         { path: 'logs', name: 'Logs', component: () => import('../views/log/Index.vue') },
         { path: 'channels', name: 'Channels', component: () => import('../views/channel/Index.vue') },
         { path: 'agents', name: 'Agents', component: () => import('../views/agent/Index.vue') },

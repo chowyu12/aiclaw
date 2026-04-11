@@ -153,6 +153,7 @@ func Run(opts Options) {
 		Upload:             cfg.Upload,
 		Version:            cmp.Or(opts.Version, "dev"),
 		WS:                 ws,
+		Scheduler:          sched,
 	})
 	server.MountEmbeddedFrontend(mux)
 
