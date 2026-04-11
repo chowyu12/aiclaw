@@ -17,6 +17,7 @@ export interface Agent {
   system_prompt: string
   provider_id: number
   model_name: string
+  fast_model_name: string
   temperature: number
   max_tokens: number
   timeout: number
@@ -43,6 +44,7 @@ export interface UpdateAgentPayload {
   system_prompt?: string
   provider_id?: number
   model_name?: string
+  fast_model_name?: string
   temperature?: number
   max_tokens?: number
   timeout?: number
@@ -65,6 +67,7 @@ export interface CreateAgentPayload {
   system_prompt?: string
   provider_id?: number
   model_name?: string
+  fast_model_name?: string
   temperature?: number
   max_tokens?: number
   timeout?: number

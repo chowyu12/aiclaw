@@ -13,7 +13,7 @@
     <div class="aic-page-body">
       <el-form :model="agentForm" label-position="top" class="af-root" v-loading="agentLoading">
         <div class="af-cols">
-          <!-- ====== 左栏：主编辑区 ====== -->
+          <!-- ====== 左栏：模型 + 参数 + 提示词 ====== -->
           <div class="af-left">
             <div class="af-row-inline">
               <el-form-item label="名称" required class="af-cell af-cell--name">
@@ -33,7 +33,7 @@
                   </el-option>
                 </el-select>
               </el-form-item>
-              <el-form-item label="模型" required class="af-cell">
+              <el-form-item label="主模型" required class="af-cell">
                 <el-select v-model="agentForm.model_name" filterable allow-create default-first-option style="width:100%" :loading="modelLoading" :disabled="!agentForm.provider_id" @focus="onModelFocus" placeholder="选择或输入">
                   <el-option-group v-if="remoteModels.length > 0" label="远程模型">
                     <el-option v-for="m in remoteModels" :key="'r-'+m" :label="m" :value="m" />
@@ -44,7 +44,63 @@
                 </el-select>
                 <div v-if="remoteFetchError" class="af-hint warn">{{ remoteFetchError }}</div>
               </el-form-item>
+              <el-form-item class="af-cell">
+                <template #label>
+                  <span>快速模型</span>
+                  <el-tooltip content="子 Agent 指定 model=fast 时使用的轻量模型，留空则跟随主模型" placement="top">
+                    <el-icon style="margin-left:4px;vertical-align:middle;cursor:help"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-select v-model="agentForm.fast_model_name" filterable allow-create clearable default-first-option style="width:100%" :loading="modelLoading" :disabled="!agentForm.provider_id" @focus="onModelFocus" placeholder="可选，如 gpt-4o-mini">
+                  <el-option-group v-if="remoteModels.length > 0" label="远程模型">
+                    <el-option v-for="m in remoteModels" :key="'fr-'+m" :label="m" :value="m" />
+                  </el-option-group>
+                  <el-option-group v-if="localOnlyModels.length > 0" :label="remoteModels.length ? '本地配置' : '模型列表'">
+                    <el-option v-for="m in localOnlyModels" :key="'fl-'+m" :label="m" :value="m" />
+                  </el-option-group>
+                </el-select>
+              </el-form-item>
             </div>
+
+            <!-- 模型参数（内嵌左栏） -->
+            <section class="af-card af-card--inline">
+              <h4 class="af-card-head">模型参数</h4>
+              <div class="af-params-grid">
+                <label class="af-kv af-kv--wide">
+                  <span class="af-kv-k">温度</span>
+                  <div class="af-kv-v af-temp">
+                    <el-slider v-model="agentForm.temperature" :min="0" :max="2" :step="0.1" :disabled="isTemperatureDisabled" class="af-temp-slider" />
+                    <span class="af-temp-val">{{ agentForm.temperature.toFixed(1) }}</span>
+                  </div>
+                </label>
+                <label class="af-kv">
+                  <span class="af-kv-k">Max Tokens</span>
+                  <el-input-number v-model="agentForm.max_tokens" :min="1" :max="128000" controls-position="right" size="small" class="af-kv-num" />
+                </label>
+                <div class="af-kv">
+                  <div class="af-switch-line">
+                    <span>深度思考</span>
+                    <el-switch v-model="thinkingEnabled" size="small" :disabled="isAlwaysThinking" />
+                  </div>
+                  <div v-if="isAlwaysThinking" class="af-hint warn">推理模型，始终开启</div>
+                  <label v-if="thinkingEnabled || isAlwaysThinking" class="af-kv" style="margin-top:6px">
+                    <span class="af-kv-k">推理强度</span>
+                    <el-select v-model="agentForm.reasoning_effort" size="small" style="width:100%">
+                      <el-option label="低 (Low)" value="low" />
+                      <el-option label="中 (Medium)" value="medium" />
+                      <el-option label="高 (High)" value="high" />
+                    </el-select>
+                  </label>
+                </div>
+                <div class="af-kv">
+                  <div class="af-switch-line">
+                    <span>联网搜索</span>
+                    <el-switch v-model="agentForm.enable_web_search" size="small" :disabled="!supportsWebSearch" />
+                  </div>
+                  <div v-if="!supportsWebSearch" class="af-hint">当前模型不支持</div>
+                </div>
+              </div>
+            </section>
 
             <el-form-item label="System Prompt">
               <el-input v-model="agentForm.system_prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 28 }" placeholder="为 Agent 编写系统提示词" class="af-prompt" />
@@ -56,43 +112,9 @@
             </div>
           </div>
 
-          <!-- ====== 右栏：配置面板 ====== -->
+          <!-- ====== 右栏：工具 + 辅助配置 ====== -->
           <div class="af-right">
             <div class="af-right-inner">
-              <!-- 模型参数 -->
-              <section class="af-card">
-                <h4 class="af-card-head">模型参数</h4>
-                <label class="af-kv">
-                  <span class="af-kv-k">温度</span>
-                  <div class="af-kv-v af-temp">
-                    <el-slider v-model="agentForm.temperature" :min="0" :max="2" :step="0.1" :disabled="isTemperatureDisabled" class="af-temp-slider" />
-                    <span class="af-temp-val">{{ agentForm.temperature.toFixed(1) }}</span>
-                  </div>
-                </label>
-                <label class="af-kv">
-                  <span class="af-kv-k">Max Tokens</span>
-                  <el-input-number v-model="agentForm.max_tokens" :min="1" :max="128000" controls-position="right" size="small" class="af-kv-num" />
-                </label>
-                <div class="af-switch-line" style="margin-top:4px">
-                  <span>深度思考</span>
-                  <el-switch v-model="thinkingEnabled" size="small" :disabled="isAlwaysThinking" />
-                </div>
-                <div v-if="isAlwaysThinking" class="af-hint warn">推理模型，始终开启</div>
-                <label v-if="thinkingEnabled || isAlwaysThinking" class="af-kv" style="margin-top:6px">
-                  <span class="af-kv-k">推理强度</span>
-                  <el-select v-model="agentForm.reasoning_effort" size="small" style="width:100%">
-                    <el-option label="低 (Low)" value="low" />
-                    <el-option label="中 (Medium)" value="medium" />
-                    <el-option label="高 (High)" value="high" />
-                  </el-select>
-                </label>
-                <div class="af-switch-line" style="margin-top:4px">
-                  <span>联网搜索</span>
-                  <el-switch v-model="agentForm.enable_web_search" size="small" :disabled="!supportsWebSearch" />
-                </div>
-                <div v-if="!supportsWebSearch" class="af-hint">当前模型不支持</div>
-              </section>
-
               <!-- 工具 -->
               <section class="af-card">
                 <h4 class="af-card-head">工具</h4>
@@ -185,6 +207,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { QuestionFilled } from '@element-plus/icons-vue'
 import { agentApi, defaultModelCaps, type Agent, type ModelCaps } from '@/api/agent'
 import { providerApi, type Provider } from '@/api/provider'
 import { toolApi, type Tool } from '@/api/tool'
@@ -217,6 +240,7 @@ const agentForm = ref({
   system_prompt: '',
   provider_id: null as number | null,
   model_name: '',
+  fast_model_name: '',
   temperature: 0.7,
   max_tokens: 4096,
   timeout: 0,
@@ -312,6 +336,7 @@ function applyAgentDetail(detail: Agent) {
     system_prompt: detail.system_prompt || '',
     provider_id: detail.provider_id,
     model_name: detail.model_name || '',
+    fast_model_name: detail.fast_model_name || '',
     temperature: detail.temperature ?? 0.7,
     max_tokens: detail.max_tokens ?? 4096,
     timeout: detail.timeout ?? 0,
@@ -370,6 +395,7 @@ async function saveAgent() {
       system_prompt: agentForm.value.system_prompt,
       provider_id: agentForm.value.provider_id ?? undefined,
       model_name: agentForm.value.model_name,
+      fast_model_name: agentForm.value.fast_model_name,
       temperature: agentForm.value.temperature,
       max_tokens: agentForm.value.max_tokens,
       timeout: agentForm.value.timeout,
@@ -438,7 +464,7 @@ onMounted(() => reloadAgent())
 }
 
 .af-right {
-  width: 380px;
+  width: 320px;
   flex-shrink: 0;
 }
 
@@ -460,6 +486,23 @@ onMounted(() => reloadAgent())
 .af-cell { flex: 1; min-width: 0; margin-bottom: 0 !important; }
 .af-cell--name { max-width: 220px; flex: 0 0 220px; }
 .af-cell--desc { flex: 1; }
+
+/* ===== 左栏内嵌卡片 ===== */
+.af-card--inline {
+  margin-bottom: 16px;
+}
+
+.af-params-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 20px;
+}
+
+.af-params-grid .af-kv--wide {
+  grid-column: 1 / -1;
+}
+
+.af-params-grid > .af-kv { margin-bottom: 0; }
 
 .af-left :deep(.el-form-item) { margin-bottom: 16px; }
 .af-left :deep(.el-form-item__label) { font-size: 13px; font-weight: 500; padding-bottom: 4px; }

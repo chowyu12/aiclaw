@@ -55,6 +55,10 @@
             <el-icon><Share /></el-icon>
             <template #title>渠道</template>
           </el-menu-item>
+          <el-menu-item index="/scheduler">
+            <el-icon><Timer /></el-icon>
+            <template #title>定时任务</template>
+          </el-menu-item>
 
           <el-menu-item index="/logs">
             <el-icon><Document /></el-icon>
