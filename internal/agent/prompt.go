@@ -38,15 +38,12 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 	if in.PersistentMemory != "" {
 		systemPrompt += "\n\n" + in.PersistentMemory
 	}
-
 	if in.MemosContext != "" {
-		systemPrompt += "\n\n## 相关记忆\n以下是从长期记忆中检索到的与当前对话相关的信息，请参考但不要盲目依赖：\n<memories>\n" + in.MemosContext + "\n</memories>"
+		systemPrompt += "\n\n<memories>\n" + in.MemosContext + "\n</memories>"
 	}
-
 	if in.SessionMemory != "" {
-		systemPrompt += "\n\n## 会话笔记\n以下是本次会话的历史执行摘要，可帮助回顾之前的对话进展：\n<session_notes>\n" + in.SessionMemory + "\n</session_notes>"
+		systemPrompt += "\n\n<session_notes>\n" + in.SessionMemory + "\n</session_notes>"
 	}
-
 	if in.TodoBlock != "" {
 		systemPrompt += "\n\n" + in.TodoBlock
 	}
@@ -185,50 +182,27 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 		}
 	}
 
-	var strategies []string
+	if hasTools || hasSkills {
+		sb.WriteString("\n\n## 执行策略\n")
+	}
 
 	if hasTools {
-		strategies = append(strategies,
-			`**先思考再行动**: 收到请求后先判断是否需要工具。以下情况直接回答，不要调用工具：
-   - 常识、概念解释、原理分析（如"什么是微服务"、"HTTP 和 HTTPS 的区别"）
-   - 代码知识、语言特性、设计模式（如"Go 的 context 怎么用"）
-   - 经验建议、方案对比、架构讨论（如"Redis 和 Memcached 怎么选"）
-   - 创意写作、文案撰写、翻译润色
-   - 数学计算、逻辑推理
-   以下情况必须使用工具：
-   - 读写文件、执行命令、操作系统（需要 read/write/exec 等）
-   - 查询实时信息、抓取网页（需要 web_fetch/current_time 等）
-   - 搜索代码库、定位文件（需要 grep/find/ls 等）
-   - 用户明确要求执行某个操作`,
-		)
+		sb.WriteString(`
+**判断原则**: 知识性问题（概念解释、原理分析、经验建议、方案对比、写作翻译、数学推理）直接回答。操作性问题（文件读写、命令执行、信息检索、网页抓取）或用户明确要求动手时，使用工具。
+
+**工作方式**:
+- 复杂任务（3+ 步骤）先用 todo 规划，逐项推进
+- 不确定时先用 sub_agent(mode=explore) 探索，再动手
+- 基于工具返回的真实数据回答，不编造
+`)
 	}
 
 	if hasTools && toolSearchMode {
-		strategies = append(strategies,
-			"**按需搜索**: 需要某工具但它不在列表中时，调用 tool_search 搜索。搜到后工具会自动加入可用列表，直接调用即可",
-			"**避免重复搜索**: 每类需求搜索一次即可，不要对同一类工具反复搜索。如果搜索结果显示工具已在可用列表中，立即使用它们",
-			"**先搜后用**: 正确流程是 tool_search → 得到工具 → 直接调用工具完成任务。不要在搜索和使用之间犹豫",
-		)
+		sb.WriteString("- 需要工具但不在列表中时，调用 tool_search 搜索一次，搜到后直接使用\n")
 	}
+
 	if hasSkills {
-		strategies = append(strategies,
-			"**技能路由**: 若问题匹配某项技能，优先使用该技能及其关联工具",
-			"**技能详情**: 需要使用某项技能时，先用 read 工具读取其详细指令文件，了解完整用法后再执行。指令文件中的相对路径以 SKILL.md 所在目录为基准，例如 SKILL.md 路径为 /a/b/SKILL.md，引用 ./refs/doc.md 时应读取 /a/b/refs/doc.md",
-		)
-	}
-	if hasTools {
-		strategies = append(strategies,
-			"**任务规划**: 收到复杂请求时（涉及 3+ 步骤），先用 todo 工具创建任务列表，再逐项执行。完成每步后及时标记完成",
-			"**探索优先**: 不确定代码位置或架构时，先用 sub_agent(mode=explore) 并行探索收集信息，再动手修改",
-			"**并行利用**: 多个独立子任务可通过 sub_agent 的 tasks 数组并行执行，提高效率",
-			"**结果驱动**: 基于工具返回的真实数据生成回答，不编造或臆测信息",
-		)
-	}
-	if len(strategies) > 0 {
-		sb.WriteString("\n\n## 执行策略\n\n")
-		for i, s := range strategies {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, s))
-		}
+		sb.WriteString("- 问题匹配某项技能时优先使用。使用前先 read 其 SKILL.md 了解完整用法，指令中的相对路径以 SKILL.md 所在目录为基准\n")
 	}
 
 	result := sb.String()
