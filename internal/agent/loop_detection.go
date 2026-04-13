@@ -37,10 +37,6 @@ func newToolLoopDetector(l *log.Entry) *toolLoopDetector {
 	return &toolLoopDetector{l: l}
 }
 
-func (d *toolLoopDetector) reset() {
-	d.history = d.history[:0]
-}
-
 // check 若本次调用应被拦截，返回 true 及给模型看的说明（不写入历史）。
 func (d *toolLoopDetector) check(name, args string) (blocked bool, message string) {
 	a := strings.TrimSpace(args)

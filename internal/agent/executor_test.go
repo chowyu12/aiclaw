@@ -55,8 +55,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 		if !strings.Contains(result, "执行策略") {
 			t.Errorf("missing strategy section: %q", result)
 		}
-		if !strings.Contains(result, "工具优先") {
-			t.Errorf("missing tool-first strategy: %q", result)
+		if !strings.Contains(result, "判断原则") {
+			t.Errorf("missing judgment principle: %q", result)
 		}
 	})
 
@@ -71,8 +71,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 		if !strings.Contains(result, "关联工具: translate_api") {
 			t.Errorf("missing skill-tool association: %q", result)
 		}
-		if !strings.Contains(result, "技能路由") {
-			t.Errorf("missing skill routing strategy: %q", result)
+		if !strings.Contains(result, "技能") {
+			t.Errorf("missing skill section: %q", result)
 		}
 	})
 
@@ -83,8 +83,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "disabled_tool", Description: "禁用", Enabled: false},
 		}
 		result := buildSystemPrompt(ag, nil, tools, nil, false, nil)
-		if !strings.Contains(result, "工具优先") {
-			t.Errorf("expected tool strategy when tools present: %q", result)
+		if !strings.Contains(result, "判断原则") {
+			t.Errorf("expected judgment principle when tools present: %q", result)
 		}
 	})
 

@@ -36,21 +36,13 @@ func appendSessionMemory(ws *workspace.Workspace, agentUUID, convUUID, userMsg s
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("\n## %s\n", time.Now().Format("2006-01-02 15:04")))
 
-	userSnippet := string([]rune(userMsg))
-	if len([]rune(userSnippet)) > 200 {
-		userSnippet = string([]rune(userSnippet)[:200]) + "..."
-	}
-	sb.WriteString(fmt.Sprintf("**User**: %s\n", userSnippet))
+	sb.WriteString(fmt.Sprintf("**User**: %s\n", truncateRunes(userMsg, 200)))
 
 	if len(toolNames) > 0 {
 		sb.WriteString(fmt.Sprintf("**Tools**: %s\n", strings.Join(toolNames, ", ")))
 	}
 
-	outcomeSnippet := string([]rune(outcome))
-	if len([]rune(outcomeSnippet)) > 300 {
-		outcomeSnippet = string([]rune(outcomeSnippet)[:300]) + "..."
-	}
-	sb.WriteString(fmt.Sprintf("**Outcome**: %s\n", outcomeSnippet))
+	sb.WriteString(fmt.Sprintf("**Outcome**: %s\n", truncateRunes(outcome, 300)))
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
