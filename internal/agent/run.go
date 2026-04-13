@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,9 +23,10 @@ import (
 
 // llmRoundResult 一次 LLM 调用的结果（流式/阻塞通用）。
 type llmRoundResult struct {
-	content   string
-	toolCalls []openai.ToolCall
-	tokens    int
+	content      string
+	toolCalls    []openai.ToolCall
+	tokens       int
+	promptTokens int
 }
 
 // llmCaller 封装单次 LLM 请求，流式与阻塞各实现一份。
@@ -37,13 +39,14 @@ func blockingCaller(llm provider.LLMProvider) llmCaller {
 			return llmRoundResult{}, err
 		}
 		if len(resp.Choices) == 0 {
-			return llmRoundResult{tokens: resp.Usage.TotalTokens}, nil
+			return llmRoundResult{tokens: resp.Usage.TotalTokens, promptTokens: resp.Usage.PromptTokens}, nil
 		}
 		ch := resp.Choices[0]
 		return llmRoundResult{
-			content:   ch.Message.Content,
-			toolCalls: ch.Message.ToolCalls,
-			tokens:    resp.Usage.TotalTokens,
+			content:      ch.Message.Content,
+			toolCalls:    ch.Message.ToolCalls,
+			tokens:       resp.Usage.TotalTokens,
+			promptTokens: resp.Usage.PromptTokens,
 		}, nil
 	}
 }
@@ -61,7 +64,7 @@ func streamingCaller(llm provider.LLMProvider, convUUID string, onChunk func(mod
 
 		var buf strings.Builder
 		var toolCalls []openai.ToolCall
-		var tokens int
+		var tokens, promptTokens int
 		var finishReason openai.FinishReason
 
 		for {
@@ -74,6 +77,7 @@ func streamingCaller(llm provider.LLMProvider, convUUID string, onChunk func(mod
 			}
 			if resp.Usage != nil {
 				tokens = resp.Usage.TotalTokens
+				promptTokens = resp.Usage.PromptTokens
 			}
 			if len(resp.Choices) == 0 {
 				continue
@@ -110,7 +114,7 @@ func streamingCaller(llm provider.LLMProvider, convUUID string, onChunk func(mod
 		if finishReason != openai.FinishReasonToolCalls {
 			toolCalls = nil
 		}
-		return llmRoundResult{content: buf.String(), toolCalls: toolCalls, tokens: tokens}, nil
+		return llmRoundResult{content: buf.String(), toolCalls: toolCalls, tokens: tokens, promptTokens: promptTokens}, nil
 	}
 }
 
@@ -132,6 +136,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 	st.calledTools = make(map[string]bool)
 
 	budget := NewBudgetTracker(ec.ag.TokenBudget)
+	compressor := NewContextCompressor(ec.ag.ModelName, ec.l)
 
 	var totalTokens int
 	var finalContent string
@@ -140,6 +145,17 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 	completed := false
 
 	for i := range maxIter {
+		// 上下文压缩检查：token 占用超过模型窗口阈值时，用 LLM 摘要压缩中间轮次
+		if compressor.NeedCompress(st.Messages) {
+			compressionModel := cmp.Or(ec.ag.FastModelName, ec.ag.ModelName)
+			compressed, compErr := compressor.Compress(ctx, st.Messages, ec.llmProv, compressionModel)
+			if compErr != nil {
+				ec.l.WithError(compErr).Warn("[Compress] context compression failed, continuing with full context")
+			} else {
+				st.Messages = compressed
+			}
+		}
+
 		// PreLLMCall hook
 		if action := e.hooks.Fire(ctx, HookPreLLMCall, &HookPayload{Model: ec.ag.ModelName, Round: i + 1}); action == HookAbort {
 			ec.l.WithField("round", i+1).Warn("[Hook] agent execution aborted by pre_llm_call hook")
@@ -176,6 +192,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 
 		totalTokens += result.tokens
 		budget.Add(result.tokens)
+		compressor.UpdatePromptTokens(result.promptTokens)
 
 		// PostLLMCall hook
 		e.hooks.Fire(ctx, HookPostLLMCall, &HookPayload{Model: ec.ag.ModelName, Round: i + 1, Tokens: result.tokens})

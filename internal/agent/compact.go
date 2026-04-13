@@ -3,6 +3,8 @@ package agent
 import (
 	"unicode/utf8"
 
+	openai "github.com/chowyu12/go-openai"
+
 	"github.com/chowyu12/aiclaw/internal/model"
 )
 
@@ -49,4 +51,21 @@ func truncateRunes(s string, maxRunes int) string {
 		return s
 	}
 	return string(rs[:maxRunes]) + "\n...(truncated)"
+}
+
+// estimateMessagesTokens 粗略估算消息列表的总 token 数。
+func estimateMessagesTokens(messages []openai.ChatCompletionMessage) int {
+	total := 0
+	for _, msg := range messages {
+		total += estimateTokens(msg.Content)
+		for _, tc := range msg.ToolCalls {
+			total += estimateTokens(tc.Function.Name)
+			total += estimateTokens(tc.Function.Arguments)
+		}
+		for _, mc := range msg.MultiContent {
+			total += estimateTokens(mc.Text)
+		}
+		total += 4 // per-message overhead (role, separators)
+	}
+	return total
 }
