@@ -51,9 +51,13 @@ func (m *MemoryManager) GetOrCreateConversation(ctx context.Context, conversatio
 const recentTurnsFullDetail = 3
 
 // LoadHistory 使用三级压缩策略加载历史消息：
+// LoadHistory 从数据库加载历史消息并进行**结构性截断**（加载时压缩）。
+// 这是一种静态、无损的分层截断策略，不依赖 LLM：
 //   - 最近 recentTurnsFullDetail 轮：完整保留
 //   - 中间 lightCompactTurns 轮：轻量压缩（保留消息结构，截断长内容）
 //   - 更早的轮：重度压缩（仅保留 user + 最后一条无 tool_calls 的 assistant）
+//
+// 注意：运行时的 LLM 驱动上下文摘要压缩由 ContextCompressor 负责，是独立的另一层机制。
 func (m *MemoryManager) LoadHistory(ctx context.Context, conversationID int64, maxTurns int) ([]openai.ChatCompletionMessage, error) {
 	msgs, err := m.store.ListMessages(ctx, conversationID, maxTurns)
 	if err != nil {

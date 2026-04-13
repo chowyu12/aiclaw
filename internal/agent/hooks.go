@@ -40,13 +40,13 @@ type HookPayload struct {
 	// LLM 调用上下文 (pre/post_llm_call)
 	Model  string
 	Round  int
-	Tokens int
+	Tokens int // 单轮 LLM 调用消耗的 token 数（PostLLMCall）
 
 	// Agent 完成上下文 (agent_done)
-	ConvUUID     string
-	UserMsg      string
-	Content      string
-	TotalTokens  int
+	ConvUUID    string
+	UserMsg     string
+	Content     string
+	TotalTokens int // 整次执行累计 token 数（AgentDone）
 	Duration     time.Duration
 	Agent        *model.Agent
 	Skills       []model.Skill

@@ -127,7 +127,7 @@ func (c *ContextCompressor) Compress(
 	result = sanitizeToolCallSequence(result)
 
 	c.previousSummary = summary
-	c.lastPromptTokens = 0
+	c.lastPromptTokens = estimateMessagesTokens(result)
 
 	c.logger.WithFields(log.Fields{
 		"original_count":   n,

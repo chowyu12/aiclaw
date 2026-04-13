@@ -562,13 +562,12 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "duration": duration, "tokens": tokensUsed}).Info("[Execute] << done")
 
 	e.hooks.Fire(ctx, HookAgentDone, &HookPayload{
-		Model:        ec.ag.ModelName,
-		Tokens:       tokensUsed,
-		ConvUUID:     ec.conv.UUID,
-		UserMsg:      ec.userMsg,
-		Content:      content,
-		TotalTokens:  tokensUsed,
-		Duration:     duration,
+		Model:       ec.ag.ModelName,
+		ConvUUID:    ec.conv.UUID,
+		UserMsg:     ec.userMsg,
+		Content:     content,
+		TotalTokens: tokensUsed,
+		Duration:    duration,
 		Agent:        ec.ag,
 		Skills:       ec.skills,
 		CalledTools:  st.calledTools,

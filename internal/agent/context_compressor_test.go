@@ -305,8 +305,8 @@ func TestContextCompressor_Compress_EndToEnd(t *testing.T) {
 		t.Error("previousSummary should be set after compression")
 	}
 
-	if c.lastPromptTokens != 0 {
-		t.Error("lastPromptTokens should be reset after compression")
+	if c.lastPromptTokens <= 0 {
+		t.Error("lastPromptTokens should be estimated from compressed messages after compression")
 	}
 }
 

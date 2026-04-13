@@ -71,22 +71,25 @@ func (t *StepTracker) RecordStep(ctx context.Context, stepType model.StepType, n
 	t.mu.Lock()
 	t.stepOrder++
 	order := t.stepOrder
+	msgID := t.messageID
 	t.mu.Unlock()
 
 	meta = t.enrichMeta(meta)
 
 	var metaJSON model.JSON
 	if meta != nil {
-		data, _ := json.Marshal(meta)
-		metaJSON = model.JSON(data)
+		if data, err := json.Marshal(meta); err == nil {
+			metaJSON = model.JSON(data)
+		} else {
+			log.WithError(err).Warn("[Tracker] marshal step metadata failed")
+		}
 	}
 
-	// 从 context 继承 sub_agent 关联信息，写入独立字段。
 	saDepth := subAgentDepth(ctx)
 	saCallID := subAgentCallID(ctx)
 
 	step := &model.ExecutionStep{
-		MessageID:      t.messageID,
+		MessageID:      msgID,
 		ConversationID: t.conversationID,
 		StepOrder:      order,
 		StepType:       stepType,

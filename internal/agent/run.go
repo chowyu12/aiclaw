@@ -207,9 +207,13 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 			break
 		}
 
-		// 检查 token 预算
+		// 检查 token 预算：超出后不再执行工具，沿用当前回复内容收尾
 		if budget.Exceeded() {
 			finalContent = result.content
+			if finalContent == "" {
+				finalContent = fmt.Sprintf("已达到 token 预算上限（%d），已消耗 %d token。请开始新对话继续。",
+					ec.ag.TokenBudget, budget.Consumed())
+			}
 			completed = true
 			ec.l.WithFields(log.Fields{
 				"round": i + 1, "budget_limit": ec.ag.TokenBudget, "consumed": budget.Consumed(),
