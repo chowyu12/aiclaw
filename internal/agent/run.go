@@ -167,10 +167,12 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 			refreshTodoInSystemMessage(st.Messages, ec.conv.UUID)
 		}
 
+		msgs := sanitizeMessages(st.Messages)
+		tools := filterURLGatedTools(toolsSentToLLM(st), userMessagesHaveURL(msgs))
 		req := openai.ChatCompletionRequest{
 			Model:    ec.ag.ModelName,
-			Messages: sanitizeMessages(st.Messages),
-			Tools:    toolsSentToLLM(st),
+			Messages: msgs,
+			Tools:    tools,
 		}
 		applyModelCaps(&req, ec.ag, ec.prov.Type, ec.l)
 
