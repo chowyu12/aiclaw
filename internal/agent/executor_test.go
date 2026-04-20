@@ -19,7 +19,7 @@ import (
 func TestBuildSystemPrompt(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		ag := &model.Agent{}
-		result := buildSystemPrompt(ag, nil, nil, nil, false, nil)
+		result := buildSystemPrompt(ag, nil, nil, nil, false, false, nil)
 		if result == "" {
 			t.Error("expected default base prompt when system_prompt is empty")
 		}
@@ -30,7 +30,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	t.Run("with_prompt", func(t *testing.T) {
 		ag := &model.Agent{SystemPrompt: "你是助手"}
-		result := buildSystemPrompt(ag, nil, nil, nil, false, nil)
+		result := buildSystemPrompt(ag, nil, nil, nil, false, false, nil)
 		if result != "你是助手" {
 			t.Errorf("expected '你是助手', got %q", result)
 		}
@@ -39,7 +39,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	t.Run("with_skills", func(t *testing.T) {
 		ag := &model.Agent{SystemPrompt: "base"}
 		skills := []model.Skill{{Name: "翻译", Description: "翻译技能描述"}}
-		result := buildSystemPrompt(ag, skills, nil, nil, false, nil)
+		result := buildSystemPrompt(ag, skills, nil, nil, false, false, nil)
 		if !strings.Contains(result, "翻译") || !strings.Contains(result, "翻译技能描述") {
 			t.Errorf("skill not included: %q", result)
 		}
@@ -51,7 +51,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "read", Description: "读取文件内容", Enabled: true},
 			{Name: "exec", Description: "运行命令", Enabled: true},
 		}
-		result := buildSystemPrompt(ag, nil, tools, nil, false, nil)
+		result := buildSystemPrompt(ag, nil, tools, nil, false, false, nil)
 		if !strings.Contains(result, "执行策略") {
 			t.Errorf("missing strategy section: %q", result)
 		}
@@ -67,7 +67,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "translate_api", Description: "文本翻译", Enabled: true},
 		}
 		toolSkillMap := map[string]string{"translate_api": "翻译"}
-		result := buildSystemPrompt(ag, skills, tools, toolSkillMap, false, nil)
+		result := buildSystemPrompt(ag, skills, tools, toolSkillMap, false, false, nil)
 		if !strings.Contains(result, "关联工具: translate_api") {
 			t.Errorf("missing skill-tool association: %q", result)
 		}
@@ -82,7 +82,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "enabled_tool", Description: "可用", Enabled: true},
 			{Name: "disabled_tool", Description: "禁用", Enabled: false},
 		}
-		result := buildSystemPrompt(ag, nil, tools, nil, false, nil)
+		result := buildSystemPrompt(ag, nil, tools, nil, false, false, nil)
 		if !strings.Contains(result, "判断原则") {
 			t.Errorf("expected judgment principle when tools present: %q", result)
 		}
@@ -94,7 +94,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		tools := []model.Tool{
 			{Name: "test_tool", Description: "测试工具", Enabled: true},
 		}
-		result := buildSystemPrompt(ag, skills, tools, nil, false, nil)
+		result := buildSystemPrompt(ag, skills, tools, nil, false, false, nil)
 		if !strings.Contains(result, "base prompt") {
 			t.Error("missing base prompt")
 		}
@@ -103,6 +103,40 @@ func TestBuildSystemPrompt(t *testing.T) {
 		}
 		if !strings.Contains(result, "执行策略") {
 			t.Error("missing strategy section")
+		}
+	})
+
+	t.Run("web_search_enabled_injects_section", func(t *testing.T) {
+		ag := &model.Agent{}
+		result := buildSystemPrompt(ag, nil, nil, nil, false, true, nil)
+		if !strings.Contains(result, "联网搜索") {
+			t.Errorf("expected web search section when enabled, got %q", result)
+		}
+		if !strings.Contains(result, "不是函数工具") {
+			t.Errorf("expected clarification that web_search is not a function tool: %q", result)
+		}
+		if !strings.Contains(result, "web_fetch") {
+			t.Errorf("expected disambiguation with web_fetch: %q", result)
+		}
+	})
+
+	t.Run("web_search_disabled_no_section", func(t *testing.T) {
+		ag := &model.Agent{}
+		result := buildSystemPrompt(ag, nil, nil, nil, false, false, nil)
+		if strings.Contains(result, "联网搜索") {
+			t.Errorf("should not mention web search when disabled, got %q", result)
+		}
+	})
+
+	t.Run("web_search_enabled_with_tools", func(t *testing.T) {
+		ag := &model.Agent{}
+		tools := []model.Tool{{Name: "read", Description: "读取", Enabled: true}}
+		result := buildSystemPrompt(ag, nil, tools, nil, false, true, nil)
+		if !strings.Contains(result, "联网搜索") {
+			t.Errorf("expected web search section alongside tools, got %q", result)
+		}
+		if !strings.Contains(result, "执行策略") {
+			t.Errorf("strategy section should still be present, got %q", result)
 		}
 	})
 }

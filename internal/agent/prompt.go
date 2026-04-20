@@ -16,6 +16,19 @@ import (
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
+// webSearchPromptSection 在开启内置联网搜索时注入 system prompt。
+// 目的：让模型明确知道自身具备实时检索能力，区分 web_search（自动）与 web_fetch（用户显式提供 URL）。
+const webSearchPromptSection = `
+
+## 联网搜索
+- 当前已开启**内置联网搜索**：你可以直接回答涉及近期资讯、实时数据、最新版本/价格/政策等问题，无需声明"我不知道"或"知识截止于…"。
+- 该搜索为模型自身能力，**不是函数工具**；不要尝试去调用一个叫 web_search 的工具，也不要在回复里写出工具调用。直接给出带来源的结论即可。
+- 需要返回具体事实时，优先引用检索到的权威来源，并附上链接。
+- 区分场景：
+  - 用户只描述主题 / 没给 URL → 直接使用内置联网搜索。
+  - 用户消息中出现具体 http(s):// URL → 使用 web_fetch 工具抓取该 URL 内容。
+`
+
 type messagesBuildInput struct {
 	Agent            *model.Agent
 	Skills           []model.Skill
@@ -29,11 +42,12 @@ type messagesBuildInput struct {
 	SessionMemory    string
 	TodoBlock        string
 	ToolSearchMode   bool
+	WebSearchEnabled bool
 	WS               *workspace.Workspace
 }
 
 func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
-	systemPrompt := buildSystemPrompt(in.Agent, in.Skills, in.AgentTools, in.ToolSkillMap, in.ToolSearchMode, in.WS)
+	systemPrompt := buildSystemPrompt(in.Agent, in.Skills, in.AgentTools, in.ToolSkillMap, in.ToolSearchMode, in.WebSearchEnabled, in.WS)
 
 	if in.PersistentMemory != "" {
 		systemPrompt += "\n\n" + in.PersistentMemory
@@ -117,7 +131,7 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 	return messages
 }
 
-func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model.Tool, toolSkillMap map[string]string, toolSearchMode bool, ws *workspace.Workspace) string {
+func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model.Tool, toolSkillMap map[string]string, toolSearchMode, webSearchEnabled bool, ws *workspace.Workspace) string {
 	l := log.WithField("agent", ag.Name)
 
 	var sb strings.Builder
@@ -143,6 +157,10 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 		}
 	}
 	hasTools := len(enabledTools) > 0
+
+	if webSearchEnabled {
+		sb.WriteString(webSearchPromptSection)
+	}
 
 	if !hasSkills && !hasTools {
 		result := sb.String()

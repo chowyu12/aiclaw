@@ -342,6 +342,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		SessionMemory:    sessionMem,
 		TodoBlock:        todoBlock,
 		ToolSearchMode:   tsMode,
+		WebSearchEnabled: webSearchEffective(ec.ag),
 		WS:               e.ws,
 	})
 	logMessages(ec.l, messages)
@@ -452,7 +453,7 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, pt model
 		l.WithFields(log.Fields{"model": ag.ModelName, "effort": effort}).Debug("[LLM] thinking enabled")
 	}
 
-	if ag.EnableWebSearch && caps.WebSearch {
+	if webSearchEffective(ag) {
 		switch pt {
 		case model.ProviderQwen:
 			extra["enable_search"] = true
@@ -469,6 +470,15 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, pt model
 	if len(extra) > 0 {
 		req.ExtraBody = extra
 	}
+}
+
+// webSearchEffective 判断当前 Agent 是否真正启用了内置联网搜索能力。
+// 需同时满足：Agent 配置开启 && 模型 caps 支持。
+func webSearchEffective(ag *model.Agent) bool {
+	if ag == nil || !ag.EnableWebSearch {
+		return false
+	}
+	return modelcaps.GetModelCaps(ag.ModelName).WebSearch
 }
 
 func mergeMap(dst, src map[string]any) map[string]any {
