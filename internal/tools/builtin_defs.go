@@ -250,19 +250,19 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "web_fetch",
-			Description: "抓取 URL 并提取可读内容。优先通过 HTTP 直接获取，失败时自动回退到浏览器渲染提取文本。",
+			Description: "抓取用户显式提供的 URL 并提取可读内容。仅当用户消息中直接出现 URL（http/https 链接）时才可调用；不得用于未指定 URL 的泛化联网检索（请改用内置联网搜索）。优先通过 HTTP 直接获取，失败时自动回退到浏览器渲染提取文本。",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     60,
 			FunctionDef: mustJSON(map[string]any{
 				"name":        "web_fetch",
-				"description": "Fetch a URL and extract readable content. Tries HTTP first, falls back to browser rendering for dynamic pages.",
+				"description": "Fetch a URL explicitly supplied by the user and extract readable content. Only call this tool when the user's message contains a concrete http/https URL; do NOT use it for general web research without a user-provided URL (use built-in web search instead). Tries HTTP first, falls back to browser rendering for dynamic pages.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"url": map[string]any{
 							"type":        "string",
-							"description": "URL to fetch",
+							"description": "Absolute http(s) URL that MUST appear verbatim in the user's message.",
 						},
 					},
 					"required": []string{"url"},
