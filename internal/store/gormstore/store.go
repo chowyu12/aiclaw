@@ -84,25 +84,27 @@ func autoMigrate(db *gorm.DB) error {
 }
 
 // dropDeprecatedColumns 清理历史遗留列（AutoMigrate 默认不会 drop 已删除字段对应的列）。
-// 这里显式列出所有已废弃的列名，在各表上容错地执行 drop。
+// 注意：SQLite 驱动的 DropColumn 通过「新建表 → 迁移数据 → 重命名」实现，必须传入完整的
+// model 实例以便反射出新 schema；传字符串表名会触发 nil schema 的 panic。因此 deprecated
+// 的 key 必须是 *model.XXX{} 实例。
 func dropDeprecatedColumns(db *gorm.DB) error {
-	deprecated := map[string][]string{
-		"agents": {"memos_enabled", "memos_config"},
+	deprecated := []struct {
+		dst  any
+		cols []string
+	}{
+		{&model.Agent{}, []string{"memos_enabled", "memos_config"}},
 	}
 	m := db.Migrator()
-	for table, cols := range deprecated {
-		if !m.HasTable(table) {
-			continue
-		}
-		for _, col := range cols {
-			if !m.HasColumn(table, col) {
+	for _, item := range deprecated {
+		for _, col := range item.cols {
+			if !m.HasColumn(item.dst, col) {
 				continue
 			}
-			if err := m.DropColumn(table, col); err != nil {
-				log.WithFields(log.Fields{"table": table, "column": col, "error": err}).
+			if err := m.DropColumn(item.dst, col); err != nil {
+				log.WithFields(log.Fields{"model": fmt.Sprintf("%T", item.dst), "column": col, "error": err}).
 					Warn("drop deprecated column failed")
 			} else {
-				log.WithFields(log.Fields{"table": table, "column": col}).
+				log.WithFields(log.Fields{"model": fmt.Sprintf("%T", item.dst), "column": col}).
 					Info("dropped deprecated column")
 			}
 		}
