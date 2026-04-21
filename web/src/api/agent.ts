@@ -1,13 +1,5 @@
 import request from './request'
 
-export interface MemOSConfig {
-  base_url?: string
-  api_key?: string
-  user_id?: string
-  top_k?: number
-  async?: boolean
-}
-
 export interface Agent {
   id: number
   uuid: string
@@ -28,8 +20,6 @@ export interface Agent {
   reasoning_effort: string
   enable_web_search: boolean
   tool_search_enabled: boolean
-  memos_enabled: boolean
-  memos_config: MemOSConfig
   token: string
   tool_ids?: number[]
   tools?: any[]
@@ -55,8 +45,6 @@ export interface UpdateAgentPayload {
   reasoning_effort?: string
   enable_web_search?: boolean
   tool_search_enabled?: boolean
-  memos_enabled?: boolean
-  memos_config?: MemOSConfig
   tool_ids?: number[]
   is_default?: boolean
 }
@@ -78,8 +66,6 @@ export interface CreateAgentPayload {
   reasoning_effort?: string
   enable_web_search?: boolean
   tool_search_enabled?: boolean
-  memos_enabled?: boolean
-  memos_config?: MemOSConfig
   tool_ids?: number[]
   is_default?: boolean
 }

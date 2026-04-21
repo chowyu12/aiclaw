@@ -66,7 +66,7 @@ func New(cfg config.DatabaseConfig) (*GormStore, error) {
 }
 
 func autoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := db.AutoMigrate(
 		&model.Agent{},
 		&model.Provider{},
 		&model.Tool{},
@@ -77,7 +77,37 @@ func autoMigrate(db *gorm.DB) error {
 		&model.Message{},
 		&model.ExecutionStep{},
 		&model.File{},
-	)
+	); err != nil {
+		return err
+	}
+	return dropDeprecatedColumns(db)
+}
+
+// dropDeprecatedColumns 清理历史遗留列（AutoMigrate 默认不会 drop 已删除字段对应的列）。
+// 这里显式列出所有已废弃的列名，在各表上容错地执行 drop。
+func dropDeprecatedColumns(db *gorm.DB) error {
+	deprecated := map[string][]string{
+		"agents": {"memos_enabled", "memos_config"},
+	}
+	m := db.Migrator()
+	for table, cols := range deprecated {
+		if !m.HasTable(table) {
+			continue
+		}
+		for _, col := range cols {
+			if !m.HasColumn(table, col) {
+				continue
+			}
+			if err := m.DropColumn(table, col); err != nil {
+				log.WithFields(log.Fields{"table": table, "column": col, "error": err}).
+					Warn("drop deprecated column failed")
+			} else {
+				log.WithFields(log.Fields{"table": table, "column": col}).
+					Info("dropped deprecated column")
+			}
+		}
+	}
+	return nil
 }
 
 func TestConnection(cfg config.DatabaseConfig) error {

@@ -161,21 +161,6 @@
                 </div>
               </section>
 
-              <!-- MemOS（可折叠） -->
-              <section class="af-card af-card--fold">
-                <h4 class="af-card-head af-card-head--toggle" @click="openSections.memos = !openSections.memos">
-                  <span>MemOS 长期记忆</span>
-                  <div style="display:flex;align-items:center;gap:6px">
-                    <el-switch v-model="agentForm.memos_enabled" size="small" @click.stop />
-                    <el-icon class="af-fold-arrow" :class="{ open: openSections.memos }"><ArrowRight /></el-icon>
-                  </div>
-                </h4>
-                <div v-show="openSections.memos && agentForm.memos_enabled" class="af-card-body">
-                  <el-input v-model="agentForm.memos_config.api_key" show-password size="small" placeholder="API Key (mpg-...)" />
-                  <el-input v-model="agentForm.memos_config.base_url" size="small" placeholder="Base URL（可选）" style="margin-top:6px" />
-                </div>
-              </section>
-
               <!-- API Token（可折叠，仅编辑模式） -->
               <section v-if="isEdit" class="af-card af-card--fold">
                 <h4 class="af-card-head af-card-head--toggle" @click="openSections.token = !openSections.token">
@@ -251,8 +236,6 @@ const agentForm = ref({
   reasoning_effort: 'medium',
   enable_web_search: false,
   tool_search_enabled: false,
-  memos_enabled: false,
-  memos_config: { base_url: '', api_key: '', user_id: '', top_k: 10, async: true },
   tool_ids: [] as number[],
   token: '',
   is_default: false,
@@ -284,7 +267,7 @@ const thinkingEnabled = computed({
   set: (v: boolean) => { agentForm.value.enable_thinking = v },
 })
 
-const openSections = ref({ advanced: false, memos: false, token: false })
+const openSections = ref({ advanced: false, token: false })
 
 const localOnlyModels = computed(() => {
   const remoteSet = new Set(remoteModels.value)
@@ -347,14 +330,6 @@ function applyAgentDetail(detail: Agent) {
     reasoning_effort: detail.reasoning_effort || 'medium',
     enable_web_search: !!detail.enable_web_search,
     tool_search_enabled: !!detail.tool_search_enabled,
-    memos_enabled: !!detail.memos_enabled,
-    memos_config: {
-      base_url: detail.memos_config?.base_url || '',
-      api_key: detail.memos_config?.api_key || '',
-      user_id: detail.memos_config?.user_id || '',
-      top_k: detail.memos_config?.top_k || 10,
-      async: detail.memos_config?.async !== false,
-    },
     tool_ids: detail.tool_ids || detail.tools?.map((t: any) => t.id) || [],
     token: detail.token || '',
     is_default: !!detail.is_default,
@@ -406,8 +381,6 @@ async function saveAgent() {
       reasoning_effort: agentForm.value.reasoning_effort,
       enable_web_search: agentForm.value.enable_web_search,
       tool_search_enabled: agentForm.value.tool_search_enabled,
-      memos_enabled: agentForm.value.memos_enabled,
-      memos_config: agentForm.value.memos_config,
       tool_ids: agentForm.value.tool_search_enabled ? [] : agentForm.value.tool_ids,
       is_default: agentForm.value.is_default,
     }

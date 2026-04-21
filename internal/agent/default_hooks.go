@@ -11,10 +11,9 @@ import (
 )
 
 // registerDefaultHooks 将框架内置的副作用逻辑注册为 HookAgentDone 钩子。
-// 注册顺序：SkillTracking → MemOS → SessionMemory（从重要到次要）。
+// 注册顺序：SkillTracking → SessionMemory（从重要到次要）。
 func registerDefaultHooks(hooks *HookRegistry) {
 	hooks.Register(HookAgentDone, skillTrackingHook)
-	hooks.Register(HookAgentDone, memosHook)
 	hooks.Register(HookAgentDone, sessionMemoryHook)
 }
 
@@ -51,14 +50,6 @@ func skillTrackingHook(ctx context.Context, _ HookEvent, p *HookPayload) HookAct
 			SkillName: sk.Name, SkillTools: calledToolNames,
 		})
 		log.WithFields(log.Fields{"skill": sk.Name, "used_tools": calledToolNames}).Info("[Skill] skill used")
-	}
-	return HookContinue
-}
-
-// memosHook 异步将本轮对话存入 MemOS 长期记忆。
-func memosHook(_ context.Context, _ HookEvent, p *HookPayload) HookAction {
-	if p.Agent != nil {
-		storeMemories(p.UserMsg, p.Content, p.Agent)
 	}
 	return HookContinue
 }

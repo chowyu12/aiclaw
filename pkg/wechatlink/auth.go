@@ -54,12 +54,13 @@ func PollQRStatus(ctx context.Context, qrcode string) (*QRStatusResult, error) {
 }
 
 func doGet(ctx context.Context, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	reqCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	c := &http.Client{Timeout: 45 * time.Second}
-	resp, err := c.Do(req)
+	resp, err := sharedHTTPClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

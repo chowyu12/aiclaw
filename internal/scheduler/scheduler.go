@@ -292,9 +292,19 @@ func (s *Scheduler) executeJob(ctx context.Context, job *Job) {
 	s.mu.Unlock()
 }
 
+// maxJobLogBytes 单个任务日志上限，超过后做一次切换；避免长期运行下日志无限膨胀。
+const maxJobLogBytes = 2 * 1024 * 1024
+
 func (s *Scheduler) appendLog(record RunRecord) {
 	data, _ := json.Marshal(record)
 	logPath := filepath.Join(s.logDir, record.JobID+".jsonl")
+
+	if info, err := os.Stat(logPath); err == nil && info.Size() > maxJobLogBytes {
+		rotated := logPath + ".1"
+		_ = os.Remove(rotated)
+		_ = os.Rename(logPath, rotated)
+	}
+
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return

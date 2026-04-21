@@ -129,7 +129,14 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := os.ReadFile(f.StoragePath)
+	file, err := os.Open(f.StoragePath)
+	if err != nil {
+		httputil.InternalError(w, "读取文件失败")
+		return
+	}
+	defer file.Close()
+
+	stat, err := file.Stat()
 	if err != nil {
 		httputil.InternalError(w, "读取文件失败")
 		return
@@ -137,8 +144,7 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", f.ContentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, f.Filename))
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-	w.Write(data)
+	http.ServeContent(w, r, f.Filename, stat.ModTime(), file)
 }
 
 func (h *FileHandler) List(w http.ResponseWriter, r *http.Request) {

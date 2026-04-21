@@ -8,12 +8,28 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/html/charset"
 
+	"github.com/chowyu12/aiclaw/internal/tools/browser"
 	"github.com/chowyu12/aiclaw/internal/tools/result"
 )
+
+const (
+	httpFetchTimeout = 15 * time.Second
+	renderTimeout    = 30 * time.Second
+	maxBodyBytes     = 10_000
+)
+
+// sharedHTTPClient 复用底层 TCP/TLS 连接池，避免每次请求新建 Transport。
+var sharedHTTPClient = &http.Client{
+	Timeout: httpFetchTimeout,
+	Transport: &http.Transport{
+		MaxIdleConns:        64,
+		MaxIdleConnsPerHost: 8,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
 
 func Handler(ctx context.Context, args string) (string, error) {
 	targetURL := result.ExtractJSONField(args, "url")
@@ -26,27 +42,29 @@ func Handler(ctx context.Context, args string) (string, error) {
 		if !looksLikeHTML(content) {
 			return content, nil
 		}
-		text, err := webpageToText(targetURL, 30*time.Second)
-		if err == nil {
+		text, err := renderPage(ctx, targetURL)
+		if err == nil && text != "" {
 			return text, nil
 		}
-		log.WithFields(log.Fields{"url": targetURL, "error": err}).Warn("[url_reader] chromedp render failed, using raw HTTP content")
+		if err != nil {
+			log.WithFields(log.Fields{"url": targetURL, "error": err}).Warn("[url_reader] browser render failed, using raw HTTP content")
+		}
 		return content, nil
 	}
 
-	log.WithFields(log.Fields{"url": targetURL, "http_error": httpErr}).Info("[url_reader] HTTP failed, trying chromedp")
-	text, err := webpageToText(targetURL, 30*time.Second)
+	log.WithFields(log.Fields{"url": targetURL, "http_error": httpErr}).Info("[url_reader] HTTP failed, trying browser render")
+	text, err := renderPage(ctx, targetURL)
 	if err != nil {
-		return "", fmt.Errorf("http: %v; chromedp: %w", httpErr, err)
+		return "", fmt.Errorf("http: %v; render: %w", httpErr, err)
 	}
 	return text, nil
 }
 
 func fetchURL(ctx context.Context, targetURL string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	fetchCtx, cancel := context.WithTimeout(ctx, httpFetchTimeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, targetURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -54,7 +72,7 @@ func fetchURL(ctx context.Context, targetURL string) (string, error) {
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
 
-	resp, err := (&http.Client{Timeout: 15 * time.Second}).Do(req)
+	resp, err := sharedHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -70,45 +88,29 @@ func fetchURL(ctx context.Context, targetURL string) (string, error) {
 		reader = resp.Body
 	}
 
-	body, err := io.ReadAll(io.LimitReader(reader, 10_000))
+	body, err := io.ReadAll(io.LimitReader(reader, maxBodyBytes))
 	if err != nil {
 		return "", err
 	}
 	return string(body), nil
 }
 
-func webpageToText(targetURL string, timeout time.Duration) (string, error) {
-	if timeout <= 0 {
-		timeout = 30 * time.Second
+// renderPage 走共享浏览器，避免每次请求都启动新 Chrome 实例。
+func renderPage(ctx context.Context, targetURL string) (string, error) {
+	text, err := browser.RenderPageText(ctx, targetURL, renderTimeout, maxBodyBytes)
+	if err != nil {
+		return "", err
 	}
-
-	ctx, cancel := chromedp.NewContext(context.Background())
-	defer cancel()
-
-	ctx, cancel = context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	var textContent string
-	tasks := chromedp.Tasks{
-		chromedp.Navigate(targetURL),
-		chromedp.WaitReady("body", chromedp.ByQuery),
-		chromedp.Sleep(2 * time.Second),
-		chromedp.Evaluate(`document.body.innerText`, &textContent),
+	if len(text) > maxBodyBytes {
+		text = text[:maxBodyBytes] + "\n... (content truncated)"
 	}
-
-	if err := chromedp.Run(ctx, tasks); err != nil {
-		return "", fmt.Errorf("chromedp render: %w", err)
-	}
-
-	const maxLen = 10_000
-	if len(textContent) > maxLen {
-		textContent = textContent[:maxLen] + "\n... (content truncated)"
-	}
-
-	return textContent, nil
+	return text, nil
 }
 
 func looksLikeHTML(content string) bool {
+	if content == "" {
+		return false
+	}
 	head := strings.ToLower(content[:min(len(content), 500)])
 	return strings.Contains(head, "<!doctype html") || strings.Contains(head, "<html")
 }
