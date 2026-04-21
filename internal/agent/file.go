@@ -23,19 +23,30 @@ import (
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
+// fileHTTPClient 用于用户给出的 URL 文件下载，全局复用连接池；
+// 单次请求 30s 超时通过 context 控制，避免每次 new http.Client。
+var fileHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        32,
+		MaxIdleConnsPerHost: 4,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 func (e *Executor) loadRemoteFile(ctx context.Context, rawURL string, chatFileType model.ChatFileType) *model.File {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return nil
 	}
 	l := log.WithField("url", rawURL)
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		l.WithError(err).Warn("[Execute] invalid file URL, skipping")
 		return nil
 	}
-	resp, err := client.Do(req)
+	resp, err := fileHTTPClient.Do(req)
 	if err != nil {
 		l.WithError(err).Warn("[Execute] fetch file URL failed, skipping")
 		return nil

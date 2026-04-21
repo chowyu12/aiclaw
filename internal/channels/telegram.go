@@ -21,6 +21,16 @@ import (
 
 // Telegram Bot Webhook：https://core.telegram.org/bots/api#setwebhook
 
+// telegramClient 所有 Telegram HTTP 调用共享的客户端：复用 TCP/TLS 连接池，
+// 单条请求的截止时间由各自 context.WithTimeout 控制（client.Timeout=0 不做二次限制）。
+var telegramClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        32,
+		MaxIdleConnsPerHost: 8,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 type telegramAdapter struct{}
 
 func (telegramAdapter) HandleGET(ch ChannelConfig, q url.Values) WebhookHTTP {
@@ -95,13 +105,14 @@ func (telegramAdapter) Reply(ctx context.Context, ch ChannelConfig, in *Inbound,
 	form := url.Values{}
 	form.Set("chat_id", in.ThreadKey)
 	form.Set("text", text)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := telegramClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -126,13 +137,14 @@ func (telegramAdapter) SendTyping(ctx context.Context, ch ChannelConfig, in *Inb
 	form := url.Values{}
 	form.Set("chat_id", in.ThreadKey)
 	form.Set("action", "typing")
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, api, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := telegramClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -180,8 +192,7 @@ func telegramDownloadFile(botToken, fileID string) string {
 		log.WithError(err).Warn("[telegram] getFile request failed")
 		return ""
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := telegramClient.Do(req)
 	if err != nil {
 		log.WithError(err).Warn("[telegram] getFile failed")
 		return ""
@@ -204,7 +215,7 @@ func telegramDownloadFile(botToken, fileID string) string {
 	if err != nil {
 		return ""
 	}
-	dlResp, err := client.Do(dlReq)
+	dlResp, err := telegramClient.Do(dlReq)
 	if err != nil {
 		log.WithError(err).Warn("[telegram] download file failed")
 		return ""

@@ -26,7 +26,7 @@ func newClaudeAdapter(apiKey, baseURL string) *claudeAdapter {
 	return &claudeAdapter{
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport}},
+		client:  providerHTTPClient,
 	}
 }
 
@@ -598,7 +598,7 @@ func fetchClaudeModels(ctx context.Context, apiKey, baseURL string) ([]string, e
 	req.Header.Set("x-api-key", apiKey)
 	req.Header.Set("anthropic-version", claudeAPIVersion)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch claude models: %w", err)
 	}

@@ -69,8 +69,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ReasoningEffort:   req.ReasoningEffort,
 		EnableWebSearch:   req.EnableWebSearch,
 		ToolSearchEnabled: req.ToolSearchEnabled,
-		MemOSEnabled:      req.MemOSEnabled,
-		MemOSCfg:          req.MemOSCfg,
 		ToolIDs:           model.Int64Slice(req.ToolIDs),
 		IsDefault:         req.IsDefault,
 	}

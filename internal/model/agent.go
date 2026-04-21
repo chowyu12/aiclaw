@@ -1,57 +1,6 @@
 package model
 
-import (
-	"database/sql/driver"
-	"encoding/json"
-	"fmt"
-	"time"
-)
-
-// MemOSConfig 存储 MemOS 连接配置。
-type MemOSConfig struct {
-	BaseURL string `json:"base_url,omitempty" yaml:"base_url,omitempty"`
-	APIKey  string `json:"api_key,omitempty" yaml:"api_key,omitempty"`
-	UserID  string `json:"user_id,omitempty" yaml:"user_id,omitempty"`
-	TopK    int    `json:"top_k,omitempty" yaml:"top_k,omitempty"`
-	Async   bool   `json:"async,omitempty" yaml:"async,omitempty"`
-}
-
-func (c MemOSConfig) EffectiveTopK() int {
-	if c.TopK > 0 {
-		return c.TopK
-	}
-	return 10
-}
-
-func (c MemOSConfig) EffectiveUserID() string {
-	if c.UserID != "" {
-		return c.UserID
-	}
-	return "aiclaw-user"
-}
-
-func (c MemOSConfig) Value() (driver.Value, error) {
-	return json.Marshal(c)
-}
-
-func (c *MemOSConfig) Scan(src any) error {
-	if src == nil {
-		return nil
-	}
-	var data []byte
-	switch v := src.(type) {
-	case []byte:
-		data = v
-	case string:
-		data = []byte(v)
-	default:
-		return fmt.Errorf("unsupported type for MemOSConfig: %T", src)
-	}
-	if len(data) == 0 {
-		return nil
-	}
-	return json.Unmarshal(data, c)
-}
+import "time"
 
 // Agent 运行时配置，持久化在数据库 agents 表；支持多 Agent。
 type Agent struct {
@@ -75,8 +24,6 @@ type Agent struct {
 	ReasoningEffort   string     `json:"reasoning_effort" gorm:"size:20;default:medium"`
 	EnableWebSearch   bool       `json:"enable_web_search" gorm:"default:false"`
 	ToolSearchEnabled bool       `json:"tool_search_enabled" gorm:"default:false"`
-	MemOSEnabled      bool        `json:"memos_enabled" gorm:"column:memos_enabled;default:false"`
-	MemOSCfg          MemOSConfig `json:"memos_config" gorm:"column:memos_config;type:text"`
 	ToolIDs           Int64Slice `json:"tool_ids,omitempty" gorm:"type:text"`
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
@@ -134,8 +81,6 @@ type UpdateAgentReq struct {
 	ReasoningEffort   *string      `json:"reasoning_effort,omitzero"`
 	EnableWebSearch   *bool        `json:"enable_web_search,omitzero"`
 	ToolSearchEnabled *bool        `json:"tool_search_enabled,omitzero"`
-	MemOSEnabled      *bool        `json:"memos_enabled,omitzero"`
-	MemOSCfg          *MemOSConfig `json:"memos_config,omitzero"`
 	ToolIDs           []int64      `json:"tool_ids,omitzero"`
 	IsDefault         *bool        `json:"is_default,omitzero"`
 }
@@ -157,8 +102,6 @@ type CreateAgentReq struct {
 	ReasoningEffort   string      `json:"reasoning_effort"`
 	EnableWebSearch   bool        `json:"enable_web_search"`
 	ToolSearchEnabled bool        `json:"tool_search_enabled"`
-	MemOSEnabled      bool        `json:"memos_enabled"`
-	MemOSCfg          MemOSConfig `json:"memos_config"`
 	ToolIDs           []int64     `json:"tool_ids,omitzero"`
 	IsDefault         bool        `json:"is_default"`
 }

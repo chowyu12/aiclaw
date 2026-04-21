@@ -20,6 +20,18 @@ const (
 	sendTimeout     = 15 * time.Second
 )
 
+// sharedHTTPClient 为包内 auth/cdn 等独立函数提供统一的 *http.Client，
+// 避免每次请求新建客户端而无法复用底层 TCP/TLS 连接池。
+// 注：Client.http 是每个登录会话独立的实例，保留原行为；这里只服务于无状态工具函数。
+// 请求级超时由调用方通过 context.WithTimeout 控制。
+var sharedHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        32,
+		MaxIdleConnsPerHost: 8,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
+
 // Client 微信 iLink Bot API 客户端。
 type Client struct {
 	baseURL  string
@@ -48,7 +60,7 @@ func NewClient(creds *Credentials, opts ...ClientOption) *Client {
 		baseURL:  baseURL,
 		botToken: creds.BotToken,
 		botID:    creds.ILinkBotID,
-		http:     &http.Client{},
+		http:     sharedHTTPClient,
 		uin:      generateUIN(),
 		logger:   nopLogger{},
 	}

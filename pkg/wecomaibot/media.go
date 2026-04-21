@@ -9,9 +9,19 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"time"
 )
 
 const qyAPIBase = "https://qyapi.weixin.qq.com/cgi-bin"
+
+// mediaHTTPClient 企业微信 media API 调用共享客户端；超时由 context 控制。
+var mediaHTTPClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConns:        16,
+		MaxIdleConnsPerHost: 4,
+		IdleConnTimeout:     90 * time.Second,
+	},
+}
 
 type getTokenResp struct {
 	ErrCode     int    `json:"errcode"`
@@ -32,7 +42,7 @@ func GetAccessToken(ctx context.Context, corpID, corpSecret string) (string, err
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := mediaHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +79,7 @@ func UploadTempMedia(ctx context.Context, accessToken, mediaType, filename strin
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := mediaHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}

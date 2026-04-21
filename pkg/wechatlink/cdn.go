@@ -43,7 +43,7 @@ func DownloadFromCDN(ctx context.Context, encryptQueryParam, aesKeyBase64 string
 		return nil, fmt.Errorf("create download request: %w", err)
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := sharedHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("download from CDN: %w", err)
 	}

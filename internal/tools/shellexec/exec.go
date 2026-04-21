@@ -21,19 +21,6 @@ type execParams struct {
 	WorkingDir string `json:"working_dir"`
 }
 
-// dangerousPatterns 是一个尽力而为（best-effort）的黑名单，通过子字符串匹配拦截
-// 明显的高危命令。注意：这不是安全沙箱。攻击者可通过转义、base64 编码、变量拼接、
-// eval/source 等方式绕过。若需严格隔离，应在容器/seccomp 等系统级沙箱中运行。
-var dangerousPatterns = []string{
-	"rm -rf /", "rm -rf /*", "rm -rf ~", "mkfs", "dd if=", ":(){:|:&};:",
-	"> /dev/sda", "chmod -R 777 /", "chown -R", "shutdown", "reboot",
-	"halt", "poweroff", "init 0", "init 6", "kill -9 1",
-	"ssh-keygen", "useradd", "userdel", "usermod", "passwd",
-	"visudo", "iptables -F", "iptables -X", "nft flush", "crontab -r",
-	"systemctl disable", "> /etc/", "tee /etc/",
-	"mount ", "umount ", "fdisk ", "parted ", "wipefs",
-}
-
 const (
 	maxOutput  = 64_000
 	maxTimeout = 300
@@ -48,7 +35,7 @@ func Handler(ctx context.Context, args string) (string, error) {
 		return "", fmt.Errorf("command is required")
 	}
 
-	if err := checkDangerous(p.Command); err != nil {
+	if err := CheckDangerousCommand(p.Command); err != nil {
 		return "", err
 	}
 
@@ -147,16 +134,6 @@ func resolveWorkingDir(dir string) string {
 		}
 	}
 	return dir
-}
-
-func checkDangerous(cmdStr string) error {
-	lower := strings.ToLower(strings.TrimSpace(cmdStr))
-	for _, p := range dangerousPatterns {
-		if strings.Contains(lower, strings.ToLower(p)) {
-			return fmt.Errorf("dangerous command blocked: contains '%s'", p)
-		}
-	}
-	return nil
 }
 
 func truncate(s string, maxLen int) string {

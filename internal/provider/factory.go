@@ -28,6 +28,15 @@ var DefaultBaseURLs = map[model.ProviderType]string{
 	model.ProviderGemini:       "https://generativelanguage.googleapis.com",
 }
 
+// providerHTTPClient 复用连接池与 loggingTransport，避免 claude/gemini/FetchRemoteModels
+// 以及每个 provider 实例都各自持有 *http.Client 引起的连接重复建立。
+var providerHTTPClient = &http.Client{
+	Transport: &loggingTransport{inner: http.DefaultTransport},
+}
+
+// SharedHTTPClient 返回 provider 层统一的 HTTP 客户端（测试或特殊场景可用）。
+func SharedHTTPClient() *http.Client { return providerHTTPClient }
+
 type adapter struct {
 	client *openai.Client
 }
@@ -85,7 +94,7 @@ func FetchRemoteModels(ctx context.Context, p *model.Provider) ([]string, error)
 	req.Header.Set("Authorization", "Bearer "+p.APIKey)
 	req.Header.Set("Accept", "application/json")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch models: %w", err)
 	}
@@ -126,9 +135,7 @@ func NewFromProvider(p *model.Provider) (LLMProvider, error) {
 
 	config := openai.DefaultConfig(p.APIKey)
 	config.BaseURL = baseURL
-	config.HTTPClient = &http.Client{
-		Transport: &loggingTransport{inner: http.DefaultTransport},
-	}
+	config.HTTPClient = providerHTTPClient
 
 	client := openai.NewClientWithConfig(config)
 	return &adapter{client: client}, nil

@@ -6,36 +6,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/internal/tools/shellexec"
 )
 
-var dangerousPatterns = []string{
-	"rm -rf /", "rm -rf /*", "rm -rf ~", "mkfs", "dd if=", ":(){:|:&};:",
-	"> /dev/sda", "chmod -R 777 /", "chown -R", "shutdown", "reboot",
-	"halt", "poweroff", "init 0", "init 6", "kill -9 1", "killall", "pkill",
-	"ssh-keygen", "ssh ", "scp ", "sftp ", "telnet ", "nc -l", "ncat -l",
-	"curl.*|.*sh", "wget.*|.*sh", "useradd", "userdel", "usermod", "passwd",
-	"visudo", "iptables -F", "iptables -X", "nft flush", "crontab -r",
-	"systemctl disable", "service.*stop", "eval ", "exec ", "nohup ",
-	"> /etc/", "tee /etc/", "mount ", "umount ", "fdisk ", "parted ", "wipefs",
+// extraCmdHandlerRules 是除 shellexec.CheckDangerousCommand 外，command 工具额外的保守规则。
+// command 工具常用于对外暴露的 HTTP → shell 桥接，限制应比本地 exec 更严，
+// 如禁止任意 ssh/scp/sftp/telnet、远程 shell、裸 rm -rf 等。
+var extraCmdHandlerRules = []struct {
+	id string
+	rx *regexp.Regexp
+}{
+	{"outbound_shell", regexp.MustCompile(`(?i)\b(?:ssh|scp|sftp|telnet)\b`)},
+	{"listen_shell", regexp.MustCompile(`(?i)\b(?:nc|ncat)\b\s+(?:-\w*\s+)*-l\b`)},
+	{"eval_or_source", regexp.MustCompile(`(?i)(?:^|[\s;|&])(?:eval|source|\.)\s+`)},
+	{"rm_recursive", regexp.MustCompile(`(?i)\brm\s+(?:-[a-z]*[rRdf][a-z]*\s+)+`)},
 }
 
 func checkDangerousCommand(cmdStr string) error {
-	lower := strings.ToLower(strings.TrimSpace(cmdStr))
-	for _, p := range dangerousPatterns {
-		if strings.Contains(lower, strings.ToLower(p)) {
-			return fmt.Errorf("dangerous command blocked: contains '%s'", p)
-		}
+	if err := shellexec.CheckDangerousCommand(cmdStr); err != nil {
+		return err
 	}
-	for _, seg := range strings.Split(lower, "|") {
-		seg = strings.TrimSpace(seg)
-		if strings.HasPrefix(seg, "rm ") && (strings.Contains(seg, " -r") || strings.Contains(seg, " -f")) {
-			return fmt.Errorf("dangerous command blocked: recursive/force rm is not allowed")
+	for _, r := range extraCmdHandlerRules {
+		if r.rx.MatchString(cmdStr) {
+			return fmt.Errorf("dangerous command blocked: matched rule %q", r.id)
 		}
 	}
 	return nil

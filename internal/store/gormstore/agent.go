@@ -3,7 +3,6 @@ package gormstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"strings"
 
 	"github.com/google/uuid"
@@ -118,13 +117,6 @@ func (s *GormStore) UpdateAgent(ctx context.Context, id int64, req *model.Update
 	}
 	if req.ToolSearchEnabled != nil {
 		updates["tool_search_enabled"] = *req.ToolSearchEnabled
-	}
-	if req.MemOSEnabled != nil {
-		updates["memos_enabled"] = *req.MemOSEnabled
-	}
-	if req.MemOSCfg != nil {
-		b, _ := json.Marshal(req.MemOSCfg)
-		updates["memos_config"] = string(b)
 	}
 	if req.ToolIDs != nil {
 		updates["tool_ids"] = model.Int64Slice(req.ToolIDs)

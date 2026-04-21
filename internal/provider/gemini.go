@@ -25,7 +25,7 @@ func newGeminiAdapter(apiKey, baseURL string) *geminiAdapter {
 	return &geminiAdapter{
 		apiKey:  apiKey,
 		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Transport: &loggingTransport{inner: http.DefaultTransport}},
+		client:  providerHTTPClient,
 	}
 }
 
@@ -532,7 +532,7 @@ func fetchGeminiModels(ctx context.Context, apiKey, baseURL string) ([]string, e
 		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := providerHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("fetch gemini models: %w", err)
 	}

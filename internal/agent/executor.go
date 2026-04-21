@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +45,12 @@ type skillCache struct {
 	ts   time.Time
 }
 
+type toolsCache struct {
+	mu   sync.RWMutex
+	data []model.Tool
+	ts   time.Time
+}
+
 type Executor struct {
 	store           store.Store
 	registry        *ToolRegistry
@@ -51,11 +59,17 @@ type Executor struct {
 	hooks           *HookRegistry
 	ws              *workspace.Workspace
 	sc              *skillCache
+	tc              *toolsCache
 	schedCtxFn      func(context.Context) context.Context
 
 	shutdownMu   sync.Mutex
 	shutdownDone bool
 	activeExecs  sync.WaitGroup
+
+	// mcpMu 保护跨请求复用的 MCP Manager，避免每次 Execute 都重启 stdio 子进程。
+	mcpMu          sync.Mutex
+	mcpMgr         *mcp.Manager
+	mcpFingerprint string
 }
 
 func WithHookRegistry(h *HookRegistry) ExecutorOption {
@@ -71,6 +85,7 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 		hooks:           NewHookRegistry(),
 		ws:              ws,
 		sc:              &skillCache{},
+		tc:              &toolsCache{},
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -119,10 +134,11 @@ func (ec *execContext) hasTools() bool {
 	return len(ec.agentTools) > 0 || len(ec.mcpTools) > 0 || len(ec.skillTools) > 0
 }
 
+// closeMCP 过去每次请求结束都关闭 MCP manager；现在改为在 Executor 层共享，
+// 因此每次请求结束不再关闭，仅在 Executor.Shutdown 时统一释放。保留空实现，
+// 以便调用点语义保持不变、未来可按需切换策略。
 func (ec *execContext) closeMCP() {
-	if ec.mcpManager != nil {
-		ec.mcpManager.Close()
-	}
+	// intentionally empty; MCP manager lifecycle is managed by Executor.
 }
 
 func (ec *execContext) stepMeta() *model.StepMetadata {
@@ -160,6 +176,14 @@ func (e *Executor) Shutdown(timeout time.Duration) {
 	case <-time.After(timeout):
 		log.WithField("timeout", timeout).Warn("[Executor] shutdown timeout, some executions may be interrupted")
 	}
+
+	e.mcpMu.Lock()
+	if e.mcpMgr != nil {
+		e.mcpMgr.Close()
+		e.mcpMgr = nil
+		e.mcpFingerprint = ""
+	}
+	e.mcpMu.Unlock()
 }
 
 func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*ExecuteResult, error) {
@@ -360,7 +384,56 @@ func normalizeAgent(a *model.Agent) {
 	}
 }
 
-const skillCacheTTL = 30 * time.Second
+const (
+	skillCacheTTL = 30 * time.Second
+	toolsCacheTTL = 15 * time.Second
+)
+
+// listAllToolsCached 以 toolsCacheTTL 为窗口缓存「tool_search 模式」所需的完整工具清单，
+// 避免每次 Execute 都做一次全表扫描（Agent 工具集通常在小时/天级别变动，短 TTL 足够）。
+func (e *Executor) listAllToolsCached(ctx context.Context) ([]model.Tool, error) {
+	e.tc.mu.RLock()
+	if e.tc.data != nil && time.Since(e.tc.ts) < toolsCacheTTL {
+		out := make([]model.Tool, len(e.tc.data))
+		copy(out, e.tc.data)
+		e.tc.mu.RUnlock()
+		return out, nil
+	}
+	e.tc.mu.RUnlock()
+
+	items, total, err := e.store.ListTools(ctx, model.ListQuery{Page: 1, PageSize: 10000})
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(items)) < total {
+		log.WithFields(log.Fields{"fetched": len(items), "total": total}).
+			Warn("[Execute] tool count exceeds single-page limit, some tools may be unavailable")
+	}
+
+	cached := make([]model.Tool, 0, len(items))
+	for _, t := range items {
+		if t != nil {
+			cached = append(cached, *t)
+		}
+	}
+
+	e.tc.mu.Lock()
+	e.tc.data = cached
+	e.tc.ts = time.Now()
+	e.tc.mu.Unlock()
+
+	out := make([]model.Tool, len(cached))
+	copy(out, cached)
+	return out, nil
+}
+
+// InvalidateToolsCache 外部在工具增删改后调用，强制下一次 Execute 重新拉取。
+func (e *Executor) InvalidateToolsCache() {
+	e.tc.mu.Lock()
+	e.tc.data = nil
+	e.tc.ts = time.Time{}
+	e.tc.mu.Unlock()
+}
 
 func (e *Executor) loadWorkspaceSkills() ([]model.Skill, error) {
 	e.sc.mu.RLock()
@@ -408,13 +481,12 @@ func (e *Executor) connectMCPServers(ctx context.Context, servers []model.MCPSer
 		return nil, nil
 	}
 
-	mgr := mcp.NewManager()
-	if err := mgr.Connect(ctx, servers); err != nil {
+	mgr, err := e.getOrConnectMCP(ctx, servers)
+	if err != nil {
 		log.WithError(err).Warn("[MCP] connect failed")
 		return nil, nil
 	}
-	if !mgr.HasTools() {
-		mgr.Close()
+	if mgr == nil || !mgr.HasTools() {
 		return nil, nil
 	}
 
@@ -439,6 +511,57 @@ func (e *Executor) connectMCPServers(ctx context.Context, servers []model.MCPSer
 	}
 	log.WithField("count", len(mcpTools)).Debug("[MCP] tools loaded")
 	return mgr, mcpTools
+}
+
+// getOrConnectMCP 返回 Executor 级共享的 mcp.Manager。
+// 只有当 servers 的指纹（UUID/Transport/Endpoint/Enabled/UpdatedAt）发生变化时才会重连，
+// 避免每次请求都启动/关闭 stdio 子进程。
+func (e *Executor) getOrConnectMCP(ctx context.Context, servers []model.MCPServer) (*mcp.Manager, error) {
+	fp := mcpServersFingerprint(servers)
+
+	e.mcpMu.Lock()
+	if e.mcpMgr != nil && e.mcpFingerprint == fp {
+		mgr := e.mcpMgr
+		e.mcpMu.Unlock()
+		return mgr, nil
+	}
+	oldMgr := e.mcpMgr
+	e.mcpMgr = nil
+	e.mcpFingerprint = ""
+	e.mcpMu.Unlock()
+
+	if oldMgr != nil {
+		oldMgr.Close()
+	}
+
+	mgr := mcp.NewManager()
+	if err := mgr.Connect(ctx, servers); err != nil {
+		mgr.Close()
+		return nil, err
+	}
+	if !mgr.HasTools() {
+		mgr.Close()
+		return nil, nil
+	}
+
+	e.mcpMu.Lock()
+	e.mcpMgr = mgr
+	e.mcpFingerprint = fp
+	e.mcpMu.Unlock()
+	return mgr, nil
+}
+
+// mcpServersFingerprint 根据 server 关键字段生成指纹，用于判断缓存是否失效。
+func mcpServersFingerprint(servers []model.MCPServer) string {
+	if len(servers) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(servers))
+	for _, s := range servers {
+		keys = append(keys, fmt.Sprintf("%s|%s|%s|%v|%d", s.UUID, s.Transport, s.Endpoint, s.Enabled, s.UpdatedAt.UnixNano()))
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ";")
 }
 
 func (e *Executor) buildSkillManifestTools(skillList []model.Skill, tracker *StepTracker, toolSkillMap map[string]string) []Tool {
@@ -500,15 +623,12 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 	}
 
 	if ag.ToolSearchEnabled {
-		items, total, err := e.store.ListTools(ctx, model.ListQuery{Page: 1, PageSize: 10000})
+		items, err := e.listAllToolsCached(ctx)
 		if err != nil {
 			return nil, nil, fmt.Errorf("list all tools: %w", err)
 		}
-		if int64(len(items)) < total {
-			log.WithFields(log.Fields{"fetched": len(items), "total": total}).
-				Warn("[Execute] tool count exceeds single-page limit, some tools may be unavailable")
-		}
-		for _, t := range items {
+		for i := range items {
+			t := &items[i]
 			if t.Enabled && !seenName[t.Name] {
 				agentTools = append(agentTools, *t)
 				seenName[t.Name] = true

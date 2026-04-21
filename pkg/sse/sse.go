@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 )
 
+// Writer 支持被多个 goroutine 并发写入（并发工具回调 + 流式 chunk 回调共享同一 ResponseWriter）。
 type Writer struct {
+	mu      sync.Mutex
 	w       http.ResponseWriter
 	flusher http.Flusher
 }
@@ -24,6 +27,8 @@ func NewWriter(w http.ResponseWriter) (*Writer, bool) {
 }
 
 func (s *Writer) WriteEvent(event, data string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if event != "" {
 		if _, err := fmt.Fprintf(s.w, "event: %s\n", event); err != nil {
 			return err

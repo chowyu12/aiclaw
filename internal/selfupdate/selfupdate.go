@@ -17,6 +17,22 @@ const (
 	binaryName = "aiclaw"
 )
 
+// metadataHTTPClient 用于 GitHub API 查询（短超时，小响应）。
+// downloadHTTPClient 用于实际二进制下载（长超时，大响应）。
+// 两者共享 transport 模板，但保留不同的 Timeout 以符合各自场景。
+var (
+	metadataHTTPClient = &http.Client{Timeout: 15 * time.Second, Transport: newSelfUpdateTransport()}
+	downloadHTTPClient = &http.Client{Timeout: 5 * time.Minute, Transport: newSelfUpdateTransport()}
+)
+
+func newSelfUpdateTransport() *http.Transport {
+	return &http.Transport{
+		MaxIdleConns:        4,
+		MaxIdleConnsPerHost: 2,
+		IdleConnTimeout:     60 * time.Second,
+	}
+}
+
 type ghRelease struct {
 	TagName string `json:"tag_name"`
 }
@@ -67,8 +83,7 @@ func Run(currentVersion string) {
 
 func fetchLatestTag() (string, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
-	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := metadataHTTPClient.Get(url)
 	if err != nil {
 		return "", err
 	}
@@ -99,8 +114,7 @@ func assetName() string {
 }
 
 func download(url string) (string, error) {
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Get(url)
+	resp, err := downloadHTTPClient.Get(url)
 	if err != nil {
 		return "", err
 	}

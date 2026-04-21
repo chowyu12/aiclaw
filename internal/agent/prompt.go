@@ -38,7 +38,6 @@ type messagesBuildInput struct {
 	ToolSkillMap     map[string]string
 	Files            []*model.File
 	PersistentMemory string
-	MemosContext     string
 	SessionMemory    string
 	TodoBlock        string
 	ToolSearchMode   bool
@@ -51,9 +50,6 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 
 	if in.PersistentMemory != "" {
 		systemPrompt += "\n\n" + in.PersistentMemory
-	}
-	if in.MemosContext != "" {
-		systemPrompt += "\n\n<memories>\n" + in.MemosContext + "\n</memories>"
 	}
 	if in.SessionMemory != "" {
 		systemPrompt += "\n\n<session_notes>\n" + in.SessionMemory + "\n</session_notes>"
