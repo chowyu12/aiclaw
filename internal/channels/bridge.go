@@ -61,7 +61,20 @@ func (b *Bridge) HandleInboundAsync(parent context.Context, ch *model.Channel, i
 		"message_runes": utf8.RuneCountInString(text),
 	}).Info("[Channel] inbound")
 	cc := ConfigFromModel(ch)
-	go b.runReply(parent, ch, cc, in, ad, text)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.WithFields(log.Fields{"channel_id": ch.ID, "recover": r}).Error("[Channel] command panic")
+			}
+		}()
+		cmdCtx, cmdCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		handled := b.tryHandleCommand(cmdCtx, ch, cc, in, ad, text)
+		cmdCancel()
+		if handled {
+			return
+		}
+		b.runReply(parent, ch, cc, in, ad, text)
+	}()
 }
 
 func (b *Bridge) runReply(_ context.Context, ch *model.Channel, cc ChannelConfig, in *Inbound, ad WebhookDriver, userText string) {

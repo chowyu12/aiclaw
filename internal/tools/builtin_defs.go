@@ -271,7 +271,8 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "browser",
-			Description: "控制网页浏览器。支持导航、截图、元素快照与交互、表单填充、Cookie/Storage 管理、Console/Network 监控、设备仿真等。多标签时：每个标签页 snapshot 产生的 ref 仅对该页有效；若操作页与当前激活页不一致，请在 click/type/snapshot 等参数中传入 target_id（由 tabs 或 open_tab 返回）。",
+			Description: "控制网页浏览器。支持导航、截图、元素快照与交互、表单填充、Cookie/Storage 管理、Console/Network 监控、设备仿真等。多标签时：每个标签页 snapshot 产生的 ref 仅对该页有效；若操作页与当前激活页不一致，请在 click/type/snapshot 等参数中传入 target_id（由 tabs 或 open_tab 返回）。" +
+				"提示：可在 config.yaml 配置 browser.cdp_endpoint=http://127.0.0.1:9222 让本工具 attach 到用户已登录的真实 Chrome（保留登录态/Cookie），适合个人助手场景。",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     120,
@@ -415,7 +416,8 @@ func DefaultBuiltinDefs() []model.Tool {
 		Name: "memory",
 		Description: "持久记忆工具，跨会话保存重要信息。" +
 			"两个存储目标：memory（你的个人笔记：环境事实、项目惯例、工具使用经验）和 user（用户画像：偏好、沟通风格、工作习惯）。" +
-			"主动保存：用户纠正你时、用户分享偏好/习惯时、发现环境特征时、学到有用经验时。",
+			"主动保存：用户纠正你时、用户分享偏好/习惯时、发现环境特征时、学到有用经验时。" +
+			"容量超 70% 时自动进入索引模式（system prompt 仅展示 [id]+tag+摘要），用 action=recall + ids 拉取完整内容。",
 		HandlerType: model.HandlerBuiltin,
 		Enabled:     true,
 		FunctionDef: mustJSON(map[string]any{
@@ -430,14 +432,21 @@ func DefaultBuiltinDefs() []model.Tool {
 				"TWO TARGETS:\n" +
 				"- 'user': who the user is — name, role, preferences, communication style\n" +
 				"- 'memory': your notes — environment facts, project conventions, lessons learned\n\n" +
-				"ACTIONS: add (new entry), replace (update existing via old_text match), remove (delete via old_text match), read (view current entries).\n\n" +
+				"ACTIONS:\n" +
+				"- add: create entry. Optional 'tag' groups related entries (e.g. 'env', 'pref', 'project').\n" +
+				"- replace: update existing entry; old_text may be the entry id (preferred) or a unique substring.\n" +
+				"- remove: delete entry by id or unique substring.\n" +
+				"- read: view current entries.\n" +
+				"- recall: fetch full content for one or more ids (used when storage is in INDEX MODE).\n\n" +
+				"INDEX MODE: when usage exceeds 70%, the snapshot in system prompt only shows [id]+tag+summary for each entry. " +
+				"Call recall(ids=[...]) to retrieve full content for the entries you actually need.\n\n" +
 				"Do NOT save task progress, temporary TODO state, or trivial/obvious information.",
 			"parameters": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"action": map[string]any{
 						"type":        "string",
-						"enum":        []string{"add", "replace", "remove", "read"},
+						"enum":        []string{"add", "replace", "remove", "read", "recall"},
 						"description": "The action to perform",
 					},
 					"target": map[string]any{
@@ -451,7 +460,16 @@ func DefaultBuiltinDefs() []model.Tool {
 					},
 					"old_text": map[string]any{
 						"type":        "string",
-						"description": "Short unique substring identifying the entry to replace or remove",
+						"description": "Entry id (preferred) or unique substring identifying the entry to replace or remove",
+					},
+					"tag": map[string]any{
+						"type":        "string",
+						"description": "Optional short tag for grouping (e.g. 'env', 'pref', 'project'). Used by add/replace.",
+					},
+					"ids": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "List of entry ids to fetch full content for (required for recall action)",
 					},
 				},
 				"required": []string{"action", "target"},
@@ -595,6 +613,56 @@ func DefaultBuiltinDefs() []model.Tool {
 					"merge": map[string]any{
 						"type":        "boolean",
 						"description": "If true, merge with existing todos by id. If false, replace all todos. Default: false",
+					},
+				},
+				"required": []string{"action"},
+			},
+		}),
+	},
+	{
+		Name: "skill",
+		Description: "技能结晶（self-evolving skills）。" +
+			"aiclaw 在多工具协作成功后会把执行路径自动归档到 skills-pending/。" +
+			"用本工具：list_pending 看候选 → read_pending 读全文 → promote 转正成正式 skill / discard 丢弃。" +
+			"主动使用：用户说'记下这套流程'、'以后都这样做'、'把刚才的步骤变成 skill' 时。",
+		HandlerType: model.HandlerBuiltin,
+		Enabled:     true,
+		FunctionDef: mustJSON(map[string]any{
+			"name": "skill",
+			"description": "Manage self-evolving skills.\n\n" +
+				"aiclaw automatically captures multi-tool execution paths into skills-pending/ as candidates.\n" +
+				"Use this tool to inspect, promote (to ~/.aiclaw/skills/), or discard those candidates.\n\n" +
+				"ACTIONS:\n" +
+				"- list_pending: list crystallized candidates awaiting review (most recent first)\n" +
+				"- read_pending: read the full markdown of a single candidate by file_name\n" +
+				"- promote: turn a candidate into a real skill. Requires file_name + name + description.\n" +
+				"- discard: delete a candidate that isn't worth keeping.\n" +
+				"- list_active: list current active skills under workspace skills/.\n\n" +
+				"USE PROACTIVELY when the user says 'remember this workflow', 'next time do it like this', " +
+				"'turn the previous steps into a skill', or after solving a non-trivial multi-step task you'd want to repeat.",
+			"parameters": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"action": map[string]any{
+						"type":        "string",
+						"enum":        []string{"list_pending", "read_pending", "promote", "discard", "list_active"},
+						"description": "Action to perform",
+					},
+					"file_name": map[string]any{
+						"type":        "string",
+						"description": "Pending candidate file name (required for read_pending/promote/discard). Get it from list_pending.",
+					},
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Short skill name (required for promote). Used as the directory slug too.",
+					},
+					"description": map[string]any{
+						"type":        "string",
+						"description": "One-sentence skill description (required for promote). LLM will see this when deciding whether to apply the skill.",
+					},
+					"limit": map[string]any{
+						"type":        "integer",
+						"description": "Max items to return for list_pending (default 10)",
 					},
 				},
 				"required": []string{"action"},

@@ -2,13 +2,17 @@ package memorytool
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
@@ -17,23 +21,40 @@ const (
 	entryDelimiter = "\n§\n"
 	memoryLimit    = 2200
 	userLimit      = 1375
+
+	// indexThresholdPct 当字符占用超过该比例时，LoadSnapshot 自动切换为索引模式：
+	// 仅注入每条 entry 的 [id]/tag/摘要，完整内容通过 recall 动作按 ID 拉取。
+	indexThresholdPct = 70
+
+	// summaryRunes 索引模式下每条 entry 摘要的字符长度（rune 计）。
+	summaryRunes = 80
 )
 
 type memoryArgs struct {
-	Action  string `json:"action"`
-	Target  string `json:"target"`
+	Action  string   `json:"action"`
+	Target  string   `json:"target"`
+	Content string   `json:"content,omitempty"`
+	OldText string   `json:"old_text,omitempty"`
+	Tag     string   `json:"tag,omitempty"`
+	IDs     []string `json:"ids,omitempty"`
+}
+
+type entryView struct {
+	ID      string `json:"id"`
+	Tag     string `json:"tag,omitempty"`
+	Summary string `json:"summary"`
 	Content string `json:"content,omitempty"`
-	OldText string `json:"old_text,omitempty"`
 }
 
 type memoryResult struct {
-	Success    bool     `json:"success"`
-	Message    string   `json:"message,omitempty"`
-	Target     string   `json:"target"`
-	Entries    []string `json:"entries"`
-	Usage      string   `json:"usage"`
-	EntryCount int      `json:"entry_count"`
-	Error      string   `json:"error,omitempty"`
+	Success    bool        `json:"success"`
+	Message    string      `json:"message,omitempty"`
+	Target     string      `json:"target"`
+	Entries    []entryView `json:"entries"`
+	Usage      string      `json:"usage"`
+	EntryCount int         `json:"entry_count"`
+	Indexed    bool        `json:"indexed"`
+	Error      string      `json:"error,omitempty"`
 }
 
 var fileMu sync.Mutex
@@ -66,30 +87,59 @@ func Handler(ctx context.Context, args string) (string, error) {
 		return handleRemove(dir, p)
 	case "read":
 		return handleRead(dir, p)
+	case "recall":
+		return handleRecall(dir, p)
 	default:
-		return errJSON(p.Target, fmt.Sprintf("unknown action %q, use: add, replace, remove, read", p.Action)), nil
+		return errJSON(p.Target, fmt.Sprintf("unknown action %q, use: add, replace, remove, read, recall", p.Action)), nil
 	}
 }
 
 // LoadSnapshot 在 session 启动时调用，返回冻结的 system prompt 片段。
+// 当字符占用 >= indexThresholdPct 时自动切换为索引模式（L1 Insight Index）：
+// 仅注入每条 entry 的 [id] + tag + summary，完整内容通过 recall 动作按 ID 拉取。
 func LoadSnapshot(ws *workspace.Workspace) (memoryBlock, userBlock string) {
 	dir := memoriesDir(ws)
-	memEntries := readFile(filepath.Join(dir, "MEMORY.md"))
-	userEntries := readFile(filepath.Join(dir, "USER.md"))
-
-	if len(memEntries) > 0 {
-		content := strings.Join(memEntries, entryDelimiter)
-		pct := min(100, len(content)*100/memoryLimit)
-		memoryBlock = fmt.Sprintf("══════════════════════════════════════════════\nMEMORY (你的个人笔记) [%d%% — %d/%d 字符]\n══════════════════════════════════════════════\n%s",
-			pct, len(content), memoryLimit, content)
-	}
-	if len(userEntries) > 0 {
-		content := strings.Join(userEntries, entryDelimiter)
-		pct := min(100, len(content)*100/userLimit)
-		userBlock = fmt.Sprintf("══════════════════════════════════════════════\nUSER PROFILE (用户画像) [%d%% — %d/%d 字符]\n══════════════════════════════════════════════\n%s",
-			pct, len(content), userLimit, content)
-	}
+	memoryBlock = renderSnapshotBlock(dir, "memory", "MEMORY (你的个人笔记)", memoryLimit)
+	userBlock = renderSnapshotBlock(dir, "user", "USER PROFILE (用户画像)", userLimit)
 	return
+}
+
+func renderSnapshotBlock(dir, target, title string, limit int) string {
+	entries := readEntries(filepath.Join(dir, fileName(target)))
+	if len(entries) == 0 {
+		return ""
+	}
+
+	full := joinEntriesRaw(entries)
+	cur := len(full)
+	pct := min(100, cur*100/limit)
+
+	header := fmt.Sprintf("══════════════════════════════════════════════\n%s [%d%% — %d/%d 字符]\n══════════════════════════════════════════════",
+		title, pct, cur, limit)
+
+	if pct < indexThresholdPct {
+		return header + "\n" + full
+	}
+
+	var sb strings.Builder
+	sb.WriteString(header)
+	sb.WriteString("\n[INDEX MODE] 容量已达 ")
+	sb.WriteString(fmt.Sprintf("%d%%", pct))
+	sb.WriteString("，仅展示索引；完整内容请用 memory(action=recall, target=")
+	sb.WriteString(target)
+	sb.WriteString(", ids=[\"...\"]) 拉取。\n")
+	for _, e := range entries {
+		sb.WriteString("\n• [")
+		sb.WriteString(e.ID)
+		sb.WriteString("]")
+		if e.Tag != "" {
+			sb.WriteString(" #")
+			sb.WriteString(e.Tag)
+		}
+		sb.WriteString(" ")
+		sb.WriteString(truncateRunes(e.Body, summaryRunes))
+	}
+	return sb.String()
 }
 
 func handleAdd(dir string, p memoryArgs) (string, error) {
@@ -102,24 +152,32 @@ func handleAdd(dir string, p memoryArgs) (string, error) {
 	}
 
 	path := targetPath(dir, p.Target)
-	entries := readFile(path)
+	entries := readEntries(path)
 	limit := charLimit(p.Target)
 
+	body := stripUserMetadata(content)
 	for _, e := range entries {
-		if e == content {
+		if e.Body == body {
 			return successJSON(p.Target, entries, "条目已存在，未重复添加。"), nil
 		}
 	}
 
-	newEntries := append(entries, content)
-	newTotal := len(strings.Join(newEntries, entryDelimiter))
-	if newTotal > limit {
-		cur := charCount(entries)
-		return errJSON(p.Target, fmt.Sprintf("记忆已占用 %d/%d 字符。添加此条目（%d 字符）将超出限制。请先替换或删除现有条目。", cur, limit, len(content))), nil
+	tag := strings.TrimSpace(p.Tag)
+	if tag == "" {
+		tag = inferTag(body)
+	}
+	id := newEntryID(body)
+	newEntry := storedEntry{ID: id, Tag: tag, Body: body}
+
+	candidate := append(entries, newEntry)
+	if len(joinEntriesRaw(candidate)) > limit {
+		cur := len(joinEntriesRaw(entries))
+		return errJSON(p.Target, fmt.Sprintf("记忆已占用 %d/%d 字符。添加此条目（约 %d 字符）将超出限制。请先替换或删除现有条目。",
+			cur, limit, len(newEntry.serialize()))), nil
 	}
 
-	writeFile(path, newEntries)
-	return successJSON(p.Target, newEntries, "条目已添加。"), nil
+	writeEntries(path, candidate)
+	return successJSON(p.Target, candidate, fmt.Sprintf("条目已添加（id=%s）。", id)), nil
 }
 
 func handleReplace(dir string, p memoryArgs) (string, error) {
@@ -136,39 +194,28 @@ func handleReplace(dir string, p memoryArgs) (string, error) {
 	}
 
 	path := targetPath(dir, p.Target)
-	entries := readFile(path)
+	entries := readEntries(path)
 	limit := charLimit(p.Target)
 
-	var matches []int
-	for i, e := range entries {
-		if strings.Contains(e, oldText) {
-			matches = append(matches, i)
-		}
-	}
-	if len(matches) == 0 {
-		return errJSON(p.Target, fmt.Sprintf("没有找到匹配 '%s' 的条目。", oldText)), nil
-	}
-	if len(matches) > 1 {
-		unique := make(map[string]bool)
-		for _, i := range matches {
-			unique[entries[i]] = true
-		}
-		if len(unique) > 1 {
-			return errJSON(p.Target, fmt.Sprintf("多个条目匹配 '%s'，请提供更精确的子串。", oldText)), nil
-		}
+	idx, err := findUniqueEntry(entries, oldText)
+	if err != nil {
+		return errJSON(p.Target, err.Error()), nil
 	}
 
-	idx := matches[0]
-	test := make([]string, len(entries))
-	copy(test, entries)
-	test[idx] = newContent
-	if len(strings.Join(test, entryDelimiter)) > limit {
+	body := stripUserMetadata(newContent)
+	tag := strings.TrimSpace(p.Tag)
+	if tag == "" {
+		tag = entries[idx].Tag
+	}
+
+	test := slices.Clone(entries)
+	test[idx] = storedEntry{ID: entries[idx].ID, Tag: tag, Body: body}
+	if len(joinEntriesRaw(test)) > limit {
 		return errJSON(p.Target, "替换后将超出字符限制，请缩短新内容或先删除其他条目。"), nil
 	}
 
-	entries[idx] = newContent
-	writeFile(path, entries)
-	return successJSON(p.Target, entries, "条目已替换。"), nil
+	writeEntries(path, test)
+	return successJSON(p.Target, test, fmt.Sprintf("条目已替换（id=%s）。", entries[idx].ID)), nil
 }
 
 func handleRemove(dir string, p memoryArgs) (string, error) {
@@ -178,28 +225,206 @@ func handleRemove(dir string, p memoryArgs) (string, error) {
 	}
 
 	path := targetPath(dir, p.Target)
-	entries := readFile(path)
+	entries := readEntries(path)
 
-	var matches []int
-	for i, e := range entries {
-		if strings.Contains(e, oldText) {
-			matches = append(matches, i)
-		}
-	}
-	if len(matches) == 0 {
-		return errJSON(p.Target, fmt.Sprintf("没有找到匹配 '%s' 的条目。", oldText)), nil
+	idx, err := findUniqueEntry(entries, oldText)
+	if err != nil {
+		return errJSON(p.Target, err.Error()), nil
 	}
 
-	idx := matches[0]
-	entries = append(entries[:idx], entries[idx+1:]...)
-	writeFile(path, entries)
-	return successJSON(p.Target, entries, "条目已删除。"), nil
+	id := entries[idx].ID
+	entries = slices.Delete(entries, idx, idx+1)
+	writeEntries(path, entries)
+	return successJSON(p.Target, entries, fmt.Sprintf("条目已删除（id=%s）。", id)), nil
 }
 
 func handleRead(dir string, p memoryArgs) (string, error) {
 	path := targetPath(dir, p.Target)
-	entries := readFile(path)
+	entries := readEntries(path)
 	return successJSON(p.Target, entries, ""), nil
+}
+
+func handleRecall(dir string, p memoryArgs) (string, error) {
+	if len(p.IDs) == 0 {
+		return errJSON(p.Target, "ids cannot be empty"), nil
+	}
+
+	path := targetPath(dir, p.Target)
+	entries := readEntries(path)
+
+	wanted := make(map[string]bool, len(p.IDs))
+	for _, id := range p.IDs {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			wanted[id] = true
+		}
+	}
+
+	var hits []storedEntry
+	var missed []string
+	for id := range wanted {
+		found := false
+		for _, e := range entries {
+			if e.ID == id {
+				hits = append(hits, e)
+				found = true
+				break
+			}
+		}
+		if !found {
+			missed = append(missed, id)
+		}
+	}
+
+	views := make([]entryView, 0, len(hits))
+	for _, e := range hits {
+		views = append(views, entryView{
+			ID:      e.ID,
+			Tag:     e.Tag,
+			Summary: truncateRunes(e.Body, summaryRunes),
+			Content: e.Body,
+		})
+	}
+
+	limit := charLimit(p.Target)
+	cur := len(joinEntriesRaw(entries))
+	pct := min(100, cur*100/limit)
+
+	r := memoryResult{
+		Success:    true,
+		Target:     p.Target,
+		Entries:    views,
+		EntryCount: len(views),
+		Usage:      fmt.Sprintf("%d%% — %d/%d 字符", pct, cur, limit),
+	}
+	if len(missed) > 0 {
+		r.Message = "部分 ID 未找到: " + strings.Join(missed, ", ")
+	}
+	out, _ := json.Marshal(r)
+	return string(out), nil
+}
+
+// ── 存储格式 ──
+
+// storedEntry 是磁盘上的单条记忆条目；使用前导元数据行 `~~AICLAW-MEMORY:v1 id=<id> tag=<tag>~~`
+// 与正文分隔。老格式（无元数据头）会被自动迁移并补齐 ID/tag。
+type storedEntry struct {
+	ID   string
+	Tag  string
+	Body string
+}
+
+const metaPrefix = "~~AICLAW-MEMORY:v1"
+
+var metaLineRE = regexp.MustCompile(`^~~AICLAW-MEMORY:v1(?:\s+id=([A-Za-z0-9_-]+))?(?:\s+tag=([^~\s]+))?~~$`)
+
+func (e storedEntry) serialize() string {
+	header := metaPrefix
+	if e.ID != "" {
+		header += " id=" + e.ID
+	}
+	if e.Tag != "" {
+		header += " tag=" + e.Tag
+	}
+	header += "~~"
+	return header + "\n" + e.Body
+}
+
+func parseEntry(raw string) storedEntry {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return storedEntry{}
+	}
+	lines := strings.SplitN(raw, "\n", 2)
+	first := strings.TrimSpace(lines[0])
+	if m := metaLineRE.FindStringSubmatch(first); m != nil {
+		body := ""
+		if len(lines) == 2 {
+			body = strings.TrimSpace(lines[1])
+		}
+		id := m[1]
+		if id == "" {
+			id = newEntryID(body)
+		}
+		return storedEntry{ID: id, Tag: m[2], Body: body}
+	}
+	// 老格式：把整段当作 body，按内容哈希补一个 ID
+	return storedEntry{ID: newEntryID(raw), Tag: inferTag(raw), Body: raw}
+}
+
+// stripUserMetadata 防止用户/模型在 content 里写入 `~~AICLAW-MEMORY` 干扰存储格式。
+func stripUserMetadata(s string) string {
+	if !strings.HasPrefix(strings.TrimSpace(s), metaPrefix) {
+		return s
+	}
+	lines := strings.SplitN(s, "\n", 2)
+	if len(lines) == 2 {
+		return strings.TrimSpace(lines[1])
+	}
+	return ""
+}
+
+func joinEntriesRaw(entries []storedEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	parts := make([]string, len(entries))
+	for i, e := range entries {
+		parts[i] = e.serialize()
+	}
+	return strings.Join(parts, entryDelimiter)
+}
+
+func findUniqueEntry(entries []storedEntry, query string) (int, error) {
+	// 1) 优先按 ID 精确匹配
+	for i, e := range entries {
+		if e.ID == query {
+			return i, nil
+		}
+	}
+	// 2) 退化为 body 子串匹配
+	var matches []int
+	for i, e := range entries {
+		if strings.Contains(e.Body, query) {
+			matches = append(matches, i)
+		}
+	}
+	if len(matches) == 0 {
+		return -1, fmt.Errorf("没有找到匹配 '%s' 的条目（可传入 id 精确定位）", query)
+	}
+	if len(matches) > 1 {
+		unique := make(map[string]bool)
+		for _, i := range matches {
+			unique[entries[i].Body] = true
+		}
+		if len(unique) > 1 {
+			return -1, fmt.Errorf("多个条目匹配 '%s'，请提供更精确的子串或 id", query)
+		}
+	}
+	return matches[0], nil
+}
+
+func newEntryID(body string) string {
+	h := sha1.Sum([]byte(body + ":" + time.Now().Format(time.RFC3339Nano)))
+	return "m_" + hex.EncodeToString(h[:4])
+}
+
+// inferTag 从 body 中粗略提取一个标签（首个 # 标记，否则取首词）。
+func inferTag(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			tag := strings.TrimLeft(line, "#")
+			tag = strings.TrimSpace(tag)
+			if i := strings.IndexAny(tag, " \t#:：，,。"); i > 0 {
+				tag = tag[:i]
+			}
+			if tag != "" && len(tag) <= 24 {
+				return tag
+			}
+		}
+	}
+	return ""
 }
 
 // ── 辅助函数 ──
@@ -212,12 +437,16 @@ func memoriesDir(ws *workspace.Workspace) string {
 	return filepath.Join(home, ".aiclaw", "memories")
 }
 
+func fileName(target string) string {
+	if target == "user" {
+		return "USER.md"
+	}
+	return "MEMORY.md"
+}
+
 func targetPath(dir, target string) string {
 	os.MkdirAll(dir, 0o755)
-	if target == "user" {
-		return filepath.Join(dir, "USER.md")
-	}
-	return filepath.Join(dir, "MEMORY.md")
+	return filepath.Join(dir, fileName(target))
 }
 
 func charLimit(target string) int {
@@ -227,14 +456,7 @@ func charLimit(target string) int {
 	return memoryLimit
 }
 
-func charCount(entries []string) int {
-	if len(entries) == 0 {
-		return 0
-	}
-	return len(strings.Join(entries, entryDelimiter))
-}
-
-func readFile(path string) []string {
+func readEntries(path string) []storedEntry {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
@@ -244,41 +466,50 @@ func readFile(path string) []string {
 		return nil
 	}
 	parts := strings.Split(raw, entryDelimiter)
-	var entries []string
+	out := make([]storedEntry, 0, len(parts))
 	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			entries = append(entries, p)
+		if strings.TrimSpace(p) == "" {
+			continue
 		}
+		out = append(out, parseEntry(p))
 	}
-	return entries
+	return out
 }
 
-func writeFile(path string, entries []string) {
+func writeEntries(path string, entries []storedEntry) {
 	os.MkdirAll(filepath.Dir(path), 0o755)
 	content := ""
 	if len(entries) > 0 {
-		content = strings.Join(entries, entryDelimiter)
+		content = joinEntriesRaw(entries)
 	}
 	os.WriteFile(path, []byte(content), 0o644)
 }
 
-func successJSON(target string, entries []string, message string) string {
-	if entries == nil {
-		entries = []string{}
-	}
+func successJSON(target string, entries []storedEntry, message string) string {
 	limit := charLimit(target)
-	cur := charCount(entries)
+	cur := len(joinEntriesRaw(entries))
 	pct := 0
 	if limit > 0 {
 		pct = min(100, cur*100/limit)
 	}
+	indexed := pct >= indexThresholdPct
+
+	views := make([]entryView, 0, len(entries))
+	for _, e := range entries {
+		v := entryView{ID: e.ID, Tag: e.Tag, Summary: truncateRunes(e.Body, summaryRunes)}
+		if !indexed {
+			v.Content = e.Body
+		}
+		views = append(views, v)
+	}
+
 	r := memoryResult{
 		Success:    true,
 		Target:     target,
-		Entries:    entries,
+		Entries:    views,
 		Usage:      fmt.Sprintf("%d%% — %d/%d 字符", pct, cur, limit),
-		EntryCount: len(entries),
+		EntryCount: len(views),
+		Indexed:    indexed,
 		Message:    message,
 	}
 	out, _ := json.Marshal(r)
@@ -293,6 +524,14 @@ func errJSON(target, msg string) string {
 	}
 	out, _ := json.Marshal(r)
 	return string(out)
+}
+
+func truncateRunes(s string, maxRunes int) string {
+	rs := []rune(s)
+	if len(rs) <= maxRunes {
+		return s
+	}
+	return string(rs[:maxRunes]) + "…"
 }
 
 // ── 安全扫描 ──
