@@ -1,14 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="AIClaw">
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#22d3ee"/>
-      <stop offset="100%" stop-color="#6366f1"/>
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="55%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#ec4899"/>
     </linearGradient>
   </defs>
-  <rect width="48" height="48" rx="12" fill="#0c0c0f"/>
-  <g transform="translate(8, 8)" fill="none">
-    <path d="M6 34 C6 16 12 8 22 6" stroke="url(#g)" stroke-width="3.5" stroke-linecap="round"/>
-    <path d="M14 34 C14 18 20 10 30 8" stroke="url(#g)" stroke-width="3.5" stroke-linecap="round"/>
-    <path d="M22 34 C22 20 28 12 38 10" stroke="url(#g)" stroke-width="3.5" stroke-linecap="round"/>
+  <polygon points="24,2 43.05,13 43.05,35 24,46 4.95,35 4.95,13" fill="url(#g)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="3.2" stroke-linecap="round">
+    <path d="M15 36 C15 25, 18 20, 22 17"/>
+    <path d="M23 37 C23 26, 26 21, 30 18"/>
+    <path d="M31 36 C31 26, 34 22, 38 20"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="22" cy="17" r="2.6"/>
+    <circle cx="30" cy="18" r="2.6"/>
+    <circle cx="38" cy="20" r="2.6"/>
   </g>
 </svg>
