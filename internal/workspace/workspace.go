@@ -71,7 +71,7 @@ func (w *Workspace) AgentDir(uuid string) string {
 	}
 	dir := filepath.Join(w.root, "agents", uuid)
 	if _, loaded := w.agentDirOnce.LoadOrStore(uuid, struct{}{}); !loaded {
-		for _, sub := range []string{"", "sandbox", "tmp", "session-memory"} {
+		for _, sub := range []string{"", "sandbox", "tmp"} {
 			_ = os.MkdirAll(filepath.Join(dir, sub), 0o755)
 		}
 	}
@@ -92,14 +92,6 @@ func (w *Workspace) AgentTmp(uuid string) string {
 		return ""
 	}
 	return filepath.Join(d, "tmp")
-}
-
-func (w *Workspace) AgentSessionMemory(uuid string) string {
-	d := w.AgentDir(uuid)
-	if d == "" {
-		return ""
-	}
-	return filepath.Join(d, "session-memory")
 }
 
 // CleanupAgentTmpFiles 清理所有 agent tmp 目录中超过 maxAge 的临时文件。
@@ -195,12 +187,3 @@ func AgentTmpFromCtx(ctx context.Context) string {
 	return ws.AgentTmp(id)
 }
 
-// AgentSessionMemoryFromCtx 从 context 中的 Workspace + WorkdirScope 返回 session-memory 目录。
-func AgentSessionMemoryFromCtx(ctx context.Context) string {
-	ws := FromContext(ctx)
-	id := WorkdirScopeFromContext(ctx)
-	if ws == nil || id == "" {
-		return ""
-	}
-	return ws.AgentSessionMemory(id)
-}

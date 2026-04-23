@@ -174,6 +174,46 @@ func SetCDPEndpoint(endpoint string) {
 	defaultBrowser.cdpEndpoint = endpoint
 }
 
+// CDPEndpoint 返回当前生效的 CDP 端点（空字符串表示使用本地 chromedp 启动）。
+func CDPEndpoint() string {
+	defaultBrowser.mu.Lock()
+	defer defaultBrowser.mu.Unlock()
+	return defaultBrowser.cdpEndpoint
+}
+
+// ProbeCDPEndpoint 在启动期对 CDP 端点做一次 /json/version 探测，
+// 用于在配置加载时立刻给出可读的诊断（成功/失败、协议版本、浏览器型号）。
+// 不影响后续按需 attach 行为，失败时不修改任何状态。
+func ProbeCDPEndpoint(endpoint string) (browserName, version string, err error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", "", fmt.Errorf("empty endpoint")
+	}
+	if strings.HasPrefix(endpoint, "ws://") || strings.HasPrefix(endpoint, "wss://") {
+		return "", "", nil
+	}
+	endpoint = strings.TrimSuffix(endpoint, "/")
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(endpoint + "/json/version")
+	if err != nil {
+		return "", "", fmt.Errorf("connect: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var info struct {
+		Browser              string `json:"Browser"`
+		ProtocolVersion      string `json:"Protocol-Version"`
+		WebSocketDebuggerURL string `json:"webSocketDebuggerUrl"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return "", "", fmt.Errorf("decode: %w", err)
+	}
+	if info.WebSocketDebuggerURL == "" {
+		return "", "", fmt.Errorf("no webSocketDebuggerUrl in response")
+	}
+	return info.Browser, info.ProtocolVersion, nil
+}
+
 func SetIdleTimeout(d time.Duration) {
 	defaultBrowser.mu.Lock()
 	defer defaultBrowser.mu.Unlock()

@@ -1,0 +1,259 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	log "github.com/sirupsen/logrus"
+
+	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/internal/store"
+	"github.com/chowyu12/aiclaw/internal/workspace"
+)
+
+// archiveTriggerEvery 每累计 N 条消息后刷一次 archive；
+// 第 1 次刷新发生在 ≥ archiveMinMessages 时。
+const (
+	archiveMinMessages  = 6
+	archiveTriggerEvery = 4
+	archiveMaxBullets   = 12
+)
+
+// ArchiveSummary 是单个会话归档的元信息，提供给 /continue 列表展示。
+type ArchiveSummary struct {
+	ConvUUID  string    `json:"conv_uuid"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Path      string    `json:"path"`
+}
+
+// archiveDir 返回 agent 的归档目录，自动创建。
+func archiveDir(ws *workspace.Workspace, agentUUID string) string {
+	if ws == nil || agentUUID == "" {
+		return ""
+	}
+	dir := filepath.Join(ws.AgentDir(agentUUID), "archives")
+	_ = os.MkdirAll(dir, 0o755)
+	return dir
+}
+
+func archivePath(ws *workspace.Workspace, agentUUID, convUUID string) string {
+	dir := archiveDir(ws, agentUUID)
+	if dir == "" || convUUID == "" {
+		return ""
+	}
+	return filepath.Join(dir, convUUID+".md")
+}
+
+// archiveHook 实现 L4 Session Archive：累计消息数达到阈值后，每 archiveTriggerEvery 条
+// 重新生成会话归档文件（用户目标 + 工具统计 + 最近决策）。零 LLM 成本，结构化提取。
+func (e *Executor) archiveHook(ctx context.Context, _ HookEvent, p *HookPayload) HookAction {
+	if p.Agent == nil || p.ConvID == 0 || p.ConvUUID == "" || p.WS == nil || e.store == nil {
+		return HookContinue
+	}
+
+	count, err := e.store.CountMessages(ctx, p.ConvID)
+	if err != nil {
+		log.WithError(err).Debug("[Archive] count messages failed")
+		return HookContinue
+	}
+	if count < archiveMinMessages || (count-archiveMinMessages)%archiveTriggerEvery != 0 {
+		return HookContinue
+	}
+
+	if err := e.regenerateArchive(ctx, p.WS, p.Agent, p.ConvID, p.ConvUUID); err != nil {
+		log.WithError(err).WithField("conv", p.ConvUUID).Debug("[Archive] regenerate failed")
+	}
+	return HookContinue
+}
+
+// regenerateArchive 用最近的消息窗口重新生成归档文件（覆盖式写入）。
+func (e *Executor) regenerateArchive(ctx context.Context, ws *workspace.Workspace, ag *model.Agent, convID int64, convUUID string) error {
+	conv, err := e.store.GetConversationByUUID(ctx, convUUID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+
+	msgs, err := e.store.ListMessages(ctx, convID, 80)
+	if err != nil {
+		return fmt.Errorf("list messages: %w", err)
+	}
+
+	steps, _ := e.store.ListExecutionStepsByConversation(ctx, convID)
+
+	path := archivePath(ws, ag.UUID, convUUID)
+	if path == "" {
+		return fmt.Errorf("archive path is empty")
+	}
+	return os.WriteFile(path, []byte(buildArchiveContent(conv, msgs, steps, ag)), 0o644)
+}
+
+func buildArchiveContent(conv *model.Conversation, msgs []model.Message, steps []model.ExecutionStep, ag *model.Agent) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Session Archive: ")
+	sb.WriteString(conv.Title)
+	sb.WriteString("\n\n")
+	sb.WriteString(fmt.Sprintf("- conversation: `%s`\n", conv.UUID))
+	sb.WriteString(fmt.Sprintf("- agent: %s (%s)\n", ag.Name, ag.UUID))
+	sb.WriteString(fmt.Sprintf("- updated: %s\n", time.Now().Format(time.RFC3339)))
+	sb.WriteString(fmt.Sprintf("- messages: %d\n\n", len(msgs)))
+
+	var userMsgs []model.Message
+	var assistantMsgs []model.Message
+	for _, m := range msgs {
+		switch m.Role {
+		case "user":
+			userMsgs = append(userMsgs, m)
+		case "assistant":
+			if strings.TrimSpace(m.Content) != "" {
+				assistantMsgs = append(assistantMsgs, m)
+			}
+		}
+	}
+
+	sb.WriteString("## User goals\n\n")
+	limit := min(len(userMsgs), archiveMaxBullets)
+	for i := range limit {
+		sb.WriteString("- ")
+		sb.WriteString(truncateRunes(strings.TrimSpace(userMsgs[i].Content), 160))
+		sb.WriteString("\n")
+	}
+	if len(userMsgs) > limit {
+		sb.WriteString(fmt.Sprintf("- … 还有 %d 条用户消息\n", len(userMsgs)-limit))
+	}
+	sb.WriteString("\n")
+
+	if len(steps) > 0 {
+		toolUsage := map[string]int{}
+		for _, s := range steps {
+			if s.StepType == model.StepToolCall && s.Status == model.StepSuccess {
+				toolUsage[s.Name]++
+			}
+		}
+		if len(toolUsage) > 0 {
+			sb.WriteString("## Tools used\n\n")
+			type tu struct {
+				name  string
+				count int
+			}
+			tus := make([]tu, 0, len(toolUsage))
+			for n, c := range toolUsage {
+				tus = append(tus, tu{n, c})
+			}
+			sort.Slice(tus, func(i, j int) bool {
+				if tus[i].count != tus[j].count {
+					return tus[i].count > tus[j].count
+				}
+				return tus[i].name < tus[j].name
+			})
+			for _, t := range tus {
+				sb.WriteString(fmt.Sprintf("- %s × %d\n", t.name, t.count))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(assistantMsgs) > 0 {
+		sb.WriteString("## Recent decisions\n\n")
+		start := max(0, len(assistantMsgs)-archiveMaxBullets/2)
+		for i := start; i < len(assistantMsgs); i++ {
+			text := strings.TrimSpace(assistantMsgs[i].Content)
+			text = collapseWhitespace(text)
+			sb.WriteString("- ")
+			sb.WriteString(truncateRunes(text, 240))
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("---\n_Auto-generated by aiclaw archive (no LLM)._\n")
+	return sb.String()
+}
+
+func collapseWhitespace(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	for strings.Contains(s, "  ") {
+		s = strings.ReplaceAll(s, "  ", " ")
+	}
+	return s
+}
+
+// ListArchives 列出指定 agent 下的所有归档（按更新时间倒序）。
+// userID 用于过滤——只返回属于该用户的会话归档。userID 为空表示不过滤。
+func ListArchives(ctx context.Context, s store.Store, ws *workspace.Workspace, agentUUID, userID string, limit int) ([]ArchiveSummary, error) {
+	dir := archiveDir(ws, agentUUID)
+	if dir == "" {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	type tmpItem struct {
+		summary ArchiveSummary
+		modTime time.Time
+	}
+	var items []tmpItem
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		convUUID := strings.TrimSuffix(entry.Name(), ".md")
+		conv, cerr := s.GetConversationByUUID(ctx, convUUID)
+		if cerr != nil || conv == nil {
+			continue
+		}
+		if userID != "" && conv.UserID != "" && conv.UserID != userID {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		summary := ArchiveSummary{
+			ConvUUID:  convUUID,
+			Title:     conv.Title,
+			UpdatedAt: info.ModTime(),
+			Path:      filepath.Join(dir, entry.Name()),
+		}
+		items = append(items, tmpItem{summary, info.ModTime()})
+	}
+
+	sort.Slice(items, func(i, j int) bool { return items[i].modTime.After(items[j].modTime) })
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+
+	out := make([]ArchiveSummary, len(items))
+	for i, it := range items {
+		out[i] = it.summary
+	}
+	return out, nil
+}
+
+// LoadArchiveContent 读取一份 archive 的原始 markdown 内容。
+func LoadArchiveContent(ws *workspace.Workspace, agentUUID, convUUID string) (string, error) {
+	path := archivePath(ws, agentUUID, convUUID)
+	if path == "" {
+		return "", fmt.Errorf("invalid archive path")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}

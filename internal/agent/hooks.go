@@ -43,6 +43,7 @@ type HookPayload struct {
 	Tokens int // 单轮 LLM 调用消耗的 token 数（PostLLMCall）
 
 	// Agent 完成上下文 (agent_done)
+	ConvID      int64
 	ConvUUID    string
 	UserMsg     string
 	Content     string

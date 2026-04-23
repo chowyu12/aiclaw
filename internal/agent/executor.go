@@ -91,13 +91,19 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 		opt(e)
 	}
 	registerDefaultHooks(e.hooks)
+	e.hooks.Register(HookAgentDone, e.archiveHook)
+	e.hooks.Register(HookAgentDone, e.crystallizeHook)
 	registry.RegisterBuiltin("sub_agent", e.subAgentHandler)
+	registry.RegisterBuiltin("skill", e.skillHandler)
 	registry.RegisterBuiltin("session_search", sessionsearch.NewHandler(s))
 	return e
 }
 
 // Hooks 返回执行器的 HookRegistry，允许外部注册生命周期钩子。
 func (e *Executor) Hooks() *HookRegistry { return e.hooks }
+
+// Workspace 暴露 Executor 内置的 *workspace.Workspace，用于跨包访问归档/技能/沙箱目录。
+func (e *Executor) Workspace() *workspace.Workspace { return e.ws }
 
 // SetSchedulerContextFunc 设置调度器 context 注入函数。
 func (e *Executor) SetSchedulerContextFunc(fn func(context.Context) context.Context) {
@@ -683,6 +689,7 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 
 	e.hooks.Fire(ctx, HookAgentDone, &HookPayload{
 		Model:       ec.ag.ModelName,
+		ConvID:      ec.conv.ID,
 		ConvUUID:    ec.conv.UUID,
 		UserMsg:     ec.userMsg,
 		Content:     content,

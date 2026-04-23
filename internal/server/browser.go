@@ -26,7 +26,18 @@ func ApplyBrowserToolConfig(c config.BrowserConfig) {
 	}
 	if c.CDPEndpoint != "" {
 		browser.SetCDPEndpoint(c.CDPEndpoint)
-		log.WithField("endpoint", c.CDPEndpoint).Info("browser tool: connecting to existing browser via CDP")
+		// 立刻探测一次端点：让用户在启动日志里就知道 CDP 是否可达，
+		// 而不是等第一次 browser 工具调用失败时才发现配置问题。
+		if name, ver, err := browser.ProbeCDPEndpoint(c.CDPEndpoint); err != nil {
+			log.WithError(err).WithField("endpoint", c.CDPEndpoint).
+				Warn("browser tool: CDP endpoint configured but probe failed (会保留配置；首次使用时再尝试连接)")
+		} else {
+			log.WithFields(log.Fields{
+				"endpoint": c.CDPEndpoint,
+				"browser":  name,
+				"protocol": ver,
+			}).Info("browser tool: CDP attach mode (sessions/cookies will be reused from existing browser)")
+		}
 	}
 	if c.IdleTimeout > 0 {
 		browser.SetIdleTimeout(time.Duration(c.IdleTimeout) * time.Second)

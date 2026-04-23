@@ -318,7 +318,6 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		}
 	}
 
-	sessionMem := loadSessionMemory(e.ws, ec.ag.UUID, ec.conv.UUID)
 	persistentMem := loadPersistentMemory(e.ws)
 	todoBlock := loadTodoBlock(ec.conv.UUID)
 
@@ -337,7 +336,6 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		ToolSkillMap:     msgToolSkillMap,
 		Files:            ec.files,
 		PersistentMemory: persistentMem,
-		SessionMemory:    sessionMem,
 		TodoBlock:        todoBlock,
 		ToolSearchMode:   tsMode,
 		WebSearchEnabled: webSearchEffective(ec.ag),
