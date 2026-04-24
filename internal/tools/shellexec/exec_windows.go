@@ -21,6 +21,10 @@ func buildShellCommand(ctx context.Context, shell, command string) *exec.Cmd {
 	return cmd
 }
 
+// AugmentEnv 在 Windows 上直接返回原环境变量：PATH 已由系统策略统一管理，
+// 通常不会出现 macOS/Linux 下因非登录 shell 而丢失用户 bin 目录的问题。
+func AugmentEnv(env []string) []string { return env }
+
 func shellCandidates() []string {
 	out := make([]string, 0, 4)
 	if comspec := os.Getenv("COMSPEC"); comspec != "" {
