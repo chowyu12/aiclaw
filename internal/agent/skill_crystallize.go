@@ -36,9 +36,23 @@ func (e *Executor) crystallizeHook(_ context.Context, _ HookEvent, p *HookPayloa
 	steps := p.Tracker.Steps()
 	toolSteps, distinct := extractToolSteps(steps)
 	if distinct < crystallizeMinDistinctTools {
+		log.WithFields(log.Fields{
+			"distinct":  distinct,
+			"min":       crystallizeMinDistinctTools,
+			"tool_steps": len(toolSteps),
+			"total":     len(steps),
+			"conv":      p.ConvUUID,
+		}).Debug("[Skill] crystallize skipped: not enough distinct tools")
 		return HookContinue
 	}
-	if hasErrorStep(steps) {
+	if errName := firstErrorStep(steps); errName != "" {
+		log.WithFields(log.Fields{
+			"distinct":      distinct,
+			"tool_steps":    len(toolSteps),
+			"total":         len(steps),
+			"first_error":   errName,
+			"conv":          p.ConvUUID,
+		}).Debug("[Skill] crystallize skipped: execution contained error steps")
 		return HookContinue
 	}
 
@@ -84,12 +98,17 @@ func extractToolSteps(steps []model.ExecutionStep) ([]model.ExecutionStep, int) 
 }
 
 func hasErrorStep(steps []model.ExecutionStep) bool {
+	return firstErrorStep(steps) != ""
+}
+
+// firstErrorStep 返回第一条 StepError 的标识（"<stepType>:<name>"），用于诊断日志。
+func firstErrorStep(steps []model.ExecutionStep) string {
 	for _, s := range steps {
 		if s.Status == model.StepError {
-			return true
+			return fmt.Sprintf("%s:%s", s.StepType, s.Name)
 		}
 	}
-	return false
+	return ""
 }
 
 func buildPendingSkill(p *HookPayload, toolSteps []model.ExecutionStep, distinct int) string {
