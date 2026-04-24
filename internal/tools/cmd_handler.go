@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -74,6 +75,7 @@ func commandToolHandler(ctx context.Context, cfg model.CommandHandlerConfig, tim
 	cmd := exec.CommandContext(ctx, shell, "-c", cmdStr)
 	setCmdProcAttr(cmd)
 	cmd.WaitDelay = 5 * time.Second
+	cmd.Env = shellexec.AugmentEnv(os.Environ())
 	if cfg.WorkingDir != "" {
 		cmd.Dir = cfg.WorkingDir
 	}
