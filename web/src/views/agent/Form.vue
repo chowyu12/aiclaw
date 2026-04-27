@@ -74,8 +74,8 @@
                   </div>
                 </label>
                 <label class="af-kv">
-                  <span class="af-kv-k">Max Tokens</span>
-                  <el-input-number v-model="agentForm.max_tokens" :min="1" :max="128000" controls-position="right" size="small" class="af-kv-num" />
+                  <span class="af-kv-k">Max Tokens <span class="af-kv-sub">0=不限</span></span>
+                  <el-input-number v-model="agentForm.max_tokens" :min="0" :max="128000" controls-position="right" size="small" class="af-kv-num" />
                 </label>
                 <div class="af-kv">
                   <div class="af-switch-line">
@@ -227,7 +227,7 @@ const agentForm = ref({
   model_name: '',
   fast_model_name: '',
   temperature: 0.7,
-  max_tokens: 4096,
+  max_tokens: 0,
   timeout: 0,
   max_history: 30,
   max_iterations: 50,
@@ -321,7 +321,7 @@ function applyAgentDetail(detail: Agent) {
     model_name: detail.model_name || '',
     fast_model_name: detail.fast_model_name || '',
     temperature: detail.temperature ?? 0.7,
-    max_tokens: detail.max_tokens ?? 4096,
+    max_tokens: detail.max_tokens ?? 0,
     timeout: detail.timeout ?? 0,
     max_history: detail.max_history ?? 30,
     max_iterations: detail.max_iterations ?? 50,

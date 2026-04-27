@@ -434,9 +434,11 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, pt model
 	extra := map[string]any{}
 	effort := ag.EffectiveReasoningEffort()
 
+	thinkingEnabled := false
 	switch {
 	case caps.AlwaysThinking:
 		req.ReasoningEffort = effort
+		thinkingEnabled = true
 		l.WithFields(log.Fields{"model": ag.ModelName, "effort": effort}).Debug("[LLM] always-thinking model, effort applied")
 	case !ag.EnableThinking:
 		extra["enable_thinking"] = false
@@ -446,7 +448,26 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, pt model
 		req.ReasoningEffort = effort
 		extra["enable_thinking"] = true
 		req.ChatTemplateKwargs = map[string]any{"enable_thinking": true}
+		thinkingEnabled = true
 		l.WithFields(log.Fields{"model": ag.ModelName, "effort": effort}).Debug("[LLM] thinking enabled")
+	}
+
+	// DashScope (Qwen) 在 OpenAI 兼容模式下，思考开启后若不显式传 thinking_budget，
+	// 会取模型最大思维链长度（如 32768）作为默认值；当用户主动设了较小的
+	// max_completion_tokens 时（如 8192），就会触发
+	// "max_completion_tokens must be greater than thinking_budget" 校验失败。
+	// 仅在用户主动设置了 max_completion_tokens 时介入：按 reasoning_effort 比例
+	// 显式下发 budget，并保证严格小于 max_completion_tokens；
+	// 用户未设 max_tokens（=0）时不干预，由 DashScope 决定整体预算。
+	if thinkingEnabled && pt == model.ProviderQwen && req.MaxCompletionTokens > 0 {
+		if budget := computeQwenThinkingBudget(req.MaxCompletionTokens, effort); budget > 0 {
+			extra["thinking_budget"] = budget
+			l.WithFields(log.Fields{
+				"model":                 ag.ModelName,
+				"thinking_budget":       budget,
+				"max_completion_tokens": req.MaxCompletionTokens,
+			}).Debug("[LLM] qwen thinking_budget applied")
+		}
 	}
 
 	if webSearchEffective(ag) {
@@ -466,6 +487,34 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, pt model
 	if len(extra) > 0 {
 		req.ExtraBody = extra
 	}
+}
+
+// computeQwenThinkingBudget 根据 reasoning_effort 与 max_completion_tokens 计算
+// 适用于 DashScope（百炼/Qwen）OpenAI 兼容接口的 thinking_budget。
+// DashScope 对深度思考模型校验 max_completion_tokens > thinking_budget，
+// 因此返回值会严格小于 maxOut（保留至少 256 token 作为可见输出预算）。
+// 当 maxOut 太小、无法分出合理 budget 时返回 0，由调用方决定不下发该参数。
+// 调用方需先确保 maxOut > 0；maxOut <= 0 时返回 0 表示"不干预，交由服务商决定"。
+func computeQwenThinkingBudget(maxOut int, effort string) int {
+	const (
+		minBudget       = 1024
+		minVisibleQuota = 256
+	)
+	if maxOut <= 0 {
+		return 0
+	}
+
+	budget := int(float64(maxOut) * provider.EffortBudgetRatio(effort))
+	if budget < minBudget {
+		budget = minBudget
+	}
+	if budget >= maxOut-minVisibleQuota {
+		budget = maxOut - minVisibleQuota
+	}
+	if budget < minBudget {
+		return 0
+	}
+	return budget
 }
 
 // webSearchEffective 判断当前 Agent 是否真正启用了内置联网搜索能力。

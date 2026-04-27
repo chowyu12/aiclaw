@@ -87,7 +87,7 @@ func buildClaudeRequest(req openai.ChatCompletionRequest) claudeRequest {
 		cr.MaxTokens = 4096
 	}
 	if req.ReasoningEffort != "" {
-		budget := int(float64(cr.MaxTokens) * effortBudgetRatio(req.ReasoningEffort))
+		budget := int(float64(cr.MaxTokens) * EffortBudgetRatio(req.ReasoningEffort))
 		if budget < 1024 {
 			budget = 1024
 		}

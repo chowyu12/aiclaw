@@ -196,8 +196,8 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	return resp, nil
 }
 
-// effortBudgetRatio 将 reasoning_effort 级别映射为 thinking budget 占 max_tokens 的比例。
-func effortBudgetRatio(effort string) float64 {
+// EffortBudgetRatio 将 reasoning_effort 级别映射为 thinking budget 占 max_tokens 的比例。
+func EffortBudgetRatio(effort string) float64 {
 	switch effort {
 	case "low":
 		return 0.25
