@@ -42,6 +42,23 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o aiclaw-windows-amd64.exe ./cmd/server
           GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o aiclaw-darwin-amd64  ./cmd/server
           GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o aiclaw-darwin-arm64  ./cmd/server
+          echo "── 压缩前体积 ──"
+          ls -lh aiclaw-*
+
+      # UPX 对 darwin Mach-O（尤其 arm64）支持不稳定，且会破坏 Apple 代码签名 /
+      # Gatekeeper 校验，因此仅压缩 Linux 和 Windows 二进制。
+      - name: Setup UPX
+        uses: crazy-max/ghaction-upx@v3
+        with:
+          install-only: true
+
+      - name: Compress binaries with UPX
+        run: |
+          upx --best --lzma aiclaw-linux-amd64
+          upx --best --lzma aiclaw-linux-arm64
+          upx --best --lzma aiclaw-windows-amd64.exe
+          echo "── 压缩后体积 ──"
+          ls -lh aiclaw-*
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
