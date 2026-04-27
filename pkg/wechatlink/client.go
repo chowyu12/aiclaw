@@ -15,7 +15,10 @@ import (
 )
 
 const (
-	DefaultBaseURL  = "https://ilinkai.weixin.qq.com"
+	DefaultBaseURL = "https://ilinkai.weixin.qq.com"
+	// protocolVersion 对应 @tencent-weixin/openclaw-weixin 的 channel_version。
+	// 服务端依据该字段做兼容性/能力路由，过旧的版本号可能被限流或拒绝服务。
+	protocolVersion = "1.0.3"
 	longPollTimeout = 60 * time.Second
 	sendTimeout     = 15 * time.Second
 )
@@ -134,18 +137,25 @@ func (c *Client) SendTyping(ctx context.Context, userID, contextToken string) er
 	return nil
 }
 
-// GetUpdates 长轮询获取消息（服务端 hold 约 30-60 秒）。
-func (c *Client) GetUpdates(ctx context.Context, buf string) (msgs []rawWeixinMsg, newBuf string, err error) {
+// GetUpdates 长轮询获取消息（服务端 hold 约 35 秒）。
+// 第三个返回值 timeoutMs 来自服务端 longpolling_timeout_ms，便于上层判断连接活性。
+func (c *Client) GetUpdates(ctx context.Context, buf string) (msgs []rawWeixinMsg, newBuf string, timeoutMs int, err error) {
 	ctx, cancel := context.WithTimeout(ctx, longPollTimeout+10*time.Second)
 	defer cancel()
 	var resp getUpdatesResp
 	if err := c.doPost(ctx, "/ilink/bot/getupdates", getUpdatesReq{
 		GetUpdatesBuf: buf,
-		BaseInfo:      baseInfo{ChannelVersion: "1.0.0"},
+		BaseInfo:      baseInfo{ChannelVersion: protocolVersion},
 	}, &resp); err != nil {
-		return nil, buf, err
+		return nil, buf, 0, err
 	}
-	return resp.Msgs, resp.GetUpdatesBuf, nil
+	// 关键校验：服务端在 HTTP 200 + ret!=0 的情况下也会返回业务错误（典型场景：
+	// bot_token 失效 / 账号在别处下线）。漏掉这一步会让长轮询"看起来成功"
+	// 但实际收不到任何消息，且没有任何错误日志。
+	if resp.Ret != 0 {
+		return nil, buf, resp.LongPollingTimeoutMs, fmt.Errorf("getupdates ret=%d errmsg=%s", resp.Ret, resp.ErrMsg)
+	}
+	return resp.Msgs, resp.GetUpdatesBuf, resp.LongPollingTimeoutMs, nil
 }
 
 // ────────────────────── HTTP 通信 ──────────────────────

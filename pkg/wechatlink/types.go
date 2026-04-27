@@ -99,10 +99,11 @@ type getUpdatesReq struct {
 }
 
 type getUpdatesResp struct {
-	Ret           int            `json:"ret"`
-	ErrMsg        string         `json:"errmsg,omitempty"`
-	Msgs          []rawWeixinMsg `json:"msgs"`
-	GetUpdatesBuf string         `json:"get_updates_buf"`
+	Ret                  int            `json:"ret"`
+	ErrMsg               string         `json:"errmsg,omitempty"`
+	Msgs                 []rawWeixinMsg `json:"msgs"`
+	GetUpdatesBuf        string         `json:"get_updates_buf"`
+	LongPollingTimeoutMs int            `json:"longpolling_timeout_ms,omitempty"`
 }
 
 type rawWeixinMsg struct {
