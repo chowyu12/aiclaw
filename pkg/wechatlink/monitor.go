@@ -35,12 +35,16 @@ func (m *Monitor) Run(ctx context.Context) {
 	var buf string
 	backoff := time.Second
 	const maxBackoff = 30 * time.Second
+	firstHandshake := true
+
+	m.logger.Info("长轮询监听启动")
+	defer m.logger.Info("长轮询监听已退出")
 
 	for {
 		if ctx.Err() != nil {
 			return
 		}
-		msgs, newBuf, err := m.client.GetUpdates(ctx, buf)
+		msgs, newBuf, timeoutMs, err := m.client.GetUpdates(ctx, buf)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -58,21 +62,25 @@ func (m *Monitor) Run(ctx context.Context) {
 		if newBuf != "" {
 			buf = newBuf
 		}
-	for _, raw := range msgs {
-		if raw.MessageType != MsgTypeUser {
-			continue
+		if firstHandshake {
+			firstHandshake = false
+			m.logger.Info("长轮询握手成功 (timeout_ms=%d, msgs=%d)", timeoutMs, len(msgs))
 		}
-		text, images := extractContent(raw.ItemList)
-		if text == "" && len(images) == 0 {
-			continue
+		for _, raw := range msgs {
+			if raw.MessageType != MsgTypeUser {
+				continue
+			}
+			text, images := extractContent(raw.ItemList)
+			if text == "" && len(images) == 0 {
+				continue
+			}
+			m.handler(Message{
+				FromUserID:   raw.FromUserID,
+				Text:         text,
+				Images:       images,
+				ContextToken: raw.ContextToken,
+			})
 		}
-		m.handler(Message{
-			FromUserID:   raw.FromUserID,
-			Text:         text,
-			Images:       images,
-			ContextToken: raw.ContextToken,
-		})
-	}
 	}
 }
 
