@@ -892,9 +892,9 @@ function buildConfigPayload(): Record<string, unknown> | null {
     set("verification_token");
     set("encrypt_key");
   } else if (t === "wechat") {
+    // iLink 凭据仅由扫码登录链路写入，编辑保存时一律不带，避免覆盖刚扫码下发的新凭据。
     for (const k of ["bot_token", "ilink_bot_id", "base_url", "ilink_user_id"] as const) {
-      const v = String((cfg as Record<string, string>)[k] ?? "").trim();
-      if (v) out[k] = v;
+      delete out[k];
     }
   }
   return out;

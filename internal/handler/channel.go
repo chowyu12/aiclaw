@@ -330,6 +330,19 @@ func (h *ChannelHandler) Update(w http.ResponseWriter, r *http.Request) {
 		httputil.BadRequest(w, "invalid request body")
 		return
 	}
+	if req.Config != nil {
+		ch, err := h.store.GetChannel(r.Context(), id)
+		if err != nil {
+			httputil.NotFound(w, "channel not found")
+			return
+		}
+		sanitized, err := channels.SanitizeUpdateConfig(ch.ChannelType, []byte(req.Config), []byte(ch.Config))
+		if err != nil {
+			httputil.BadRequest(w, "invalid config: "+err.Error())
+			return
+		}
+		req.Config = model.JSON(sanitized)
+	}
 	if err := h.store.UpdateChannel(r.Context(), id, req); err != nil {
 		httputil.InternalError(w, err.Error())
 		return
