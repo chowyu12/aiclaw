@@ -101,7 +101,7 @@ func buildGeminiRequest(req openai.ChatCompletionRequest) geminiRequest {
 	}
 
 	if req.ReasoningEffort != "" {
-		ratio := effortBudgetRatio(req.ReasoningEffort)
+		ratio := EffortBudgetRatio(req.ReasoningEffort)
 		var budget int
 		if req.MaxCompletionTokens > 0 {
 			budget = int(float64(req.MaxCompletionTokens) * ratio)

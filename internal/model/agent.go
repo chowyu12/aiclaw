@@ -14,7 +14,8 @@ type Agent struct {
 	ModelName         string     `json:"model_name" gorm:"size:200"`
 	FastModelName     string     `json:"fast_model_name" gorm:"size:200"`
 	Temperature       float64    `json:"temperature" gorm:"default:0.7"`
-	MaxTokens         int        `json:"max_tokens" gorm:"default:4096"`
+	// MaxTokens 限制单次响应的最大输出 token；0 表示不限制，由模型/服务商自行决定。
+	MaxTokens         int        `json:"max_tokens" gorm:"default:0"`
 	Timeout           int        `json:"timeout" gorm:"default:0"`
 	MaxHistory        int        `json:"max_history" gorm:"default:30"`
 	MaxIterations     int        `json:"max_iterations" gorm:"default:50"`

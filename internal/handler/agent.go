@@ -75,9 +75,6 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if a.Temperature == 0 {
 		a.Temperature = 0.7
 	}
-	if a.MaxTokens == 0 {
-		a.MaxTokens = 4096
-	}
 	if a.MaxHistory == 0 {
 		a.MaxHistory = model.DefaultAgentMaxHistory
 	}
