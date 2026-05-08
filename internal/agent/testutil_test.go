@@ -282,6 +282,22 @@ func (s *mockStore) CreateExecutionStep(_ context.Context, step *model.Execution
 	s.execSteps[step.ConversationID] = append(s.execSteps[step.ConversationID], *step)
 	return nil
 }
+func (s *mockStore) UpdateExecutionStep(_ context.Context, step *model.ExecutionStep) error {
+	if step == nil || step.ID == 0 {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	steps := s.execSteps[step.ConversationID]
+	for i := range steps {
+		if steps[i].ID == step.ID {
+			steps[i] = *step
+			s.execSteps[step.ConversationID] = steps
+			return nil
+		}
+	}
+	return nil
+}
 func (s *mockStore) UpdateStepsMessageID(_ context.Context, conversationID, messageID int64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

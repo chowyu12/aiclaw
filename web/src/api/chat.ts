@@ -40,7 +40,7 @@ export interface ExecutionStep {
   name: string
   input: string
   output: string
-  status: 'success' | 'error' | 'pending'
+  status: 'success' | 'error' | 'pending' | 'running'
   error?: string
   duration_ms: number
   tokens_used: number
@@ -82,6 +82,7 @@ export interface StreamChunk {
   delta?: string
   content?: string
   tokens_used?: number
+  duration_ms?: number
   done: boolean
   step?: ExecutionStep
   steps?: ExecutionStep[]
@@ -112,6 +113,7 @@ export interface Message {
   content: string
   tool_calls?: any
   tokens_used?: number
+  duration_ms?: number
   steps?: ExecutionStep[]
   files?: FileInfo[]
   created_at: string

@@ -126,40 +126,6 @@ func TestMergeMap_Merge(t *testing.T) {
 	}
 }
 
-// ── isTransientLLMError ─────────────────────────────────────
-
-func TestIsTransientLLMError(t *testing.T) {
-	tests := []struct {
-		name string
-		err  error
-		want bool
-	}{
-		{"api_429", &openai.APIError{HTTPStatusCode: 429}, true},
-		{"api_500", &openai.APIError{HTTPStatusCode: 500}, true},
-		{"api_502", &openai.APIError{HTTPStatusCode: 502}, true},
-		{"api_503", &openai.APIError{HTTPStatusCode: 503}, true},
-		{"api_504", &openai.APIError{HTTPStatusCode: 504}, true},
-		{"api_400", &openai.APIError{HTTPStatusCode: 400}, false},
-		{"api_401", &openai.APIError{HTTPStatusCode: 401}, false},
-		{"connection_reset", &testErr{msg: "read tcp: connection reset by peer"}, true},
-		{"unexpected_eof", &testErr{msg: "unexpected EOF"}, true},
-		{"too_many_empty", &testErr{msg: "too many empty messages in a row"}, true},
-		{"not_transient", &testErr{msg: "invalid api key"}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isTransientLLMError(tt.err)
-			if got != tt.want {
-				t.Errorf("isTransientLLMError(%v) = %v, want %v", tt.err, got, tt.want)
-			}
-		})
-	}
-}
-
-type testErr struct{ msg string }
-
-func (e *testErr) Error() string { return e.msg }
-
 // ── generateSummary empty choices ───────────────────────────
 
 func TestContextCompressor_Compress_EmptyChoices(t *testing.T) {

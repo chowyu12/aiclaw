@@ -126,19 +126,22 @@ func NewFromProvider(p *model.Provider) (LLMProvider, error) {
 		return nil, err
 	}
 
+	var inner LLMProvider
 	switch p.Type {
 	case model.ProviderClaude:
-		return newClaudeAdapter(p.APIKey, baseURL), nil
+		inner = newClaudeAdapter(p.APIKey, baseURL)
 	case model.ProviderGemini:
-		return newGeminiAdapter(p.APIKey, baseURL), nil
+		inner = newGeminiAdapter(p.APIKey, baseURL)
+	default:
+		config := openai.DefaultConfig(p.APIKey)
+		config.BaseURL = baseURL
+		config.HTTPClient = providerHTTPClient
+		inner = &adapter{client: openai.NewClientWithConfig(config)}
 	}
 
-	config := openai.DefaultConfig(p.APIKey)
-	config.BaseURL = baseURL
-	config.HTTPClient = providerHTTPClient
-
-	client := openai.NewClientWithConfig(config)
-	return &adapter{client: client}, nil
+	// 透明重试：429/500/502/503/504 等瞬态错误由 provider 层自行重试，
+	// agent 的 run loop 不感知重试发生，迭代次数不会因此被消耗。
+	return WithRetry(inner, DefaultRetryConfig()), nil
 }
 
 type loggingTransport struct {

@@ -177,20 +177,18 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		applyModelCaps(&req, ec.ag, ec.prov.Type, ec.l)
 
 		ec.l.WithFields(log.Fields{"round": i + 1, "model": ec.ag.ModelName}).Info("[LLM] >> call")
+		llmStep := ec.tracker.BeginStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, ec.stepMeta())
 		iterStart := time.Now()
-		result, err := call(ctx, req)
+		result, callErr := call(ctx, req)
 		iterDur := time.Since(iterStart)
 
-		if err != nil {
-			ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur}).WithError(err).Error("[LLM] << failed")
-			ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, err.Error(), iterDur, 0, ec.stepMeta())
-			if st.llmRetries < maxLLMRetries && isTransientLLMError(err) {
-				st.llmRetries++
-				ec.l.WithFields(log.Fields{"retry": st.llmRetries, "max": maxLLMRetries}).Warn("[LLM] transient error, retrying")
-				continue
-			}
-			return nil, fmt.Errorf("generate content: %w", err)
+		if callErr != nil {
+			ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur}).WithError(callErr).Error("[LLM] << failed")
+			ec.tracker.FinalizeStep(ctx, llmStep, "", model.StepError, callErr.Error(), iterDur, 0, ec.stepMeta())
+			return nil, fmt.Errorf("generate content: %w", callErr)
 		}
+
+		ec.tracker.FinalizeStep(ctx, llmStep, result.content, model.StepSuccess, "", iterDur, result.tokens, ec.stepMeta())
 
 		totalTokens += result.tokens
 		budget.Add(result.tokens)
@@ -259,7 +257,6 @@ type agentRunState struct {
 	mu          sync.Mutex
 	loopDet     *toolLoopDetector
 	calledTools map[string]bool
-	llmRetries  int
 
 	lastDiscoveredLen int
 	cachedLLMDefs     []openai.Tool
@@ -380,32 +377,6 @@ func toolsSentToLLM(st *agentRunState) []openai.Tool {
 	st.cachedLLMDefs = buildToolSearchDefs(st.AllToolDefs, st.Discovered)
 	st.lastDiscoveredLen = len(st.Discovered)
 	return st.cachedLLMDefs
-}
-
-// ── LLM 瞬态错误重试 ─────────────────────────────────────────
-
-const maxLLMRetries = 2
-
-// isTransientLLMError 判断 LLM 错误是否为可自动重试的瞬态错误。
-func isTransientLLMError(err error) bool {
-	var apiErr *openai.APIError
-	if errors.As(err, &apiErr) {
-		switch apiErr.HTTPStatusCode {
-		case 429, 500, 502, 503, 504:
-			return true
-		}
-	}
-	var reqErr *openai.RequestError
-	if errors.As(err, &reqErr) {
-		switch reqErr.HTTPStatusCode {
-		case 429, 500, 502, 503, 504:
-			return true
-		}
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "too many empty messages") ||
-		strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "unexpected EOF")
 }
 
 // ── 工具函数 ────────────────────────────────────────────────
