@@ -336,7 +336,11 @@ func (a *claudeAdapter) CreateChatCompletion(ctx context.Context, req openai.Cha
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return openai.ChatCompletionResponse{}, fmt.Errorf("claude API error %d: %s", resp.StatusCode, string(respBody))
+		return openai.ChatCompletionResponse{}, &ProviderError{
+			HTTPStatusCode: resp.StatusCode,
+			Message:        "claude API error",
+			Body:           string(respBody),
+		}
 	}
 
 	var cr2 claudeResponse
@@ -371,7 +375,11 @@ func (a *claudeAdapter) CreateChatCompletionStream(ctx context.Context, req open
 	if resp.StatusCode != http.StatusOK {
 		errBody, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, fmt.Errorf("claude API error %d: %s", resp.StatusCode, string(errBody))
+		return nil, &ProviderError{
+			HTTPStatusCode: resp.StatusCode,
+			Message:        "claude API error",
+			Body:           string(errBody),
+		}
 	}
 
 	return &claudeStream{

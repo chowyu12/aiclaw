@@ -234,7 +234,7 @@ func toOpenAIMessage(msg model.Message) openai.ChatCompletionMessage {
 }
 
 func (m *MemoryManager) SaveUserMessage(ctx context.Context, conversationID int64, content string, files []*model.File) (int64, error) {
-	msgID, err := m.saveMessage(ctx, conversationID, "user", content, 0)
+	msgID, err := m.saveMessage(ctx, conversationID, "user", content, 0, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -242,8 +242,11 @@ func (m *MemoryManager) SaveUserMessage(ctx context.Context, conversationID int6
 	return msgID, nil
 }
 
-func (m *MemoryManager) SaveAssistantMessage(ctx context.Context, conversationID int64, content string, tokensUsed int) (int64, error) {
-	return m.saveMessage(ctx, conversationID, "assistant", content, tokensUsed)
+// SaveAssistantMessage 写入 assistant 回复。durationMs 记录本轮对话总耗时
+// （user 提交 → assistant 回复完成），用于前端展示「开始/结束/耗时」。
+// 错误兜底场景（saveErrorMessage）传 0 即可。
+func (m *MemoryManager) SaveAssistantMessage(ctx context.Context, conversationID int64, content string, tokensUsed, durationMs int) (int64, error) {
+	return m.saveMessage(ctx, conversationID, "assistant", content, tokensUsed, durationMs)
 }
 
 // SaveToolCallRound atomically saves one tool-call round: assistant message +
@@ -279,12 +282,13 @@ func (m *MemoryManager) SaveToolCallRound(ctx context.Context, conversationID in
 	return m.store.CreateMessages(ctx, msgs)
 }
 
-func (m *MemoryManager) saveMessage(ctx context.Context, conversationID int64, role, content string, tokensUsed int) (int64, error) {
+func (m *MemoryManager) saveMessage(ctx context.Context, conversationID int64, role, content string, tokensUsed, durationMs int) (int64, error) {
 	msg := &model.Message{
 		ConversationID: conversationID,
 		Role:           role,
 		Content:        content,
 		TokensUsed:     tokensUsed,
+		DurationMs:     durationMs,
 	}
 	if err := m.store.CreateMessage(ctx, msg); err != nil {
 		return 0, err

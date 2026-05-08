@@ -21,8 +21,11 @@ type Message struct {
 	ToolCallID     string    `json:"tool_call_id,omitzero" gorm:"size:100"`
 	Name           string    `json:"name,omitzero" gorm:"size:100"`
 	TokensUsed     int       `json:"tokens_used" gorm:"default:0"`
-	ParentStepID   int64     `json:"parent_step_id,omitzero" gorm:"default:0"`
-	CreatedAt      time.Time `json:"created_at"`
+	// DurationMs 仅对 assistant 消息有意义：本轮对话的总耗时（user 提交 → assistant 回复完成）。
+	// 配合 CreatedAt（结束时间）即可推算 StartedAt = CreatedAt - DurationMs。
+	DurationMs   int       `json:"duration_ms" gorm:"default:0"`
+	ParentStepID int64     `json:"parent_step_id,omitzero" gorm:"default:0"`
+	CreatedAt    time.Time `json:"created_at"`
 
 	Steps []ExecutionStep `json:"steps,omitzero" gorm:"-"`
 	Files []*File         `json:"files,omitzero" gorm:"-"`
@@ -42,6 +45,9 @@ const (
 	StepSuccess StepStatus = "success"
 	StepError   StepStatus = "error"
 	StepPending StepStatus = "pending"
+	// StepRunning 表示步骤已开始但尚未完成（如 LLM 流式调用进行中、长耗时工具未返回）。
+	// 用于在前端实时展示「运行中」状态，调用结束后会被 FinalizeStep 更新为 success/error。
+	StepRunning StepStatus = "running"
 )
 
 type ExecutionStep struct {
@@ -140,10 +146,12 @@ type StreamChunk struct {
 	Delta          string          `json:"delta,omitzero"`
 	Content        string          `json:"content,omitzero"`
 	TokensUsed     int             `json:"tokens_used,omitzero"`
-	Done           bool            `json:"done"`
-	Step           *ExecutionStep  `json:"step,omitzero"`
-	Steps          []ExecutionStep `json:"steps,omitzero"`
-	Files          []*File         `json:"files,omitzero"`
+	// DurationMs 仅在 Done=true 的最终 chunk 中有意义，标识本轮对话总耗时（毫秒）。
+	DurationMs int             `json:"duration_ms,omitzero"`
+	Done       bool            `json:"done"`
+	Step       *ExecutionStep  `json:"step,omitzero"`
+	Steps      []ExecutionStep `json:"steps,omitzero"`
+	Files      []*File         `json:"files,omitzero"`
 }
 
 type ListQuery struct {

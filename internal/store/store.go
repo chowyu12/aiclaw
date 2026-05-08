@@ -86,6 +86,7 @@ type ConversationStore interface {
 	DeleteMessagesFrom(ctx context.Context, conversationID, fromMessageID int64) error
 
 	CreateExecutionStep(ctx context.Context, step *model.ExecutionStep) error
+	UpdateExecutionStep(ctx context.Context, step *model.ExecutionStep) error
 	UpdateStepsMessageID(ctx context.Context, conversationID, messageID int64) error
 	ListExecutionSteps(ctx context.Context, messageID int64) ([]model.ExecutionStep, error)
 	ListExecutionStepsByConversation(ctx context.Context, conversationID int64) ([]model.ExecutionStep, error)

@@ -918,7 +918,7 @@ func TestMemoryManager_SaveAndLoadHistory(t *testing.T) {
 	conv, _ := mm.GetOrCreateConversation(ctx, "", "user1", "")
 
 	mm.SaveUserMessage(ctx, conv.ID, "你好", nil)
-	mm.SaveAssistantMessage(ctx, conv.ID, "你好！", 0)
+	mm.SaveAssistantMessage(ctx, conv.ID, "你好！", 0, 0)
 	mm.SaveUserMessage(ctx, conv.ID, "再见", nil)
 
 	history, err := mm.LoadHistory(ctx, conv.ID, 50)

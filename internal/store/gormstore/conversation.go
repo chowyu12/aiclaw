@@ -164,6 +164,26 @@ func (s *GormStore) CreateExecutionStep(ctx context.Context, step *model.Executi
 	return s.db.WithContext(ctx).Create(step).Error
 }
 
+// UpdateExecutionStep 按主键更新已存在的步骤记录（用于 FinalizeStep：从 running → success/error）。
+// 仅更新可变字段，避免覆盖 CreatedAt 等只读列。
+func (s *GormStore) UpdateExecutionStep(ctx context.Context, step *model.ExecutionStep) error {
+	if step == nil || step.ID == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).
+		Model(&model.ExecutionStep{}).
+		Where("id = ?", step.ID).
+		Updates(map[string]any{
+			"output":      step.Output,
+			"status":      step.Status,
+			"error":       step.Error,
+			"duration_ms": step.DurationMs,
+			"tokens_used": step.TokensUsed,
+			"metadata":    step.Metadata,
+			"message_id":  step.MessageID,
+		}).Error
+}
+
 func (s *GormStore) UpdateStepsMessageID(ctx context.Context, conversationID, messageID int64) error {
 	return s.db.WithContext(ctx).
 		Model(&model.ExecutionStep{}).

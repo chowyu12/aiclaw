@@ -131,6 +131,14 @@
               <div class="msg-meta">
                 <span class="msg-sender">{{ msg.role === 'user' ? '你' : currentAgentName }}</span>
                 <span v-if="msg.role === 'assistant' && msg.tokens_used" class="msg-tokens">{{ msg.tokens_used }} tokens</span>
+                <template v-if="msg.role === 'user' && msg.created_at">
+                  <span class="msg-time" :title="msg.created_at">{{ formatDateTime(msg.created_at) }}</span>
+                </template>
+                <template v-else-if="msg.role === 'assistant' && msg.created_at">
+                  <span v-if="messageStartedAt(msg)" class="msg-time">开始 {{ messageStartedAt(msg) }}</span>
+                  <span class="msg-time">结束 {{ formatDateTime(msg.created_at) }}</span>
+                  <span v-if="msg.duration_ms" class="msg-duration">耗时 {{ formatDuration(msg.duration_ms) }}</span>
+                </template>
               </div>
 
               <!-- 消息气泡（附件 + 文本统一展示） -->
@@ -180,9 +188,16 @@
                           <span v-if="subAgentDepthLabel(node.step)" class="step-depth">{{ subAgentDepthLabel(node.step) }}</span>
                           <span class="step-title">{{ node.step.name === 'sub_agent' ? (node.step.metadata?.tool_name || 'sub_agent') : node.step.name }}</span>
                           <el-tag
-                            :type="node.step.status === 'success' ? 'success' : 'danger'"
+                            :type="stepTagType(node.step.status)"
                             size="small" round effect="plain"
-                          >{{ node.step.status === 'success' ? node.step.duration_ms + 'ms' : 'failed' }}</el-tag>
+                          >
+                            <template v-if="node.step.status === 'running'">
+                              <el-icon class="is-loading" :size="10"><Loading /></el-icon>
+                              运行中
+                            </template>
+                            <template v-else-if="node.step.status === 'success'">{{ node.step.duration_ms }}ms</template>
+                            <template v-else>failed</template>
+                          </el-tag>
                           <span v-if="node.step.tokens_used" class="step-tokens">{{ node.step.tokens_used }} tokens</span>
                           <span v-if="node.children.length" class="step-child-count">{{ node.children.length }} 步</span>
                           <el-icon v-if="node.children.length" class="step-child-arrow" :class="{ open: node.step._childrenOpen !== false }"><ArrowRight /></el-icon>
@@ -225,9 +240,16 @@
                                   <span class="step-badge" :class="stepBadgeClass(child.step)">{{ stepTypeLabel(child.step.step_type, child.step.name) }}</span>
                                   <span class="step-title">{{ child.step.name }}</span>
                                   <el-tag
-                                    :type="child.step.status === 'success' ? 'success' : 'danger'"
+                                    :type="stepTagType(child.step.status)"
                                     size="small" round effect="plain"
-                                  >{{ child.step.status === 'success' ? child.step.duration_ms + 'ms' : 'failed' }}</el-tag>
+                                  >
+                                    <template v-if="child.step.status === 'running'">
+                                      <el-icon class="is-loading" :size="10"><Loading /></el-icon>
+                                      运行中
+                                    </template>
+                                    <template v-else-if="child.step.status === 'success'">{{ child.step.duration_ms }}ms</template>
+                                    <template v-else>failed</template>
+                                  </el-tag>
                                   <span v-if="child.step.tokens_used" class="step-tokens">{{ child.step.tokens_used }} tokens</span>
                                 </div>
                                 <div class="step-detail">
@@ -281,6 +303,10 @@
                     <span class="wf-name">{{ node.step.name === 'sub_agent' ? (node.step.metadata?.tool_name || 'sub_agent') : node.step.name }}</span>
                     <el-tag v-if="node.step.status === 'success'" type="success" size="small" round effect="plain">{{ node.step.duration_ms }}ms</el-tag>
                     <el-tag v-else-if="node.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
+                    <el-tag v-else-if="node.step.status === 'running'" type="info" size="small" round effect="plain">
+                      <el-icon class="is-loading" :size="10"><Loading /></el-icon>
+                      运行中
+                    </el-tag>
                     <span v-if="node.step.tokens_used" class="wf-tokens">{{ node.step.tokens_used }} tokens</span>
                     <span v-if="node.children.length" class="wf-child-count" @click.stop="node.step._childrenOpen = node.step._childrenOpen === false ? true : false">
                       {{ node.children.length }} 步
@@ -325,6 +351,10 @@
                           <span class="wf-name">{{ child.step.name }}</span>
                           <el-tag v-if="child.step.status === 'success'" type="success" size="small" round effect="plain">{{ child.step.duration_ms }}ms</el-tag>
                           <el-tag v-else-if="child.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
+                          <el-tag v-else-if="child.step.status === 'running'" type="info" size="small" round effect="plain">
+                            <el-icon class="is-loading" :size="10"><Loading /></el-icon>
+                            运行中
+                          </el-tag>
                           <span v-if="child.step.tokens_used" class="wf-tokens">{{ child.step.tokens_used }} tokens</span>
                         </div>
                       </div>
@@ -445,6 +475,8 @@ interface ChatMessage {
   role: string
   content: string
   tokens_used?: number
+  duration_ms?: number
+  created_at?: string
   steps?: ExecutionStep[]
   files?: FileInfo[]
   _showSteps?: boolean
@@ -616,6 +648,8 @@ function parseChatMessages(msgs: Message[]): ChatMessage[] {
       role: m.role,
       content: m.content,
       tokens_used: m.tokens_used,
+      duration_ms: m.duration_ms,
+      created_at: m.created_at,
       steps: m.steps,
       files: m.files,
       _showSteps: false,
@@ -694,6 +728,31 @@ function formatTime(t: string): string {
   const isToday = d.toDateString() === now.toDateString()
   if (isToday) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+function formatDateTime(t?: string): string {
+  if (!t) return ''
+  const d = new Date(t)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function formatDuration(ms?: number): string {
+  if (!ms || ms <= 0) return ''
+  if (ms < 1000) return `${ms} ms`
+  const sec = ms / 1000
+  if (sec < 60) return `${sec.toFixed(1)} s`
+  const m = Math.floor(sec / 60)
+  const s = Math.round(sec % 60)
+  return `${m} 分 ${s} 秒`
+}
+
+function messageStartedAt(msg: ChatMessage): string {
+  if (!msg.created_at) return ''
+  const end = new Date(msg.created_at).getTime()
+  if (Number.isNaN(end)) return ''
+  const start = end - (msg.duration_ms || 0)
+  return formatDateTime(new Date(start).toISOString())
 }
 
 function newConversation() {
@@ -800,7 +859,7 @@ function sendMessage() {
     ...pendingURLs.value.map(u => ({ id: 0, uuid: u, conversation_id: 0, message_id: 0, filename: u.split('/').pop() || 'url', content_type: '', file_size: 0, file_type: 'text' as const, created_at: '' })),
   ]
 
-  messages.value.push(reactive({ role: 'user', content: text, files: displayFiles.length > 0 ? displayFiles : undefined }))
+  messages.value.push(reactive({ role: 'user', content: text, created_at: new Date().toISOString(), files: displayFiles.length > 0 ? displayFiles : undefined }))
   inputMessage.value = ''
   pendingFiles.value = []
   pendingURLs.value = []
@@ -836,13 +895,22 @@ function sendMessage() {
     (chunk: StreamChunk) => {
       if (chunk.conversation_id) conversationId.value = chunk.conversation_id
       if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
-      if (chunk.steps?.length) { for (const s of chunk.steps) pendingSteps.value.push(reactive({ ...s, _expanded: false })) }
-      else if (chunk.step) pendingSteps.value.push(reactive({ ...chunk.step, _expanded: false }))
+      if (chunk.steps?.length) { for (const s of chunk.steps) pushOrUpdateStep(pendingSteps.value, s) }
+      else if (chunk.step) pushOrUpdateStep(pendingSteps.value, chunk.step)
       if (chunk.done) {
         const steps = chunk.steps?.length ? chunk.steps : [...pendingSteps.value]
         const tokensUsed = chunk.tokens_used || steps.reduce((sum, s) => sum + (s.tokens_used || 0), 0)
         const content = chunk.content || streamingContent.value
-        const msg: any = { role: 'assistant', content, tokens_used: tokensUsed || undefined, steps, _showSteps: false, id: chunk.message_id || undefined }
+        const msg: any = {
+          role: 'assistant',
+          content,
+          tokens_used: tokensUsed || undefined,
+          duration_ms: chunk.duration_ms,
+          created_at: new Date().toISOString(),
+          steps,
+          _showSteps: false,
+          id: chunk.message_id || undefined,
+        }
         if (chunk.files?.length) msg.files = chunk.files
         finishSend(msg)
       }
@@ -891,8 +959,8 @@ function retryMessage(assistantIdx: number) {
       { conversation_id: conversationId.value, message_id: assistantMsg.id },
       (chunk: StreamChunk) => {
         if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
-        if (chunk.steps?.length) { for (const s of chunk.steps) pendingSteps.value.push(reactive({ ...s, _expanded: false })) }
-        else if (chunk.step) pendingSteps.value.push(reactive({ ...chunk.step, _expanded: false }))
+        if (chunk.steps?.length) { for (const s of chunk.steps) pushOrUpdateStep(pendingSteps.value, s) }
+        else if (chunk.step) pushOrUpdateStep(pendingSteps.value, chunk.step)
         if (chunk.done) finishRetry()
       },
       () => finishRetry(),
@@ -927,6 +995,21 @@ function stepTypeLabel(t: string, name?: string) {
 function stepBadgeClass(step: any) {
   if (step.step_type === 'tool_call' && step.name === 'sub_agent') return 'badge--sub_agent'
   return 'badge--' + step.step_type
+}
+
+function stepTagType(status: string): 'success' | 'danger' | 'info' {
+  if (status === 'success') return 'success'
+  if (status === 'running' || status === 'pending') return 'info'
+  return 'danger'
+}
+
+function pushOrUpdateStep(list: ExecutionStep[], step: ExecutionStep) {
+  const existing = list.find(s => s.step_order === step.step_order)
+  if (existing) {
+    Object.assign(existing, step)
+    return
+  }
+  list.push(reactive({ ...step, _expanded: false }))
 }
 
 function stepDotClass(step: any) {
@@ -1411,6 +1494,20 @@ function groupSteps(steps: ExecutionStep[]): StepNode[] {
   font-size: 11px;
   color: #cbd5e1;
   font-variant-numeric: tabular-nums;
+}
+.msg-time {
+  font-size: 11px;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+.msg-duration {
+  font-size: 11px;
+  font-weight: 500;
+  color: #0ea5e9;
+  font-variant-numeric: tabular-nums;
+  background: rgba(14, 165, 233, 0.1);
+  padding: 1px 7px;
+  border-radius: 6px;
 }
 
 .msg-bubble {

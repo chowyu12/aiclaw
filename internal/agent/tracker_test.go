@@ -134,3 +134,69 @@ func TestStepTracker_WithMetadata(t *testing.T) {
 		t.Error("metadata should be serialized")
 	}
 }
+
+func TestStepTracker_BeginAndFinalize(t *testing.T) {
+	s := newMockStore()
+	tracker := NewStepTracker(s, 1)
+
+	var emitted []model.ExecutionStep
+	tracker.SetOnStep(func(step model.ExecutionStep) {
+		emitted = append(emitted, step)
+	})
+
+	ctx := t.Context()
+	step := tracker.BeginStep(ctx, model.StepLLMCall, "deepseek-v4", "你好",
+		&model.StepMetadata{Provider: "test", Model: "deepseek-v4"})
+
+	if step.Status != model.StepRunning {
+		t.Errorf("expected status running, got %s", step.Status)
+	}
+	if step.StepOrder != 1 {
+		t.Errorf("expected order 1, got %d", step.StepOrder)
+	}
+	if len(emitted) != 1 || emitted[0].Status != model.StepRunning {
+		t.Errorf("expected initial running emit, got %d events", len(emitted))
+	}
+
+	tracker.FinalizeStep(ctx, step, "你好！", model.StepSuccess, "", 250*time.Millisecond, 42, nil)
+
+	if step.Status != model.StepSuccess {
+		t.Errorf("expected status success after finalize, got %s", step.Status)
+	}
+	if step.DurationMs != 250 {
+		t.Errorf("expected duration 250ms, got %d", step.DurationMs)
+	}
+	if step.TokensUsed != 42 {
+		t.Errorf("expected tokens 42, got %d", step.TokensUsed)
+	}
+	if len(emitted) != 2 || emitted[1].Status != model.StepSuccess {
+		t.Errorf("expected finalized emit, got %d events", len(emitted))
+	}
+
+	steps := tracker.Steps()
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step (replaced), got %d", len(steps))
+	}
+	if steps[0].Status != model.StepSuccess {
+		t.Errorf("expected stored step finalized, got %s", steps[0].Status)
+	}
+}
+
+func TestStepTracker_FinalizeStep_Error(t *testing.T) {
+	s := newMockStore()
+	tracker := NewStepTracker(s, 1)
+
+	step := tracker.BeginStep(t.Context(), model.StepLLMCall, "model", "input", nil)
+	tracker.FinalizeStep(t.Context(), step, "", model.StepError, "boom", time.Second, 0, nil)
+
+	steps := tracker.Steps()
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(steps))
+	}
+	if steps[0].Status != model.StepError {
+		t.Errorf("expected error status, got %s", steps[0].Status)
+	}
+	if steps[0].Error != "boom" {
+		t.Errorf("expected error message, got %q", steps[0].Error)
+	}
+}

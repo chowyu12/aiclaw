@@ -27,8 +27,10 @@ type ExecuteResult struct {
 	MessageID      int64
 	Content        string
 	TokensUsed     int
-	Steps          []model.ExecutionStep
-	ToolFiles      []*model.File
+	// DurationMs 本轮对话总耗时（毫秒），与 Message.DurationMs 同义，便于流式 doneChunk 直接下发。
+	DurationMs int
+	Steps      []model.ExecutionStep
+	ToolFiles  []*model.File
 }
 
 type ProviderFactory func(p *model.Provider) (provider.LLMProvider, error)
@@ -243,6 +245,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 		Done:           true,
 		Content:        res.Content,
 		TokensUsed:     res.TokensUsed,
+		DurationMs:     res.DurationMs,
 		Steps:          res.Steps,
 	}
 	if len(ec.toolFiles) > 0 {
@@ -260,7 +263,7 @@ func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
 	content := fmt.Sprintf("[错误] %s", execErr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, 0)
+	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, 0, 0)
 	if err != nil {
 		ec.l.WithError(err).Error("[Execute] save error message failed")
 		return
@@ -661,17 +664,17 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRunState, content string, tokensUsed int, duration time.Duration) (*ExecuteResult, error) {
 	// ephemeral 模式（sub_agent）：只记录执行步骤，跳过消息持久化和 HookAgentDone
 	if ec.ephemeral {
-		ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, content, model.StepSuccess, "", duration, tokensUsed, ec.stepMeta())
 		ec.l.WithFields(log.Fields{"duration": duration, "tokens": tokensUsed}).Info("[SubAgent] << saveResult (ephemeral)")
 		return &ExecuteResult{
 			Content:    content,
 			TokensUsed: tokensUsed,
+			DurationMs: int(duration.Milliseconds()),
 			Steps:      ec.tracker.Steps(),
 			ToolFiles:  append([]*model.File(nil), ec.toolFiles...),
 		}, nil
 	}
 
-	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, tokensUsed)
+	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, tokensUsed, int(duration.Milliseconds()))
 	if err != nil {
 		ec.l.WithError(err).Error("[Execute] save assistant message failed")
 		return nil, err
@@ -682,7 +685,6 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 	}
 
 	ec.tracker.SetMessageID(msgID)
-	ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, content, model.StepSuccess, "", duration, tokensUsed, ec.stepMeta())
 
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "duration": duration, "tokens": tokensUsed}).Info("[Execute] << done")
 
@@ -707,6 +709,7 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 		MessageID:      msgID,
 		Content:        content,
 		TokensUsed:     tokensUsed,
+		DurationMs:     int(duration.Milliseconds()),
 		Steps:          ec.tracker.Steps(),
 		ToolFiles:      append([]*model.File(nil), ec.toolFiles...),
 	}, nil
