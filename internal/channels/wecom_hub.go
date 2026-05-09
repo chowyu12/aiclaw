@@ -205,21 +205,11 @@ func wecomDispatchInbound(bridge *Bridge, chLive *atomic.Pointer[model.Channel],
 				log.WithError(err).Error("[wecom] ReplyText failed")
 				return err
 			}
-			publicURL := bridge.rt.PublicURL()
 			for _, img := range images {
-				if publicURL == "" || img.UUID == "" {
-					log.WithFields(log.Fields{
-						"file":       img.Filename,
-						"uuid":       img.UUID,
-						"has_puburl": publicURL != "",
-					}).Warn("[wecom] image skipped: server.public_url not configured or file has no uuid")
+				if img == nil {
 					continue
 				}
-				imgURL := publicURL + "/public/files/" + img.UUID
-				log.WithFields(log.Fields{"file": img.Filename, "url": imgURL}).Info("[wecom] sending image as news card")
-				if err := client.ReplyNewsCard(nm.Frame, img.Filename, imgURL); err != nil {
-					log.WithError(err).WithField("file", img.Filename).Error("[wecom] send news card failed")
-				}
+				log.WithField("file", img.Filename).Debug("[wecom] outbound image skipped: no public file URL is configured")
 			}
 			return nil
 		},

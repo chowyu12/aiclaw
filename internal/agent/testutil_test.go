@@ -31,6 +31,7 @@ type mockStore struct {
 	convByUUID    map[string]*model.Conversation
 	messages      map[int64][]model.Message
 	execSteps     map[int64][]model.ExecutionStep
+	filesByUUID   map[string]*model.File
 
 	agents       map[int64]*model.Agent
 	agentsByUUID map[string]*model.Agent
@@ -47,6 +48,7 @@ func newMockStore() *mockStore {
 		convByUUID:    make(map[string]*model.Conversation),
 		messages:      make(map[int64][]model.Message),
 		execSteps:     make(map[int64][]model.ExecutionStep),
+		filesByUUID:   make(map[string]*model.File),
 		agents:        make(map[int64]*model.Agent),
 		agentsByUUID:  make(map[string]*model.Agent),
 	}
@@ -330,21 +332,83 @@ func (s *mockStore) ListExecutionStepsByConversation(_ context.Context, convID i
 }
 
 func (s *mockStore) CreateFile(_ context.Context, f *model.File) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	f.ID = s.nextID()
+	cp := *f
+	s.filesByUUID[f.UUID] = &cp
 	return nil
 }
-func (s *mockStore) GetFileByUUID(_ context.Context, _ string) (*model.File, error) {
-	return nil, fmt.Errorf("not found")
+func (s *mockStore) GetFileByUUID(_ context.Context, fileUUID string) (*model.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	f, ok := s.filesByUUID[fileUUID]
+	if !ok {
+		return nil, fmt.Errorf("not found")
+	}
+	cp := *f
+	return &cp, nil
 }
-func (s *mockStore) ListFilesByConversation(_ context.Context, _ int64) ([]*model.File, error) {
-	return nil, nil
+func (s *mockStore) ListFilesByConversation(_ context.Context, convID int64) ([]*model.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var files []*model.File
+	for _, f := range s.filesByUUID {
+		if f.ConversationID != convID {
+			continue
+		}
+		cp := *f
+		files = append(files, &cp)
+	}
+	return files, nil
 }
-func (s *mockStore) ListFilesByMessage(_ context.Context, _ int64) ([]*model.File, error) {
-	return nil, nil
+func (s *mockStore) ListFilesByMessage(_ context.Context, messageID int64) ([]*model.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var files []*model.File
+	for _, f := range s.filesByUUID {
+		if f.MessageID != messageID {
+			continue
+		}
+		cp := *f
+		files = append(files, &cp)
+	}
+	return files, nil
 }
-func (s *mockStore) UpdateFileMessageID(_ context.Context, _, _ int64) error  { return nil }
-func (s *mockStore) LinkFileToMessage(_ context.Context, _, _, _ int64) error { return nil }
-func (s *mockStore) DeleteFile(_ context.Context, _ int64) error              { return nil }
+func (s *mockStore) UpdateFileMessageID(_ context.Context, fileID, messageID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, f := range s.filesByUUID {
+		if f.ID == fileID {
+			f.MessageID = messageID
+			return nil
+		}
+	}
+	return nil
+}
+func (s *mockStore) LinkFileToMessage(_ context.Context, fileID, convID, messageID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, f := range s.filesByUUID {
+		if f.ID == fileID {
+			f.ConversationID = convID
+			f.MessageID = messageID
+			return nil
+		}
+	}
+	return nil
+}
+func (s *mockStore) DeleteFile(_ context.Context, fileID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for fileUUID, f := range s.filesByUUID {
+		if f.ID == fileID {
+			delete(s.filesByUUID, fileUUID)
+			return nil
+		}
+	}
+	return nil
+}
 
 func (s *mockStore) ListMCPServers(_ context.Context) ([]model.MCPServer, error) {
 	return nil, nil

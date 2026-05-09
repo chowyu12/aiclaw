@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/tools"
+	"github.com/chowyu12/aiclaw/internal/tools/result"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 	"github.com/google/uuid"
 )
@@ -90,6 +90,11 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	if toolName == "sub_agent" {
 		toolCtx = withSubAgentCallID(toolCtx, tc.ID)
 	}
+
+	// 工具调用前：快照 sandbox 文件列表，用于事后检测新增文件。
+	sandboxDir := workspace.AgentSandboxFromCtx(toolCtx)
+	preSandbox := snapshotDir(sandboxDir)
+
 	callStart := time.Now()
 	output, callErr := tool.Call(toolCtx, toolArgs)
 	callDur := time.Since(callStart)
@@ -108,6 +113,11 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 
 	if callErr == nil {
 		toolFile = e.persistToolFile(ctx, ec, toolResult)
+		// 若工具未返回 FileResult（如 codeinterp、shellexec），则扫描 sandbox
+		// 目录查找本轮新建的文件，并将其持久化为工具输出附件。
+		if toolFile == nil && sandboxDir != "" {
+			toolFile = e.persistNewSandboxFile(ctx, ec, sandboxDir, preSandbox)
+		}
 	}
 
 	return toolMsg, ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: toolMsg.Content}, fileParts, toolFile
@@ -115,9 +125,11 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 
 func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolResult string) *model.File {
 	fr := tools.ParseFileResult(toolResult)
-	if fr == nil || !strings.HasPrefix(fr.MimeType, "image/") {
+	if fr == nil {
 		return nil
 	}
+
+	ec.l.WithFields(log.Fields{"path": fr.Path, "mime": fr.MimeType}).Debug("[Tool] detected file result, persisting...")
 
 	data, err := os.ReadFile(fr.Path)
 	if err != nil {
@@ -127,6 +139,7 @@ func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolRes
 
 	ws := workspace.FromContext(ec.ctx)
 	if ws == nil {
+		ec.l.Warn("[Tool] workspace not available, cannot persist tool file")
 		return nil
 	}
 	uploadsDir := ws.Uploads()
@@ -135,7 +148,7 @@ func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolRes
 	ext := filepath.Ext(fr.Path)
 	storagePath := filepath.Join(uploadsDir, fileUUID+ext)
 	if err := os.WriteFile(storagePath, data, 0o644); err != nil {
-		ec.l.WithError(err).Warn("[Tool] persist tool file to uploads failed")
+		ec.l.WithError(err).WithField("storage_path", storagePath).Warn("[Tool] persist tool file to uploads failed")
 		return nil
 	}
 
@@ -145,15 +158,82 @@ func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolRes
 		Filename:       filepath.Base(fr.Path),
 		ContentType:    fr.MimeType,
 		FileSize:       int64(len(data)),
-		FileType:       model.FileTypeImage,
+		FileType:       model.ClassifyFileType(fr.MimeType, filepath.Base(fr.Path)),
 		StoragePath:    storagePath,
 	}
 	if err := e.store.CreateFile(ctx, f); err != nil {
-		ec.l.WithError(err).Warn("[Tool] create file record failed")
+		ec.l.WithError(err).WithField("filename", f.Filename).Warn("[Tool] create file record failed")
 		return nil
 	}
-	ec.l.WithFields(log.Fields{"file_uuid": fileUUID, "path": storagePath}).Info("[Tool] persisted tool screenshot as file")
+	ec.l.WithFields(log.Fields{
+		"file_uuid": fileUUID,
+		"filename":  f.Filename,
+		"path":      storagePath,
+		"type":      f.FileType,
+	}).Info("[Tool] persisted tool output as file")
 	return f
+}
+
+// snapshotDir 返回目录中所有文件的名称→修改时间戳映射；目录为空或不可读时返回 nil。
+func snapshotDir(dir string) map[string]int64 {
+	if dir == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	snap := make(map[string]int64, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if info, err := e.Info(); err == nil {
+			snap[e.Name()] = info.ModTime().UnixNano()
+		}
+	}
+	return snap
+}
+
+// persistNewSandboxFile 在 sandbox 目录中查找相比快照新增的文件，
+// 取第一个新增文件并持久化为工具输出附件。
+// pre 为 nil 时（快照失败）直接返回 nil，避免误判历史文件。
+func (e *Executor) persistNewSandboxFile(ctx context.Context, ec *execContext, sandboxDir string, pre map[string]int64) *model.File {
+	if pre == nil {
+		return nil
+	}
+	entries, err := os.ReadDir(sandboxDir)
+	if err != nil {
+		return nil
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		name := entry.Name()
+		prevMtime, existed := pre[name]
+		// 跳过执行脚本本身（codeinterp 写入的临时代码文件）
+		if existed && info.ModTime().UnixNano() == prevMtime {
+			continue
+		}
+		// 跳过 .py / .js / .sh 等代码文件（这些是执行载体，不是产出物）
+		switch filepath.Ext(name) {
+		case ".py", ".js", ".sh", ".rb", ".ts":
+			continue
+		}
+		fullPath := filepath.Join(sandboxDir, name)
+		mimeStr := result.MimeFromExt(filepath.Ext(name))
+		fr := result.NewFileResult(fullPath, mimeStr, name)
+		if tf := e.persistToolFile(ctx, ec, fr); tf != nil {
+			ec.l.WithFields(log.Fields{"file": name, "sandbox": sandboxDir}).Info("[Tool] persisted new sandbox file as output")
+			return tf
+		}
+	}
+	return nil
 }
 
 // appendAssistantToolRound 执行一轮工具调用：并发安全的工具并行执行，其余串行执行。

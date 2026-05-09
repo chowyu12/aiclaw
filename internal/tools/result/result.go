@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+// absPathRe 匹配文本中形如 /foo/bar/baz.ext 的绝对路径（带扩展名）。
+var absPathRe = regexp.MustCompile(`/(?:[^\s/]+/)*[^\s/]+\.[a-zA-Z0-9]{1,10}`)
 
 type FileResult struct {
 	Type        string `json:"__type"`
@@ -33,26 +37,57 @@ func ParseFileResult(output string) *FileResult {
 	if fr := detectFilePath(output); fr != nil {
 		return fr
 	}
+	// 尝试从 JSON 结构（如 codeinterp 结果）的 stdout 字段中检测文件路径。
+	var m map[string]any
+	if json.Unmarshal([]byte(output), &m) == nil {
+		if stdout, ok := m["stdout"].(string); ok && stdout != "" {
+			if fr := detectFilePath(stdout); fr != nil {
+				return fr
+			}
+		}
+	}
 	return nil
 }
 
+// detectFilePath 在文本中寻找指向磁盘上已存在文件的绝对路径。
+// 先尝试将整个 trimmed 文本作为路径（单行快速路径），再逐行扫描，
+// 最后用正则在文本中搜索嵌入的路径（如 "Saved to /tmp/out.csv"）。
 func detectFilePath(output string) *FileResult {
 	p := strings.TrimSpace(output)
-	if p == "" || strings.Contains(p, "\n") || len(p) > 500 {
+	if p == "" {
 		return nil
 	}
-	if !filepath.IsAbs(p) {
-		return nil
+	// 快速路径：整段文本就是单个绝对路径
+	if !strings.Contains(p, "\n") && len(p) <= 500 && filepath.IsAbs(p) {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return makeFileResult(p)
+		}
 	}
-	info, err := os.Stat(p)
-	if err != nil || info.IsDir() {
-		return nil
+	// 逐行扫描：每行本身是绝对路径
+	for _, line := range strings.Split(p, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || len(line) > 500 || !filepath.IsAbs(line) {
+			continue
+		}
+		if info, err := os.Stat(line); err == nil && !info.IsDir() {
+			return makeFileResult(line)
+		}
 	}
+	// 正则搜索：文本中嵌入的绝对路径（如 "文件已保存到 /Users/foo/out.csv"）
+	for _, match := range absPathRe.FindAllString(p, -1) {
+		if info, err := os.Stat(match); err == nil && !info.IsDir() {
+			return makeFileResult(match)
+		}
+	}
+	return nil
+}
+
+func makeFileResult(path string) *FileResult {
 	return &FileResult{
 		Type:        "file",
-		Path:        p,
-		MimeType:    MimeFromExt(filepath.Ext(p)),
-		Description: fmt.Sprintf("File: %s", filepath.Base(p)),
+		Path:        path,
+		MimeType:    MimeFromExt(filepath.Ext(path)),
+		Description: fmt.Sprintf("File: %s", filepath.Base(path)),
 	}
 }
 

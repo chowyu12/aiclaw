@@ -1,9 +1,6 @@
 package config
 
-import (
-	"strings"
-	"sync"
-)
+import "sync"
 
 // RuntimeConfig 持有进程内当前生效的配置（与磁盘 config.yaml 对应），
 // 通过依赖注入传递而非包级全局变量。热加载时原地替换 *Cfg 内容以保持指针稳定。
@@ -31,16 +28,6 @@ func (rt *RuntimeConfig) Save() error {
 		return nil
 	}
 	return c.Save(path)
-}
-
-// PublicURL 返回全局服务公网地址（去除末尾斜线），未配置时返回空字符串。
-func (rt *RuntimeConfig) PublicURL() string {
-	rt.mu.RLock()
-	defer rt.mu.RUnlock()
-	if rt.cfg == nil {
-		return ""
-	}
-	return strings.TrimRight(strings.TrimSpace(rt.cfg.Server.PublicURL), "/")
 }
 
 // ReplaceFromDisk 重新读取磁盘并合并进当前 Cfg（保持 Cfg 指针不变）。

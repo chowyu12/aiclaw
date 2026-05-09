@@ -89,14 +89,6 @@ export interface StreamChunk {
   files?: FileInfo[]
 }
 
-export interface FileInfo {
-  uuid: string
-  filename: string
-  content_type: string
-  file_type: 'text' | 'image' | 'document'
-  file_size: number
-}
-
 export interface Conversation {
   id: number
   uuid: string

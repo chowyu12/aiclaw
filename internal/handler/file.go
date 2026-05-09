@@ -7,7 +7,9 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -36,6 +38,7 @@ func (h *FileHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/files/{uuid}", h.Download)
 	mux.HandleFunc("GET /public/files/{uuid}", h.Download)
 	mux.HandleFunc("DELETE /api/v1/files/{uuid}", h.Delete)
+	mux.HandleFunc("POST /api/v1/files/{uuid}/reveal", h.Reveal)
 }
 
 func (h *FileHandler) Upload(w http.ResponseWriter, r *http.Request) {
@@ -142,8 +145,12 @@ func (h *FileHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	disposition := "inline"
+	if r.URL.Query().Get("download") == "1" {
+		disposition = "attachment"
+	}
 	w.Header().Set("Content-Type", f.ContentType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, f.Filename))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, f.Filename))
 	http.ServeContent(w, r, f.Filename, stat.ModTime(), file)
 }
 
@@ -174,5 +181,49 @@ func (h *FileHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 	os.Remove(f.StoragePath)
 	httputil.OK(w, nil)
+}
+
+// Reveal 在操作系统文件管理器中定位并高亮显示文件。
+// 仅适用于服务器与客户端在同一台机器的本地部署场景。
+func (h *FileHandler) Reveal(w http.ResponseWriter, r *http.Request) {
+	uid := r.PathValue("uuid")
+	f, err := h.store.GetFileByUUID(r.Context(), uid)
+	if err != nil {
+		httputil.NotFound(w, "文件不存在")
+		return
+	}
+
+	absPath, err := filepath.Abs(f.StoragePath)
+	if err != nil {
+		httputil.InternalError(w, "解析路径失败")
+		return
+	}
+	if _, err := os.Stat(absPath); err != nil {
+		httputil.NotFound(w, "文件不存在于磁盘")
+		return
+	}
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		// -R: reveal（定位并高亮文件）
+		cmd = exec.CommandContext(r.Context(), "open", "-R", absPath)
+	case "windows":
+		cmd = exec.CommandContext(r.Context(), "explorer", "/select,"+absPath)
+	default:
+		// Linux：xdg-open 打开所在目录
+		cmd = exec.CommandContext(r.Context(), "xdg-open", filepath.Dir(absPath))
+	}
+
+	if err := cmd.Start(); err != nil {
+		log.WithError(err).WithField("path", absPath).Warn("[FileHandler] reveal failed")
+		httputil.InternalError(w, "打开目录失败: "+err.Error())
+		return
+	}
+	// 非阻塞：不等待文件管理器进程退出
+	go func() { _ = cmd.Wait() }()
+
+	log.WithFields(log.Fields{"uuid": uid, "path": absPath, "os": runtime.GOOS}).Info("[FileHandler] revealed file in OS file manager")
+	httputil.OK(w, map[string]any{"ok": true, "path": filepath.Dir(absPath)})
 }
 

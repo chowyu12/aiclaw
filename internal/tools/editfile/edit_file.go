@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/tools/result"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -51,7 +52,9 @@ func Handler(ctx context.Context, args string) (string, error) {
 		return "", fmt.Errorf("write %q: %w", targetPath, err)
 	}
 
-	return fmt.Sprintf("Edited %s: replaced 1 occurrence (%d bytes → %d bytes)", targetPath, len(data), len(newContent)), nil
+	mime := result.MimeFromExt(filepath.Ext(targetPath))
+	desc := fmt.Sprintf("Edited %s: replaced 1 occurrence (%d bytes → %d bytes)", filepath.Base(targetPath), len(data), len(newContent))
+	return result.NewFileResult(targetPath, mime, desc), nil
 }
 
 func resolvePath(ctx context.Context, raw string) string {

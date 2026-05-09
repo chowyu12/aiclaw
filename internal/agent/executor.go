@@ -121,9 +121,12 @@ type execContext struct {
 	conv    *model.Conversation
 	skills  []model.Skill
 	tracker *StepTracker
-	files   []*model.File
-	userMsg string
-	l       *log.Entry
+	// files 包含本轮所有可用文件（新上传 + 会话历史文件），用于 LLM 上下文构建。
+	files []*model.File
+	// uploadedFiles 仅包含本次请求中用户显式上传的文件，用于关联到当前用户消息记录。
+	uploadedFiles []*model.File
+	userMsg       string
+	l             *log.Entry
 
 	agentTools   []model.Tool
 	mcpTools     []Tool
@@ -342,18 +345,19 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 
 	logResourceSummary(l, agentTools, skills)
 
-	files := e.loadRequestFiles(ctx, req.Files, conv.ID)
+	allFiles, uploadedFiles := e.loadRequestFiles(ctx, req.Files, conv.ID)
 
 	return &execContext{
-		ctx:          ctx,
-		ag:           ag,
-		prov:         prov,
-		llmProv:      llmProv,
-		conv:         conv,
-		skills:       skills,
-		tracker:      tracker,
-		files:        files,
-		userMsg:      req.Message,
+		ctx:           ctx,
+		ag:            ag,
+		prov:          prov,
+		llmProv:       llmProv,
+		conv:          conv,
+		skills:        skills,
+		tracker:       tracker,
+		files:         allFiles,
+		uploadedFiles: uploadedFiles,
+		userMsg:       req.Message,
 		l:            l.WithField("conv", conv.UUID),
 		agentTools:   agentTools,
 		mcpTools:     mcpTools,

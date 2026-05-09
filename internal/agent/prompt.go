@@ -64,23 +64,33 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 
 	messages = append(messages, in.History...)
 
+	// oldStorageLimit 是之前的 50KB 存储截断上限。
+	// TextContent 恰好达到此长度说明当初被截断，需从磁盘重新提取完整内容。
+	const oldStorageLimit = 50 * 1024
+	// maxInjectionBytes 是单个文件注入 prompt 的字节上限（约 125K tokens）。
+	// 超过此限制时仍把路径告知 AI，让其用 readfile 工具分段读取剩余内容。
+	const maxInjectionBytes = 500 * 1024
+
 	var textFiles []*model.File
 	var imageFiles []*model.File
 	for _, f := range in.Files {
 		if f.IsImage() && f.StoragePath != "" {
 			imageFiles = append(imageFiles, f)
-		} else if f.TextContent != "" {
-			textFiles = append(textFiles, f)
-		} else if f.StoragePath != "" {
-			data, err := os.ReadFile(f.StoragePath)
-			if err == nil {
-				text, err := parser.ExtractText(f.ContentType, bytes.NewReader(data))
-				if err == nil && text != "" {
+			continue
+		}
+		// 满足以下任一条件时从磁盘重新提取：
+		// 1. DB 中没有缓存文本（新文件或远程文件首次访问）
+		// 2. 文本长度恰好等于旧的 50KB 上限——说明当时被截断，现在需要完整版
+		if f.StoragePath != "" && (f.TextContent == "" || len(f.TextContent) >= oldStorageLimit) {
+			if data, err := os.ReadFile(f.StoragePath); err == nil {
+				if text, err := parser.ExtractText(f.ContentType, bytes.NewReader(data)); err == nil && text != "" {
 					f.TextContent = text
-					textFiles = append(textFiles, f)
-					continue
 				}
 			}
+		}
+		if f.TextContent != "" {
+			textFiles = append(textFiles, f)
+		} else if f.StoragePath != "" {
 			log.WithField("file", f.Filename).Warn("[Execute] document text extraction failed, skipping")
 		}
 	}
@@ -90,7 +100,17 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 		var sb strings.Builder
 		sb.WriteString("以下是用户提供的参考文件内容:\n\n")
 		for _, f := range textFiles {
-			sb.WriteString(fmt.Sprintf("--- [文件: %s] ---\n%s\n---\n\n", f.Filename, f.TextContent))
+			content := f.TextContent
+			var truncHint string
+			if len(content) > maxInjectionBytes {
+				content = content[:maxInjectionBytes]
+				if f.StoragePath != "" {
+					truncHint = fmt.Sprintf("\n[注意: 文件内容已截至 500KB，剩余内容请使用 readfile 工具读取完整文件: %s]\n", f.StoragePath)
+				} else {
+					truncHint = "\n[注意: 文件内容已截至 500KB]\n"
+				}
+			}
+			sb.WriteString(fmt.Sprintf("--- [文件: %s] ---\n%s%s---\n\n", f.Filename, content, truncHint))
 		}
 		sb.WriteString("用户消息: ")
 		sb.WriteString(in.UserMsg)
