@@ -8,105 +8,99 @@
       </p>
     </div>
     <div class="aic-page-body" v-loading="loading">
-      <div class="toolbar" style="margin-bottom: 12px">
-        <el-button @click="loadAll">刷新列表</el-button>
-      </div>
+      <el-tabs v-model="activeTab" class="sk-tabs">
+        <template #prefix>
+          <el-button size="small" plain style="margin-right: 12px" @click="loadAll">刷新</el-button>
+        </template>
 
-      <!-- 待审候选 -->
-      <div class="sk-group">
-        <div class="sk-group-header" @click="pendingOpen = !pendingOpen">
-          <el-icon class="sk-arrow" :class="{ 'is-open': pendingOpen }"><ArrowRight /></el-icon>
-          <span class="sk-group-title">待审候选</span>
-          <el-tag size="small" :type="pendingSkills.length > 0 ? 'warning' : 'info'" round>
-            {{ pendingSkills.length }}
-          </el-tag>
-          <span v-if="pendingSkills.length > 0" class="sk-hint">
-            Agent 自动归档的执行路径，需你审阅后转正
-          </span>
-        </div>
-        <el-collapse-transition>
-          <div v-show="pendingOpen">
-            <div v-if="pendingSkills.length === 0" class="sk-empty">
-              暂无待审候选；当 Agent 一次执行调用 ≥3 个不同工具且成功完成时，会自动在此归档
-            </div>
-            <div v-else class="sk-list">
-              <div v-for="p in pendingSkills" :key="p.file_name" class="sk-item">
-                <div class="sk-item-head">
-                  <span class="sk-item-name">{{ p.file_name }}</span>
-                  <el-tag size="small" type="warning" round>pending</el-tag>
-                  <span class="sk-time">{{ formatTime(p.updated_at) }}</span>
-                </div>
-                <div class="sk-item-desc">{{ p.preview || '—' }}</div>
-                <div class="sk-item-actions">
-                  <el-button size="small" @click="openPreview(p.file_name)">查看全文</el-button>
-                  <el-button size="small" type="primary" @click="openPromote(p)">转正</el-button>
-                  <el-button size="small" type="danger" plain @click="discardPending(p.file_name)">
-                    丢弃
-                  </el-button>
-                </div>
+        <!-- 待审候选 -->
+        <el-tab-pane name="pending">
+          <template #label>
+            <span class="sk-tab-label">
+              待审候选
+              <el-badge
+                v-if="pendingSkills.length > 0"
+                :value="pendingSkills.length"
+                type="warning"
+                class="sk-tab-badge"
+              />
+              <span v-else class="sk-tab-count">{{ pendingSkills.length }}</span>
+            </span>
+          </template>
+          <div v-if="pendingSkills.length === 0" class="sk-empty">
+            暂无待审候选；当 Agent 一次执行调用 ≥3 个不同工具且成功完成时，会自动在此归档
+          </div>
+          <div v-else class="sk-list">
+            <div v-for="p in pendingSkills" :key="p.file_name" class="sk-item">
+              <div class="sk-item-head">
+                <span class="sk-item-name">{{ p.file_name }}</span>
+                <el-tag size="small" type="warning" round>pending</el-tag>
+                <span class="sk-time">{{ formatTime(p.updated_at) }}</span>
+              </div>
+              <div class="sk-item-desc">{{ p.preview || '—' }}</div>
+              <div class="sk-item-actions">
+                <el-button size="small" @click="openPreview(p.file_name)">查看全文</el-button>
+                <el-button size="small" type="primary" @click="openPromote(p)">转正</el-button>
+                <el-button size="small" type="danger" plain @click="discardPending(p.file_name)">
+                  丢弃
+                </el-button>
               </div>
             </div>
           </div>
-        </el-collapse-transition>
-      </div>
+        </el-tab-pane>
 
-      <!-- 内置技能 -->
-      <div class="sk-group">
-        <div class="sk-group-header" @click="builtinOpen = !builtinOpen">
-          <el-icon class="sk-arrow" :class="{ 'is-open': builtinOpen }"><ArrowRight /></el-icon>
-          <span class="sk-group-title">内置技能</span>
-          <el-tag size="small" type="info" round>{{ builtinSkills.length }}</el-tag>
-        </div>
-        <el-collapse-transition>
-          <div v-show="builtinOpen">
-            <div v-if="builtinSkills.length === 0" class="sk-empty">暂无内置技能</div>
-            <div v-else class="sk-list">
-              <div v-for="s in builtinSkills" :key="s.dir_name" class="sk-item">
-                <div class="sk-item-head">
-                  <span class="sk-item-name">{{ s.name }}</span>
-                  <el-tag size="small" round>v{{ s.version }}</el-tag>
-                </div>
-                <div class="sk-item-desc">{{ s.description }}</div>
-                <div class="sk-item-meta">
-                  <span>目录 <code>{{ s.dir_name }}</code></span>
-                  <span v-if="s.author">作者 {{ s.author }}</span>
-                </div>
+        <!-- 内置技能 -->
+        <el-tab-pane name="builtin">
+          <template #label>
+            <span class="sk-tab-label">
+              内置技能
+              <span class="sk-tab-count">{{ builtinSkills.length }}</span>
+            </span>
+          </template>
+          <div v-if="builtinSkills.length === 0" class="sk-empty">暂无内置技能</div>
+          <div v-else class="sk-list">
+            <div v-for="s in builtinSkills" :key="s.dir_name" class="sk-item">
+              <div class="sk-item-head">
+                <span class="sk-item-name">{{ s.name }}</span>
+                <el-tag size="small" round>v{{ s.version }}</el-tag>
+              </div>
+              <div class="sk-item-desc">{{ s.description }}</div>
+              <div class="sk-item-meta">
+                <span>目录 <code>{{ s.dir_name }}</code></span>
+                <span v-if="s.author">作者 {{ s.author }}</span>
               </div>
             </div>
           </div>
-        </el-collapse-transition>
-      </div>
+        </el-tab-pane>
 
-      <!-- 本地技能 -->
-      <div class="sk-group">
-        <div class="sk-group-header" @click="localOpen = !localOpen">
-          <el-icon class="sk-arrow" :class="{ 'is-open': localOpen }"><ArrowRight /></el-icon>
-          <span class="sk-group-title">本地技能</span>
-          <el-tag size="small" type="info" round>{{ localSkills.length }}</el-tag>
-        </div>
-        <el-collapse-transition>
-          <div v-show="localOpen">
-            <div v-if="localSkills.length === 0" class="sk-empty">
-              <code>~/.aiclaw/skills/</code> 下暂无技能目录
-            </div>
-            <div v-else class="sk-list">
-              <div v-for="s in localSkills" :key="s.dir_name" class="sk-item">
-                <div class="sk-item-head">
-                  <span class="sk-item-name">{{ s.name }}</span>
-                  <el-tag v-if="s.version" size="small" round>v{{ s.version }}</el-tag>
-                  <el-tag v-if="s.main_file" size="small" type="success" round>可执行</el-tag>
-                </div>
-                <div class="sk-item-desc">{{ s.description || '—' }}</div>
-                <div class="sk-item-meta">
-                  <span>目录 <code>{{ s.dir_name }}</code></span>
-                  <span v-if="s.author">作者 {{ s.author }}</span>
-                  <span v-if="s.main_file">入口 <code>{{ s.main_file }}</code></span>
-                </div>
+        <!-- 本地技能 -->
+        <el-tab-pane name="local">
+          <template #label>
+            <span class="sk-tab-label">
+              本地技能
+              <span class="sk-tab-count">{{ localSkills.length }}</span>
+            </span>
+          </template>
+          <div v-if="localSkills.length === 0" class="sk-empty">
+            <code>~/.aiclaw/skills/</code> 下暂无技能目录
+          </div>
+          <div v-else class="sk-list">
+            <div v-for="s in localSkills" :key="s.dir_name" class="sk-item">
+              <div class="sk-item-head">
+                <span class="sk-item-name">{{ s.name }}</span>
+                <el-tag v-if="s.version" size="small" round>v{{ s.version }}</el-tag>
+                <el-tag v-if="s.main_file" size="small" type="success" round>可执行</el-tag>
+              </div>
+              <div class="sk-item-desc">{{ s.description || '—' }}</div>
+              <div class="sk-item-meta">
+                <span>目录 <code>{{ s.dir_name }}</code></span>
+                <span v-if="s.author">作者 {{ s.author }}</span>
+                <span v-if="s.main_file">入口 <code>{{ s.main_file }}</code></span>
               </div>
             </div>
           </div>
-        </el-collapse-transition>
-      </div>
+        </el-tab-pane>
+      </el-tabs>
     </div>
 
     <!-- 全文预览 -->
@@ -175,9 +169,7 @@ const builtinSkills = ref<SkillItem[]>([])
 const localSkills = ref<SkillItem[]>([])
 const pendingSkills = ref<PendingSkillItem[]>([])
 const loading = ref(false)
-const builtinOpen = ref(true)
-const localOpen = ref(true)
-const pendingOpen = ref(true)
+const activeTab = ref('builtin')
 
 const previewVisible = ref(false)
 const previewFile = ref('')
@@ -215,6 +207,9 @@ async function loadAll() {
   loading.value = true
   try {
     await Promise.all([loadSkills(), loadPending()])
+    if (pendingSkills.value.length > 0) {
+      activeTab.value = 'pending'
+    }
   } finally {
     loading.value = false
   }
@@ -301,55 +296,62 @@ onMounted(() => loadAll())
 </script>
 
 <style scoped>
-/* ===== 分组容器 ===== */
-.sk-group {
-  margin-bottom: 16px;
-  border-radius: 10px;
+/* ===== Tabs 容器 ===== */
+.sk-tabs {
   border: 1px solid var(--el-border-color-lighter);
+  border-radius: 10px;
   background: var(--el-fill-color-blank);
   overflow: hidden;
 }
 
-/* ===== 分组头（可点击折叠） ===== */
-.sk-group-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.15s;
+/* tab 面板内边距 */
+.sk-tabs :deep(.el-tabs__content) {
+  padding: 0;
 }
 
-.sk-group-header:hover {
+/* tab 导航条底部对齐 */
+.sk-tabs :deep(.el-tabs__header) {
+  margin: 0;
+  padding: 0 16px;
   background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color-lighter);
 }
 
-.sk-group-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+/* tab label 布局 */
+.sk-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.sk-hint {
-  margin-left: auto;
-  font-size: 12px;
+/* 数量角标（无新增时用灰色文字） */
+.sk-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 9px;
+  background: var(--el-fill-color-dark);
   color: var(--el-text-color-secondary);
 }
 
-.sk-arrow {
-  transition: transform 0.2s;
-  color: var(--el-text-color-secondary);
-  font-size: 14px;
+/* el-badge 对齐微调 */
+.sk-tab-badge {
+  position: static;
+  transform: none;
 }
-
-.sk-arrow.is-open {
-  transform: rotate(90deg);
+.sk-tab-badge :deep(.el-badge__content) {
+  position: static;
+  transform: none;
 }
 
 /* ===== 列表 ===== */
 .sk-list {
-  border-top: 1px solid var(--el-border-color-lighter);
+  border-top: none;
 }
 
 .sk-item {
