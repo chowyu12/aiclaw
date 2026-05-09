@@ -142,14 +142,28 @@
               </div>
 
               <!-- 消息气泡（附件 + 文本统一展示） -->
-              <div class="msg-bubble">
+                <div class="msg-bubble">
                 <div v-if="msg.files && msg.files.length > 0" class="bubble-attachments">
                   <template v-for="f in msg.files" :key="f.uuid">
-                    <img v-if="f.file_type === 'image'" :src="'/public/files/' + f.uuid" :alt="f.filename" class="attach-img" />
-                    <a v-else :href="'/public/files/' + f.uuid" target="_blank" class="attach-file">
+                    <!-- 图片卡：缩略图 + 文件名 -->
+                    <a v-if="f.file_type === 'image'" :href="fileURL(f)" target="_blank" rel="noopener noreferrer" class="attach-card attach-card--image">
+                      <img :src="fileURL(f)" :alt="f.filename" class="attach-img" />
+                      <div class="attach-img-meta">
+                        <span class="attach-file-name">{{ f.filename }}</span>
+                        <span class="attach-file-size" v-if="f.file_size">{{ formatFileSize(f.file_size) }}</span>
+                      </div>
+                    </a>
+                    <!-- 文件卡：横向布局，整卡可点击 -->
+                    <a v-else :href="fileURL(f)" target="_blank" rel="noopener noreferrer" class="attach-card attach-card--file">
                       <span class="attach-file-icon">{{ fileTypeIcon(f.file_type) }}</span>
-                      <span class="attach-file-name">{{ f.filename }}</span>
-                      <span class="attach-file-size" v-if="f.file_size">{{ formatFileSize(f.file_size) }}</span>
+                      <div class="attach-meta">
+                        <span class="attach-file-name">{{ f.filename }}</span>
+                        <span class="attach-file-info">
+                          <span>{{ fileTypeLabel(f.file_type) }}</span>
+                          <span v-if="f.file_size">{{ formatFileSize(f.file_size) }}</span>
+                        </span>
+                      </div>
+                      <span class="attach-open-arrow">↗</span>
                     </a>
                   </template>
                 </div>
@@ -831,6 +845,19 @@ function fileTypeIcon(type: string): string {
     default: return '📝'
   }
 }
+
+function fileTypeLabel(type: string): string {
+  switch (type) {
+    case 'image': return '图片'
+    case 'document': return '文档'
+    default: return '文本'
+  }
+}
+
+function fileURL(file: FileInfo): string {
+  return `/public/files/${file.uuid}`
+}
+
 
 function handleKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -1746,27 +1773,114 @@ function groupSteps(steps: ExecutionStep[]): StepNode[] {
   gap: 8px;
   margin-bottom: 10px;
 }
-.attach-img {
-  max-width: 220px;
-  max-height: 160px;
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-}
-.attach-file {
+/* 文件附件卡片 - 现代浅色风格 */
+.attach-card {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  background: #fff;
+  gap: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 8px 14px;
-  font-size: 12px;
-  color: #2563eb;
+  border-radius: 12px;
+  padding: 10px 14px 10px 12px;
   text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
 }
-.attach-file:hover {
-  border-color: #93c5fd;
-  background: #eff6ff;
+.attach-card:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15), 0 2px 4px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+.attach-card--image {
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 240px;
+  padding: 8px;
+  gap: 6px;
+}
+.attach-card--file {
+  min-width: 220px;
+  max-width: 320px;
+}
+.attach-img {
+  width: 100%;
+  max-width: 224px;
+  max-height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  display: block;
+}
+.attach-img-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 2px 2px;
+}
+.attach-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.attach-file-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.attach-file-name {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+  letter-spacing: -0.01em;
+}
+.attach-file-info {
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+}
+.attach-file-info > span + span::before {
+  content: '·';
+  color: #cbd5e1;
+  margin: 0 6px;
+}
+.attach-file-size {
+  color: #64748b;
+  font-size: 11px;
+}
+.attach-open-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 13px;
+  flex-shrink: 0;
+  line-height: 1;
+  margin-left: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+.attach-card:hover .attach-open-arrow {
+  background: #3b82f6;
+  color: #fff;
 }
 
 /* Steps */

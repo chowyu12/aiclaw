@@ -124,8 +124,10 @@ func chatFileTypeToFileType(chatType model.ChatFileType, contentType, filename s
 	}
 }
 
-func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatFile, conversationID int64) []*model.File {
-	var files []*model.File
+// loadRequestFiles 加载本次请求涉及的文件，返回两个列表：
+//   - allFiles：本轮所有可用文件（新上传 + 会话历史文件），用于 LLM 上下文。
+//   - uploadedFiles：仅本次请求用户显式上传的文件，用于关联到当前用户消息记录。
+func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatFile, conversationID int64) (allFiles, uploadedFiles []*model.File) {
 	seen := make(map[string]bool)
 
 	for _, cf := range chatFiles {
@@ -140,7 +142,8 @@ func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatF
 				continue
 			}
 			seen[f.UUID] = true
-			files = append(files, f)
+			allFiles = append(allFiles, f)
+			uploadedFiles = append(uploadedFiles, f)
 		case model.TransferRemoteURL:
 			if cf.URL == "" {
 				continue
@@ -156,7 +159,8 @@ func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatF
 			}
 			if f != nil {
 				seen[cf.URL] = true
-				files = append(files, f)
+				allFiles = append(allFiles, f)
+				uploadedFiles = append(uploadedFiles, f)
 			}
 		}
 	}
@@ -167,20 +171,21 @@ func (e *Executor) loadRequestFiles(ctx context.Context, chatFiles []model.ChatF
 			for _, f := range convFiles {
 				if !seen[f.UUID] {
 					seen[f.UUID] = true
-					files = append(files, f)
+					allFiles = append(allFiles, f)
+					// 历史文件不加入 uploadedFiles，避免覆盖旧消息的关联关系
 				}
 			}
 		}
 	}
 
-	if len(files) > 0 {
-		names := make([]string, 0, len(files))
-		for _, f := range files {
+	if len(allFiles) > 0 {
+		names := make([]string, 0, len(allFiles))
+		for _, f := range allFiles {
 			names = append(names, fmt.Sprintf("%s(%s)", f.Filename, f.FileType))
 		}
 		log.WithField("files", names).Debug("[Execute] files loaded for context")
 	}
-	return files
+	return allFiles, uploadedFiles
 }
 
 func loadLocalMediaFile(absPath string, chatFileType model.ChatFileType) *model.File {

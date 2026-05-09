@@ -272,7 +272,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 			return nil, err
 		}
 
-		if _, err := e.memory.SaveUserMessage(ctx, ec.conv.ID, ec.userMsg, ec.files); err != nil {
+		if _, err := e.memory.SaveUserMessage(ctx, ec.conv.ID, ec.userMsg, ec.uploadedFiles); err != nil {
 			ec.l.WithError(err).Error("[LLM] save user message failed")
 			return nil, err
 		}

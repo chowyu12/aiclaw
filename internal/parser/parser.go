@@ -10,7 +10,7 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-const maxTextLen = 50 * 1024 // 50KB
+const maxTextLen = 5 * 1024 * 1024 // 5MB
 
 func ExtractText(contentType string, r io.Reader) (string, error) {
 	switch {

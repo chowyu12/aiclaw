@@ -204,23 +204,13 @@ func wechatILinkDispatch(client *wechatlink.Client, chLive *atomic.Pointer[model
 		},
 		ReplyWith: func(ctx context.Context, reply string, images []*model.File) error {
 			replyClientID := uuid.New().String()
-			publicURL := bridge.rt.PublicURL()
-			if len(images) == 0 || publicURL == "" {
-				return client.SendMessage(ctx, fromUser, contextToken, replyClientID, reply)
-			}
-			items := []wechatlink.MessageItem{
-				{Type: wechatlink.ItemTypeText, TextItem: &wechatlink.TextItem{Text: reply}},
-			}
 			for _, img := range images {
-				if img.UUID == "" {
+				if img == nil {
 					continue
 				}
-				items = append(items, wechatlink.MessageItem{
-					Type:      wechatlink.ItemTypeImage,
-					ImageItem: &wechatlink.ImageItem{URL: publicURL + "/public/files/" + img.UUID},
-				})
+				log.WithField("file", img.Filename).Debug("[wechat] outbound image skipped: no public file URL is configured")
 			}
-			return client.SendMessageItems(ctx, fromUser, contextToken, replyClientID, items)
+			return client.SendMessage(ctx, fromUser, contextToken, replyClientID, reply)
 		},
 	}
 	bridge.HandleInboundAsync(context.Background(), ch, in, noopDrv)
