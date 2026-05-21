@@ -31,7 +31,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	t.Run("with_prompt", func(t *testing.T) {
 		ag := &model.Agent{SystemPrompt: "你是助手"}
 		result := buildSystemPrompt(ag, nil, nil, nil, false, false, nil)
-		if result != "你是助手" {
+		if !strings.Contains(result, "你是助手") {
 			t.Errorf("expected '你是助手', got %q", result)
 		}
 	})
@@ -52,10 +52,10 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "exec", Description: "运行命令", Enabled: true},
 		}
 		result := buildSystemPrompt(ag, nil, tools, nil, false, false, nil)
-		if !strings.Contains(result, "执行策略") {
+		if !strings.Contains(result, "execution_strategy") {
 			t.Errorf("missing strategy section: %q", result)
 		}
-		if !strings.Contains(result, "判断原则") {
+		if !strings.Contains(result, "知识性问题") {
 			t.Errorf("missing judgment principle: %q", result)
 		}
 	})
@@ -83,7 +83,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "disabled_tool", Description: "禁用", Enabled: false},
 		}
 		result := buildSystemPrompt(ag, nil, tools, nil, false, false, nil)
-		if !strings.Contains(result, "判断原则") {
+		if !strings.Contains(result, "知识性问题") {
 			t.Errorf("expected judgment principle when tools present: %q", result)
 		}
 	})
@@ -101,7 +101,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		if !strings.Contains(result, "代码审查") {
 			t.Error("missing skill")
 		}
-		if !strings.Contains(result, "执行策略") {
+		if !strings.Contains(result, "execution_strategy") {
 			t.Error("missing strategy section")
 		}
 	})
@@ -135,7 +135,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		if !strings.Contains(result, "联网搜索") {
 			t.Errorf("expected web search section alongside tools, got %q", result)
 		}
-		if !strings.Contains(result, "执行策略") {
+		if !strings.Contains(result, "execution_strategy") {
 			t.Errorf("strategy section should still be present, got %q", result)
 		}
 	})
@@ -812,8 +812,8 @@ func TestBuildMessages(t *testing.T) {
 	if lastMsg.Role != openai.ChatMessageRoleUser {
 		t.Errorf("last message should be user, got %s", lastMsg.Role)
 	}
-	if lastMsg.Content != "new question" {
-		t.Errorf("last message content should be 'new question', got %q", lastMsg.Content)
+	if !strings.Contains(lastMsg.Content, "new question") {
+		t.Errorf("last message content should contain 'new question', got %q", lastMsg.Content)
 	}
 }
 

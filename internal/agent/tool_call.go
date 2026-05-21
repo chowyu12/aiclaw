@@ -106,8 +106,8 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 		ec.l.WithFields(log.Fields{"tool": toolName, "duration": callDur, "preview": truncateLog(output, 200)}).Info("[Tool] << ok")
 	}
 
-	// PostToolUse hook
-	e.hooks.Fire(ctx, HookPostToolUse, &HookPayload{ToolName: toolName, ToolArgs: toolArgs, Result: output, Error: callErr})
+	// PostToolUse hook（异步，不阻塞工具链路）
+	e.hooks.FireAsync(ctx, HookPostToolUse, &HookPayload{ToolName: toolName, ToolArgs: toolArgs, Result: output, Error: callErr})
 
 	toolMsg, fileParts = e.buildToolResponseParts(ctx, tc.ID, toolName, toolResult, callErr == nil, ec.l)
 

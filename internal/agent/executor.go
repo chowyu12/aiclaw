@@ -325,7 +325,8 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 		return nil, fmt.Errorf("get conversation: %w", err)
 	}
 	if isNewConv {
-		e.memory.AutoSetTitle(ctx, conv.ID, req.Message)
+		bgCtx := context.WithoutCancel(ctx)
+		go e.memory.AutoSetTitle(bgCtx, conv.ID, req.Message)
 	}
 
 	ctx = todotool.WithTodoStore(ctx, todotool.GetOrCreateStore(conv.UUID))
@@ -685,14 +686,16 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 	}
 
 	if len(ec.toolFiles) > 0 {
-		e.memory.LinkFilesToMessage(ctx, ec.toolFiles, ec.conv.ID, msgID)
+		files := append([]*model.File(nil), ec.toolFiles...)
+		bgCtx := context.WithoutCancel(ctx)
+		go e.memory.LinkFilesToMessage(bgCtx, files, ec.conv.ID, msgID)
 	}
 
 	ec.tracker.SetMessageID(msgID)
 
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "duration": duration, "tokens": tokensUsed}).Info("[Execute] << done")
 
-	e.hooks.Fire(ctx, HookAgentDone, &HookPayload{
+	e.hooks.FireAsync(ctx, HookAgentDone, &HookPayload{
 		Model:       ec.ag.ModelName,
 		ConvID:      ec.conv.ID,
 		ConvUUID:    ec.conv.UUID,
