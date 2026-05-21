@@ -50,7 +50,7 @@
             <div class="agent-info">
               <div class="agent-model agent-model--solo">{{ currentAgent.model_name }}</div>
             </div>
-            <router-link to="/agents" class="settings-link">
+            <router-link :to="currentAgent?.id ? `/agents/${currentAgent.id}/edit` : '/agents'" class="settings-link">
               <el-icon :size="14"><Setting /></el-icon>
             </router-link>
           </div>
@@ -448,6 +448,7 @@
           </div>
           <div class="composer-input">
             <el-input
+              ref="inputRef"
               v-model="inputMessage"
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 5 }"
@@ -592,6 +593,7 @@ const activeConvId = _activeConvId
 const defaultAgent = ref<Agent | null>(null)
 const inputMessage = ref('')
 const messagesArea = ref<HTMLElement>()
+const inputRef = ref()
 const pendingFiles = ref<UploadedFile[]>([])
 const pendingURLs = ref<string[]>([])
 const urlInput = ref('')
@@ -897,6 +899,8 @@ function sendMessage() {
   pendingSteps.value = []
   scrollToBottom()
 
+  const focusInput = () => nextTick(() => inputRef.value?.focus())
+
   let sendFinished = false
   const finishSend = async (localMsg?: any) => {
     if (sendFinished) return
@@ -915,6 +919,7 @@ function sendMessage() {
       pendingSteps.value = []
       streaming.value = false
     }
+    focusInput()
   }
 
   _streamController = streamChat(
