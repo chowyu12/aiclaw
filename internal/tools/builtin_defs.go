@@ -16,20 +16,6 @@ func mustJSON(v any) model.JSON {
 func DefaultBuiltinDefs() []model.Tool {
 	return []model.Tool{
 		{
-			Name:        "current_time",
-			Description: "获取当前系统时间，返回 ISO 8601 格式的时间字符串。无需输入参数。",
-			HandlerType: model.HandlerBuiltin,
-			Enabled:     true,
-			FunctionDef: mustJSON(map[string]any{
-				"name":        "current_time",
-				"description": "Get the current system time in ISO 8601 format",
-				"parameters": map[string]any{
-					"type":       "object",
-					"properties": map[string]any{},
-				},
-			}),
-		},
-		{
 			Name:        "read",
 			Description: "读取文件内容。支持全文读取或按行范围读取（通过 offset/limit 参数）。对于图片文件（png/jpg/gif/webp/svg），会自动将图片传递给视觉模型进行理解和分析。",
 			HandlerType: model.HandlerBuiltin,
