@@ -19,16 +19,13 @@ import (
 
 // webSearchPromptSection 在开启内置联网搜索时注入 system prompt。
 // 目的：让模型明确知道自身具备实时检索能力，区分 web_search（自动）与 web_fetch（用户显式提供 URL）。
-const webSearchPromptSection = `
-
-## 联网搜索
-- 当前已开启**内置联网搜索**：你可以直接回答涉及近期资讯、实时数据、最新版本/价格/政策等问题，无需声明"我不知道"或"知识截止于…"。
-- 该搜索为模型自身能力，**不是函数工具**；不要尝试去调用一个叫 web_search 的工具，也不要在回复里写出工具调用。直接给出带来源的结论即可。
-- 需要返回具体事实时，优先引用检索到的权威来源，并附上链接。
-- 区分场景：
-  - 用户只描述主题 / 没给 URL → 直接使用内置联网搜索。
-  - 用户消息中出现具体 http(s):// URL → 使用 web_fetch 工具抓取该 URL 内容。
-`
+const webSearchPromptSection = `<web_search>
+当前已开启内置联网搜索：你可以直接回答涉及近期资讯、实时数据、最新版本/价格/政策等问题，无需声明"我不知道"或"知识截止于…"。
+该搜索为模型自身能力，不是函数工具；不要尝试调用名为 web_search 的工具，也不要在回复中写出工具调用，直接给出带来源的结论即可。
+需要返回具体事实时，优先引用权威来源并附上链接。
+- 用户只描述主题 / 没给 URL → 使用内置联网搜索
+- 用户消息中出现具体 http(s):// URL → 使用 web_fetch 工具抓取该 URL 内容
+</web_search>`
 
 type messagesBuildInput struct {
 	Agent            *model.Agent
@@ -96,27 +93,7 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 		}
 	}
 
-	userText := fmt.Sprintf("Current time: %s\n\n%s", time.Now().Format(time.RFC3339), in.UserMsg)
-	if len(textFiles) > 0 {
-		var sb strings.Builder
-		sb.WriteString("以下是用户提供的参考文件内容:\n\n")
-		for _, f := range textFiles {
-			content := f.TextContent
-			var truncHint string
-			if len(content) > maxInjectionBytes {
-				content = content[:maxInjectionBytes]
-				if f.StoragePath != "" {
-					truncHint = fmt.Sprintf("\n[注意: 文件内容已截至 500KB，剩余内容请使用 readfile 工具读取完整文件: %s]\n", f.StoragePath)
-				} else {
-					truncHint = "\n[注意: 文件内容已截至 500KB]\n"
-				}
-			}
-			sb.WriteString(fmt.Sprintf("--- [文件: %s] ---\n%s%s---\n\n", f.Filename, content, truncHint))
-		}
-		sb.WriteString("用户消息: ")
-		sb.WriteString(in.UserMsg)
-		userText = sb.String()
-	}
+	userText := buildUserMessage(in.UserMsg, textFiles, maxInjectionBytes)
 
 	if len(imageFiles) > 0 {
 		multiContent := []openai.ChatMessagePart{
@@ -144,16 +121,60 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 	return messages
 }
 
+func buildUserMessage(userMsg string, textFiles []*model.File, maxInjectionBytes int) string {
+	var sb strings.Builder
+	sb.WriteString("Current time: ")
+	sb.WriteString(time.Now().Format(time.RFC3339))
+	sb.WriteString("\n\n")
+
+	if len(textFiles) > 0 {
+		for _, f := range textFiles {
+			content := f.TextContent
+			sb.WriteString("<file name=\"")
+			sb.WriteString(f.Filename)
+			sb.WriteString("\"")
+			if f.StoragePath != "" {
+				sb.WriteString(" path=\"")
+				sb.WriteString(f.StoragePath)
+				sb.WriteString("\"")
+			}
+			sb.WriteString(">\n")
+			if len(content) > maxInjectionBytes {
+				content = content[:maxInjectionBytes]
+				sb.WriteString(content)
+				if f.StoragePath != "" {
+					sb.WriteString(fmt.Sprintf("\n... [文件已截至 500KB，剩余内容请使用 read 工具读取: %s]", f.StoragePath))
+				} else {
+					sb.WriteString("\n... [文件已截至 500KB]")
+				}
+			} else {
+				sb.WriteString(content)
+			}
+			sb.WriteString("\n</file>\n\n")
+		}
+	}
+
+	sb.WriteString("<user_message>\n")
+	sb.WriteString(userMsg)
+	sb.WriteString("\n</user_message>")
+
+	return sb.String()
+}
+
 func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model.Tool, toolSkillMap map[string]string, toolSearchMode, webSearchEnabled bool, ws *workspace.Workspace) string {
 	l := log.WithField("agent", ag.Name)
 
 	var sb strings.Builder
+
+	// <instructions>: agent 自定义提示词（角色、行为、限制）
+	sb.WriteString("<instructions>\n")
 	if ag.SystemPrompt != "" {
 		sb.WriteString(ag.SystemPrompt)
 		l.WithField("len", len(ag.SystemPrompt)).Debug("[Prompt]  base prompt loaded")
 	} else {
 		sb.WriteString("你是一个运行在 Aiclaw 内部的个人助手。")
 	}
+	sb.WriteString("\n</instructions>")
 
 	var enabledTools []model.Tool
 	for _, t := range agentTools {
@@ -172,6 +193,7 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 	hasTools := len(enabledTools) > 0
 
 	if webSearchEnabled {
+		sb.WriteString("\n\n")
 		sb.WriteString(webSearchPromptSection)
 	}
 
@@ -189,51 +211,58 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 	}
 
 	if hasSkills {
-		sb.WriteString("\n\n## 技能\n")
+		sb.WriteString("\n\n<skills>")
 		for _, sk := range skills {
 			if sk.Instruction == "" && sk.Description == "" {
 				l.WithField("skill", sk.Name).Debug("[Prompt]  skill has no content, skipped")
 				continue
 			}
-			sb.WriteString("\n### " + sk.Name + "\n")
-
+			sb.WriteString("\n<skill name=\"")
+			sb.WriteString(sk.Name)
+			sb.WriteString("\">\n")
 			if sk.Description != "" {
-				sb.WriteString(sk.Description + "\n")
+				sb.WriteString(sk.Description)
+				sb.WriteString("\n")
 			}
 			if ws != nil {
 				if skillDir := ws.SkillDir(sk.DirName); skillDir != "" {
-					sb.WriteString("详细指令: " + filepath.Join(skillDir, "SKILL.md") + "\n")
+					sb.WriteString("详细指令: ")
+					sb.WriteString(filepath.Join(skillDir, "SKILL.md"))
+					sb.WriteString("\n")
 				}
 			}
-			l.WithField("skill", sk.Name).Debug("[Prompt]  skill summary injected (two-phase)")
-
 			if names := skillToolNames[sk.Name]; len(names) > 0 {
-				sb.WriteString("关联工具: " + strings.Join(names, ", ") + "\n")
+				sb.WriteString("关联工具: ")
+				sb.WriteString(strings.Join(names, ", "))
+				sb.WriteString("\n")
 			}
+			sb.WriteString("</skill>")
+			l.WithField("skill", sk.Name).Debug("[Prompt]  skill summary injected (two-phase)")
 		}
+		sb.WriteString("\n</skills>")
 	}
 
 	if hasTools || hasSkills {
-		sb.WriteString("\n\n## 执行策略\n")
-	}
+		sb.WriteString("\n\n<execution_strategy>")
 
-	if hasTools {
-		sb.WriteString(`
-**判断原则**: 知识性问题（概念解释、原理分析、经验建议、方案对比、写作翻译、数学推理）直接回答。操作性问题（文件读写、命令执行、信息检索、网页抓取）或用户明确要求动手时，使用工具。
-
-**工作方式**:
+		if hasTools {
+			sb.WriteString(`
+- 知识性问题（概念解释、原理分析、经验建议、方案对比、写作翻译、数学推理）直接回答
+- 操作性问题（文件读写、命令执行、信息检索、网页抓取）或用户明确要求动手时使用工具
 - 复杂任务（3+ 步骤）先用 todo 规划，逐项推进
 - 不确定时先用 sub_agent(mode=explore) 探索，再动手
-- 基于工具返回的真实数据回答，不编造
-`)
-	}
+- 基于工具返回的真实数据回答，不编造`)
+		}
 
-	if hasTools && toolSearchMode {
-		sb.WriteString("- 需要工具但不在列表中时，调用 tool_search 搜索一次，搜到后直接使用\n")
-	}
+		if hasTools && toolSearchMode {
+			sb.WriteString("\n- 需要工具但不在列表中时，调用 tool_search 搜索一次，搜到后直接使用")
+		}
 
-	if hasSkills {
-		sb.WriteString("- 问题匹配某项技能时优先使用。使用前先 read 其 SKILL.md 了解完整用法，指令中的相对路径以 SKILL.md 所在目录为基准\n")
+		if hasSkills {
+			sb.WriteString("\n- 问题匹配某项技能时优先使用；使用前先 read 其 SKILL.md 了解完整用法，指令中的相对路径以 SKILL.md 所在目录为基准")
+		}
+
+		sb.WriteString("\n</execution_strategy>")
 	}
 
 	result := sb.String()
