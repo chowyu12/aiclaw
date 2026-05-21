@@ -91,3 +91,21 @@ func (r *HookRegistry) Fire(ctx context.Context, event HookEvent, payload *HookP
 	}
 	return action
 }
+
+// FireAsync 在后台 goroutine 中触发事件，不阻塞调用方，忽略返回值。
+// 仅适用于纯通知性钩子（如 HookAgentDone 中的结晶、统计），不得用于需要影响执行流的钩子。
+func (r *HookRegistry) FireAsync(ctx context.Context, event HookEvent, payload *HookPayload) {
+	r.mu.RLock()
+	fns := r.hooks[event]
+	r.mu.RUnlock()
+	if len(fns) == 0 {
+		return
+	}
+	// 使用 context.WithoutCancel 让后台任务不受调用方 ctx 取消影响
+	bgCtx := context.WithoutCancel(ctx)
+	go func() {
+		for _, fn := range fns {
+			fn(bgCtx, event, payload)
+		}
+	}()
+}
