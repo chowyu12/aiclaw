@@ -247,7 +247,7 @@ func (feishuAdapter) Reply(ctx context.Context, ch ChannelConfig, in *Inbound, t
 	}
 	client := lark.NewClient(appID, secret)
 	req := larkim.NewCreateMessageReqBuilder().
-		ReceiveIdType(larkim.ReceiveIdTypeChatId).
+		ReceiveIdType("chat_id").
 		Body(larkim.NewCreateMessageReqBodyBuilder().
 			ReceiveId(chatID).
 			MsgType("text").
