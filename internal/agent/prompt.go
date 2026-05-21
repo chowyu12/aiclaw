@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	openai "github.com/chowyu12/go-openai"
 	log "github.com/sirupsen/logrus"
@@ -95,7 +96,7 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 		}
 	}
 
-	userText := in.UserMsg
+	userText := fmt.Sprintf("Current time: %s\n\n%s", time.Now().Format(time.RFC3339), in.UserMsg)
 	if len(textFiles) > 0 {
 		var sb strings.Builder
 		sb.WriteString("以下是用户提供的参考文件内容:\n\n")
