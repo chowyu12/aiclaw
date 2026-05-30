@@ -74,6 +74,7 @@ export interface ChatResponse {
   message: string
   tokens_used: number
   steps?: ExecutionStep[]
+  files?: FileInfo[]
 }
 
 export interface StreamChunk {
@@ -199,6 +200,9 @@ function streamRequest(
               const errData = JSON.parse(payload)
               onError(errData.error || 'unknown error')
               return
+            }
+            if (currentEvent === 'ping') {
+              continue
             }
             const chunk: StreamChunk = JSON.parse(payload)
             onChunk(chunk)

@@ -129,14 +129,15 @@ type subAgentTask struct {
 }
 
 type subAgentTaskResult struct {
-	TaskIndex       int      `json:"task_index"`
-	Goal            string   `json:"goal"`
-	Status          string   `json:"status"`
-	Summary         string   `json:"summary"`
-	TokensUsed      int      `json:"tokens_used"`
-	ToolsUsed       []string `json:"tools_used,omitempty"`
-	DurationSeconds float64  `json:"duration_seconds"`
-	ExitReason      string   `json:"exit_reason"`
+	TaskIndex       int           `json:"task_index"`
+	Goal            string        `json:"goal"`
+	Status          string        `json:"status"`
+	Summary         string        `json:"summary"`
+	TokensUsed      int           `json:"tokens_used"`
+	ToolsUsed       []string      `json:"tools_used,omitempty"`
+	Files           []*model.File `json:"files,omitempty"`
+	DurationSeconds float64       `json:"duration_seconds"`
+	ExitReason      string        `json:"exit_reason"`
 }
 
 type subAgentBatchResult struct {
@@ -227,7 +228,7 @@ func (e *Executor) executeTaskBatch(ctx context.Context, tasks []subAgentTask, d
 				"goal":     truncateLog(t.Goal, 120),
 			}).Info("[SubAgent] >> task start")
 
-			summary, tokens, toolsUsed, err := e.executeOneTask(ctx, prompt, t.AgentUUID, blocked, t.Model)
+			summary, tokens, toolsUsed, files, err := e.executeOneTask(ctx, prompt, t.AgentUUID, blocked, t.Model)
 			dur := time.Since(start)
 
 			r := subAgentTaskResult{
@@ -235,6 +236,7 @@ func (e *Executor) executeTaskBatch(ctx context.Context, tasks []subAgentTask, d
 				Goal:            t.Goal,
 				TokensUsed:      tokens,
 				ToolsUsed:       toolsUsed,
+				Files:           files,
 				DurationSeconds: dur.Seconds(),
 			}
 			if err != nil {
@@ -274,17 +276,17 @@ func (e *Executor) executeTaskBatch(ctx context.Context, tasks []subAgentTask, d
 	return string(out), nil
 }
 
-// executeOneTask 执行单个子任务，返回 (summary, tokens, toolsUsed, error)。
-func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string, blocked []string, modelHint string) (string, int, []string, error) {
+// executeOneTask 执行单个子任务，返回 (summary, tokens, toolsUsed, files, error)。
+func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string, blocked []string, modelHint string) (string, int, []string, []*model.File, error) {
 	if err := e.checkShutdown(); err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, nil, err
 	}
 	defer e.activeExecs.Done()
 
 	ctx = withBlockedTools(ctx, blocked)
 	ec, err := e.prepareSubAgent(ctx, prompt, agentUUID)
 	if err != nil {
-		return "", 0, nil, fmt.Errorf("sub_agent prepare: %w", err)
+		return "", 0, nil, nil, fmt.Errorf("sub_agent prepare: %w", err)
 	}
 	defer ec.closeMCP()
 
@@ -299,11 +301,11 @@ func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string,
 
 	res, err := e.run(ec.ctx, ec, blockingCaller(ec.llmProv), false)
 	if err != nil {
-		return "", 0, nil, err
+		return "", 0, nil, nil, err
 	}
 
 	toolsUsed := extractToolsUsed(res.Steps)
-	return res.Content, res.TokensUsed, toolsUsed, nil
+	return res.Content, res.TokensUsed, toolsUsed, res.ToolFiles, nil
 }
 
 // ── 辅助函数 ────────────────────────────────────────────────

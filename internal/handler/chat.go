@@ -70,6 +70,7 @@ func (h *ChatHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		Message:        result.Content,
 		TokensUsed:     result.TokensUsed,
 		Steps:          result.Steps,
+		Files:          result.ToolFiles,
 	})
 }
 
@@ -93,6 +94,9 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 		httputil.InternalError(w, "streaming not supported")
 		return
 	}
+	_ = sseWriter.WritePing()
+	stopPing := sseWriter.StartPing(r.Context(), 0)
+	defer stopPing()
 
 	Metrics.IncChat()
 	err := h.executor.ExecuteStream(r.Context(), req, func(chunk model.StreamChunk) error {
@@ -169,6 +173,9 @@ func (h *ChatHandler) RetryStream(w http.ResponseWriter, r *http.Request) {
 		httputil.InternalError(w, "streaming not supported")
 		return
 	}
+	_ = sseWriter.WritePing()
+	stopPing := sseWriter.StartPing(r.Context(), 0)
+	defer stopPing()
 
 	if err := h.executor.ExecuteStream(r.Context(), chatReq, func(chunk model.StreamChunk) error {
 		return sseWriter.WriteJSON("message", chunk)
