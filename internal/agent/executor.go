@@ -359,12 +359,12 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 		files:         allFiles,
 		uploadedFiles: uploadedFiles,
 		userMsg:       req.Message,
-		l:            l.WithField("conv", conv.UUID),
-		agentTools:   agentTools,
-		mcpTools:     mcpTools,
-		skillTools:   skillTools,
-		mcpManager:   mcpManager,
-		toolSkillMap: toolSkillMap,
+		l:             l.WithField("conv", conv.UUID),
+		agentTools:    agentTools,
+		mcpTools:      mcpTools,
+		skillTools:    skillTools,
+		mcpManager:    mcpManager,
+		toolSkillMap:  toolSkillMap,
 	}, nil
 }
 
@@ -667,6 +667,9 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 }
 
 func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRunState, content string, tokensUsed int, duration time.Duration) (*ExecuteResult, error) {
+	ec.toolFiles = dedupeFiles(ec.toolFiles)
+	content = appendAttachmentList(content, ec.toolFiles)
+
 	// ephemeral 模式（sub_agent）：只记录执行步骤，跳过消息持久化和 HookAgentDone
 	if ec.ephemeral {
 		ec.l.WithFields(log.Fields{"duration": duration, "tokens": tokensUsed}).Info("[SubAgent] << saveResult (ephemeral)")
@@ -696,13 +699,13 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "duration": duration, "tokens": tokensUsed}).Info("[Execute] << done")
 
 	e.hooks.FireAsync(ctx, HookAgentDone, &HookPayload{
-		Model:       ec.ag.ModelName,
-		ConvID:      ec.conv.ID,
-		ConvUUID:    ec.conv.UUID,
-		UserMsg:     ec.userMsg,
-		Content:     content,
-		TotalTokens: tokensUsed,
-		Duration:    duration,
+		Model:        ec.ag.ModelName,
+		ConvID:       ec.conv.ID,
+		ConvUUID:     ec.conv.UUID,
+		UserMsg:      ec.userMsg,
+		Content:      content,
+		TotalTokens:  tokensUsed,
+		Duration:     duration,
 		Agent:        ec.ag,
 		Skills:       ec.skills,
 		CalledTools:  st.calledTools,
@@ -720,6 +723,59 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 		Steps:          ec.tracker.Steps(),
 		ToolFiles:      append([]*model.File(nil), ec.toolFiles...),
 	}, nil
+}
+
+func appendAttachmentList(content string, files []*model.File) string {
+	files = dedupeFiles(files)
+	if len(files) == 0 {
+		return content
+	}
+
+	var sb strings.Builder
+	sb.WriteString(strings.TrimRight(content, "\n"))
+	if sb.Len() > 0 {
+		sb.WriteString("\n\n")
+	}
+	sb.WriteString("附件列表:\n")
+	for _, f := range files {
+		if f == nil {
+			continue
+		}
+		name := escapeMarkdownLinkText(f.Filename)
+		if name == "" {
+			name = f.UUID
+		}
+		sb.WriteString("- [")
+		sb.WriteString(name)
+		sb.WriteString("](/public/files/")
+		sb.WriteString(f.UUID)
+		sb.WriteString(")")
+		if f.FileSize > 0 {
+			sb.WriteString(fmt.Sprintf(" (%s)", formatBytes(f.FileSize)))
+		}
+		sb.WriteString("\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func escapeMarkdownLinkText(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "[", `\[`)
+	s = strings.ReplaceAll(s, "]", `\]`)
+	return s
+}
+
+func formatBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for v := n / unit; v >= unit; v /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
 // prepareSubAgent 为 sub_agent 构建 execContext：

@@ -13,14 +13,14 @@ type Conversation struct {
 }
 
 type Message struct {
-	ID             int64     `json:"id" gorm:"primaryKey;autoIncrement"`
-	ConversationID int64     `json:"conversation_id" gorm:"index;not null"`
-	Role           string    `json:"role" gorm:"size:50;not null"`
-	Content        string    `json:"content" gorm:"type:text"`
-	ToolCalls      JSON      `json:"tool_calls,omitzero" gorm:"type:text"`
-	ToolCallID     string    `json:"tool_call_id,omitzero" gorm:"size:100"`
-	Name           string    `json:"name,omitzero" gorm:"size:100"`
-	TokensUsed     int       `json:"tokens_used" gorm:"default:0"`
+	ID             int64  `json:"id" gorm:"primaryKey;autoIncrement"`
+	ConversationID int64  `json:"conversation_id" gorm:"index;not null"`
+	Role           string `json:"role" gorm:"size:50;not null"`
+	Content        string `json:"content" gorm:"type:text"`
+	ToolCalls      JSON   `json:"tool_calls,omitzero" gorm:"type:text"`
+	ToolCallID     string `json:"tool_call_id,omitzero" gorm:"size:100"`
+	Name           string `json:"name,omitzero" gorm:"size:100"`
+	TokensUsed     int    `json:"tokens_used" gorm:"default:0"`
 	// DurationMs 仅对 assistant 消息有意义：本轮对话的总耗时（user 提交 → assistant 回复完成）。
 	// 配合 CreatedAt（结束时间）即可推算 StartedAt = CreatedAt - DurationMs。
 	DurationMs   int       `json:"duration_ms" gorm:"default:0"`
@@ -138,14 +138,15 @@ type ChatResponse struct {
 	Message        string          `json:"message"`
 	TokensUsed     int             `json:"tokens_used"`
 	Steps          []ExecutionStep `json:"steps,omitzero"`
+	Files          []*File         `json:"files,omitzero"`
 }
 
 type StreamChunk struct {
-	ConversationID string          `json:"conversation_id,omitzero"`
-	MessageID      int64           `json:"message_id,omitzero"`
-	Delta          string          `json:"delta,omitzero"`
-	Content        string          `json:"content,omitzero"`
-	TokensUsed     int             `json:"tokens_used,omitzero"`
+	ConversationID string `json:"conversation_id,omitzero"`
+	MessageID      int64  `json:"message_id,omitzero"`
+	Delta          string `json:"delta,omitzero"`
+	Content        string `json:"content,omitzero"`
+	TokensUsed     int    `json:"tokens_used,omitzero"`
 	// DurationMs 仅在 Done=true 的最终 chunk 中有意义，标识本轮对话总耗时（毫秒）。
 	DurationMs int             `json:"duration_ms,omitzero"`
 	Done       bool            `json:"done"`

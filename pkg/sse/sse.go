@@ -1,10 +1,12 @@
 package sse
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // Writer 支持被多个 goroutine 并发写入（并发工具回调 + 流式 chunk 回调共享同一 ResponseWriter）。
@@ -47,6 +49,30 @@ func (s *Writer) WriteJSON(event string, v any) error {
 		return err
 	}
 	return s.WriteEvent(event, string(data))
+}
+
+func (s *Writer) WritePing() error {
+	return s.WriteEvent("ping", "{}")
+}
+
+func (s *Writer) StartPing(ctx context.Context, interval time.Duration) func() {
+	if interval <= 0 {
+		interval = 15 * time.Second
+	}
+	pingCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-pingCtx.Done():
+				return
+			case <-ticker.C:
+				_ = s.WritePing()
+			}
+		}
+	}()
+	return cancel
 }
 
 func (s *Writer) WriteDone() error {

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,7 +44,7 @@ func toolCallContext(parent context.Context) (ctx context.Context, done func()) 
 
 // runOneToolCall 执行单个工具调用，返回消息、结果、文件附件、持久化文件。
 // 方法内部使用 st.mu 保护共享状态（loopDet / calledTools），可安全并行调用。
-func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc openai.ToolCall, st *agentRunState) (toolMsg openai.ChatCompletionMessage, tr ToolResult, fileParts []openai.ChatMessagePart, toolFile *model.File) {
+func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc openai.ToolCall, st *agentRunState) (toolMsg openai.ChatCompletionMessage, tr ToolResult, fileParts []openai.ChatMessagePart, toolFiles []*model.File) {
 	toolName := tc.Function.Name
 	toolArgs := tc.Function.Arguments
 
@@ -112,15 +113,20 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	toolMsg, fileParts = e.buildToolResponseParts(ctx, tc.ID, toolName, toolResult, callErr == nil, ec.l)
 
 	if callErr == nil {
-		toolFile = e.persistToolFile(ctx, ec, toolResult)
+		if toolFile := e.persistToolFile(ctx, ec, toolResult); toolFile != nil {
+			toolFiles = append(toolFiles, toolFile)
+		}
+		if toolName == "sub_agent" {
+			toolFiles = append(toolFiles, filesFromSubAgentOutput(toolResult)...)
+		}
 		// 若工具未返回 FileResult（如 codeinterp、shellexec），则扫描 sandbox
 		// 目录查找本轮新建的文件，并将其持久化为工具输出附件。
-		if toolFile == nil && sandboxDir != "" {
-			toolFile = e.persistNewSandboxFile(ctx, ec, sandboxDir, preSandbox)
+		if len(toolFiles) == 0 && sandboxDir != "" {
+			toolFiles = append(toolFiles, e.persistNewSandboxFiles(ctx, ec, sandboxDir, preSandbox)...)
 		}
 	}
 
-	return toolMsg, ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: toolMsg.Content}, fileParts, toolFile
+	return toolMsg, ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: toolMsg.Content}, fileParts, dedupeFiles(toolFiles)
 }
 
 func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolResult string) *model.File {
@@ -195,10 +201,10 @@ func snapshotDir(dir string) map[string]int64 {
 	return snap
 }
 
-// persistNewSandboxFile 在 sandbox 目录中查找相比快照新增的文件，
-// 取第一个新增文件并持久化为工具输出附件。
+// persistNewSandboxFiles 在 sandbox 目录中查找相比快照新增或修改的文件，
+// 并持久化为工具输出附件。
 // pre 为 nil 时（快照失败）直接返回 nil，避免误判历史文件。
-func (e *Executor) persistNewSandboxFile(ctx context.Context, ec *execContext, sandboxDir string, pre map[string]int64) *model.File {
+func (e *Executor) persistNewSandboxFiles(ctx context.Context, ec *execContext, sandboxDir string, pre map[string]int64) []*model.File {
 	if pre == nil {
 		return nil
 	}
@@ -206,6 +212,7 @@ func (e *Executor) persistNewSandboxFile(ctx context.Context, ec *execContext, s
 	if err != nil {
 		return nil
 	}
+	var files []*model.File
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -230,10 +237,42 @@ func (e *Executor) persistNewSandboxFile(ctx context.Context, ec *execContext, s
 		fr := result.NewFileResult(fullPath, mimeStr, name)
 		if tf := e.persistToolFile(ctx, ec, fr); tf != nil {
 			ec.l.WithFields(log.Fields{"file": name, "sandbox": sandboxDir}).Info("[Tool] persisted new sandbox file as output")
-			return tf
+			files = append(files, tf)
 		}
 	}
-	return nil
+	return dedupeFiles(files)
+}
+
+func filesFromSubAgentOutput(output string) []*model.File {
+	var batch subAgentBatchResult
+	if err := json.Unmarshal([]byte(output), &batch); err != nil {
+		return nil
+	}
+	var files []*model.File
+	for _, r := range batch.Results {
+		files = append(files, r.Files...)
+	}
+	return dedupeFiles(files)
+}
+
+func dedupeFiles(files []*model.File) []*model.File {
+	seen := make(map[string]bool, len(files))
+	out := make([]*model.File, 0, len(files))
+	for _, f := range files {
+		if f == nil {
+			continue
+		}
+		key := f.UUID
+		if key == "" {
+			key = fmt.Sprintf("%d:%s", f.ID, f.Filename)
+		}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, f)
+	}
+	return out
 }
 
 // appendAssistantToolRound 执行一轮工具调用：并发安全的工具并行执行，其余串行执行。
@@ -260,7 +299,7 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 		toolMsg   openai.ChatCompletionMessage
 		tr        ToolResult
 		fileParts []openai.ChatMessagePart
-		toolFile  *model.File
+		toolFiles []*model.File
 	}
 	results := make([]callResult, n)
 
@@ -309,10 +348,11 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 		st.Messages = append(st.Messages, r.toolMsg)
 		toolResults = append(toolResults, r.tr)
 		pendingParts = append(pendingParts, r.fileParts...)
-		if r.toolFile != nil {
-			ec.toolFiles = append(ec.toolFiles, r.toolFile)
+		if len(r.toolFiles) > 0 {
+			ec.toolFiles = append(ec.toolFiles, r.toolFiles...)
 		}
 	}
+	ec.toolFiles = dedupeFiles(ec.toolFiles)
 
 	if !ec.ephemeral {
 		if err := e.memory.SaveToolCallRound(ctx, ec.conv.ID, assistant.Content, assistant.ToolCalls, toolResults); err != nil {
