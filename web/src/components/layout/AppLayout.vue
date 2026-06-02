@@ -66,93 +66,94 @@
           </el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
-          <div v-if="!isCollapse" class="sidebar-theme-row">
-            <span class="theme-label">{{ i18n.t("app.theme") }}</span>
-            <div class="theme-switch">
-              <button
-                type="button"
-                class="theme-icon-btn"
-                :class="{ active: themeStore.mode === 'light' }"
-                :title="i18n.t('app.light')"
-                @click="themeStore.setMode('light')"
-              >
-                <el-icon :size="16"><Sunny /></el-icon>
-              </button>
-              <button
-                type="button"
-                class="theme-icon-btn"
-                :class="{ active: themeStore.mode === 'dark' }"
-                :title="i18n.t('app.dark')"
-                @click="themeStore.setMode('dark')"
-              >
-                <el-icon :size="16"><Moon /></el-icon>
-              </button>
-            </div>
-          </div>
-          <div v-if="!isCollapse" class="sidebar-theme-row">
-            <span class="theme-label">{{ i18n.t("app.language") }}</span>
-            <div class="theme-switch">
-              <button
-                type="button"
-                class="theme-icon-btn lang"
-                :class="{ active: i18n.language === 'zh-CN' }"
-                title="中文"
-                @click="i18n.setLanguage('zh-CN')"
-              >中</button>
-              <button
-                type="button"
-                class="theme-icon-btn lang"
-                :class="{ active: i18n.language === 'en-US' }"
-                title="English"
-                @click="i18n.setLanguage('en-US')"
-              >EN</button>
-            </div>
-          </div>
-          <div v-else class="sidebar-theme-collapsed">
-            <el-tooltip
-              :content="themeStore.mode === 'dark' ? i18n.t('app.switchLight') : i18n.t('app.switchDark')"
-              placement="right"
-            >
-              <button
-                type="button"
-                class="theme-icon-btn single"
-                @click="themeStore.toggleMode()"
-              >
-                <el-icon v-if="themeStore.mode === 'dark'" :size="18"
-                  ><Sunny
-                /></el-icon>
-                <el-icon v-else :size="18"><Moon /></el-icon>
-              </button>
-            </el-tooltip>
-            <el-tooltip :content="i18n.t('app.language')" placement="right">
-              <button
-                type="button"
-                class="theme-icon-btn single lang"
-                @click="i18n.toggleLanguage()"
-              >{{ i18n.language === 'zh-CN' ? '中' : 'EN' }}</button>
-            </el-tooltip>
-          </div>
           <template v-if="!isCollapse">
+            <div class="sidebar-quick-controls">
+              <div class="footer-segment" :aria-label="i18n.t('app.theme')">
+                <button
+                  type="button"
+                  class="footer-toggle-btn"
+                  :class="{ active: themeStore.mode === 'light' }"
+                  :title="i18n.t('app.light')"
+                  @click="themeStore.setMode('light')"
+                >
+                  <el-icon :size="15"><Sunny /></el-icon>
+                </button>
+                <button
+                  type="button"
+                  class="footer-toggle-btn"
+                  :class="{ active: themeStore.mode === 'dark' }"
+                  :title="i18n.t('app.dark')"
+                  @click="themeStore.setMode('dark')"
+                >
+                  <el-icon :size="15"><Moon /></el-icon>
+                </button>
+              </div>
+              <div class="footer-segment" :aria-label="i18n.t('app.language')">
+                <button
+                  type="button"
+                  class="footer-toggle-btn lang"
+                  :class="{ active: i18n.language === 'zh-CN' }"
+                  title="中文"
+                  @click="i18n.setLanguage('zh-CN')"
+                >中</button>
+                <button
+                  type="button"
+                  class="footer-toggle-btn lang"
+                  :class="{ active: i18n.language === 'en-US' }"
+                  title="English"
+                  @click="i18n.setLanguage('en-US')"
+                >EN</button>
+              </div>
+            </div>
             <div class="sidebar-user-line">
               <span class="username">{{
                 appVersion ? appVersion : "AiClaw"
               }}</span>
-              <el-button text type="danger" size="small" @click="handleLogout"
-                >{{ i18n.t("app.logout") }}</el-button
-              >
+              <el-tooltip :content="i18n.t('app.logoutFull')" placement="top">
+                <button
+                  type="button"
+                  class="footer-logout-btn"
+                  @click="handleLogout"
+                >
+                  <el-icon :size="15"><SwitchButton /></el-icon>
+                </button>
+              </el-tooltip>
             </div>
           </template>
           <template v-else>
-            <el-tooltip :content="i18n.t('app.logoutFull')" placement="right">
-              <el-button
-                class="sidebar-logout-icon"
-                text
-                type="danger"
-                @click="handleLogout"
+            <div class="sidebar-theme-collapsed">
+              <el-tooltip
+                :content="themeStore.mode === 'dark' ? i18n.t('app.switchLight') : i18n.t('app.switchDark')"
+                placement="right"
               >
-                <el-icon :size="18"><SwitchButton /></el-icon>
-              </el-button>
-            </el-tooltip>
+                <button
+                  type="button"
+                  class="footer-toggle-btn single"
+                  @click="themeStore.toggleMode()"
+                >
+                  <el-icon v-if="themeStore.mode === 'dark'" :size="16"
+                    ><Sunny
+                  /></el-icon>
+                  <el-icon v-else :size="16"><Moon /></el-icon>
+                </button>
+              </el-tooltip>
+              <el-tooltip :content="i18n.t('app.language')" placement="right">
+                <button
+                  type="button"
+                  class="footer-toggle-btn single lang"
+                  @click="i18n.toggleLanguage()"
+                >{{ i18n.language === 'zh-CN' ? '中' : 'EN' }}</button>
+              </el-tooltip>
+              <el-tooltip :content="i18n.t('app.logoutFull')" placement="right">
+                <button
+                  type="button"
+                  class="footer-logout-btn single"
+                  @click="handleLogout"
+                >
+                  <el-icon :size="16"><SwitchButton /></el-icon>
+                </button>
+              </el-tooltip>
+            </div>
           </template>
         </div>
       </div>
@@ -297,35 +298,35 @@ body,
 }
 .sidebar-footer {
   flex-shrink: 0;
-  padding: 12px 10px 14px;
-  border-top: 1px solid var(--aic-sidebar-border);
+  padding: 10px 10px 12px;
+  border-top: 1px solid color-mix(in srgb, var(--aic-sidebar-border) 70%, transparent);
+  background: color-mix(in srgb, var(--aic-sidebar-bg) 92%, transparent);
 }
-.sidebar-theme-row {
+.sidebar-quick-controls {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 8px;
 }
-.theme-label {
-  font-size: 11px;
-  color: var(--aic-sidebar-muted);
-  font-weight: 600;
-  letter-spacing: 0.06em;
-}
-.theme-switch {
-  display: flex;
-  gap: 4px;
-  padding: 2px;
-  border-radius: 10px;
-  border: 1px solid var(--aic-theme-btn-border);
-  background: var(--aic-theme-btn-bg);
-}
-.theme-icon-btn {
+.footer-segment {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 12px;
+  border: 1px solid var(--aic-theme-btn-border);
+  background: var(--aic-theme-btn-bg);
+}
+.footer-toggle-btn,
+.footer-logout-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  width: 100%;
   height: 28px;
   border: none;
   border-radius: 8px;
@@ -336,27 +337,32 @@ body,
     color 0.15s,
     background 0.15s;
 }
-.theme-icon-btn:hover {
+.footer-toggle-btn:hover,
+.footer-logout-btn:hover {
   color: var(--aic-sidebar-icon-hover);
+  background: color-mix(in srgb, var(--aic-theme-btn-active-bg) 45%, transparent);
 }
-.theme-icon-btn.active {
+.footer-toggle-btn.active {
   color: var(--aic-theme-btn-active-color);
   background: var(--aic-theme-btn-active-bg);
 }
-.theme-icon-btn.lang {
+.footer-toggle-btn.lang {
   font-size: 11px;
   font-weight: 700;
 }
 .sidebar-theme-collapsed {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   justify-content: center;
-  margin-bottom: 8px;
+  margin-bottom: 0;
 }
-.theme-icon-btn.single {
+.footer-toggle-btn.single,
+.footer-logout-btn.single {
   width: 100%;
-  height: 36px;
+  height: 34px;
+  border: 1px solid var(--aic-theme-btn-border);
+  background: var(--aic-theme-btn-bg);
 }
 .sidebar-user-line {
   display: flex;
@@ -365,16 +371,24 @@ body,
   gap: 8px;
 }
 .username {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--aic-sidebar-muted);
   line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  opacity: 0.78;
 }
-.sidebar-logout-icon {
-  width: 100%;
-  padding: 8px 0;
+.footer-logout-btn {
+  width: 30px;
+  height: 28px;
+  flex-shrink: 0;
+  color: var(--el-color-danger);
+  background: transparent;
+}
+.footer-logout-btn:hover {
+  color: var(--el-color-danger);
+  background: var(--el-color-danger-light-9);
 }
 .app-body {
   flex: 1;
