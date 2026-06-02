@@ -1,20 +1,20 @@
 <template>
   <div class="aic-page">
     <div class="aic-page-head">
-      <h1 class="aic-title">工具</h1>
-      <p class="aic-sub">管理 Agent 可调用的 HTTP、脚本等工具；与 Agent 设置中的「关联工具」联动。</p>
+      <h1 class="aic-title">{{ i18n.t('tools.title') }}</h1>
+      <p class="aic-sub">{{ i18n.t('tools.subtitle') }}</p>
     </div>
     <div class="aic-page-body">
     <el-card class="aic-card" shadow="never">
       <template #header>
         <div class="aic-card-header">
-          <span class="aic-card-title">工具列表</span>
+          <span class="aic-card-title">{{ i18n.t('tools.list') }}</span>
           <div>
-            <el-input v-model="keyword" placeholder="搜索" clearable style="width: 200px; margin-right: 12px;" @clear="loadData" @keyup.enter="loadData">
+            <el-input v-model="keyword" :placeholder="i18n.t('common.search')" clearable style="width: 200px; margin-right: 12px;" @clear="loadData" @keyup.enter="loadData">
               <template #prefix><el-icon><Search /></el-icon></template>
             </el-input>
             <el-button type="primary" @click="router.push({ name: 'ToolCreate' })">
-              <el-icon><Plus /></el-icon> 新增
+              <el-icon><Plus /></el-icon> {{ i18n.t('common.add') }}
             </el-button>
           </div>
         </div>
@@ -22,34 +22,34 @@
 
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" label="名称" width="160" />
-        <el-table-column label="描述" min-width="280">
+        <el-table-column prop="name" :label="i18n.t('common.name')" width="160" />
+        <el-table-column :label="i18n.t('common.description')" min-width="280">
           <template #default="{ row }">
             <span class="desc-cell">{{ row.description }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="handler_type" label="类型" width="90" align="center">
+        <el-table-column prop="handler_type" :label="i18n.t('common.type')" width="90" align="center">
           <template #default="{ row }">
             <el-tag :type="handlerTagType(row.handler_type)" size="small">
               {{ handlerLabel(row.handler_type) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="enabled" label="状态" width="70" align="center">
+        <el-table-column prop="enabled" :label="i18n.t('common.status')" width="70" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? '启用' : '禁用' }}</el-tag>
+            <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{ row.enabled ? i18n.t('common.enabled') : i18n.t('common.disabled') }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="timeout" label="超时(秒)" width="80" align="center">
+        <el-table-column prop="timeout" :label="i18n.t('tools.timeout')" width="90" align="center">
           <template #default="{ row }">{{ row.timeout || 30 }}</template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="170" show-overflow-tooltip />
-        <el-table-column label="操作" width="120" fixed="right">
+        <el-table-column prop="created_at" :label="i18n.t('common.createdAt')" width="170" show-overflow-tooltip />
+        <el-table-column :label="i18n.t('common.actions')" width="120" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="router.push({ name: 'ToolEdit', params: { id: row.id } })">编辑</el-button>
-            <el-popconfirm title="确定删除？" @confirm="handleDelete(row.id)">
+            <el-button link type="primary" @click="router.push({ name: 'ToolEdit', params: { id: row.id } })">{{ i18n.t('common.edit') }}</el-button>
+            <el-popconfirm :title="i18n.isEnglish ? 'Delete this item?' : '确定删除？'" @confirm="handleDelete(row.id)">
               <template #reference>
-                <el-button link type="danger">删除</el-button>
+                <el-button link type="danger">{{ i18n.t('common.delete') }}</el-button>
               </template>
             </el-popconfirm>
           </template>
@@ -72,8 +72,10 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { toolApi, type Tool } from '../../api/tool'
+import { useI18nStore } from '../../stores/i18n'
 
 const router = useRouter()
+const i18n = useI18nStore()
 const list = ref<Tool[]>([])
 const loading = ref(false)
 const total = ref(0)
@@ -86,7 +88,7 @@ function handlerTagType(type: string) {
   return m[type] || 'info'
 }
 function handlerLabel(type: string) {
-  const m: Record<string, string> = { builtin: '内置', http: 'HTTP', command: '命令行', script: '脚本' }
+  const m: Record<string, string> = { builtin: i18n.t('tools.builtin'), http: 'HTTP', command: i18n.t('tools.command'), script: i18n.t('tools.script') }
   return m[type] || type
 }
 
@@ -104,10 +106,10 @@ async function loadData() {
 async function handleDelete(id: number) {
   try {
     await toolApi.delete(id)
-    ElMessage.success('删除成功')
+    ElMessage.success(i18n.t('common.deleteSuccess'))
     loadData()
   } catch {
-    ElMessage.error('删除失败')
+    ElMessage.error(i18n.t('common.deleteFailed'))
   }
 }
 

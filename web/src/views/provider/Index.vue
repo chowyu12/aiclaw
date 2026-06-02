@@ -1,18 +1,18 @@
 <template>
   <div class="aic-page">
     <div class="aic-page-head">
-      <h1 class="aic-title">模型供应商</h1>
-      <p class="aic-sub">配置 OpenAI、Claude、通义等接入，供 Agent 调用；API Key 仅保存在服务端。</p>
+      <h1 class="aic-title">{{ i18n.t('providers.title') }}</h1>
+      <p class="aic-sub">{{ i18n.t('providers.subtitle') }}</p>
     </div>
     <div class="aic-page-body">
     <el-card class="aic-card" shadow="never">
       <template #header>
         <div class="aic-card-header">
-          <span class="aic-card-title">供应商列表</span>
+          <span class="aic-card-title">{{ i18n.t('providers.list') }}</span>
           <div>
             <el-input
               v-model="keyword"
-              placeholder="搜索"
+              :placeholder="i18n.t('common.search')"
               clearable
               style="width: 200px; margin-right: 12px"
               @clear="loadData"
@@ -26,7 +26,7 @@
               type="primary"
               @click="openDialog()"
             >
-              <el-icon><Plus /></el-icon> 新增
+              <el-icon><Plus /></el-icon> {{ i18n.t('common.add') }}
             </el-button>
           </div>
         </div>
@@ -34,8 +34,8 @@
 
       <el-table :data="list" v-loading="loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="名称" min-width="120" />
-        <el-table-column prop="type" label="类型" width="120">
+        <el-table-column prop="name" :label="i18n.t('common.name')" min-width="120" />
+        <el-table-column prop="type" :label="i18n.t('common.type')" width="120">
           <template #default="{ row }">
             <el-tag>{{ row.type }}</el-tag>
           </template>
@@ -46,33 +46,33 @@
           min-width="200"
           show-overflow-tooltip
         />
-        <el-table-column label="模型数" width="80">
+        <el-table-column :label="i18n.t('providers.modelCount')" width="80">
           <template #default="{ row }">
             <el-tag type="info" size="small">{{
               (row.models || []).length
             }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="enabled" label="状态" width="80">
+        <el-table-column prop="enabled" :label="i18n.t('common.status')" width="80">
           <template #default="{ row }">
             <el-tag :type="row.enabled ? 'success' : 'danger'" size="small">{{
-              row.enabled ? "启用" : "禁用"
+              row.enabled ? i18n.t('common.enabled') : i18n.t('common.disabled')
             }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column prop="created_at" :label="i18n.t('common.createdAt')" width="180" />
         <el-table-column
-          label="操作"
+          :label="i18n.t('common.actions')"
           width="160"
           fixed="right"
         >
           <template #default="{ row }">
             <el-button link type="primary" @click="openDialog(row)"
-              >编辑</el-button
+              >{{ i18n.t('common.edit') }}</el-button
             >
-            <el-popconfirm title="确定删除？" @confirm="handleDelete(row.id)">
+            <el-popconfirm :title="i18n.isEnglish ? 'Delete this provider?' : '确定删除？'" @confirm="handleDelete(row.id)">
               <template #reference>
-                <el-button link type="danger">删除</el-button>
+                <el-button link type="danger">{{ i18n.t('common.delete') }}</el-button>
               </template>
             </el-popconfirm>
           </template>
@@ -94,18 +94,18 @@
 
     <el-dialog
       v-model="dialogVisible"
-      :title="form.id ? '编辑供应商' : '新增供应商'"
+      :title="form.id ? (i18n.isEnglish ? 'Edit Provider' : '编辑供应商') : (i18n.isEnglish ? 'Add Provider' : '新增供应商')"
       width="600px"
       destroy-on-close
     >
       <el-form :model="form" label-width="100px">
-        <el-form-item label="名称" required>
+        <el-form-item :label="i18n.t('common.name')" required>
           <el-input v-model="form.name" placeholder="如：OpenAI Production" />
         </el-form-item>
-        <el-form-item label="类型" required>
+        <el-form-item :label="i18n.t('common.type')" required>
           <el-select
             v-model="form.type"
-            placeholder="选择类型"
+            :placeholder="i18n.isEnglish ? 'Select type' : '选择类型'"
             style="width: 100%"
             @change="onTypeChange"
           >
@@ -128,7 +128,7 @@
             placeholder="sk-..."
           />
         </el-form-item>
-        <el-form-item label="模型列表">
+        <el-form-item :label="i18n.isEnglish ? 'Models' : '模型列表'">
           <div style="width: 100%">
             <div class="model-tags">
               <el-tag
@@ -145,7 +145,7 @@
               <el-autocomplete
                 v-model="newModelName"
                 :fetch-suggestions="suggestModels"
-                placeholder="输入模型名称, 回车添加"
+                :placeholder="i18n.isEnglish ? 'Enter model name, press Enter to add' : '输入模型名称, 回车添加'"
                 clearable
                 style="flex: 1"
                 @keyup.enter="addModel"
@@ -153,7 +153,7 @@
                 @focus="onAutocompleteFocus"
               />
               <el-button @click="addModel" :disabled="!newModelName.trim()"
-                >添加</el-button
+                >{{ i18n.t('common.add') }}</el-button
               >
               <el-button
                 @click="fetchRemoteModelsForProvider"
@@ -165,8 +165,7 @@
               </el-button>
             </div>
             <div style="margin-top: 4px; font-size: 12px; color: #909399">
-              输入模型名称后按回车或点击添加；点击刷新按钮从 API
-              拉取远程模型列表
+              {{ i18n.isEnglish ? 'Enter a model name and press Enter or click Add. Use refresh to fetch remote models from the API.' : '输入模型名称后按回车或点击添加；点击刷新按钮从 API 拉取远程模型列表' }}
             </div>
             <div
               v-if="remoteFetchMsg"
@@ -177,14 +176,14 @@
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="启用">
+        <el-form-item :label="i18n.t('common.enabled')">
           <el-switch v-model="form.enabled" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
+        <el-button @click="dialogVisible = false">{{ i18n.t('common.cancel') }}</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitting"
-          >确定</el-button
+          >{{ i18n.t('common.confirm') }}</el-button
         >
       </template>
     </el-dialog>
@@ -195,7 +194,9 @@
 import { ref, onMounted } from "vue";
 import { ElMessage } from "element-plus";
 import { providerApi, type Provider } from "../../api/provider";
+import { useI18nStore } from "../../stores/i18n";
 
+const i18n = useI18nStore();
 const list = ref<Provider[]>([]);
 const loading = ref(false);
 const total = ref(0);
@@ -356,10 +357,14 @@ async function fetchRemoteModelsForProvider() {
     remoteModelsList.value = res.data || [];
     remoteFetchedDone.value = true;
     remoteFetchOk.value = true;
-    remoteFetchMsg.value = `成功拉取 ${remoteModelsList.value.length} 个远程模型`;
+    remoteFetchMsg.value = i18n.isEnglish
+      ? `Fetched ${remoteModelsList.value.length} remote models`
+      : `成功拉取 ${remoteModelsList.value.length} 个远程模型`;
   } catch {
     remoteFetchOk.value = false;
-    remoteFetchMsg.value = "远程模型拉取失败，请检查 API Key 和 Base URL";
+    remoteFetchMsg.value = i18n.isEnglish
+      ? "Failed to fetch remote models. Check API Key and Base URL."
+      : "远程模型拉取失败，请检查 API Key 和 Base URL";
     remoteFetchedDone.value = true;
   } finally {
     remoteFetching.value = false;
@@ -390,10 +395,10 @@ async function handleSubmit() {
   try {
     if (form.value.id) {
       await providerApi.update(form.value.id, form.value);
-      ElMessage.success("更新成功");
+      ElMessage.success(i18n.isEnglish ? "Updated" : "更新成功");
     } else {
       await providerApi.create(form.value);
-      ElMessage.success("创建成功");
+      ElMessage.success(i18n.isEnglish ? "Created" : "创建成功");
     }
     dialogVisible.value = false;
     loadData();
@@ -405,10 +410,10 @@ async function handleSubmit() {
 async function handleDelete(id: number) {
   try {
     await providerApi.delete(id);
-    ElMessage.success("删除成功");
+    ElMessage.success(i18n.t('common.deleteSuccess'));
     loadData();
   } catch {
-    ElMessage.error("删除失败");
+    ElMessage.error(i18n.t('common.deleteFailed'));
   }
 }
 

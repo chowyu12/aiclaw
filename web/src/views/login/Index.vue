@@ -6,17 +6,20 @@
         <div class="login-logo-wrap">
           <AiclawLogo size="lg" />
         </div>
-        <p class="login-tagline">控制台登录</p>
+        <p class="login-tagline">{{ i18n.t('login.title') }}</p>
+      </div>
+      <div class="language-switch">
+        <el-segmented v-model="i18n.language" :options="languageOptions" size="small" />
       </div>
       <p class="hint">
-        请输入配置文件中的 <code>auth.web_token</code>，验证成功后浏览器会保存该令牌用于后续请求。
+        {{ i18n.t('login.hint') }}
       </p>
       <el-form ref="formRef" :model="form" :rules="rules" @submit.prevent="handleLogin" class="login-form">
         <el-form-item prop="token">
           <el-input
             v-model="form.token"
             type="password"
-            placeholder="Web 访问令牌"
+            :placeholder="i18n.t('login.token')"
             :prefix-icon="Key"
             size="large"
             show-password
@@ -24,7 +27,7 @@
           />
         </el-form-item>
         <el-button type="primary" size="large" :loading="loading" class="login-btn" @click="handleLogin">
-          进入控制台
+          {{ i18n.t('login.submit') }}
         </el-button>
       </el-form>
     </div>
@@ -39,16 +42,22 @@ import AiclawLogo from '@/components/brand/AiclawLogo.vue'
 import { ElMessage, type FormInstance } from 'element-plus'
 import { authApi } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
+import { useI18nStore } from '@/stores/i18n'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const i18n = useI18nStore()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const languageOptions = [
+  { label: '中文', value: 'zh-CN' },
+  { label: 'English', value: 'en-US' },
+]
 
 const form = reactive({ token: '' })
-const rules = {
-  token: [{ required: true, message: '请输入访问令牌', trigger: 'blur' }],
-}
+const rules = reactive({
+  token: [{ required: true, message: i18n.t('login.tokenRequired'), trigger: 'blur' }],
+})
 
 async function handleLogin() {
   const valid = await formRef.value?.validate().catch(() => false)
@@ -59,11 +68,11 @@ async function handleLogin() {
     const res: any = await authApi.login({ token: form.token.trim() })
     const t = res?.data?.token
     if (!t || typeof t !== 'string') {
-      ElMessage.error('登录响应无效，请重试')
+      ElMessage.error(i18n.t('login.invalidResponse'))
       return
     }
     authStore.setToken(t)
-    ElMessage.success('验证成功')
+    ElMessage.success(i18n.t('login.success'))
     router.push('/')
   } catch {
     // error handled by interceptor
@@ -104,6 +113,11 @@ async function handleLogin() {
 .login-brand {
   text-align: center;
   margin-bottom: 20px;
+}
+.language-switch {
+  display: flex;
+  justify-content: center;
+  margin: -8px 0 16px;
 }
 .login-logo-wrap {
   display: flex;

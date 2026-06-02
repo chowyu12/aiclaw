@@ -5,31 +5,31 @@
         <div>
           <h1 class="aic-title">Agents</h1>
           <p class="aic-sub" style="margin-top:4px;font-size:13px;color:var(--el-text-color-secondary)">
-            管理多个 Agent，每个 Agent 独立配置模型、提示词与工具，对话互相隔离。
+            {{ i18n.t('agents.subtitle') }}
           </p>
         </div>
         <el-button type="primary" @click="$router.push('/agents/create')">
-          <el-icon><Plus /></el-icon>&nbsp;新建 Agent
+          <el-icon><Plus /></el-icon>&nbsp;{{ i18n.t('agents.create') }}
         </el-button>
       </div>
     </div>
 
     <div class="aic-page-body">
       <el-table :data="agents" v-loading="loading" row-key="id" style="width:100%" table-layout="auto">
-        <el-table-column label="名称" prop="name" min-width="160">
+        <el-table-column :label="i18n.t('common.name')" prop="name" min-width="160">
           <template #default="{ row }">
             <span class="agent-name">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="供应商" min-width="100" show-overflow-tooltip>
+        <el-table-column :label="i18n.t('agents.provider')" min-width="100" show-overflow-tooltip>
           <template #default="{ row }">
             {{ providerName(row.provider_id) }}
           </template>
         </el-table-column>
-        <el-table-column label="模型" prop="model_name" min-width="160" show-overflow-tooltip />
-        <el-table-column label="迭代上限" prop="max_iterations" width="80" align="center" />
-        <el-table-column label="历史条数" prop="max_history" width="80" align="center" />
-        <el-table-column label="默认" width="70" align="center">
+        <el-table-column :label="i18n.t('agents.model')" prop="model_name" min-width="160" show-overflow-tooltip />
+        <el-table-column :label="i18n.t('agents.maxIterations')" prop="max_iterations" width="110" align="center" />
+        <el-table-column :label="i18n.t('agents.maxHistory')" prop="max_history" width="90" align="center" />
+        <el-table-column :label="i18n.t('common.default')" width="70" align="center">
           <template #default="{ row }">
             <el-switch
               :model-value="row.is_default"
@@ -39,11 +39,11 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="140" fixed="right">
+        <el-table-column :label="i18n.t('common.actions')" width="140" fixed="right">
           <template #default="{ row }">
             <div style="display:flex;gap:6px;flex-wrap:nowrap;">
-              <el-button size="small" @click="$router.push(`/agents/${row.id}/edit`)">编辑</el-button>
-              <el-button size="small" type="danger" plain @click="handleDelete(row)">删除</el-button>
+              <el-button size="small" @click="$router.push(`/agents/${row.id}/edit`)">{{ i18n.t('common.edit') }}</el-button>
+              <el-button size="small" type="danger" plain @click="handleDelete(row)">{{ i18n.t('common.delete') }}</el-button>
             </div>
           </template>
         </el-table-column>
@@ -58,8 +58,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { agentApi, type Agent } from '../../api/agent'
 import { providerApi, type Provider } from '../../api/provider'
 import { useAgentStore } from '../../stores/agent'
+import { useI18nStore } from '../../stores/i18n'
 
 const agentStore = useAgentStore()
+const i18n = useI18nStore()
 const agents = ref<Agent[]>([])
 const providers = ref<Provider[]>([])
 const loading = ref(false)
@@ -75,7 +77,7 @@ async function loadAgents() {
     const res: any = await agentApi.list({ page: 1, page_size: 100 })
     agents.value = res.data?.list ?? []
   } catch {
-    ElMessage.error('加载失败')
+    ElMessage.error(i18n.t('common.loadingFailed'))
   } finally {
     loading.value = false
   }
@@ -98,9 +100,9 @@ async function setDefault(row: Agent) {
     await agentApi.updateById(row.id, { is_default: isDefault })
     agents.value.forEach((a) => { a.is_default = a.id === row.id })
     await agentStore.loadAgents()
-    ElMessage.success(`已将「${row.name}」设为默认 Agent`)
+    ElMessage.success(i18n.t('agents.setDefaultSuccess'))
   } catch {
-    ElMessage.error('设置失败')
+    ElMessage.error(i18n.t('agents.setDefaultFailed'))
   } finally {
     switchingId.value = null
   }
@@ -108,21 +110,21 @@ async function setDefault(row: Agent) {
 
 async function handleDelete(row: Agent) {
   try {
-    await ElMessageBox.confirm(`确定删除 Agent「${row.name}」？`, '删除', {
+    await ElMessageBox.confirm(`${i18n.t('agents.deleteConfirm')} ${row.name}`, i18n.t('common.delete'), {
       type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
+      confirmButtonText: i18n.t('common.delete'),
+      cancelButtonText: i18n.t('common.cancel'),
     })
   } catch {
     return
   }
   try {
     await agentApi.deleteById(row.id)
-    ElMessage.success('已删除')
+    ElMessage.success(i18n.t('common.deleteSuccess'))
     await loadAgents()
     await agentStore.loadAgents()
   } catch {
-    ElMessage.error('删除失败')
+    ElMessage.error(i18n.t('common.deleteFailed'))
   }
 }
 

@@ -6,43 +6,46 @@
         <div class="setup-logo-wrap">
           <AiclawLogo size="lg" />
         </div>
-        <p class="setup-subtitle">首次使用，请配置数据库连接</p>
+        <p class="setup-subtitle">{{ i18n.t('setup.subtitle') }}</p>
+        <div class="language-switch">
+          <el-segmented v-model="i18n.language" :options="languageOptions" size="small" />
+        </div>
       </div>
 
       <div class="setup-steps">
         <el-steps :active="0" align-center finish-status="success" class="step-bar">
-          <el-step title="配置数据库" />
-          <el-step title="登录控制台" />
-          <el-step title="开始使用" />
+          <el-step :title="i18n.t('setup.stepDatabase')" />
+          <el-step :title="i18n.t('setup.stepLogin')" />
+          <el-step :title="i18n.t('setup.stepStart')" />
         </el-steps>
       </div>
 
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="setup-form">
-        <el-form-item label="数据库类型" prop="driver">
+        <el-form-item :label="i18n.t('setup.driver')" prop="driver">
           <el-radio-group v-model="form.driver" size="large" class="driver-group">
             <el-radio-button label="sqlite">
               <div class="driver-label">
                 <strong>SQLite</strong>
-                <span>轻量级，适合开发</span>
+                <span>{{ i18n.t('setup.sqliteHint') }}</span>
               </div>
             </el-radio-button>
             <el-radio-button label="mysql">
               <div class="driver-label">
                 <strong>MySQL</strong>
-                <span>适合生产环境</span>
+                <span>{{ i18n.t('setup.mysqlHint') }}</span>
               </div>
             </el-radio-button>
             <el-radio-button label="postgres">
               <div class="driver-label">
                 <strong>PostgreSQL</strong>
-                <span>功能丰富</span>
+                <span>{{ i18n.t('setup.postgresHint') }}</span>
               </div>
             </el-radio-button>
           </el-radio-group>
         </el-form-item>
 
         <template v-if="form.driver === 'sqlite'">
-          <el-form-item label="数据库文件路径">
+          <el-form-item :label="i18n.t('setup.dsn')">
             <el-input v-model="form.dsn" placeholder="go_ai_agent.db" />
           </el-form-item>
         </template>
@@ -50,36 +53,36 @@
         <template v-if="form.driver === 'mysql'">
           <el-row :gutter="16">
             <el-col :span="16">
-              <el-form-item label="主机地址" prop="host">
+              <el-form-item :label="i18n.t('setup.host')" prop="host">
                 <el-input v-model="form.host" placeholder="127.0.0.1" />
               </el-form-item>
             </el-col>
             <el-col :span="8">
-              <el-form-item label="端口">
+              <el-form-item :label="i18n.t('setup.port')">
                 <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
           </el-row>
           <el-row :gutter="16">
             <el-col :span="12">
-              <el-form-item label="用户名" prop="user">
+              <el-form-item :label="i18n.t('setup.user')" prop="user">
                 <el-input v-model="form.user" placeholder="root" />
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item label="密码">
-                <el-input v-model="form.password" type="password" show-password placeholder="数据库密码" />
+              <el-form-item :label="i18n.t('setup.password')">
+                <el-input v-model="form.password" type="password" show-password :placeholder="i18n.t('setup.passwordPlaceholder')" />
               </el-form-item>
             </el-col>
           </el-row>
           <el-row :gutter="16">
             <el-col :span="16">
-              <el-form-item label="数据库名" prop="database">
+              <el-form-item :label="i18n.t('setup.database')" prop="database">
                 <el-input v-model="form.database" placeholder="go_ai_agent" />
               </el-form-item>
             </el-col>
             <el-col :span="8">
-              <el-form-item label="字符集">
+              <el-form-item :label="i18n.t('setup.charset')">
                 <el-input v-model="form.charset" placeholder="utf8mb4" />
               </el-form-item>
             </el-col>
@@ -89,36 +92,36 @@
         <template v-if="form.driver === 'postgres'">
           <el-row :gutter="16">
             <el-col :span="16">
-              <el-form-item label="主机地址" prop="host">
+              <el-form-item :label="i18n.t('setup.host')" prop="host">
                 <el-input v-model="form.host" placeholder="127.0.0.1" />
               </el-form-item>
             </el-col>
             <el-col :span="8">
-              <el-form-item label="端口">
+              <el-form-item :label="i18n.t('setup.port')">
                 <el-input-number v-model="form.port" :min="1" :max="65535" controls-position="right" style="width: 100%" />
               </el-form-item>
             </el-col>
           </el-row>
           <el-row :gutter="16">
             <el-col :span="12">
-              <el-form-item label="用户名" prop="user">
+              <el-form-item :label="i18n.t('setup.user')" prop="user">
                 <el-input v-model="form.user" placeholder="postgres" />
               </el-form-item>
             </el-col>
             <el-col :span="12">
-              <el-form-item label="密码">
-                <el-input v-model="form.password" type="password" show-password placeholder="数据库密码" />
+              <el-form-item :label="i18n.t('setup.password')">
+                <el-input v-model="form.password" type="password" show-password :placeholder="i18n.t('setup.passwordPlaceholder')" />
               </el-form-item>
             </el-col>
           </el-row>
           <el-row :gutter="16">
             <el-col :span="16">
-              <el-form-item label="数据库名" prop="database">
+              <el-form-item :label="i18n.t('setup.database')" prop="database">
                 <el-input v-model="form.database" placeholder="go_ai_agent" />
               </el-form-item>
             </el-col>
             <el-col :span="8">
-              <el-form-item label="SSL 模式">
+              <el-form-item :label="i18n.t('setup.sslMode')">
                 <el-select v-model="form.ssl_mode" style="width: 100%">
                   <el-option label="disable" value="disable" />
                   <el-option label="require" value="require" />
@@ -131,17 +134,17 @@
 
         <div class="btn-group">
           <el-button :loading="testing" :disabled="restarting" @click="handleTest">
-            测试连接
+            {{ i18n.t('setup.test') }}
           </el-button>
           <el-button type="primary" size="large" :loading="saving" :disabled="restarting" @click="handleSave">
-            保存并继续
+            {{ i18n.t('setup.saveContinue') }}
           </el-button>
         </div>
       </el-form>
 
       <div v-if="restarting" class="restart-overlay">
         <el-icon class="is-loading" :size="32"><Loading /></el-icon>
-        <p>配置已保存，服务重启中...</p>
+        <p>{{ i18n.t('setup.restarting') }}</p>
       </div>
     </div>
   </div>
@@ -155,12 +158,18 @@ import AiclawLogo from '@/components/brand/AiclawLogo.vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { setupApi, type DatabaseConfig } from '@/api/setup'
 import { resetSetupStatus } from '@/router'
+import { useI18nStore } from '@/stores/i18n'
 
 const router = useRouter()
+const i18n = useI18nStore()
 const formRef = ref<FormInstance>()
 const testing = ref(false)
 const saving = ref(false)
 const restarting = ref(false)
+const languageOptions = [
+  { label: '中文', value: 'zh-CN' },
+  { label: 'English', value: 'en-US' },
+]
 
 const form = reactive<DatabaseConfig>({
   driver: 'sqlite',
@@ -175,10 +184,10 @@ const form = reactive<DatabaseConfig>({
 })
 
 const rules: FormRules = {
-  driver: [{ required: true, message: '请选择数据库类型', trigger: 'change' }],
-  host: [{ required: true, message: '请输入主机地址', trigger: 'blur' }],
-  user: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  database: [{ required: true, message: '请输入数据库名', trigger: 'blur' }],
+  driver: [{ required: true, message: i18n.t('setup.driverRequired'), trigger: 'change' }],
+  host: [{ required: true, message: i18n.t('setup.hostRequired'), trigger: 'blur' }],
+  user: [{ required: true, message: i18n.t('setup.userRequired'), trigger: 'blur' }],
+  database: [{ required: true, message: i18n.t('setup.databaseRequired'), trigger: 'blur' }],
 }
 
 function buildPayload(): DatabaseConfig {
@@ -209,9 +218,9 @@ async function handleTest() {
   try {
     const res: any = await setupApi.testDatabase(buildPayload())
     if (res.data.success) {
-      ElMessage.success('数据库连接成功!')
+      ElMessage.success(i18n.t('setup.connected'))
     } else {
-      ElMessage.error('连接失败: ' + res.data.error)
+      ElMessage.error(i18n.t('setup.connectFailed') + res.data.error)
     }
   } catch {
     // handled by interceptor
@@ -246,7 +255,7 @@ async function handleSave() {
   saving.value = true
   try {
     await setupApi.saveDatabase(buildPayload())
-    ElMessage.success('数据库配置已保存')
+    ElMessage.success(i18n.t('setup.saved'))
     restarting.value = true
 
     const ready = await pollServerReady()
@@ -254,7 +263,7 @@ async function handleSave() {
       resetSetupStatus()
       router.push('/login')
     } else {
-      ElMessage.warning('服务重启超时，请手动刷新页面')
+      ElMessage.warning(i18n.isEnglish ? 'Service restart timed out. Please refresh manually.' : '服务重启超时，请手动刷新页面')
       restarting.value = false
     }
   } catch {
@@ -309,6 +318,11 @@ async function handleSave() {
   color: var(--aic-login-tagline);
   font-size: 14px;
   font-weight: 500;
+}
+.language-switch {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
 }
 .setup-steps {
   margin-bottom: 28px;
