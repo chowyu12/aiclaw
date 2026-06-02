@@ -44,7 +44,7 @@ type messagesBuildInput struct {
 	ToolSkillMap     map[string]string
 	Files            []*model.File
 	PersistentMemory string
-	TodoBlock        string
+	PlanBlock        string
 	ToolSearchMode   bool
 	WebSearchEnabled bool
 	WS               *workspace.Workspace
@@ -56,8 +56,8 @@ func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
 	if in.PersistentMemory != "" {
 		systemPrompt += "\n\n" + in.PersistentMemory
 	}
-	if in.TodoBlock != "" {
-		systemPrompt += "\n\n" + in.TodoBlock
+	if in.PlanBlock != "" {
+		systemPrompt += "\n\n" + in.PlanBlock
 	}
 
 	var messages []openai.ChatCompletionMessage
@@ -241,7 +241,8 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 		if hasTools {
 			strategy.WriteString(`- 知识性问题（概念解释、原理分析、经验建议、方案对比、写作翻译、数学推理）直接回答
 - 操作性问题（文件读写、命令执行、信息检索、网页抓取）或用户明确要求动手时使用工具
-- 复杂任务（3+ 步骤）先用 todo 规划，逐项推进
+- 复杂任务（3+ 步骤）先用 plan 工具建立运行计划；计划只用于执行进度，不要把计划正文写进最终回答
+- 执行中遵循 <plan_state>：优先完成当前步骤，需要调整计划时用 plan revise/update 说明原因
 - 不确定时先用 sub_agent(mode=explore) 探索，再动手
 - 基于工具返回的真实数据回答，不编造`)
 		}

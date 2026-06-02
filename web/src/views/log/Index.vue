@@ -45,6 +45,24 @@
                     <pre class="msg-content">{{ truncate(msg.content, 800) }}</pre>
                   </div>
 
+                  <div v-if="msg.role === 'assistant' && msg.plan?.items?.length" class="plan-section">
+                    <div class="plan-header">
+                      <div>
+                        <div class="plan-label">执行计划</div>
+                        <div class="plan-goal">{{ msg.plan.goal || '运行计划' }}</div>
+                      </div>
+                      <span class="plan-progress">{{ planProgress(msg.plan) }}</span>
+                    </div>
+                    <div v-if="msg.plan.revision_reason" class="plan-reason">{{ msg.plan.revision_reason }}</div>
+                    <div class="plan-list">
+                      <div v-for="item in msg.plan.items" :key="item.id" class="plan-row" :class="'plan-row--' + item.status">
+                        <span class="plan-dot" />
+                        <span class="plan-title">{{ item.title }}</span>
+                        <span class="plan-status">{{ planItemStatusLabel(item.status) }}</span>
+                      </div>
+                    </div>
+                  </div>
+
                   <div v-if="msg.steps && msg.steps.length > 0" class="steps-section">
                     <div
                       class="steps-header"
@@ -351,6 +369,25 @@ function totalDuration(steps: ExecutionStep[]) {
   return steps.reduce((sum, s) => sum + s.duration_ms, 0)
 }
 
+function planItemStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending': return '待执行'
+    case 'running': return '进行中'
+    case 'completed': return '已完成'
+    case 'blocked': return '阻塞'
+    case 'failed': return '失败'
+    case 'skipped': return '跳过'
+    default: return status
+  }
+}
+
+function planProgress(plan?: Message['plan']): string {
+  const items = plan?.items || []
+  if (!items.length) return ''
+  const done = items.filter(i => i.status === 'completed' || i.status === 'skipped').length
+  return `${done}/${items.length}`
+}
+
 function groupSteps(steps: ExecutionStep[]): StepNode[] {
   // Phase 1: group children by sub_agent_call_id (order-independent)
   const childrenByCall = new Map<string, ExecutionStep[]>()
@@ -450,6 +487,98 @@ function formatTime(t: string) {
   color: var(--el-text-color-primary);
   max-height: 300px;
   overflow-y: auto;
+}
+
+.plan-section {
+  border-top: 1px solid var(--el-border-color-extra-light);
+  padding: 10px 14px 12px;
+  background: #f8fafc;
+}
+.plan-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.plan-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0f766e;
+}
+.plan-goal {
+  margin-top: 2px;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #0f172a;
+}
+.plan-progress {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f766e;
+  font-variant-numeric: tabular-nums;
+}
+.plan-reason {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.plan-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-row {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.plan-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+.plan-row--running .plan-dot {
+  background: #0ea5e9;
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12);
+}
+.plan-row--completed .plan-dot {
+  background: #10b981;
+}
+.plan-row--blocked .plan-dot,
+.plan-row--failed .plan-dot {
+  background: #ef4444;
+}
+.plan-row--skipped .plan-dot {
+  background: #cbd5e1;
+}
+.plan-title {
+  min-width: 0;
+  color: #1e293b;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-status {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+}
+.plan-row--running .plan-status {
+  color: #0284c7;
+}
+.plan-row--completed .plan-status {
+  color: #059669;
+}
+.plan-row--blocked .plan-status,
+.plan-row--failed .plan-status {
+  color: #dc2626;
 }
 
 .steps-section {

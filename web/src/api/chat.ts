@@ -64,6 +64,35 @@ export interface ExecutionStep {
   _childrenOpen?: boolean
 }
 
+export type PlanItemStatus = 'pending' | 'running' | 'completed' | 'blocked' | 'failed' | 'skipped'
+export type PlanStatus = 'active' | 'completed' | 'failed'
+
+export interface PlanItem {
+  id: number
+  plan_run_id: number
+  item_key: string
+  title: string
+  detail?: string
+  status: PlanItemStatus
+  reason?: string
+  step_id?: number
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface PlanState {
+  id: number
+  uuid: string
+  conversation_id: number
+  message_id?: number
+  goal?: string
+  status: PlanStatus
+  revision_reason?: string
+  items: PlanItem[]
+  updated_at: string
+}
+
 export interface StepNode {
   step: ExecutionStep
   children: StepNode[]
@@ -75,6 +104,7 @@ export interface ChatResponse {
   tokens_used: number
   steps?: ExecutionStep[]
   files?: FileInfo[]
+  plan?: PlanState
 }
 
 export interface StreamChunk {
@@ -88,6 +118,7 @@ export interface StreamChunk {
   step?: ExecutionStep
   steps?: ExecutionStep[]
   files?: FileInfo[]
+  plan?: PlanState
 }
 
 export interface Conversation {
@@ -109,6 +140,7 @@ export interface Message {
   duration_ms?: number
   steps?: ExecutionStep[]
   files?: FileInfo[]
+  plan?: PlanState
   created_at: string
 }
 

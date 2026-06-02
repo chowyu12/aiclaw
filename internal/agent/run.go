@@ -162,10 +162,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 			return nil, errors.New("agent execution aborted by hook")
 		}
 
-		// 每轮刷新 system prompt 中的 todo 列表
-		if i > 0 && !ec.ephemeral {
-			refreshTodoInSystemMessage(st.Messages, ec.conv.UUID)
-		}
+		refreshPlanInSystemMessage(st.Messages, ec.plan)
 
 		msgs := sanitizeMessages(st.Messages)
 		tools := filterURLGatedTools(toolsSentToLLM(st), userMessagesHaveURL(msgs))
@@ -185,6 +182,9 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		if callErr != nil {
 			ec.l.WithFields(log.Fields{"round": i + 1, "duration": iterDur}).WithError(callErr).Error("[LLM] << failed")
 			ec.tracker.FinalizeStep(ctx, llmStep, "", model.StepError, callErr.Error(), iterDur, 0, ec.stepMeta())
+			if ec.plan != nil {
+				ec.plan.FailRunning(ctx, callErr.Error())
+			}
 			return nil, fmt.Errorf("generate content: %w", callErr)
 		}
 
@@ -232,13 +232,19 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 			Content:   result.content,
 			ToolCalls: result.toolCalls,
 		}
-		e.appendAssistantToolRound(ctx, ec, st, asst)
+		hasRealTool, toolFailed := e.appendAssistantToolRound(ctx, ec, st, asst)
+		if ec.plan != nil && hasRealTool && !toolFailed {
+			ec.plan.CompleteRunning(ctx)
+		}
 	}
 
 	if !completed {
 		ec.l.WithField("max_iterations", maxIter).Error("[Execute] max iterations reached")
 		errMsg := fmt.Sprintf("已达到最大迭代次数 %d，Agent 未能给出最终回答", maxIter)
 		ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, errMsg, time.Since(totalStart), totalTokens, ec.stepMeta())
+		if ec.plan != nil {
+			ec.plan.FailRunning(ctx, errMsg)
+		}
 		return nil, errors.New(errMsg)
 	}
 
@@ -316,7 +322,10 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 	}
 
 	persistentMem := loadPersistentMemory(e.ws)
-	todoBlock := loadTodoBlock(ec.conv.UUID)
+	planBlock := ""
+	if ec.plan != nil {
+		planBlock = ec.plan.PromptBlock(ctx)
+	}
 
 	var msgTools []model.Tool
 	var msgToolSkillMap map[string]string
@@ -333,7 +342,7 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		ToolSkillMap:     msgToolSkillMap,
 		Files:            ec.files,
 		PersistentMemory: persistentMem,
-		TodoBlock:        todoBlock,
+		PlanBlock:        planBlock,
 		ToolSearchMode:   tsMode,
 		WebSearchEnabled: webSearchEffective(ec.ag),
 		WS:               e.ws,
@@ -349,16 +358,19 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 	}, nil
 }
 
-// refreshTodoInSystemMessage 在每轮 LLM 调用前，用最新的 todo 列表替换 system prompt 中的 todo 段落。
-func refreshTodoInSystemMessage(messages []openai.ChatCompletionMessage, convUUID string) {
+// refreshPlanInSystemMessage 在每轮 LLM 调用前，用最新 Plan State 替换 system prompt 中的 plan 段落。
+func refreshPlanInSystemMessage(messages []openai.ChatCompletionMessage, pm *PlanManager) {
 	if len(messages) == 0 || messages[0].Role != openai.ChatMessageRoleSystem {
 		return
 	}
-	newBlock := loadTodoBlock(convUUID)
+	newBlock := ""
+	if pm != nil {
+		newBlock = pm.PromptBlock(context.Background())
+	}
 	content := messages[0].Content
 
-	const todoHeader = "\n\n## 当前任务\n"
-	if idx := strings.Index(content, todoHeader); idx >= 0 {
+	const planHeader = "\n\n<plan_state>\n"
+	if idx := strings.Index(content, planHeader); idx >= 0 {
 		content = content[:idx]
 	}
 	if newBlock != "" {
@@ -448,7 +460,7 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, pt model
 		case model.ProviderOpenAI:
 			extra["web_search_options"] = map[string]any{
 				"search_context_size": "medium",
-				"user_location":      map[string]any{"type": "approximate"},
+				"user_location":       map[string]any{"type": "approximate"},
 			}
 		}
 		req.ChatTemplateKwargs = mergeMap(req.ChatTemplateKwargs, map[string]any{"enable_search": true})

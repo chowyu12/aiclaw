@@ -31,6 +31,8 @@ type mockStore struct {
 	convByUUID    map[string]*model.Conversation
 	messages      map[int64][]model.Message
 	execSteps     map[int64][]model.ExecutionStep
+	planRuns      map[int64]*model.PlanRun
+	planItems     map[int64][]model.PlanItem
 	filesByUUID   map[string]*model.File
 
 	agents       map[int64]*model.Agent
@@ -48,6 +50,8 @@ func newMockStore() *mockStore {
 		convByUUID:    make(map[string]*model.Conversation),
 		messages:      make(map[int64][]model.Message),
 		execSteps:     make(map[int64][]model.ExecutionStep),
+		planRuns:      make(map[int64]*model.PlanRun),
+		planItems:     make(map[int64][]model.PlanItem),
 		filesByUUID:   make(map[string]*model.File),
 		agents:        make(map[int64]*model.Agent),
 		agentsByUUID:  make(map[string]*model.Agent),
@@ -274,6 +278,12 @@ func (s *mockStore) DeleteMessagesFrom(_ context.Context, conversationID, fromMe
 		}
 	}
 	s.messages[conversationID] = kept
+	for id, run := range s.planRuns {
+		if run.ConversationID == conversationID && (run.MessageID == 0 || run.MessageID >= fromMessageID) {
+			delete(s.planItems, id)
+			delete(s.planRuns, id)
+		}
+	}
 	return nil
 }
 
@@ -329,6 +339,119 @@ func (s *mockStore) ListExecutionStepsByConversation(_ context.Context, convID i
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.execSteps[convID], nil
+}
+
+func (s *mockStore) CreatePlanRun(_ context.Context, run *model.PlanRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run.ID = s.nextID()
+	if run.UUID == "" {
+		run.UUID = fmt.Sprintf("plan-%d", run.ID)
+	}
+	if run.Status == "" {
+		run.Status = model.PlanStatusActive
+	}
+	cp := *run
+	s.planRuns[run.ID] = &cp
+	return nil
+}
+
+func (s *mockStore) UpdatePlanRun(_ context.Context, run *model.PlanRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run == nil || run.ID == 0 {
+		return nil
+	}
+	cp := *run
+	s.planRuns[run.ID] = &cp
+	return nil
+}
+
+func (s *mockStore) GetActivePlanRun(_ context.Context, conversationID int64) (*model.PlanRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var best *model.PlanRun
+	for _, run := range s.planRuns {
+		if run.ConversationID == conversationID && run.MessageID == 0 {
+			if best == nil || run.ID > best.ID {
+				cp := *run
+				best = &cp
+			}
+		}
+	}
+	if best == nil {
+		return nil, sql.ErrNoRows
+	}
+	return best, nil
+}
+
+func (s *mockStore) GetPlanRunByMessage(_ context.Context, messageID int64) (*model.PlanRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, run := range s.planRuns {
+		if run.MessageID == messageID {
+			cp := *run
+			return &cp, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (s *mockStore) ListPlanItems(_ context.Context, planRunID int64) ([]model.PlanItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := s.planItems[planRunID]
+	out := make([]model.PlanItem, len(items))
+	copy(out, items)
+	return out, nil
+}
+
+func (s *mockStore) ReplacePlanItems(_ context.Context, planRunID int64, items []model.PlanItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]model.PlanItem, len(items))
+	for i := range items {
+		items[i].ID = s.nextID()
+		items[i].PlanRunID = planRunID
+		out[i] = items[i]
+	}
+	s.planItems[planRunID] = out
+	return nil
+}
+
+func (s *mockStore) UpdatePlanItemsMessageID(_ context.Context, conversationID, messageID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, run := range s.planRuns {
+		if run.ConversationID == conversationID && run.MessageID == 0 {
+			run.MessageID = messageID
+		}
+	}
+	return nil
+}
+
+func (s *mockStore) DeletePlansByConversation(_ context.Context, conversationID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, run := range s.planRuns {
+		if run.ConversationID == conversationID {
+			delete(s.planItems, id)
+			delete(s.planRuns, id)
+		}
+	}
+	return nil
+}
+
+func (s *mockStore) DeletePlansFromMessage(_ context.Context, conversationID, fromMessageID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, run := range s.planRuns {
+		if run.ConversationID == conversationID && (run.MessageID == 0 || run.MessageID >= fromMessageID) {
+			delete(s.planItems, id)
+			delete(s.planRuns, id)
+		}
+	}
+	return nil
 }
 
 func (s *mockStore) CreateFile(_ context.Context, f *model.File) error {

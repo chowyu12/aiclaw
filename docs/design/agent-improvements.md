@@ -11,20 +11,20 @@
 │                     AiClaw Agent 执行引擎                        │
 │                                                                  │
 │  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
-│  │ 持久记忆系统 │  │ 跨会话搜索   │  │    任务规划与分解        │ │
-│  │ MEMORY.md   │  │ FTS5 全文索引 │  │    todo 工具            │ │
+│  │ 持久记忆系统 │  │ 跨会话搜索   │  │    Plan State           │ │
+│  │ MEMORY.md   │  │ FTS5 全文索引 │  │    harness 运行状态     │ │
 │  │ USER.md     │  │ session_search│  │    结构化进度追踪        │ │
 │  │ (Hermes)    │  │ (Hermes)     │  │    (Cursor)             │ │
 │  └──────┬──────┘  └──────┬───────┘  └───────────┬─────────────┘ │
 │         │                │                      │               │
 │  ┌──────▼──────────────────────────────────────▼──────────────┐ │
 │  │                   System Prompt 组装                        │ │
-│  │  base prompt + 持久记忆快照 + 会话笔记 + Todo列表           │ │
+│  │  base prompt + 持久记忆快照 + 会话笔记 + compact plan       │ │
 │  └──────────────────────┬────────────────────────────────────┘ │
 │                         │                                      │
 │  ┌──────────────────────▼────────────────────────────────────┐ │
 │  │                 执行循环 (run loop)                         │ │
-│  │  每轮: 刷新 todo → LLM → tool calls → 结果 → 下一轮       │ │
+│  │  每轮: 注入 plan state → LLM → tool calls → harness 推进   │ │
 │  └──────────────────────┬────────────────────────────────────┘ │
 │                         │                                      │
 │  ┌──────────────────────▼────────────────────────────────────┐ │
@@ -137,14 +137,16 @@
 
 ---
 
-### 2.3 任务规划与分解 — 借鉴 Cursor
+### 2.3 Plan State 运行时计划 — harness 化任务分解
 
-**设计来源**: Cursor IDE 的 `TodoWrite` 工具，Agent 在执行前创建结构化任务列表，逐项推进。
+**设计来源**: 保留 Cursor 风格的「复杂任务先规划」体验，但不再把计划实现为聊天历史中的 Todo 工具噪音。计划变更由模型提出，执行器 harness 拥有状态生命周期、校验、持久化、流式下发和失败兜底。
 
 **核心思路**:
 - 复杂任务如果不拆解，Agent 容易遗漏步骤或迷失方向
-- 任务列表需要「每轮可见」，不是一次性的
-- 任务状态更新应该是轻量的（不需要重建整个列表）
+- 计划是运行状态，不是最终回答正文，也不是普通 tool message 历史
+- 同一计划只允许一个 `running`，执行器自动推进第一个 `pending`
+- LLM/tool error 会把当前 `running` 标为 `failed`，成功工具轮次会推进计划
+- 最终 assistant 消息保存后回填 `message_id`，历史消息和执行日志都可回看 plan snapshot
 
 **执行流程**:
 
@@ -155,48 +157,58 @@
          │             │
       简单任务      复杂任务（3+ 步骤）
          │             │
-      直接执行     todo(create) 创建任务列表
+      直接执行     plan(set) 提出计划
                        │
                 ┌──────▼──────┐
-                │  执行循环    │◄──── 每轮刷新 system prompt 中的 todo
+                │  PlanManager │
+                │  校验状态机   │
+                │  持久化快照   │
+                │  SSE 下发     │
+                └──────┬──────┘
+                       │
+                ┌──────▼──────┐
+                │  执行循环    │◄──── 每轮注入 compact <plan_state>
                 │             │
-                │  选 pending  │
-                │  → in_progress
+                │  当前 running│
+                │  工具执行结果 │
                 │             │
-                │  需要探索?   │
-                │  ├── 是: sub_agent(mode=explore, model=fast)
-                │  └── 否: 直接用工具执行
+                │  成功: complete + advance
+                │  失败: failed + advance
                 │             │
-                │  todo(update)│
-                │  → completed│
-                │             │
-                │  还有 pending?
-                │  ├── 是: 继续循环
-                │  └── 否: 最终回复
+                │  需要调整? plan(update/revise)
+                │  完成: assistant 消息关联 plan
                 └─────────────┘
 ```
 
-**per-round 刷新机制**:
+**per-round 注入机制**:
 
 ```go
-// run loop 中，每轮 LLM 调用前
-if i > 0 && !ec.ephemeral {
-    refreshTodoInSystemMessage(st.Messages, ec.conv.UUID)
-}
+// run loop 中，每轮 LLM 调用前刷新紧凑计划块
+refreshPlanInSystemMessage(st.Messages, ec.plan)
 ```
 
-这确保 Agent 在每轮思考时都看到最新的任务状态，即使中途通过 todo 工具修改了列表。
+注入内容只包含目标、当前 `running`、剩余 `pending` 摘要和最近变更原因，避免完整历史挤占上下文。
 
 **数据结构**:
+
 ```go
-type TodoItem struct {
-    ID      string // 唯一标识
-    Content string // 任务描述
-    Status  string // pending / in_progress / completed / cancelled
+type PlanRun struct {
+    ConversationID int64
+    MessageID      int64 // 执行中为 0，保存 assistant 消息后回填
+    Goal           string
+    Status         string
+}
+
+type PlanItem struct {
+    PlanRunID int64
+    ItemKey   string
+    Title     string
+    Status    string // pending/running/completed/blocked/failed/skipped
+    SortOrder int
 }
 ```
 
-**关键代码**: `internal/tools/todotool/todo.go`
+**关键代码**: `internal/agent/plan.go`, `internal/agent/plan_tool.go`, `internal/model/plan.go`
 
 ---
 
@@ -341,7 +353,7 @@ type Agent struct {
 ## 执行策略
 
 1. **工具优先**: 可通过工具获得更准确结果时，必须调用工具
-2. **任务规划**: 复杂请求（3+ 步骤）先用 todo 创建任务列表，再逐项执行
+2. **任务规划**: 复杂请求（3+ 步骤）先用 plan 建立运行计划，执行中按当前 Plan State 推进
 3. **探索优先**: 不确定时先用 sub_agent(mode=explore) 并行探索
 4. **并行利用**: 独立子任务用 sub_agent 的 tasks 数组并行执行
 5. **组合调用**: 复杂问题可串联或并行调用多个工具
@@ -363,7 +375,7 @@ buildMessages()
 │
 ├── 4. 持久记忆快照（MEMORY.md + USER.md 冻结注入）
 ├── 5. ## 会话笔记（session-memory）
-├── 6. ## 当前任务（todo 列表，每轮刷新）
+├── 6. <plan_state>（紧凑运行计划，每轮刷新）
 │
 ├── 7. 历史消息
 └── 8. 当前用户消息（含文件附件）
@@ -382,19 +394,21 @@ buildMessages()
 | `internal/store/gormstore/fts.go` | Hermes | FTS5 虚拟表 + 触发器 + 搜索实现 |
 | `internal/scheduler/scheduler.go` | Hermes | in-process 定时任务调度器核心 |
 | `internal/scheduler/handler.go` | Hermes | cron 工具 handler + context 注入 |
-| `internal/tools/todotool/todo.go` | Cursor | 结构化任务规划工具 |
+| `internal/model/plan.go` | AiClaw | PlanRun / PlanItem 持久化模型 |
+| `internal/agent/plan.go` | AiClaw | PlanManager 状态机、校验、流式变更回调 |
+| `internal/agent/plan_tool.go` | AiClaw | harness plan 控制工具 handler |
 
 ### 修改文件
 
 | 文件 | 变更内容 |
 |------|---------|
-| `internal/tools/builtin_defs.go` | 新增 memory / session_search / cron / todo / sub_agent mode+model schema |
-| `internal/tools/tools.go` | 注册 memory / todo handler，替换 cron handler |
+| `internal/tools/builtin_defs.go` | 新增 memory / session_search / cron / plan / sub_agent mode+model schema |
+| `internal/tools/tools.go` | 注册 memory handler，plan 由 Agent harness 接管，替换 cron handler |
 | `internal/agent/subagent.go` | mode/model 字段、删除 inlineSubAgentCall、白名单 blocklist |
-| `internal/agent/prompt.go` | 注入持久记忆 + todo 列表、任务分解执行策略 |
-| `internal/agent/run.go` | 加载持久记忆 + todo、每轮刷新 todo |
-| `internal/agent/session_memory.go` | loadPersistentMemory + loadTodoBlock |
-| `internal/agent/executor.go` | 注入 session_search handler + todo store + scheduler context |
+| `internal/agent/prompt.go` | 注入持久记忆 + compact plan block、任务分解执行策略 |
+| `internal/agent/run.go` | 每轮刷新 Plan State，工具成功/失败后由 harness 推进 |
+| `internal/agent/session_memory.go` | loadPersistentMemory |
+| `internal/agent/executor.go` | 注入 session_search handler + PlanManager + scheduler context |
 | `internal/model/agent.go` | Agent 新增 FastModelName 字段 |
 | `internal/bootstrap/run.go` | 初始化 FTS5 + scheduler 启动/停止生命周期 |
 
@@ -405,5 +419,5 @@ buildMessages()
 1. **渐进增强**: 所有新功能都是可选的，不配置则不影响现有行为
 2. **降级友好**: FTS5 仅 SQLite 生效，其他 DB 自动降级为 LIKE；FastModelName 为空则保持原模型
 3. **安全第一**: 持久记忆注入前做安全扫描；sub_agent 深度限制 + 工具 blocklist
-4. **最小侵入**: 新功能通过 context 注入和工具注册实现，不改变核心执行循环结构
-5. **可观测性**: scheduler 执行日志、sub_agent 结构化结果、todo 进度追踪
+4. **最小侵入**: 新功能通过 context 注入和工具注册实现，执行循环只增加 harness 状态节点
+5. **可观测性**: scheduler 执行日志、sub_agent 结构化结果、Plan State 进度追踪

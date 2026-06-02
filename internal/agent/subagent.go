@@ -359,7 +359,7 @@ func mergeBlockedToolsWithMode(userBlocked []string, depth int, mode string) []s
 		allBuiltins := []string{
 			"read", "write", "edit", "grep", "find", "ls",
 			"exec", "process", "web_fetch", "browser", "canvas",
-			"code_interpreter", "memory", "cron", "todo",
+			"code_interpreter", "memory", "cron", "plan",
 			"session_search", "sub_agent",
 		}
 		for _, name := range allBuiltins {

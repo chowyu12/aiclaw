@@ -13,6 +13,7 @@ type Store interface {
 	ChannelStore
 	ChannelThreadStore
 	ConversationStore
+	PlanStore
 	FileStore
 	MCPServerStore
 	Close() error
@@ -90,6 +91,18 @@ type ConversationStore interface {
 	UpdateStepsMessageID(ctx context.Context, conversationID, messageID int64) error
 	ListExecutionSteps(ctx context.Context, messageID int64) ([]model.ExecutionStep, error)
 	ListExecutionStepsByConversation(ctx context.Context, conversationID int64) ([]model.ExecutionStep, error)
+}
+
+type PlanStore interface {
+	CreatePlanRun(ctx context.Context, run *model.PlanRun) error
+	UpdatePlanRun(ctx context.Context, run *model.PlanRun) error
+	GetActivePlanRun(ctx context.Context, conversationID int64) (*model.PlanRun, error)
+	GetPlanRunByMessage(ctx context.Context, messageID int64) (*model.PlanRun, error)
+	ListPlanItems(ctx context.Context, planRunID int64) ([]model.PlanItem, error)
+	ReplacePlanItems(ctx context.Context, planRunID int64, items []model.PlanItem) error
+	UpdatePlanItemsMessageID(ctx context.Context, conversationID, messageID int64) error
+	DeletePlansByConversation(ctx context.Context, conversationID int64) error
+	DeletePlansFromMessage(ctx context.Context, conversationID, fromMessageID int64) error
 }
 
 type FileStore interface {
