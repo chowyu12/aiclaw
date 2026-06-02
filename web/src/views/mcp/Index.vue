@@ -3,23 +3,23 @@
     <div class="aic-page-head">
       <h1 class="aic-title">MCP</h1>
       <p class="aic-sub">
-        配置 Model Context Protocol 服务，保存至 Workspace；运行时由 Agent 加载。
+        {{ i18n.t('mcp.subtitle') }}
       </p>
     </div>
     <div class="aic-page-body">
       <el-card class="aic-card" shadow="never" v-loading="mcpLoading">
         <div class="toolbar">
-          <el-button type="primary" @click="addMcpRow">添加服务</el-button>
-          <el-button @click="loadMcp">刷新</el-button>
-          <el-button type="success" :loading="mcpSaving" @click="saveMcp">保存到 Workspace</el-button>
+          <el-button type="primary" @click="addMcpRow">{{ i18n.t('mcp.addServer') }}</el-button>
+          <el-button @click="loadMcp">{{ i18n.t('common.refresh') }}</el-button>
+          <el-button type="success" :loading="mcpSaving" @click="saveMcp">{{ i18n.t('mcp.saveWorkspace') }}</el-button>
         </div>
         <el-table :data="mcpServers" stripe style="width: 100%; margin-top: 16px">
-          <el-table-column prop="name" label="名称" min-width="120">
+          <el-table-column prop="name" :label="i18n.t('common.name')" min-width="120">
             <template #default="{ row }">
               <el-input v-model="row.name" size="small" />
             </template>
           </el-table-column>
-          <el-table-column label="传输" width="100">
+          <el-table-column :label="i18n.t('mcp.transport')" width="100">
             <template #default="{ row }">
               <el-select v-model="row.transport" size="small" style="width: 100%">
                 <el-option label="stdio" value="stdio" />
@@ -29,22 +29,22 @@
           </el-table-column>
           <el-table-column label="Endpoint" min-width="160">
             <template #default="{ row }">
-              <el-input v-model="row.endpoint" size="small" placeholder="命令或 URL" />
+              <el-input v-model="row.endpoint" size="small" :placeholder="i18n.t('mcp.endpointPlaceholder')" />
             </template>
           </el-table-column>
-          <el-table-column label="Args (JSON 数组)" min-width="140">
+          <el-table-column :label="i18n.t('mcp.args')" min-width="140">
             <template #default="{ row }">
               <el-input v-model="row._argsStr" size="small" placeholder='["-y","pkg"]' @blur="parseArgsRow(row)" />
             </template>
           </el-table-column>
-          <el-table-column label="启用" width="72" align="center">
+          <el-table-column :label="i18n.t('common.enabled')" width="72" align="center">
             <template #default="{ row }">
               <el-switch v-model="row.enabled" />
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="80" fixed="right">
+          <el-table-column :label="i18n.t('common.actions')" width="80" fixed="right">
             <template #default="{ $index }">
-              <el-button link type="danger" size="small" @click="mcpServers.splice($index, 1)">删除</el-button>
+              <el-button link type="danger" size="small" @click="mcpServers.splice($index, 1)">{{ i18n.t('common.delete') }}</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -57,9 +57,11 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { runtimeMcpApi, type McpServer } from '@/api/mcp'
+import { useI18nStore } from '@/stores/i18n'
 
 type McpRow = McpServer & { _argsStr?: string }
 
+const i18n = useI18nStore()
 const mcpServers = ref<McpRow[]>([])
 const mcpLoading = ref(false)
 const mcpSaving = ref(false)
@@ -83,7 +85,7 @@ function parseArgsRow(row: McpRow) {
     }
     row.args = JSON.parse(v) as string[]
   } catch {
-    ElMessage.error('Args 需为 JSON 数组，例如 ["-y","@modelcontextprotocol/server-filesystem"]')
+    ElMessage.error(i18n.t('mcp.argsError'))
   }
 }
 
@@ -121,7 +123,7 @@ async function saveMcp() {
   try {
     const payload: McpServer[] = mcpServers.value.map(({ _argsStr, ...rest }) => rest)
     await runtimeMcpApi.save(payload)
-    ElMessage.success('MCP 配置已写入 workspace')
+    ElMessage.success(i18n.t('mcp.saved'))
     await loadMcp()
   } finally {
     mcpSaving.value = false

@@ -29,23 +29,23 @@
         >
           <el-menu-item index="/chat">
             <el-icon><ChatDotRound /></el-icon>
-            <template #title>对话</template>
+            <template #title>{{ i18n.t("app.chat") }}</template>
           </el-menu-item>
           <el-menu-item index="/agents">
             <el-icon><User /></el-icon>
-            <template #title>Agents</template>
+            <template #title>{{ i18n.t("app.agents") }}</template>
           </el-menu-item>
           <el-menu-item index="/skill">
             <el-icon><Reading /></el-icon>
-            <template #title>技能</template>
+            <template #title>{{ i18n.t("app.skills") }}</template>
           </el-menu-item>
           <el-menu-item index="/tools">
             <el-icon><SetUp /></el-icon>
-            <template #title>工具</template>
+            <template #title>{{ i18n.t("app.tools") }}</template>
           </el-menu-item>
           <el-menu-item index="/providers">
             <el-icon><Connection /></el-icon>
-            <template #title>模型</template>
+            <template #title>{{ i18n.t("app.providers") }}</template>
           </el-menu-item>
           <el-menu-item index="/mcp">
             <el-icon><Link /></el-icon>
@@ -53,27 +53,27 @@
           </el-menu-item>
           <el-menu-item index="/channels">
             <el-icon><Share /></el-icon>
-            <template #title>渠道</template>
+            <template #title>{{ i18n.t("app.channels") }}</template>
           </el-menu-item>
           <el-menu-item index="/scheduler">
             <el-icon><Timer /></el-icon>
-            <template #title>定时任务</template>
+            <template #title>{{ i18n.t("app.scheduler") }}</template>
           </el-menu-item>
 
           <el-menu-item index="/logs">
             <el-icon><Document /></el-icon>
-            <template #title>日志</template>
+            <template #title>{{ i18n.t("app.logs") }}</template>
           </el-menu-item>
         </el-menu>
         <div class="sidebar-footer">
           <div v-if="!isCollapse" class="sidebar-theme-row">
-            <span class="theme-label">主题</span>
+            <span class="theme-label">{{ i18n.t("app.theme") }}</span>
             <div class="theme-switch">
               <button
                 type="button"
                 class="theme-icon-btn"
                 :class="{ active: themeStore.mode === 'light' }"
-                title="浅色"
+                :title="i18n.t('app.light')"
                 @click="themeStore.setMode('light')"
               >
                 <el-icon :size="16"><Sunny /></el-icon>
@@ -82,16 +82,35 @@
                 type="button"
                 class="theme-icon-btn"
                 :class="{ active: themeStore.mode === 'dark' }"
-                title="深色"
+                :title="i18n.t('app.dark')"
                 @click="themeStore.setMode('dark')"
               >
                 <el-icon :size="16"><Moon /></el-icon>
               </button>
             </div>
           </div>
+          <div v-if="!isCollapse" class="sidebar-theme-row">
+            <span class="theme-label">{{ i18n.t("app.language") }}</span>
+            <div class="theme-switch">
+              <button
+                type="button"
+                class="theme-icon-btn lang"
+                :class="{ active: i18n.language === 'zh-CN' }"
+                title="中文"
+                @click="i18n.setLanguage('zh-CN')"
+              >中</button>
+              <button
+                type="button"
+                class="theme-icon-btn lang"
+                :class="{ active: i18n.language === 'en-US' }"
+                title="English"
+                @click="i18n.setLanguage('en-US')"
+              >EN</button>
+            </div>
+          </div>
           <div v-else class="sidebar-theme-collapsed">
             <el-tooltip
-              :content="themeStore.mode === 'dark' ? '切换浅色' : '切换深色'"
+              :content="themeStore.mode === 'dark' ? i18n.t('app.switchLight') : i18n.t('app.switchDark')"
               placement="right"
             >
               <button
@@ -105,6 +124,13 @@
                 <el-icon v-else :size="18"><Moon /></el-icon>
               </button>
             </el-tooltip>
+            <el-tooltip :content="i18n.t('app.language')" placement="right">
+              <button
+                type="button"
+                class="theme-icon-btn single lang"
+                @click="i18n.toggleLanguage()"
+              >{{ i18n.language === 'zh-CN' ? '中' : 'EN' }}</button>
+            </el-tooltip>
           </div>
           <template v-if="!isCollapse">
             <div class="sidebar-user-line">
@@ -112,12 +138,12 @@
                 appVersion ? appVersion : "AiClaw"
               }}</span>
               <el-button text type="danger" size="small" @click="handleLogout"
-                >退出</el-button
+                >{{ i18n.t("app.logout") }}</el-button
               >
             </div>
           </template>
           <template v-else>
-            <el-tooltip content="退出登录" placement="right">
+            <el-tooltip :content="i18n.t('app.logoutFull')" placement="right">
               <el-button
                 class="sidebar-logout-icon"
                 text
@@ -144,6 +170,7 @@ import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useThemeStore } from "@/stores/theme";
+import { useI18nStore } from "@/stores/i18n";
 import AiclawLogo from "@/components/brand/AiclawLogo.vue";
 import request from "@/api/request";
 
@@ -151,6 +178,7 @@ const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
+const i18n = useI18nStore();
 const isCollapse = ref(false);
 const appVersion = ref("");
 
@@ -315,8 +343,14 @@ body,
   color: var(--aic-theme-btn-active-color);
   background: var(--aic-theme-btn-active-bg);
 }
+.theme-icon-btn.lang {
+  font-size: 11px;
+  font-weight: 700;
+}
 .sidebar-theme-collapsed {
   display: flex;
+  flex-direction: column;
+  gap: 6px;
   justify-content: center;
   margin-bottom: 8px;
 }

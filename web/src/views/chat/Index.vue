@@ -32,10 +32,10 @@
           </el-dropdown>
           <!-- 单 Agent：纯文本 -->
           <span v-else class="aside-title" :class="{ 'aside-title--agent': !!defaultAgent }" :title="defaultAgent ? currentAgentName : undefined">
-            {{ defaultAgent ? currentAgentName : '会话' }}
+            {{ defaultAgent ? currentAgentName : i18n.t('chat.title') }}
           </span>
         </div>
-        <el-button class="aside-new-btn" circle size="small" @click="newConversation" :disabled="!currentAgent" title="新对话">
+        <el-button class="aside-new-btn" circle size="small" @click="newConversation" :disabled="!currentAgent" :title="i18n.t('chat.newConversation')">
           <el-icon><Plus /></el-icon>
         </el-button>
       </div>
@@ -55,13 +55,13 @@
             </router-link>
           </div>
           <div v-else class="aside-empty-agent">
-            <p>尚未配置 Agent</p>
-            <router-link to="/agents" class="aside-empty-link">前往设置</router-link>
+            <p>{{ i18n.t('chat.noAgentConfigured') }}</p>
+            <router-link to="/agents" class="aside-empty-link">{{ i18n.t('chat.goSettings') }}</router-link>
           </div>
 
           <template v-if="currentAgent">
             <div class="aside-divider" v-if="conversations.length > 0">
-              <span>最近</span>
+              <span>{{ i18n.t('chat.recent') }}</span>
             </div>
             <div
               v-for="conv in conversations"
@@ -72,7 +72,7 @@
             >
               <el-icon :size="14" class="conv-icon"><ChatDotRound /></el-icon>
               <div class="conv-info">
-                <div class="conv-title">{{ conv.title || '未命名对话' }}</div>
+                <div class="conv-title">{{ conv.title || (i18n.isEnglish ? 'Untitled conversation' : '未命名对话') }}</div>
                 <div class="conv-time">{{ formatTime(conv.updated_at) }}</div>
               </div>
               <el-icon
@@ -83,7 +83,7 @@
               ><Delete /></el-icon>
             </div>
             <div v-if="conversations.length === 0" class="aside-conv-hint">
-              暂无历史会话，点击右上角 + 开始新对话
+              {{ i18n.t('chat.noHistory') }}
             </div>
           </template>
         </div>
@@ -94,9 +94,9 @@
     <main class="chat-main">
       <header class="chat-main-head">
         <div class="chat-main-head-left">
-          <h1 class="chat-main-title">对话</h1>
+          <h1 class="chat-main-title">{{ i18n.t('chat.title') }}</h1>
           <p v-if="currentAgent" class="chat-main-sub">{{ currentAgentName }} · {{ currentAgent.model_name }}</p>
-          <p v-else class="chat-main-sub muted">配置 Agent 后即可开始</p>
+          <p v-else class="chat-main-sub muted">{{ i18n.t('chat.notConfigured') }}</p>
         </div>
       </header>
 
@@ -113,11 +113,11 @@
           <div class="empty-icon-wrap">
             <el-icon :size="36"><ChatDotRound /></el-icon>
           </div>
-          <div class="empty-title">{{ !currentAgent ? '请先完成 Agent 配置' : '新对话' }}</div>
+          <div class="empty-title">{{ !currentAgent ? i18n.t('chat.noAgent') : i18n.t('chat.newConversation') }}</div>
           <div class="empty-desc" v-if="currentAgent">
-            在下方输入消息，与 <strong>{{ currentAgentName }}</strong> 开始交流
+            <span v-html="i18n.t('chat.startWith', { name: `<strong>${currentAgentName}</strong>` })"></span>
           </div>
-          <div class="empty-hint" v-else>在侧栏进入设置，绑定模型供应商与参数</div>
+          <div class="empty-hint" v-else>{{ i18n.t('chat.setupHint') }}</div>
         </div>
 
         <!-- 消息列表 -->
@@ -129,7 +129,7 @@
             </div>
             <div class="msg-body">
               <div class="msg-meta">
-                <span class="msg-sender">{{ msg.role === 'user' ? '你' : currentAgentName }}</span>
+                <span class="msg-sender">{{ msg.role === 'user' ? i18n.t('chat.user') : currentAgentName }}</span>
                 <span v-if="msg.role === 'assistant' && msg.tokens_used" class="msg-tokens">{{ msg.tokens_used }} tokens</span>
                 <template v-if="msg.role === 'user' && msg.created_at">
                   <span class="msg-time" :title="msg.created_at">{{ formatDateTime(msg.created_at) }}</span>
@@ -144,7 +144,7 @@
               <div v-if="msg.role === 'assistant' && msg.plan?.items?.length" class="plan-panel">
                 <div class="plan-head">
                   <div class="plan-title-wrap">
-                    <span class="plan-kicker">执行计划</span>
+                    <span class="plan-kicker">{{ i18n.t('chat.plan') }}</span>
                     <span class="plan-goal">{{ msg.plan.goal || '运行计划' }}</span>
                   </div>
                   <span class="plan-progress">{{ planProgress(msg.plan) }}</span>
@@ -193,13 +193,13 @@
 
               <!-- 操作按钮 -->
               <div class="msg-actions">
-                <button class="action-btn" @click="copyMessage(msg, i)" title="复制">
+                <button class="action-btn" @click="copyMessage(msg, i)" :title="i18n.t('chat.copy')">
                   <el-icon :size="14"><CopyDocument /></el-icon>
-                  <span>{{ copiedMsgIdx === i ? '已复制' : '复制' }}</span>
+                  <span>{{ copiedMsgIdx === i ? i18n.t('chat.copied') : i18n.t('chat.copy') }}</span>
                 </button>
-                <button v-if="msg.role === 'assistant'" class="action-btn" @click="retryMessage(i)" :disabled="streaming" title="重试">
+                <button v-if="msg.role === 'assistant'" class="action-btn" @click="retryMessage(i)" :disabled="streaming" :title="i18n.t('chat.retry')">
                   <el-icon :size="14"><RefreshRight /></el-icon>
-                  <span>重试</span>
+                  <span>{{ i18n.t('chat.retry') }}</span>
                 </button>
               </div>
 
@@ -228,7 +228,7 @@
                           >
                             <template v-if="node.step.status === 'running'">
                               <el-icon class="is-loading" :size="10"><Loading /></el-icon>
-                              运行中
+                              {{ i18n.t('chat.running') }}
                             </template>
                             <template v-else-if="node.step.status === 'success'">{{ node.step.duration_ms }}ms</template>
                             <template v-else>failed</template>
@@ -280,7 +280,7 @@
                                   >
                                     <template v-if="child.step.status === 'running'">
                                       <el-icon class="is-loading" :size="10"><Loading /></el-icon>
-                                      运行中
+                                      {{ i18n.t('chat.running') }}
                                     </template>
                                     <template v-else-if="child.step.status === 'success'">{{ child.step.duration_ms }}ms</template>
                                     <template v-else>failed</template>
@@ -331,7 +331,7 @@
               <div v-if="pendingPlan?.items?.length" class="plan-panel plan-panel--streaming">
                 <div class="plan-head">
                   <div class="plan-title-wrap">
-                    <span class="plan-kicker">执行计划</span>
+                    <span class="plan-kicker">{{ i18n.t('chat.plan') }}</span>
                     <span class="plan-goal">{{ pendingPlan.goal || '运行计划' }}</span>
                   </div>
                   <span class="plan-progress">{{ planProgress(pendingPlan) }}</span>
@@ -361,7 +361,7 @@
                     <el-tag v-else-if="node.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
                     <el-tag v-else-if="node.step.status === 'running'" type="info" size="small" round effect="plain">
                       <el-icon class="is-loading" :size="10"><Loading /></el-icon>
-                      运行中
+                      {{ i18n.t('chat.running') }}
                     </el-tag>
                     <span v-if="node.step.tokens_used" class="wf-tokens">{{ node.step.tokens_used }} tokens</span>
                     <span v-if="node.children.length" class="wf-child-count" @click.stop="node.step._childrenOpen = node.step._childrenOpen === false ? true : false">
@@ -409,7 +409,7 @@
                           <el-tag v-else-if="child.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
                           <el-tag v-else-if="child.step.status === 'running'" type="info" size="small" round effect="plain">
                             <el-icon class="is-loading" :size="10"><Loading /></el-icon>
-                            运行中
+                            {{ i18n.t('chat.running') }}
                           </el-tag>
                           <span v-if="child.step.tokens_used" class="wf-tokens">{{ child.step.tokens_used }} tokens</span>
                         </div>
@@ -420,7 +420,7 @@
 
                 <div v-if="!streamingContent" class="wf-node wf-node--thinking">
                   <span class="wf-dot wf-dot--thinking"><el-icon class="is-loading" :size="10"><Loading /></el-icon></span>
-                  <span class="wf-thinking-text">{{ pendingSteps.length > 0 ? '生成回复中...' : '思考中...' }}</span>
+                  <span class="wf-thinking-text">{{ pendingSteps.length > 0 ? i18n.t('chat.generating') : i18n.t('chat.thinking') }}</span>
                 </div>
               </div>
 
@@ -457,19 +457,19 @@
           <el-input
             v-model="urlInput"
             size="small"
-            placeholder="粘贴文件 URL，回车添加"
+            :placeholder="i18n.t('chat.urlPlaceholder')"
             @keydown.enter.prevent="addURL"
             clearable
             class="url-input"
           />
-          <el-button size="small" type="primary" @click="addURL" :disabled="!urlInput.trim()">添加</el-button>
-          <el-button size="small" text @click="showURLInput = false; urlInput = ''">取消</el-button>
+          <el-button size="small" type="primary" @click="addURL" :disabled="!urlInput.trim()">{{ i18n.t('chat.add') }}</el-button>
+          <el-button size="small" text @click="showURLInput = false; urlInput = ''">{{ i18n.t('common.cancel') }}</el-button>
         </div>
 
         <!-- 输入框 -->
         <div class="composer">
           <div class="composer-tools">
-            <label class="tool-btn" :class="{ off: !defaultAgent || streaming || uploading }" title="上传文件">
+            <label class="tool-btn" :class="{ off: !defaultAgent || streaming || uploading }" :title="i18n.t('chat.uploadFile')">
               <el-icon :size="18"><UploadFilled /></el-icon>
               <input
                 type="file" multiple style="display:none"
@@ -483,7 +483,7 @@
               :class="{ off: !defaultAgent || streaming, active: showURLInput }"
               :disabled="!defaultAgent || streaming"
               @click="showURLInput = !showURLInput"
-              title="添加 URL"
+              :title="i18n.t('chat.addUrl')"
             >
               <el-icon :size="18"><Link /></el-icon>
             </button>
@@ -494,7 +494,7 @@
               v-model="inputMessage"
               type="textarea"
               :autosize="{ minRows: 1, maxRows: 5 }"
-              placeholder="输入消息，Enter 发送，Shift + Enter 换行"
+              :placeholder="i18n.t('chat.input')"
               :disabled="!defaultAgent || streaming"
               @keydown="handleKeydown"
               resize="none"
@@ -504,7 +504,7 @@
             v-if="streaming"
             class="stop-btn"
             @click="stopGeneration"
-            title="停止生成"
+            :title="i18n.t('chat.stop')"
           >
             <span class="stop-square"></span>
           </button>
@@ -557,6 +557,7 @@ import { type Agent } from '../../api/agent'
 import { useAgentStore } from '../../stores/agent'
 import { chatApi, streamChat, retryStream, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18nStore } from '../../stores/i18n'
 import { Marked } from 'marked'
 import hljs from 'highlight.js/lib/core'
 import javascript from 'highlight.js/lib/languages/javascript'
@@ -650,6 +651,7 @@ const copiedMsgIdx = ref(-1)
 
 // 多 Agent 支持
 const agentStore = useAgentStore()
+const i18n = useI18nStore()
 
 const currentAgentName = computed(() => agentStore.activeAgent?.name || defaultAgent.value?.name || 'Agent')
 
@@ -728,7 +730,7 @@ async function loadConversation(conv: Conversation) {
     messages.value = parseChatMessages(res.data || [])
     scrollToBottom()
   } catch {
-    ElMessage.error('加载会话失败')
+    ElMessage.error(i18n.t('chat.loadFailed'))
   } finally {
     loadingHistory.value = false
   }
@@ -770,7 +772,7 @@ async function reloadCurrentMessages() {
 
 async function deleteConv(id: number) {
   try {
-    await ElMessageBox.confirm('确定删除该会话？', '删除', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' })
+    await ElMessageBox.confirm(i18n.t('chat.deleteConfirm'), i18n.t('common.delete'), { type: 'warning', confirmButtonText: i18n.t('common.delete'), cancelButtonText: i18n.t('common.cancel') })
   } catch { return }
   try {
     await chatApi.deleteConversation(id)
@@ -779,7 +781,7 @@ async function deleteConv(id: number) {
       resetChat()
     }
   } catch {
-    ElMessage.error('删除失败')
+    ElMessage.error(i18n.t('chat.deleteFailed'))
   }
 }
 
@@ -873,8 +875,8 @@ function removeFile(idx: number) {
 function addURL() {
   const url = urlInput.value.trim()
   if (!url) return
-  try { new URL(url) } catch { ElMessage.warning('请输入有效的 URL'); return }
-  if (pendingURLs.value.includes(url)) { ElMessage.warning('该 URL 已添加'); return }
+  try { new URL(url) } catch { ElMessage.warning(i18n.t('chat.invalidUrl')); return }
+  if (pendingURLs.value.includes(url)) { ElMessage.warning(i18n.t('chat.duplicateUrl')); return }
   pendingURLs.value.push(url)
   urlInput.value = ''
 }
@@ -1092,12 +1094,12 @@ function stepTagType(status: string): 'success' | 'danger' | 'info' {
 
 function planItemStatusLabel(status: string): string {
   switch (status) {
-    case 'pending': return '待执行'
-    case 'running': return '进行中'
-    case 'completed': return '已完成'
-    case 'blocked': return '阻塞'
-    case 'failed': return '失败'
-    case 'skipped': return '跳过'
+    case 'pending': return i18n.t('plan.pending')
+    case 'running': return i18n.t('plan.running')
+    case 'completed': return i18n.t('plan.completed')
+    case 'blocked': return i18n.t('plan.blocked')
+    case 'failed': return i18n.t('plan.failed')
+    case 'skipped': return i18n.t('plan.skipped')
     default: return status
   }
 }

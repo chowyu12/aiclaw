@@ -236,6 +236,7 @@ import { ElMessage } from 'element-plus'
 import { chatApi, type Conversation, type Message, type ExecutionStep, type StepNode } from '../../api/chat'
 import { agentApi, type Agent } from '../../api/agent'
 import { useRoute } from 'vue-router'
+import { useI18nStore } from '../../stores/i18n'
 
 interface ConvRow extends Conversation {
   _loading?: boolean
@@ -256,6 +257,7 @@ const filterUserPrefix = ref('')
 const includeChannels = ref(true)
 const expandedRows = ref<number[]>([])
 const route = useRoute()
+const i18n = useI18nStore()
 
 onMounted(async () => {
   try {
@@ -371,12 +373,12 @@ function totalDuration(steps: ExecutionStep[]) {
 
 function planItemStatusLabel(status: string): string {
   switch (status) {
-    case 'pending': return '待执行'
-    case 'running': return '进行中'
-    case 'completed': return '已完成'
-    case 'blocked': return '阻塞'
-    case 'failed': return '失败'
-    case 'skipped': return '跳过'
+    case 'pending': return i18n.t('plan.pending')
+    case 'running': return i18n.t('plan.running')
+    case 'completed': return i18n.t('plan.completed')
+    case 'blocked': return i18n.t('plan.blocked')
+    case 'failed': return i18n.t('plan.failed')
+    case 'skipped': return i18n.t('plan.skipped')
     default: return status
   }
 }

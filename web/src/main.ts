@@ -9,8 +9,10 @@ import './styles/theme.css'
 import App from './App.vue'
 import router from './router'
 import { applyDomTheme, readInitialThemeMode } from './stores/theme'
+import { applyDomLanguage, readInitialLanguage } from './stores/i18n'
 
 applyDomTheme(readInitialThemeMode())
+applyDomLanguage(readInitialLanguage())
 
 const app = createApp(App)
 

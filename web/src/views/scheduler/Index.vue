@@ -2,15 +2,15 @@
   <div class="aic-page">
     <div class="aic-page-head">
       <div>
-        <h1 class="aic-title">定时任务</h1>
+        <h1 class="aic-title">{{ i18n.t('scheduler.title') }}</h1>
         <p class="aic-sub" style="margin-top:4px;font-size:13px;color:var(--el-text-color-secondary)">
-          查看和管理 Agent 创建的定时任务，支持启停、删除和执行日志查看。
+          {{ i18n.t('scheduler.subtitle') }}
         </p>
       </div>
     </div>
 
     <div class="aic-page-body">
-      <el-empty v-if="!loading && jobs.length === 0" description="暂无定时任务" />
+      <el-empty v-if="!loading && jobs.length === 0" :description="i18n.t('scheduler.empty')" />
 
       <el-table v-else :data="jobs" v-loading="loading" row-key="id" style="width:100%" table-layout="auto">
         <el-table-column type="expand">
@@ -25,7 +25,7 @@
                 <pre class="sj-pre">{{ row.command }}</pre>
               </div>
               <div v-if="row.description" class="sj-detail">
-                <span class="sj-label">描述</span>
+                <span class="sj-label">{{ i18n.t('common.description') }}</span>
                 <span>{{ row.description }}</span>
               </div>
               <div v-if="row.agent_uuid" class="sj-detail">
@@ -36,26 +36,26 @@
               <!-- 执行日志 -->
               <div class="sj-logs-section">
                 <div class="sj-logs-head">
-                  <span class="sj-label">执行日志</span>
+                  <span class="sj-label">{{ i18n.t('scheduler.logs') }}</span>
                   <el-button size="small" text type="primary" @click="loadLogs(row.id)" :loading="logsLoading === row.id">
-                    刷新
+                    {{ i18n.t('common.refresh') }}
                   </el-button>
                 </div>
                 <el-table v-if="logsMap[row.id]?.length" :data="logsMap[row.id]" size="small" style="width:100%">
-                  <el-table-column label="执行时间" width="180">
+                  <el-table-column :label="i18n.t('scheduler.runAt')" width="180">
                     <template #default="{ row: log }">
                       {{ formatTime(log.run_at) }}
                     </template>
                   </el-table-column>
-                  <el-table-column label="状态" width="90" align="center">
+                  <el-table-column :label="i18n.t('common.status')" width="90" align="center">
                     <template #default="{ row: log }">
                       <el-tag :type="log.status === 'success' ? 'success' : 'danger'" size="small">
-                        {{ log.status === 'success' ? '成功' : '失败' }}
+                        {{ log.status === 'success' ? i18n.t('scheduler.success') : i18n.t('scheduler.failed') }}
                       </el-tag>
                     </template>
                   </el-table-column>
-                  <el-table-column label="耗时" prop="duration" width="120" />
-                  <el-table-column label="输出 / 错误" min-width="200">
+                  <el-table-column :label="i18n.t('scheduler.duration')" prop="duration" width="120" />
+                  <el-table-column :label="i18n.t('scheduler.outputError')" min-width="200">
                     <template #default="{ row: log }">
                       <pre v-if="log.error" class="sj-pre sj-pre--error">{{ log.error }}</pre>
                       <pre v-else-if="log.output" class="sj-pre">{{ log.output }}</pre>
@@ -63,44 +63,44 @@
                     </template>
                   </el-table-column>
                 </el-table>
-                <div v-else class="sj-muted" style="margin-top:4px">暂无日志，点击刷新加载</div>
+                <div v-else class="sj-muted" style="margin-top:4px">{{ i18n.t('scheduler.noLogs') }}</div>
               </div>
             </div>
           </template>
         </el-table-column>
 
-        <el-table-column label="名称" prop="name" min-width="140">
+        <el-table-column :label="i18n.t('common.name')" prop="name" min-width="140">
           <template #default="{ row }">
             <span class="sj-name">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="类型" width="90" align="center">
+        <el-table-column :label="i18n.t('common.type')" width="90" align="center">
           <template #default="{ row }">
             <el-tag size="small" :type="row.type === 'prompt' ? 'primary' : 'info'">
               {{ row.type === 'prompt' ? 'Prompt' : 'Command' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Cron 表达式" prop="expression" width="160" show-overflow-tooltip />
-        <el-table-column label="执行次数" width="100" align="center">
+        <el-table-column :label="i18n.t('scheduler.expression')" prop="expression" width="160" show-overflow-tooltip />
+        <el-table-column :label="i18n.t('scheduler.runCount')" width="100" align="center">
           <template #default="{ row }">
             <span>{{ row.run_count }}</span>
             <span v-if="row.max_runs" class="sj-muted"> / {{ row.max_runs }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="下次执行" width="180">
+        <el-table-column :label="i18n.t('scheduler.nextRun')" width="180">
           <template #default="{ row }">
             <span v-if="row.enabled && row.next_run_at">{{ formatTime(row.next_run_at) }}</span>
             <span v-else class="sj-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="上次执行" width="180">
+        <el-table-column :label="i18n.t('scheduler.lastRun')" width="180">
           <template #default="{ row }">
             <span v-if="row.last_run_at">{{ formatTime(row.last_run_at) }}</span>
             <span v-else class="sj-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="80" align="center">
+        <el-table-column :label="i18n.t('common.status')" width="80" align="center">
           <template #default="{ row }">
             <el-switch
               :model-value="row.enabled"
@@ -110,11 +110,11 @@
             />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="80" fixed="right" align="center">
+        <el-table-column :label="i18n.t('common.actions')" width="80" fixed="right" align="center">
           <template #default="{ row }">
-            <el-popconfirm title="确定删除此定时任务？" @confirm="handleDelete(row.id)">
+            <el-popconfirm :title="i18n.t('scheduler.deleteConfirm')" @confirm="handleDelete(row.id)">
               <template #reference>
-                <el-button size="small" type="danger" text>删除</el-button>
+                <el-button size="small" type="danger" text>{{ i18n.t('common.delete') }}</el-button>
               </template>
             </el-popconfirm>
           </template>
@@ -128,7 +128,9 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { schedulerApi, type SchedulerJob, type RunRecord } from '@/api/scheduler'
+import { useI18nStore } from '@/stores/i18n'
 
+const i18n = useI18nStore()
 const jobs = ref<SchedulerJob[]>([])
 const loading = ref(false)
 const togglingId = ref<string | null>(null)
@@ -139,7 +141,7 @@ function formatTime(t: string): string {
   if (!t) return '-'
   const d = new Date(t)
   if (isNaN(d.getTime())) return t
-  return d.toLocaleString('zh-CN', {
+  return d.toLocaleString(i18n.language, {
     month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
@@ -151,7 +153,7 @@ async function loadJobs() {
     const res: any = await schedulerApi.listJobs()
     jobs.value = res.data ?? []
   } catch {
-    ElMessage.error('加载定时任务失败')
+    ElMessage.error(i18n.t('scheduler.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -163,7 +165,7 @@ async function loadLogs(jobId: string) {
     const res: any = await schedulerApi.getJobLogs(jobId, 20)
     logsMap[jobId] = (res.data ?? []).reverse()
   } catch {
-    ElMessage.error('加载日志失败')
+    ElMessage.error(i18n.t('scheduler.logsFailed'))
   } finally {
     logsLoading.value = null
   }
@@ -174,9 +176,9 @@ async function handleToggle(row: SchedulerJob, enabled: boolean) {
   try {
     await schedulerApi.toggleJob(row.id, enabled)
     row.enabled = enabled
-    ElMessage.success(enabled ? '已启用' : '已停用')
+    ElMessage.success(enabled ? i18n.t('scheduler.enabled') : i18n.t('scheduler.disabled'))
   } catch {
-    ElMessage.error('操作失败')
+    ElMessage.error(i18n.t('common.operationFailed'))
   } finally {
     togglingId.value = null
   }
@@ -185,10 +187,10 @@ async function handleToggle(row: SchedulerJob, enabled: boolean) {
 async function handleDelete(id: string) {
   try {
     await schedulerApi.deleteJob(id)
-    ElMessage.success('已删除')
+    ElMessage.success(i18n.t('common.deleteSuccess'))
     await loadJobs()
   } catch {
-    ElMessage.error('删除失败')
+    ElMessage.error(i18n.t('common.deleteFailed'))
   }
 }
 
