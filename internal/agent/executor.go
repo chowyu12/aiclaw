@@ -18,7 +18,6 @@ import (
 	"github.com/chowyu12/aiclaw/internal/store"
 	"github.com/chowyu12/aiclaw/internal/tools/mcp"
 	"github.com/chowyu12/aiclaw/internal/tools/sessionsearch"
-	"github.com/chowyu12/aiclaw/internal/tools/todotool"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -31,6 +30,7 @@ type ExecuteResult struct {
 	DurationMs int
 	Steps      []model.ExecutionStep
 	ToolFiles  []*model.File
+	Plan       *model.PlanState
 }
 
 type ProviderFactory func(p *model.Provider) (provider.LLMProvider, error)
@@ -98,6 +98,7 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 	registry.RegisterBuiltin("sub_agent", e.subAgentHandler)
 	registry.RegisterBuiltin("skill", e.skillHandler)
 	registry.RegisterBuiltin("session_search", sessionsearch.NewHandler(s))
+	registry.RegisterBuiltin(planToolName, e.planHandler)
 	return e
 }
 
@@ -121,6 +122,7 @@ type execContext struct {
 	conv    *model.Conversation
 	skills  []model.Skill
 	tracker *StepTracker
+	plan    *PlanManager
 	// files 包含本轮所有可用文件（新上传 + 会话历史文件），用于 LLM 上下文构建。
 	files []*model.File
 	// uploadedFiles 仅包含本次请求中用户显式上传的文件，用于关联到当前用户消息记录。
@@ -236,6 +238,11 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 	ec.tracker.SetOnStep(func(step model.ExecutionStep) {
 		_ = chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Step: &step})
 	})
+	if ec.plan != nil {
+		ec.plan.SetOnChange(func(plan *model.PlanState) {
+			_ = chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Plan: plan})
+		})
+	}
 
 	res, err := e.run(ec.ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true)
 	if err != nil {
@@ -250,6 +257,7 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 		TokensUsed:     res.TokensUsed,
 		DurationMs:     res.DurationMs,
 		Steps:          res.Steps,
+		Plan:           res.Plan,
 	}
 	if len(ec.toolFiles) > 0 {
 		doneChunk.Files = ec.toolFiles
@@ -329,8 +337,6 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 		go e.memory.AutoSetTitle(bgCtx, conv.ID, req.Message)
 	}
 
-	ctx = todotool.WithTodoStore(ctx, todotool.GetOrCreateStore(conv.UUID))
-
 	tracker := NewStepTracker(e.store, conv.ID)
 	if req.ExecChannel != nil {
 		tracker.SetChannelTrace(req.ExecChannel)
@@ -347,6 +353,8 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 	logResourceSummary(l, agentTools, skills)
 
 	allFiles, uploadedFiles := e.loadRequestFiles(ctx, req.Files, conv.ID)
+	plan := NewPlanManager(e.store, conv.ID)
+	ctx = WithPlanManager(ctx, plan)
 
 	return &execContext{
 		ctx:           ctx,
@@ -356,6 +364,7 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 		conv:          conv,
 		skills:        skills,
 		tracker:       tracker,
+		plan:          plan,
 		files:         allFiles,
 		uploadedFiles: uploadedFiles,
 		userMsg:       req.Message,
@@ -687,6 +696,14 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 		ec.l.WithError(err).Error("[Execute] save assistant message failed")
 		return nil, err
 	}
+	var planState *model.PlanState
+	if ec.plan != nil {
+		if state, linkErr := ec.plan.LinkMessage(ctx, msgID); linkErr != nil {
+			ec.l.WithError(linkErr).Warn("[Plan] link plan to message failed")
+		} else {
+			planState = state
+		}
+	}
 
 	if len(ec.toolFiles) > 0 {
 		files := append([]*model.File(nil), ec.toolFiles...)
@@ -722,6 +739,7 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRun
 		DurationMs:     int(duration.Milliseconds()),
 		Steps:          ec.tracker.Steps(),
 		ToolFiles:      append([]*model.File(nil), ec.toolFiles...),
+		Plan:           planState,
 	}, nil
 }
 

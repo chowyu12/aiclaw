@@ -29,6 +29,7 @@ type Message struct {
 
 	Steps []ExecutionStep `json:"steps,omitzero" gorm:"-"`
 	Files []*File         `json:"files,omitzero" gorm:"-"`
+	Plan  *PlanState      `json:"plan,omitzero" gorm:"-"`
 }
 
 type StepType string
@@ -139,6 +140,7 @@ type ChatResponse struct {
 	TokensUsed     int             `json:"tokens_used"`
 	Steps          []ExecutionStep `json:"steps,omitzero"`
 	Files          []*File         `json:"files,omitzero"`
+	Plan           *PlanState      `json:"plan,omitzero"`
 }
 
 type StreamChunk struct {
@@ -153,6 +155,7 @@ type StreamChunk struct {
 	Step       *ExecutionStep  `json:"step,omitzero"`
 	Steps      []ExecutionStep `json:"steps,omitzero"`
 	Files      []*File         `json:"files,omitzero"`
+	Plan       *PlanState      `json:"plan,omitzero"`
 }
 
 type ListQuery struct {

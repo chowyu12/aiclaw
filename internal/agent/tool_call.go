@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -276,7 +277,8 @@ func dedupeFiles(files []*model.File) []*model.File {
 }
 
 // appendAssistantToolRound 执行一轮工具调用：并发安全的工具并行执行，其余串行执行。
-func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *agentRunState, assistant openai.ChatCompletionMessage) {
+// 返回值分别表示：是否执行了非 plan 的真实工具、是否至少一个工具失败。
+func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *agentRunState, assistant openai.ChatCompletionMessage) (bool, bool) {
 	st.Messages = append(st.Messages, assistant)
 	tcs := assistant.ToolCalls
 	n := len(tcs)
@@ -343,19 +345,35 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 
 	// 按原始顺序收集结果
 	var toolResults []ToolResult
+	var persistedToolResults []ToolResult
+	var persistedToolCalls []openai.ToolCall
 	var pendingParts []openai.ChatMessagePart
-	for _, r := range results {
+	toolFailed := ""
+	hasRealTool := false
+	for i, r := range results {
 		st.Messages = append(st.Messages, r.toolMsg)
 		toolResults = append(toolResults, r.tr)
+		if strings.HasPrefix(r.tr.Content, "error:") && toolFailed == "" {
+			toolFailed = fmt.Sprintf("%s: %s", r.tr.ToolName, r.tr.Content)
+		}
+		if tcs[i].Function.Name != planToolName {
+			hasRealTool = true
+			persistedToolCalls = append(persistedToolCalls, tcs[i])
+			persistedToolResults = append(persistedToolResults, r.tr)
+		}
 		pendingParts = append(pendingParts, r.fileParts...)
 		if len(r.toolFiles) > 0 {
 			ec.toolFiles = append(ec.toolFiles, r.toolFiles...)
 		}
 	}
 	ec.toolFiles = dedupeFiles(ec.toolFiles)
+	if toolFailed != "" && ec.plan != nil {
+		ec.plan.FailRunning(ctx, toolFailed)
+	}
 
-	if !ec.ephemeral {
-		if err := e.memory.SaveToolCallRound(ctx, ec.conv.ID, assistant.Content, assistant.ToolCalls, toolResults); err != nil {
+	_ = toolResults
+	if !ec.ephemeral && len(persistedToolCalls) > 0 {
+		if err := e.memory.SaveToolCallRound(ctx, ec.conv.ID, assistant.Content, persistedToolCalls, persistedToolResults); err != nil {
 			ec.l.WithError(err).Warn("[Memory] save tool call round failed")
 		}
 	}
@@ -368,6 +386,7 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 			MultiContent: parts,
 		})
 	}
+	return hasRealTool, toolFailed != ""
 }
 
 func toolResultMsg(toolCallID, toolName, content string) openai.ChatCompletionMessage {

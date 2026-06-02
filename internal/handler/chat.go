@@ -71,6 +71,7 @@ func (h *ChatHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		TokensUsed:     result.TokensUsed,
 		Steps:          result.Steps,
 		Files:          result.ToolFiles,
+		Plan:           result.Plan,
 	})
 }
 
@@ -242,6 +243,23 @@ func (h *ChatHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		files, err := h.store.ListFilesByMessage(r.Context(), msg.ID)
 		if err == nil && len(files) > 0 {
 			msgs[i].Files = files
+		}
+		if msg.Role == "assistant" {
+			if run, err := h.store.GetPlanRunByMessage(r.Context(), msg.ID); err == nil && run != nil {
+				if items, err := h.store.ListPlanItems(r.Context(), run.ID); err == nil {
+					msgs[i].Plan = &model.PlanState{
+						ID:             run.ID,
+						UUID:           run.UUID,
+						ConversationID: run.ConversationID,
+						MessageID:      run.MessageID,
+						Goal:           run.Goal,
+						Status:         run.Status,
+						RevisionReason: run.RevisionReason,
+						Items:          items,
+						UpdatedAt:      run.UpdatedAt,
+					}
+				}
+			}
 		}
 	}
 

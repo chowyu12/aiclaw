@@ -104,14 +104,14 @@ func TestUserMessagesHaveURL(t *testing.T) {
 func TestFilterURLGatedTools(t *testing.T) {
 	mkTool := func(name string) openai.Tool {
 		return openai.Tool{
-			Type: openai.ToolTypeFunction,
+			Type:     openai.ToolTypeFunction,
 			Function: &openai.FunctionDefinition{Name: name},
 		}
 	}
 	tools := []openai.Tool{
 		mkTool("web_fetch"),
 		mkTool("session_search"),
-		mkTool("todo_write"),
+		mkTool("plan"),
 	}
 
 	t.Run("has_url_keeps_all", func(t *testing.T) {

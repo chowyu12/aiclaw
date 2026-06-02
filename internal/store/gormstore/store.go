@@ -9,9 +9,9 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	sqliteDriver "github.com/glebarez/sqlite"
 	mysqlDriver "gorm.io/driver/mysql"
 	pgDriver "gorm.io/driver/postgres"
-	sqliteDriver "github.com/glebarez/sqlite"
 
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
@@ -76,6 +76,8 @@ func autoMigrate(db *gorm.DB) error {
 		&model.Conversation{},
 		&model.Message{},
 		&model.ExecutionStep{},
+		&model.PlanRun{},
+		&model.PlanItem{},
 		&model.File{},
 	); err != nil {
 		return err

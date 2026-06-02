@@ -83,6 +83,12 @@ func (s *GormStore) UpdateConversationTitle(ctx context.Context, id int64, title
 
 func (s *GormStore) DeleteConversation(ctx context.Context, id int64) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var planIDs []int64
+		tx.Model(&model.PlanRun{}).Where("conversation_id = ?", id).Pluck("id", &planIDs)
+		if len(planIDs) > 0 {
+			tx.Where("plan_run_id IN ?", planIDs).Delete(&model.PlanItem{})
+		}
+		tx.Where("conversation_id = ?", id).Delete(&model.PlanRun{})
 		tx.Where("conversation_id = ?", id).Delete(&model.File{})
 		tx.Where("conversation_id = ?", id).Delete(&model.ExecutionStep{})
 		tx.Where("conversation_id = ?", id).Delete(&model.Message{})
@@ -101,6 +107,14 @@ func (s *GormStore) GetMessage(ctx context.Context, id int64) (*model.Message, e
 // DeleteMessagesFrom 删除指定会话中 id >= fromMessageID 的所有消息及其关联的步骤和文件。
 func (s *GormStore) DeleteMessagesFrom(ctx context.Context, conversationID, fromMessageID int64) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var planIDs []int64
+		tx.Model(&model.PlanRun{}).
+			Where("conversation_id = ? AND (message_id = 0 OR message_id >= ?)", conversationID, fromMessageID).
+			Pluck("id", &planIDs)
+		if len(planIDs) > 0 {
+			tx.Where("plan_run_id IN ?", planIDs).Delete(&model.PlanItem{})
+		}
+		tx.Where("conversation_id = ? AND (message_id = 0 OR message_id >= ?)", conversationID, fromMessageID).Delete(&model.PlanRun{})
 		cond := "conversation_id = ? AND id >= ?"
 		msgCond := "conversation_id = ? AND message_id IN (?)"
 		subQuery := tx.Model(&model.Message{}).Select("id").Where(cond, conversationID, fromMessageID)

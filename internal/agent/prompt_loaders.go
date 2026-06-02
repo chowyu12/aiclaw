@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/tools/memorytool"
-	"github.com/chowyu12/aiclaw/internal/tools/todotool"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -23,12 +22,4 @@ func loadPersistentMemory(ws *workspace.Workspace) string {
 		return ""
 	}
 	return strings.Join(parts, "\n\n")
-}
-
-// loadTodoBlock 加载当前会话的 todo 列表，格式化为 system prompt 片段。
-func loadTodoBlock(convUUID string) string {
-	if convUUID == "" {
-		return ""
-	}
-	return todotool.FormatTodoBlock(todotool.GetOrCreateStore(convUUID).Get())
 }

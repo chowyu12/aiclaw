@@ -141,6 +141,27 @@
                 </template>
               </div>
 
+              <div v-if="msg.role === 'assistant' && msg.plan?.items?.length" class="plan-panel">
+                <div class="plan-head">
+                  <div class="plan-title-wrap">
+                    <span class="plan-kicker">执行计划</span>
+                    <span class="plan-goal">{{ msg.plan.goal || '运行计划' }}</span>
+                  </div>
+                  <span class="plan-progress">{{ planProgress(msg.plan) }}</span>
+                </div>
+                <div v-if="msg.plan.revision_reason" class="plan-reason">{{ msg.plan.revision_reason }}</div>
+                <div class="plan-items">
+                  <div v-for="item in msg.plan.items" :key="item.id" class="plan-item" :class="'plan-item--' + item.status">
+                    <span class="plan-status-dot" />
+                    <div class="plan-item-main">
+                      <div class="plan-item-title">{{ item.title }}</div>
+                      <div v-if="item.detail || item.reason" class="plan-item-detail">{{ item.detail || item.reason }}</div>
+                    </div>
+                    <span class="plan-item-status">{{ planItemStatusLabel(item.status) }}</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- 消息气泡（附件 + 文本统一展示） -->
                 <div class="msg-bubble">
                 <div v-if="msg.files && msg.files.length > 0" class="bubble-attachments">
@@ -305,6 +326,27 @@
             <div class="msg-body">
               <div class="msg-meta">
                 <span class="msg-sender">{{ currentAgentName }}</span>
+              </div>
+
+              <div v-if="pendingPlan?.items?.length" class="plan-panel plan-panel--streaming">
+                <div class="plan-head">
+                  <div class="plan-title-wrap">
+                    <span class="plan-kicker">执行计划</span>
+                    <span class="plan-goal">{{ pendingPlan.goal || '运行计划' }}</span>
+                  </div>
+                  <span class="plan-progress">{{ planProgress(pendingPlan) }}</span>
+                </div>
+                <div v-if="pendingPlan.revision_reason" class="plan-reason">{{ pendingPlan.revision_reason }}</div>
+                <div class="plan-items">
+                  <div v-for="item in pendingPlan.items" :key="item.id" class="plan-item" :class="'plan-item--' + item.status">
+                    <span class="plan-status-dot" />
+                    <div class="plan-item-main">
+                      <div class="plan-item-title">{{ item.title }}</div>
+                      <div v-if="item.detail || item.reason" class="plan-item-detail">{{ item.detail || item.reason }}</div>
+                    </div>
+                    <span class="plan-item-status">{{ planItemStatusLabel(item.status) }}</span>
+                  </div>
+                </div>
               </div>
 
               <!-- 实时步骤时间线 -->
@@ -483,7 +525,7 @@
 
 <script lang="ts">
 import { ref } from 'vue'
-import type { ExecutionStep, FileInfo, StepNode } from '../../api/chat'
+import type { ExecutionStep, FileInfo, PlanState, StepNode } from '../../api/chat'
 
 interface ChatMessage {
   id?: number
@@ -494,6 +536,7 @@ interface ChatMessage {
   created_at?: string
   steps?: ExecutionStep[]
   files?: FileInfo[]
+  plan?: PlanState
   _showSteps?: boolean
 }
 
@@ -502,6 +545,7 @@ const _messages = ref<ChatMessage[]>([])
 const _streaming = ref(false)
 const _streamingContent = ref('')
 const _pendingSteps = ref<ExecutionStep[]>([])
+const _pendingPlan = ref<PlanState | null>(null)
 const _conversationId = ref('')
 const _activeConvId = ref<number>(0)
 let _streamController: AbortController | null = null
@@ -587,6 +631,7 @@ const messages = _messages
 const streaming = _streaming
 const streamingContent = _streamingContent
 const pendingSteps = _pendingSteps
+const pendingPlan = _pendingPlan
 const conversationId = _conversationId
 const activeConvId = _activeConvId
 
@@ -668,6 +713,7 @@ function parseChatMessages(msgs: Message[]): ChatMessage[] {
       created_at: m.created_at,
       steps: m.steps,
       files: m.files,
+      plan: m.plan,
       _showSteps: false,
     }))
 }
@@ -781,6 +827,7 @@ function resetChat() {
   messages.value = []
   streamingContent.value = ''
   pendingSteps.value = []
+  pendingPlan.value = null
   pendingFiles.value = []
   pendingURLs.value = []
   urlInput.value = ''
@@ -897,6 +944,7 @@ function sendMessage() {
   streaming.value = true
   streamingContent.value = ''
   pendingSteps.value = []
+  pendingPlan.value = null
   scrollToBottom()
 
   const focusInput = () => nextTick(() => inputRef.value?.focus())
@@ -910,6 +958,7 @@ function sendMessage() {
       messages.value.push(reactive(localMsg))
       streamingContent.value = ''
       pendingSteps.value = []
+      pendingPlan.value = null
       streaming.value = false
       scrollToBottom()
       loadConversations()
@@ -917,6 +966,7 @@ function sendMessage() {
       await reloadCurrentMessages()
       streamingContent.value = ''
       pendingSteps.value = []
+      pendingPlan.value = null
       streaming.value = false
     }
     focusInput()
@@ -927,6 +977,7 @@ function sendMessage() {
     (chunk: StreamChunk) => {
       if (chunk.conversation_id) conversationId.value = chunk.conversation_id
       if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
+      if (chunk.plan) pendingPlan.value = chunk.plan
       if (chunk.steps?.length) { for (const s of chunk.steps) pushOrUpdateStep(pendingSteps.value, s) }
       else if (chunk.step) pushOrUpdateStep(pendingSteps.value, chunk.step)
       if (chunk.done) {
@@ -944,6 +995,7 @@ function sendMessage() {
           id: chunk.message_id || undefined,
         }
         if (chunk.files?.length) msg.files = chunk.files
+        if (chunk.plan) msg.plan = chunk.plan
         finishSend(msg)
       }
     },
@@ -974,6 +1026,7 @@ function retryMessage(assistantIdx: number) {
     streaming.value = true
     streamingContent.value = ''
     pendingSteps.value = []
+    pendingPlan.value = null
     scrollToBottom()
 
     let retryFinished = false
@@ -984,6 +1037,7 @@ function retryMessage(assistantIdx: number) {
       await reloadCurrentMessages()
       streamingContent.value = ''
       pendingSteps.value = []
+      pendingPlan.value = null
       streaming.value = false
     }
 
@@ -991,6 +1045,7 @@ function retryMessage(assistantIdx: number) {
       { conversation_id: conversationId.value, message_id: assistantMsg.id },
       (chunk: StreamChunk) => {
         if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
+        if (chunk.plan) pendingPlan.value = chunk.plan
         if (chunk.steps?.length) { for (const s of chunk.steps) pushOrUpdateStep(pendingSteps.value, s) }
         else if (chunk.step) pushOrUpdateStep(pendingSteps.value, chunk.step)
         if (chunk.done) finishRetry()
@@ -1033,6 +1088,25 @@ function stepTagType(status: string): 'success' | 'danger' | 'info' {
   if (status === 'success') return 'success'
   if (status === 'running' || status === 'pending') return 'info'
   return 'danger'
+}
+
+function planItemStatusLabel(status: string): string {
+  switch (status) {
+    case 'pending': return '待执行'
+    case 'running': return '进行中'
+    case 'completed': return '已完成'
+    case 'blocked': return '阻塞'
+    case 'failed': return '失败'
+    case 'skipped': return '跳过'
+    default: return status
+  }
+}
+
+function planProgress(plan?: PlanState | null): string {
+  const items = plan?.items || []
+  if (!items.length) return ''
+  const done = items.filter(i => i.status === 'completed' || i.status === 'skipped').length
+  return `${done}/${items.length}`
 }
 
 function pushOrUpdateStep(list: ExecutionStep[], step: ExecutionStep) {
@@ -1561,6 +1635,122 @@ function groupSteps(steps: ExecutionStep[]): StepNode[] {
   border: none;
   border-radius: 18px 18px 6px 18px;
   box-shadow: 0 8px 24px rgba(37, 99, 235, 0.35);
+}
+
+.plan-panel {
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+.plan-panel--streaming {
+  margin-bottom: 14px;
+}
+.plan-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.plan-title-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.plan-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  color: #0f766e;
+}
+.plan-goal {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+}
+.plan-progress {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f766e;
+  font-variant-numeric: tabular-nums;
+}
+.plan-reason {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #64748b;
+}
+.plan-items {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.plan-item {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  min-height: 24px;
+}
+.plan-status-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+.plan-item--running .plan-status-dot {
+  background: #0ea5e9;
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12);
+}
+.plan-item--completed .plan-status-dot {
+  background: #10b981;
+}
+.plan-item--blocked .plan-status-dot,
+.plan-item--failed .plan-status-dot {
+  background: #ef4444;
+}
+.plan-item--skipped .plan-status-dot {
+  background: #cbd5e1;
+}
+.plan-item-main {
+  min-width: 0;
+}
+.plan-item-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.plan-item-detail {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.plan-item-status {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  line-height: 20px;
+}
+.plan-item--running .plan-item-status {
+  color: #0284c7;
+}
+.plan-item--completed .plan-item-status {
+  color: #059669;
+}
+.plan-item--blocked .plan-item-status,
+.plan-item--failed .plan-item-status {
+  color: #dc2626;
 }
 
 /* ── Markdown 渲染样式 ── */
