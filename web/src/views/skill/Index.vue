@@ -3,21 +3,23 @@
     <div class="aic-page-head">
       <h1 class="aic-title">Skills</h1>
       <p class="aic-sub">
-        内置技能随程序发布；本地技能来自 Workspace <code>skills/</code> 目录；待审候选由 Agent
-        在多工具协作成功后自动归档到 <code>skills-pending/</code>，转正后才会成为正式技能。
+        Built-in skills ship with the application. Local skills come from the Workspace
+        <code>skills/</code> directory. Pending candidates are archived to
+        <code>skills-pending/</code> after successful multi-tool Agent runs and become active
+        only after promotion.
       </p>
     </div>
     <div class="aic-page-body" v-loading="loading">
       <el-tabs v-model="activeTab" class="sk-tabs">
         <template #prefix>
-          <el-button size="small" plain style="margin-right: 12px" @click="loadAll">刷新</el-button>
+          <el-button size="small" plain style="margin-right: 12px" @click="loadAll">Refresh</el-button>
         </template>
 
         <!-- 待审候选 -->
         <el-tab-pane name="pending">
           <template #label>
             <span class="sk-tab-label">
-              待审候选
+              Pending
               <el-badge
                 v-if="pendingSkills.length > 0"
                 :value="pendingSkills.length"
@@ -28,7 +30,8 @@
             </span>
           </template>
           <div v-if="pendingSkills.length === 0" class="sk-empty">
-            暂无待审候选；当 Agent 一次执行调用 ≥3 个不同工具且成功完成时，会自动在此归档
+            No pending candidates. Successful Agent runs that use 3 or more distinct tools
+            are archived here automatically.
           </div>
           <div v-else class="sk-list">
             <div v-for="p in pendingSkills" :key="p.file_name" class="sk-item">
@@ -39,10 +42,10 @@
               </div>
               <div class="sk-item-desc">{{ p.preview || '—' }}</div>
               <div class="sk-item-actions">
-                <el-button size="small" @click="openPreview(p.file_name)">查看全文</el-button>
-                <el-button size="small" type="primary" @click="openPromote(p)">转正</el-button>
+                <el-button size="small" @click="openPreview(p.file_name)">Preview</el-button>
+                <el-button size="small" type="primary" @click="openPromote(p)">Promote</el-button>
                 <el-button size="small" type="danger" plain @click="discardPending(p.file_name)">
-                  丢弃
+                  Discard
                 </el-button>
               </div>
             </div>
@@ -53,11 +56,11 @@
         <el-tab-pane name="builtin">
           <template #label>
             <span class="sk-tab-label">
-              内置技能
+              Built-in
               <span class="sk-tab-count">{{ builtinSkills.length }}</span>
             </span>
           </template>
-          <div v-if="builtinSkills.length === 0" class="sk-empty">暂无内置技能</div>
+          <div v-if="builtinSkills.length === 0" class="sk-empty">No built-in skills</div>
           <div v-else class="sk-list">
             <div v-for="s in builtinSkills" :key="s.dir_name" class="sk-item">
               <div class="sk-item-head">
@@ -66,8 +69,8 @@
               </div>
               <div class="sk-item-desc">{{ s.description }}</div>
               <div class="sk-item-meta">
-                <span>目录 <code>{{ s.dir_name }}</code></span>
-                <span v-if="s.author">作者 {{ s.author }}</span>
+                <span>Directory <code>{{ s.dir_name }}</code></span>
+                <span v-if="s.author">Author {{ s.author }}</span>
               </div>
             </div>
           </div>
@@ -77,25 +80,25 @@
         <el-tab-pane name="local">
           <template #label>
             <span class="sk-tab-label">
-              本地技能
+              Local
               <span class="sk-tab-count">{{ localSkills.length }}</span>
             </span>
           </template>
           <div v-if="localSkills.length === 0" class="sk-empty">
-            <code>~/.aiclaw/skills/</code> 下暂无技能目录
+            No skill directories under <code>~/.aiclaw/skills/</code>
           </div>
           <div v-else class="sk-list">
             <div v-for="s in localSkills" :key="s.dir_name" class="sk-item">
               <div class="sk-item-head">
                 <span class="sk-item-name">{{ s.name }}</span>
                 <el-tag v-if="s.version" size="small" round>v{{ s.version }}</el-tag>
-                <el-tag v-if="s.main_file" size="small" type="success" round>可执行</el-tag>
+                <el-tag v-if="s.main_file" size="small" type="success" round>Executable</el-tag>
               </div>
               <div class="sk-item-desc">{{ s.description || '—' }}</div>
               <div class="sk-item-meta">
-                <span>目录 <code>{{ s.dir_name }}</code></span>
-                <span v-if="s.author">作者 {{ s.author }}</span>
-                <span v-if="s.main_file">入口 <code>{{ s.main_file }}</code></span>
+                <span>Directory <code>{{ s.dir_name }}</code></span>
+                <span v-if="s.author">Author {{ s.author }}</span>
+                <span v-if="s.main_file">Entry <code>{{ s.main_file }}</code></span>
               </div>
             </div>
           </div>
@@ -112,45 +115,45 @@
     >
       <pre class="sk-preview"><code>{{ previewContent }}</code></pre>
       <template #footer>
-        <el-button @click="previewVisible = false">关闭</el-button>
+        <el-button @click="previewVisible = false">Close</el-button>
         <el-button
           v-if="previewFile"
           type="primary"
           @click="previewVisible = false; openPromote({ file_name: previewFile, updated_at: '', preview: '' })"
         >
-          去转正
+          Promote
         </el-button>
       </template>
     </el-dialog>
 
     <!-- 转正 -->
-    <el-dialog v-model="promoteVisible" title="转正候选技能" width="520px" :destroy-on-close="true">
+    <el-dialog v-model="promoteVisible" title="Promote Skill Candidate" width="520px" :destroy-on-close="true">
       <el-form :model="promoteForm" label-width="90px">
-        <el-form-item label="候选文件">
+        <el-form-item label="Candidate">
           <el-tag>{{ promoteForm.file }}</el-tag>
         </el-form-item>
-        <el-form-item label="技能名称" required>
+        <el-form-item label="Name" required>
           <el-input
             v-model="promoteForm.name"
-            placeholder="例如：fetch-and-summarize-url"
+            placeholder="Example: fetch-and-summarize-url"
             maxlength="64"
             show-word-limit
           />
         </el-form-item>
-        <el-form-item label="描述" required>
+        <el-form-item label="Description" required>
           <el-input
             v-model="promoteForm.description"
             type="textarea"
             :rows="3"
-            placeholder="一句话描述触发场景与作用，会写入 SKILL.md frontmatter"
+            placeholder="One sentence describing when to use this skill and what it does. This is written to SKILL.md frontmatter."
             maxlength="500"
             show-word-limit
           />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="promoteVisible = false">取消</el-button>
-        <el-button type="primary" :loading="promoting" @click="submitPromote">转正</el-button>
+        <el-button @click="promoteVisible = false">Cancel</el-button>
+        <el-button type="primary" :loading="promoting" @click="submitPromote">Promote</el-button>
       </template>
     </el-dialog>
   </div>
@@ -237,17 +240,17 @@ async function submitPromote() {
   const name = promoteForm.name.trim()
   const description = promoteForm.description.trim()
   if (!name) {
-    ElMessage.warning('请填写技能名称')
+    ElMessage.warning('Enter a skill name')
     return
   }
   if (!description) {
-    ElMessage.warning('请填写描述')
+    ElMessage.warning('Enter a description')
     return
   }
   promoting.value = true
   try {
     await workspaceSkillApi.promotePending(promoteForm.file, { name, description })
-    ElMessage.success('已转正为正式技能')
+    ElMessage.success('Promoted to an active skill')
     promoteVisible.value = false
     await loadAll()
   } catch {
@@ -259,17 +262,17 @@ async function submitPromote() {
 
 async function discardPending(file: string) {
   try {
-    await ElMessageBox.confirm(`确定丢弃候选 ${file} 吗？该操作不可恢复。`, '丢弃确认', {
+    await ElMessageBox.confirm(`Discard candidate ${file}? This cannot be undone.`, 'Discard Candidate', {
       type: 'warning',
-      confirmButtonText: '丢弃',
-      cancelButtonText: '取消',
+      confirmButtonText: 'Discard',
+      cancelButtonText: 'Cancel',
     })
   } catch {
     return
   }
   try {
     await workspaceSkillApi.discardPending(file)
-    ElMessage.success('已丢弃')
+    ElMessage.success('Discarded')
     await loadPending()
   } catch {
     /* 拦截器已提示 */

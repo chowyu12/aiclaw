@@ -81,14 +81,14 @@ func listRecent(ctx context.Context, s store.Store, limit int) (string, error) {
 	q := model.ListQuery{Page: 1, PageSize: limit}
 	convs, _, err := s.ListConversations(ctx, "", q)
 	if err != nil {
-		return errResult("查询会话列表失败: " + err.Error()), nil
+		return errResult("Failed to query conversations: " + err.Error()), nil
 	}
 
 	var hits []sessionHit
 	for _, c := range convs {
 		title := c.Title
 		if title == "" {
-			title = "(无标题)"
+			title = "(Untitled)"
 		}
 		preview := ""
 		msgs, _ := s.ListMessages(ctx, c.ID, 1)
@@ -111,7 +111,7 @@ func listRecent(ctx context.Context, s store.Store, limit int) (string, error) {
 		Mode:    "recent",
 		Results: hits,
 		Count:   len(hits),
-		Message: fmt.Sprintf("最近 %d 个会话。使用关键词搜索特定主题。", len(hits)),
+		Message: fmt.Sprintf("Latest %d conversations. Provide a keyword to search a specific topic.", len(hits)),
 	}
 	out, _ := json.Marshal(r)
 	return string(out), nil
@@ -147,7 +147,7 @@ func searchMessages(ctx context.Context, s store.Store, query string, limit int)
 		Count:   len(hits),
 	}
 	if len(hits) == 0 {
-		res.Message = "没有找到匹配的会话。"
+		res.Message = "No matching conversations found."
 	}
 	out, _ := json.Marshal(res)
 	return string(out), nil
@@ -157,7 +157,7 @@ func searchFallback(ctx context.Context, s store.Store, query string, limit int)
 	q := model.ListQuery{Page: 1, PageSize: 200}
 	convs, _, err := s.ListConversations(ctx, "", q)
 	if err != nil {
-		return errResult("查询会话列表失败: " + err.Error()), nil
+		return errResult("Failed to query conversations: " + err.Error()), nil
 	}
 
 	keywords := strings.Fields(strings.ToLower(query))
@@ -188,7 +188,7 @@ func searchFallback(ctx context.Context, s store.Store, query string, limit int)
 			}
 			title := c.Title
 			if title == "" {
-				title = "(无标题)"
+				title = "(Untitled)"
 			}
 			hits = append(hits, messageHit{
 				ConversationUUID: c.UUID,
@@ -208,7 +208,7 @@ func searchFallback(ctx context.Context, s store.Store, query string, limit int)
 		Count:   len(hits),
 	}
 	if len(hits) == 0 {
-		res.Message = "没有找到匹配的会话。"
+		res.Message = "No matching conversations found."
 	}
 	out, _ := json.Marshal(res)
 	return string(out), nil

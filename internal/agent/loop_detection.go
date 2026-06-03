@@ -14,9 +14,9 @@ const (
 	loopConsecutiveIdenticalBlock = 5
 
 	// 在最近 loopToolSearchWindow 次工具调用中，tool_search 超过该次数则拦截下一次 tool_search。
-	loopToolSearchWindow          = 12
-	loopToolSearchMaxInWindow     = 6
-	loopPingPongTailLen           = 6
+	loopToolSearchWindow      = 12
+	loopToolSearchMaxInWindow = 6
+	loopPingPongTailLen       = 6
 )
 
 type loopToolCall struct {
@@ -43,18 +43,18 @@ func (d *toolLoopDetector) check(name, args string) (blocked bool, message strin
 
 	if n := d.consecutiveTail(name, a); n >= loopConsecutiveIdenticalBlock-1 {
 		return true, fmt.Sprintf(
-			"[loop_guard] 已连续 %d 次完全相同的 %s 调用，疑似陷入循环。请改变参数、换用其他工具，或直接给出最终回答。",
-			n+1, name)
+			"[loop_guard] The exact same %s call has repeated %d times, which looks like a loop. Change the arguments, use a different tool, or provide the final answer.",
+			name, n+1)
 	}
 
 	if name == toolSearchName {
 		if c := d.countNameInWindow(toolSearchName, loopToolSearchWindow); c >= loopToolSearchMaxInWindow {
-			return true, "[loop_guard] tool_search 在最近若干次调用中过于频繁。当前列表中已有可用工具，请直接调用它们完成任务，勿再搜索。"
+			return true, "[loop_guard] tool_search has been called too often recently. Use the currently available tools to finish the task instead of searching again."
 		}
 	}
 
 	if d.wouldCompletePingPong(name) {
-		return true, "[loop_guard] 检测到两个工具交替重复调用（ping-pong），无进展。请合并步骤、换工具或输出结论。"
+		return true, "[loop_guard] Detected repeated ping-pong calls between two tools with no progress. Combine steps, switch tools, or provide a conclusion."
 	}
 
 	return false, ""

@@ -17,7 +17,7 @@ func DefaultBuiltinDefs() []model.Tool {
 	return []model.Tool{
 		{
 			Name:        "read",
-			Description: "读取文件内容。支持全文读取或按行范围读取（通过 offset/limit 参数）。对于图片文件（png/jpg/gif/webp/svg），会自动将图片传递给视觉模型进行理解和分析。",
+			Description: "Read file content. Supports full reads or line-range reads with offset/limit. Image files are automatically passed to the vision model for understanding and analysis.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -45,7 +45,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "write",
-			Description: "创建或覆盖文件。支持绝对路径、~ 开头路径和相对路径（解析到 Agent 沙箱目录）。可选追加模式。自动创建父目录。",
+			Description: "Create or overwrite files. Supports absolute paths, home-relative paths, and relative paths resolved inside the Agent sandbox. Can append and creates parent directories automatically.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -73,7 +73,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "edit",
-			Description: "对文件进行精确编辑。查找 old_string 并替换为 new_string。old_string 在文件中必须唯一（不唯一时需提供更多上下文）。",
+			Description: "Make precise file edits by replacing old_string with new_string. old_string must be unique in the target file.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -101,7 +101,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "grep",
-			Description: "按正则表达式模式搜索文件内容。支持目录递归搜索、文件过滤、大小写忽略。自动跳过 .git/node_modules 等目录。",
+			Description: "Search file contents with regular expressions. Supports recursive directory search, file filters, and case-insensitive matching while skipping common vendor directories.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     60,
@@ -134,7 +134,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "find",
-			Description: "按 glob 模式查找文件。支持 ** 递归匹配。自动跳过 .git/node_modules 等目录。",
+			Description: "Find files by glob pattern, including recursive ** matches, while skipping common vendor directories.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     60,
@@ -159,7 +159,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "ls",
-			Description: "列出目录内容。显示文件权限、大小、修改时间等信息。",
+			Description: "List directory contents with permissions, size, and modification time.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -178,7 +178,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "exec",
-			Description: "运行 shell 命令。支持 PTY 以适配需要 TTY 的命令行工具（如 docker、kubectl 等），自动检测并使用 PTY。内置危险命令拦截。",
+			Description: "Run shell commands with automatic PTY support for tools that need a terminal. Includes dangerous-command blocking.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     300,
@@ -207,7 +207,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "process",
-			Description: "管理后台 exec 会话。支持启动后台命令、列出会话、读取输出、终止进程。适用于需要长时间运行的命令（如开发服务器、日志监控）。",
+			Description: "Manage background exec sessions. Start long-running commands, list sessions, read output, and terminate processes.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -236,7 +236,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "web_fetch",
-			Description: "抓取用户显式提供的 URL 并提取可读内容。仅当用户消息中直接出现 URL（http/https 链接）时才可调用；不得用于未指定 URL 的泛化联网检索（请改用内置联网搜索）。优先通过 HTTP 直接获取，失败时自动回退到浏览器渲染提取文本。",
+			Description: "Fetch a URL explicitly provided by the user and extract readable content. Use only for concrete http/https URLs, not general web research.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     60,
@@ -256,9 +256,8 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "browser",
-			Description: "控制网页浏览器。支持导航、截图、元素快照与交互、表单填充、Cookie/Storage 管理、Console/Network 监控、设备仿真等。多标签时：每个标签页 snapshot 产生的 ref 仅对该页有效；若操作页与当前激活页不一致，请在 click/type/snapshot 等参数中传入 target_id（由 tabs 或 open_tab 返回）。" +
-				"提示：可在 config.yaml 配置 browser.cdp_endpoint=http://127.0.0.1:9222 让本工具 attach 到用户已登录的真实 Chrome（保留登录态/Cookie），适合个人助手场景。",
+			Name:        "browser",
+			Description: "Control a web browser. Supports navigation, screenshots, element snapshots and interaction, form filling, cookie/storage management, console/network monitoring, and device emulation. In multi-tab mode, refs are tab-specific; pass target_id when acting on a non-active tab. Configure browser.cdp_endpoint in config.yaml to attach to a signed-in Chrome profile when needed.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     120,
@@ -266,7 +265,7 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "canvas",
-			Description: "展示/评估/快照 Canvas 画布。支持渲染 HTML/CSS/JS 内容、执行 JavaScript 表达式、截取画面快照。",
+			Description: "Display, evaluate, or snapshot a Canvas. Render HTML/CSS/JS, execute JavaScript expressions, and capture visual snapshots.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     60,
@@ -303,10 +302,8 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "code_interpreter",
-			Description: "代码解释器，支持编写并执行 Python/JavaScript/Shell 代码。" +
-				"Agent 传入语言类型和代码，工具自动在沙箱目录中创建文件并执行，返回 stdout/stderr 结果。" +
-				"适用于数据处理、数学计算、文件生成、API 调试、格式转换等场景。",
+			Name:        "code_interpreter",
+			Description: "Code interpreter for running Python, JavaScript, or Shell in a sandbox. Useful for data processing, math, file generation, API debugging, and format conversion.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     120,
@@ -337,11 +334,8 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "sub_agent",
-			Description: "将复杂任务拆分为多个独立子任务，分派给子 Agent 并行执行。" +
-				"每个子 Agent 拥有独立的推理链和工具集。" +
-				"适用场景：并行调研多个方向、对比多个方案、专家分工协作。" +
-				"返回结构化 JSON 结果，包含每个子任务的状态、摘要、耗时和 token 用量。",
+			Name:        "sub_agent",
+			Description: "Split complex work into independent sub-tasks and delegate them to sub-agents for parallel execution. Returns structured JSON with status, summary, duration, and token usage.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			Timeout:     600,
@@ -399,11 +393,8 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "memory",
-			Description: "持久记忆工具，跨会话保存重要信息。" +
-				"两个存储目标：memory（你的个人笔记：环境事实、项目惯例、工具使用经验）和 user（用户画像：偏好、沟通风格、工作习惯）。" +
-				"主动保存：用户纠正你时、用户分享偏好/习惯时、发现环境特征时、学到有用经验时。" +
-				"容量超 70% 时自动进入索引模式（system prompt 仅展示 [id]+tag+摘要），用 action=recall + ids 拉取完整内容。",
+			Name:        "memory",
+			Description: "Persistent memory tool for saving durable information across sessions. Stores user-profile facts and assistant notes, and supports recall when compact snapshots are in index mode.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -463,9 +454,8 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "cron",
-			Description: "定时任务调度器。支持定时执行 Agent 提示词或 Shell 命令。" +
-				"支持秒级精度 cron 表达式、最大运行次数限制、执行日志查看、启用/禁用切换。",
+			Name:        "cron",
+			Description: "In-process scheduler for running Agent prompts or shell commands on cron expressions. Supports run limits, logs, and enable/disable controls.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -542,9 +532,8 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "plan",
-			Description: "运行时计划状态工具，用于复杂任务的计划建立、状态推进和计划修订。" +
-				"收到复杂请求时（涉及 3+ 步骤），先建立计划；执行中根据真实进展更新状态，不要把计划正文写进最终回答。",
+			Name:        "plan",
+			Description: "Runtime Plan State tool for creating plans, advancing status, and revising plans during complex tasks. For requests with 3+ steps, create a plan first, update it as real progress happens, and do not include the plan body in the final answer.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -612,11 +601,8 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "skill",
-			Description: "技能结晶（self-evolving skills）。" +
-				"aiclaw 在多工具协作成功后会把执行路径自动归档到 skills-pending/。" +
-				"用本工具：list_pending 看候选 → read_pending 读全文 → promote 转正成正式 skill / discard 丢弃。" +
-				"主动使用：用户说'记下这套流程'、'以后都这样做'、'把刚才的步骤变成 skill' 时。",
+			Name:        "skill",
+			Description: "Self-evolving skill management. aiclaw archives successful multi-tool workflows into skills-pending/. Use this tool to list candidates, read them, promote them into real skills, or discard them.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
@@ -662,10 +648,8 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
-			Name: "session_search",
-			Description: "搜索过去的对话历史，跨会话回忆。" +
-				"两种模式：无查询时返回最近会话列表（零 LLM 成本），有关键词时全文搜索并返回匹配片段。" +
-				"主动使用：用户说'上次'、'记得吗'、'我们之前'等时。",
+			Name:        "session_search",
+			Description: "Search past conversation history for cross-session recall. Without a query, returns recent sessions; with keywords, performs full-text search and returns matching snippets.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{

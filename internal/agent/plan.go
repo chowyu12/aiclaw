@@ -140,37 +140,37 @@ func (pm *PlanManager) PromptBlock(ctx context.Context) string {
 	var sb strings.Builder
 	sb.WriteString("<plan_state>\n")
 	if state.Goal != "" {
-		sb.WriteString("目标: ")
+		sb.WriteString("Goal: ")
 		sb.WriteString(state.Goal)
 		sb.WriteString("\n")
 	}
 	if running != nil {
-		sb.WriteString("当前步骤: ")
+		sb.WriteString("Current step: ")
 		sb.WriteString(running.Title)
 		sb.WriteString("\n")
 	} else {
-		sb.WriteString("当前步骤: 未设置\n")
+		sb.WriteString("Current step: not set\n")
 	}
 	if len(pending) > 0 {
-		sb.WriteString("剩余步骤: ")
+		sb.WriteString("Pending steps: ")
 		for i, item := range pending {
 			if i >= 3 {
-				sb.WriteString(fmt.Sprintf(" 等 %d 项", len(pending)-i))
+				sb.WriteString(fmt.Sprintf(" and %d more", len(pending)-i))
 				break
 			}
 			if i > 0 {
-				sb.WriteString("；")
+				sb.WriteString("; ")
 			}
 			sb.WriteString(item.Title)
 		}
 		sb.WriteString("\n")
 	}
 	if state.RevisionReason != "" {
-		sb.WriteString("最近调整: ")
+		sb.WriteString("Latest revision: ")
 		sb.WriteString(state.RevisionReason)
 		sb.WriteString("\n")
 	}
-	sb.WriteString(fmt.Sprintf("进度: %d/%d 完成\n", done, len(state.Items)))
+	sb.WriteString(fmt.Sprintf("Progress: %d/%d completed\n", done, len(state.Items)))
 	sb.WriteString("</plan_state>")
 	return sb.String()
 }

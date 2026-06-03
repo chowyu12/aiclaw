@@ -36,16 +36,16 @@ type toolSearchResult struct {
 }
 
 func toolSearchDefWithContext(totalTools int, discoveredCount int, discoveredNames []string) openai.Tool {
-	desc := "搜索可用工具。搜索一次即可，匹配的工具会自动加入可用列表，之后直接调用即可，无需重复搜索。"
+	desc := "Search available tools. One search is enough: matching tools are automatically added to the available list, and you can call them directly afterward."
 	if totalTools > 0 {
-		desc += fmt.Sprintf(" 当前共 %d 个工具", totalTools)
+		desc += fmt.Sprintf(" Total tools: %d", totalTools)
 		if discoveredCount > 0 {
-			desc += fmt.Sprintf("，你已发现 %d 个", discoveredCount)
+			desc += fmt.Sprintf("; discovered: %d", discoveredCount)
 		}
-		desc += "。"
+		desc += "."
 	}
 	if len(discoveredNames) > 0 {
-		desc += " 已可用: " + strings.Join(discoveredNames, ", ") + "。如需其他工具再搜索。"
+		desc += " Already available: " + strings.Join(discoveredNames, ", ") + ". Search again only if you need a different tool."
 	}
 
 	return openai.Tool{
@@ -58,7 +58,7 @@ func toolSearchDefWithContext(totalTools int, discoveredCount int, discoveredNam
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
-						"description": "搜索关键词（英文优先，如 read、exec、browser），也支持中文描述。一次搜索即可，无需反复搜索同一类工具。",
+						"description": "Search keywords. Prefer English names such as read, exec, or browser. Chinese descriptions are also supported. Search once per tool category.",
 					},
 				},
 				"required": []string{"query"},
@@ -187,15 +187,15 @@ func searchTools(query string, allDefs []openai.Tool) []toolSearchResult {
 
 func formatToolSearchResults(results []toolSearchResult, totalTools int, newCount int, totalDiscovered int) string {
 	if len(results) == 0 {
-		return fmt.Sprintf("未找到匹配的工具（共 %d 个工具）。尝试更宽泛的关键词，或直接使用已发现的 %d 个工具。", totalTools, totalDiscovered)
+		return fmt.Sprintf("No matching tools found among %d tools. Try broader keywords or use the %d already discovered tools.", totalTools, totalDiscovered)
 	}
-	msg := fmt.Sprintf("找到 %d 个工具", len(results))
+	msg := fmt.Sprintf("Found %d tools", len(results))
 	if newCount > 0 {
-		msg += fmt.Sprintf("（%d 个新发现）", newCount)
+		msg += fmt.Sprintf(" (%d newly discovered)", newCount)
 	} else {
-		msg += "（均已在可用列表中）"
+		msg += " (all already available)"
 	}
-	msg += fmt.Sprintf("，已发现 %d/%d 个工具。直接调用即可，无需再次搜索。", totalDiscovered, totalTools)
+	msg += fmt.Sprintf(". Discovered %d/%d tools. Call the tools directly; no need to search again.", totalDiscovered, totalTools)
 
 	resp := struct {
 		FoundTools []toolSearchResult `json:"found_tools"`

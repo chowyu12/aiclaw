@@ -64,7 +64,7 @@ func (e *Executor) skillListPending(p skillToolArgs) (string, error) {
 		Success: true,
 		Action:  "list_pending",
 		Items:   items,
-		Message: fmt.Sprintf("找到 %d 份待审 skill 候选。用 read_pending(file_name=...) 查看完整内容，promote(...) 转正。", len(items)),
+		Message: fmt.Sprintf("Found %d pending skill candidates. Use read_pending(file_name=...) to inspect full content, then promote(...) to activate one.", len(items)),
 	}
 	out, _ := json.Marshal(r)
 	return string(out), nil
@@ -89,7 +89,7 @@ func (e *Executor) skillReadPending(p skillToolArgs) (string, error) {
 
 func (e *Executor) skillPromote(p skillToolArgs) (string, error) {
 	if strings.TrimSpace(p.FileName) == "" || strings.TrimSpace(p.Name) == "" || strings.TrimSpace(p.Description) == "" {
-		return skillErr("promote", "file_name, name, description 都是必填"), nil
+		return skillErr("promote", "file_name, name, and description are required"), nil
 	}
 	dir, err := PromotePendingSkill(e.ws.Root(), e.ws.Skills(), p.FileName, p.Name, p.Description)
 	if err != nil {
@@ -104,7 +104,7 @@ func (e *Executor) skillPromote(p skillToolArgs) (string, error) {
 		Success: true,
 		Action:  "promote",
 		Path:    dir,
-		Message: fmt.Sprintf("已转正为 skill «%s»，下次会话将自动加载。", p.Name),
+		Message: fmt.Sprintf("Promoted skill «%s». It will be loaded automatically in the next session.", p.Name),
 	}
 	out, _ := json.Marshal(r)
 	return string(out), nil
@@ -120,7 +120,7 @@ func (e *Executor) skillDiscard(p skillToolArgs) (string, error) {
 	r := skillToolResult{
 		Success: true,
 		Action:  "discard",
-		Message: "候选已删除。",
+		Message: "Candidate deleted.",
 	}
 	out, _ := json.Marshal(r)
 	return string(out), nil

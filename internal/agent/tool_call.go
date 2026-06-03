@@ -379,7 +379,7 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 	}
 	if len(pendingParts) > 0 {
 		parts := append([]openai.ChatMessagePart{
-			{Type: openai.ChatMessagePartTypeText, Text: "工具返回了以下文件:"},
+			{Type: openai.ChatMessagePartTypeText, Text: "The tool returned the following files:"},
 		}, pendingParts...)
 		st.Messages = append(st.Messages, openai.ChatCompletionMessage{
 			Role:         openai.ChatMessageRoleUser,
