@@ -316,15 +316,15 @@ func buildSubAgentPrompt(t subAgentTask) string {
 
 	switch t.Mode {
 	case "explore":
-		sb.WriteString("## 约束\n你处于只读探索模式，仅可使用 read/grep/find/ls/web_fetch 等工具查看信息，不得修改任何文件。\n\n")
+		sb.WriteString("## Constraints\nYou are in read-only exploration mode. Use only information-gathering tools such as read, grep, find, ls, and web_fetch. Do not modify any files.\n\n")
 	case "shell":
-		sb.WriteString("## 约束\n你处于命令执行模式，仅可使用 exec/process/read/ls 工具运行命令和查看结果。\n\n")
+		sb.WriteString("## Constraints\nYou are in command execution mode. Use only exec, process, read, and ls to run commands and inspect results.\n\n")
 	}
 
 	if t.Context != "" {
-		sb.WriteString(fmt.Sprintf("## 背景信息\n%s\n\n", t.Context))
+		sb.WriteString(fmt.Sprintf("## Context\n%s\n\n", t.Context))
 	}
-	sb.WriteString(fmt.Sprintf("## 任务目标\n%s", t.Goal))
+	sb.WriteString(fmt.Sprintf("## Goal\n%s", t.Goal))
 	return sb.String()
 }
 

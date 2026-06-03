@@ -27,13 +27,12 @@ func xmlBlock(tag, attrs, content string) string {
 	return open + "\n" + content + "\n</" + tag + ">"
 }
 
-// webSearchPromptSection 在开启内置联网搜索时注入 system prompt。
-// 目的：让模型明确知道自身具备实时检索能力，区分 web_search（自动）与 web_fetch（用户显式提供 URL）。
-const webSearchContent = `当前已开启内置联网搜索：你可以直接回答涉及近期资讯、实时数据、最新版本/价格/政策等问题，无需声明"我不知道"或"知识截止于…"。
-该搜索为模型自身能力，不是函数工具；不要尝试调用名为 web_search 的工具，也不要在回复中写出工具调用，直接给出带来源的结论即可。
-需要返回具体事实时，优先引用权威来源并附上链接。
-- 用户只描述主题 / 没给 URL → 使用内置联网搜索
-- 用户消息中出现具体 http(s):// URL → 使用 web_fetch 工具抓取该 URL 内容`
+// webSearchPromptSection injects system guidance when built-in web search is enabled.
+const webSearchContent = `Built-in web search is enabled. You can answer questions about recent news, real-time data, latest versions, prices, policies, and similar time-sensitive topics without saying that you do not know or that your knowledge is outdated.
+This search capability is part of the model runtime, not a function tool. Do not try to call a tool named web_search, and do not write tool calls in your response. Answer directly and include sources when factual claims require them.
+Prefer authoritative sources and include links for concrete facts.
+- If the user describes only a topic and does not provide a URL, use built-in web search.
+- If the user message contains a concrete http(s):// URL, use the web_fetch tool to fetch that URL.`
 
 type messagesBuildInput struct {
 	Agent            *model.Agent
@@ -144,9 +143,9 @@ func buildUserMessage(userMsg string, textFiles []*model.File, maxInjectionBytes
 		if len(content) > maxInjectionBytes {
 			content = content[:maxInjectionBytes]
 			if f.StoragePath != "" {
-				content += fmt.Sprintf("\n... [文件已截至 500KB，剩余内容请使用 read 工具读取: %s]", f.StoragePath)
+				content += fmt.Sprintf("\n... [File truncated at 500KB. Use the read tool to inspect the remaining content: %s]", f.StoragePath)
 			} else {
-				content += "\n... [文件已截至 500KB]"
+				content += "\n... [File truncated at 500KB]"
 			}
 		}
 		sb.WriteString(xmlBlock("file", attrs, content))
@@ -163,12 +162,12 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 
 	var parts []string
 
-	// <instructions>: agent 自定义提示词（角色、行为、限制）
+	// <instructions>: custom agent prompt (role, behavior, and constraints)
 	basePrompt := ag.SystemPrompt
 	if basePrompt != "" {
 		l.WithField("len", len(ag.SystemPrompt)).Debug("[Prompt]  base prompt loaded")
 	} else {
-		basePrompt = "你是一个运行在 Aiclaw 内部的个人助手。"
+		basePrompt = "You are a personal assistant running inside Aiclaw."
 	}
 	parts = append(parts, xmlBlock("instructions", "", basePrompt))
 
@@ -219,13 +218,13 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 			}
 			if ws != nil {
 				if skillDir := ws.SkillDir(sk.DirName); skillDir != "" {
-					body.WriteString("详细指令: ")
+					body.WriteString("Detailed instructions: ")
 					body.WriteString(filepath.Join(skillDir, "SKILL.md"))
 					body.WriteString("\n")
 				}
 			}
 			if names := skillToolNames[sk.Name]; len(names) > 0 {
-				body.WriteString("关联工具: ")
+				body.WriteString("Related tools: ")
 				body.WriteString(strings.Join(names, ", "))
 			}
 			skillParts = append(skillParts, xmlBlock("skill", fmt.Sprintf("name=%q", sk.Name), strings.TrimRight(body.String(), "\n")))
@@ -239,18 +238,18 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 	if hasTools || hasSkills {
 		var strategy strings.Builder
 		if hasTools {
-			strategy.WriteString(`- 知识性问题（概念解释、原理分析、经验建议、方案对比、写作翻译、数学推理）直接回答
-- 操作性问题（文件读写、命令执行、信息检索、网页抓取）或用户明确要求动手时使用工具
-- 复杂任务（3+ 步骤）先用 plan 工具建立运行计划；计划只用于执行进度，不要把计划正文写进最终回答
-- 执行中遵循 <plan_state>：优先完成当前步骤，需要调整计划时用 plan revise/update 说明原因
-- 不确定时先用 sub_agent(mode=explore) 探索，再动手
-- 基于工具返回的真实数据回答，不编造`)
+			strategy.WriteString(`- Answer knowledge questions directly, including concept explanations, reasoning, advice, comparisons, writing, translation, and math.
+- Use tools for operational tasks such as file reading/writing, command execution, information retrieval, web extraction, or when the user explicitly asks you to act.
+- For complex tasks with 3 or more steps, first use the plan tool to create a runtime plan. The plan is for execution progress only; do not include the plan body in the final answer.
+- During execution, follow <plan_state>: prioritize the current step, and use plan revise/update with a reason when the plan needs to change.
+- When uncertain, use sub_agent(mode=explore) to investigate before making changes.
+- Base answers on real tool outputs. Do not fabricate data.`)
 		}
 		if hasTools && toolSearchMode {
-			strategy.WriteString("\n- 需要工具但不在列表中时，调用 tool_search 搜索一次，搜到后直接使用")
+			strategy.WriteString("\n- If you need a tool that is not listed, call tool_search once and then use the discovered tool directly.")
 		}
 		if hasSkills {
-			strategy.WriteString("\n- 问题匹配某项技能时优先使用；使用前先 read 其 SKILL.md 了解完整用法，指令中的相对路径以 SKILL.md 所在目录为基准")
+			strategy.WriteString("\n- Prefer a matching skill when the task fits it. Before using the skill, read its SKILL.md for full instructions. Resolve relative paths from the SKILL.md directory.")
 		}
 		parts = append(parts, xmlBlock("execution_strategy", "", strategy.String()))
 	}

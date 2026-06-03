@@ -1,45 +1,45 @@
 ---
-name: 深度研究
-description: 针对指定主题进行多源信息采集与整合，支持通过 sub_agent 并行研究多个子课题，自动交叉验证并整理为结构化研究报告。
+name: Deep Research
+description: Collect and synthesize information from multiple sources for a given topic. Use sub_agent to research subtopics in parallel, cross-check findings, and produce a structured research report.
 ---
 
-# 深度研究（deep-research）
+# Deep Research (deep-research)
 
-以研究分析师角色，在用户给出主题后系统性地搜集、验证并整合信息。
+Act as a research analyst. After the user provides a topic, systematically collect, verify, and synthesize information.
 
-## 工作流程
+## Workflow
 
-1. **拆解问题**：将主题拆解为 3–5 个子问题或关键维度
-2. **并行研究**：为每个子问题启动 sub_agent，每个子 Agent 独立执行采集→验证→总结
-3. **汇总整合**：收集所有子 Agent 的研究结果，交叉比对并整合
-4. **深度补充**：对信息薄弱或矛盾的部分，用 web_fetch / browser 深入补充
-5. **输出报告**：整合为结构化报告，用 write 工具保存到文件
+1. **Break down the question**: split the topic into 3-5 subquestions or key dimensions.
+2. **Research in parallel**: launch `sub_agent` tasks for each subquestion; each sub-agent should collect, verify, and summarize independently.
+3. **Synthesize results**: gather sub-agent findings, compare them, and merge them into a coherent view.
+4. **Fill gaps**: use `web_fetch` or `browser` for areas where sources are thin or contradictory.
+5. **Write the report**: produce a structured report and save it with `write` when a file output is useful.
 
-## 子 Agent 研究模式
+## Sub-Agent Research Pattern
 
-对于复杂主题，用 sub_agent 工具为每个子课题启动独立研究：
+For complex topics, use `sub_agent` to start independent research tasks:
 
+```text
+sub_agent(prompt: "Research subtopic A: use web_fetch to collect 2-3 sources, then summarize key findings and data.")
+sub_agent(prompt: "Research subtopic B: ...")
+sub_agent(prompt: "Research subtopic C: ...")
 ```
-sub_agent(prompt: "研究子课题A：用 web_fetch 抓取 2-3 个来源，总结关键发现和数据")
-sub_agent(prompt: "研究子课题B：...")
-sub_agent(prompt: "研究子课题C：...")
-```
 
-每个子 Agent 自动获得全部工具能力（web_fetch、browser 等），独立完成采集和总结后返回结果。父 Agent 只需汇总和交叉验证。
+Each sub-agent can use the available tools independently and should return a concise result. The parent Agent handles synthesis and cross-checking.
 
-对于简单主题，直接用 web_fetch 采集即可，无需启动子 Agent。
+For simple topics, use direct web collection without launching sub-agents.
 
-## 报告格式
+## Report Format
 
-- **主题概述**：一段话概括研究对象
-- **关键发现**：按子问题分节，每节含事实、数据、来源
-- **对比分析**：不同来源的一致/矛盾之处
-- **结论与建议**：基于事实的判断和建议
-- **参考来源**：所有访问过的 URL 列表
+- **Topic overview**: one paragraph summarizing the subject
+- **Key findings**: sections by subquestion, each with facts, data, and sources
+- **Comparison**: agreement or conflict across sources
+- **Conclusion and recommendations**: fact-based judgment and next steps
+- **References**: URLs accessed during the research
 
-## 原则
+## Principles
 
-- 只引用从工具获取的真实信息，不编造
-- 明确标注信息来源
-- 对不确定的内容标记为「待验证」
-- 若某个来源无法访问，记录并尝试替代来源
+- Only cite information obtained from tools; do not invent sources or facts.
+- Clearly identify sources.
+- Mark uncertain claims as "needs verification".
+- If a source cannot be accessed, record that and try a credible alternative.

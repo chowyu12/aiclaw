@@ -113,14 +113,14 @@ func handleAdd(ctx context.Context, s *Scheduler, p scheduleArgs) (string, error
 		return errJSON("add", err.Error()), nil
 	}
 
-	return okJSON("add", fmt.Sprintf("任务 '%s' 已创建，schedule: %s, 下次执行: %s",
+	return okJSON("add", fmt.Sprintf("Job '%s' created. Schedule: %s. Next run: %s",
 		job.Name, job.Expression, job.NextRunAt.Format(time.DateTime)), job), nil
 }
 
 func handleList(s *Scheduler, _ scheduleArgs) (string, error) {
 	jobs := s.ListJobs()
 	if len(jobs) == 0 {
-		return okJSON("list", "没有定时任务。", nil), nil
+		return okJSON("list", "No scheduled jobs.", nil), nil
 	}
 
 	type jobView struct {
@@ -157,7 +157,7 @@ func handleList(s *Scheduler, _ scheduleArgs) (string, error) {
 		views = append(views, v)
 	}
 
-	return okJSON("list", fmt.Sprintf("共 %d 个定时任务。", len(views)), views), nil
+	return okJSON("list", fmt.Sprintf("%d scheduled jobs.", len(views)), views), nil
 }
 
 func handleRemove(s *Scheduler, p scheduleArgs) (string, error) {
@@ -167,7 +167,7 @@ func handleRemove(s *Scheduler, p scheduleArgs) (string, error) {
 	if err := s.RemoveJob(p.JobID); err != nil {
 		return errJSON("remove", err.Error()), nil
 	}
-	return okJSON("remove", fmt.Sprintf("任务 %s 已删除。", p.JobID), nil), nil
+	return okJSON("remove", fmt.Sprintf("Job %s removed.", p.JobID), nil), nil
 }
 
 func handleToggle(ctx context.Context, s *Scheduler, p scheduleArgs) (string, error) {
@@ -180,11 +180,11 @@ func handleToggle(ctx context.Context, s *Scheduler, p scheduleArgs) (string, er
 	if err := s.ToggleJob(ctx, p.JobID, *p.Enabled); err != nil {
 		return errJSON("toggle", err.Error()), nil
 	}
-	state := "已启用"
+	state := "enabled"
 	if !*p.Enabled {
-		state = "已禁用"
+		state = "disabled"
 	}
-	return okJSON("toggle", fmt.Sprintf("任务 %s %s。", p.JobID, state), nil), nil
+	return okJSON("toggle", fmt.Sprintf("Job %s %s.", p.JobID, state), nil), nil
 }
 
 func handleLogs(s *Scheduler, p scheduleArgs) (string, error) {
@@ -197,7 +197,7 @@ func handleLogs(s *Scheduler, p scheduleArgs) (string, error) {
 	}
 	records := s.ListLogs(p.JobID, limit)
 	if len(records) == 0 {
-		return okJSON("logs", "该任务暂无执行记录。", nil), nil
+		return okJSON("logs", "This job has no run records yet.", nil), nil
 	}
 
 	type logView struct {
@@ -222,7 +222,7 @@ func handleLogs(s *Scheduler, p scheduleArgs) (string, error) {
 			Error:    r.Error,
 		})
 	}
-	return okJSON("logs", fmt.Sprintf("最近 %d 条执行记录。", len(views)), views), nil
+	return okJSON("logs", fmt.Sprintf("Latest %d run records.", len(views)), views), nil
 }
 
 func okJSON(action, message string, data any) string {

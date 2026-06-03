@@ -37,21 +37,21 @@ func (e *Executor) crystallizeHook(_ context.Context, _ HookEvent, p *HookPayloa
 	toolSteps, distinct := extractToolSteps(steps)
 	if distinct < crystallizeMinDistinctTools {
 		log.WithFields(log.Fields{
-			"distinct":  distinct,
-			"min":       crystallizeMinDistinctTools,
+			"distinct":   distinct,
+			"min":        crystallizeMinDistinctTools,
 			"tool_steps": len(toolSteps),
-			"total":     len(steps),
-			"conv":      p.ConvUUID,
+			"total":      len(steps),
+			"conv":       p.ConvUUID,
 		}).Debug("[Skill] crystallize skipped: not enough distinct tools")
 		return HookContinue
 	}
 	if errName := firstErrorStep(steps); errName != "" {
 		log.WithFields(log.Fields{
-			"distinct":      distinct,
-			"tool_steps":    len(toolSteps),
-			"total":         len(steps),
-			"first_error":   errName,
-			"conv":          p.ConvUUID,
+			"distinct":    distinct,
+			"tool_steps":  len(toolSteps),
+			"total":       len(steps),
+			"first_error": errName,
+			"conv":        p.ConvUUID,
 		}).Debug("[Skill] crystallize skipped: execution contained error steps")
 		return HookContinue
 	}
@@ -73,10 +73,10 @@ func (e *Executor) crystallizeHook(_ context.Context, _ HookEvent, p *HookPayloa
 		return HookContinue
 	}
 	log.WithFields(log.Fields{
-		"path":     path,
-		"tools":    distinct,
-		"agent":    p.Agent.Name,
-		"conv":     p.ConvUUID,
+		"path":  path,
+		"tools": distinct,
+		"agent": p.Agent.Name,
+		"conv":  p.ConvUUID,
 	}).Info("[Skill] crystallized pending candidate")
 	return HookContinue
 }
@@ -125,17 +125,17 @@ func buildPendingSkill(p *HookPayload, toolSteps []model.ExecutionStep, distinct
 	sb.WriteString("---\n\n")
 
 	sb.WriteString("# Candidate Skill\n\n")
-	sb.WriteString("> 这是 aiclaw 自动归档的执行路径候选。需要你 (或 LLM 通过 `skill` 工具) 填写 name/description ")
-	sb.WriteString("并通过 promote 转正后才会成为正式 skill。\n\n")
+	sb.WriteString("> This is an execution-path candidate automatically archived by aiclaw. Fill in name/description ")
+	sb.WriteString("and promote it before it becomes an active skill.\n\n")
 
-	sb.WriteString("## 触发场景\n\n")
-	sb.WriteString("用户请求：\n\n```\n")
+	sb.WriteString("## Trigger\n\n")
+	sb.WriteString("User request:\n\n```\n")
 	sb.WriteString(truncateRunes(strings.TrimSpace(p.UserMsg), 800))
 	sb.WriteString("\n```\n\n")
 
-	sb.WriteString("## 执行路径\n\n")
+	sb.WriteString("## Execution Path\n\n")
 	if len(toolSteps) == 0 {
-		sb.WriteString("（未捕获工具步骤）\n\n")
+		sb.WriteString("(No tool steps captured.)\n\n")
 	} else {
 		for i, s := range toolSteps {
 			sb.WriteString(fmt.Sprintf("%d. **%s** ", i+1, s.Name))
@@ -157,7 +157,7 @@ func buildPendingSkill(p *HookPayload, toolSteps []model.ExecutionStep, distinct
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString("## 最终输出\n\n")
+	sb.WriteString("## Final Output\n\n")
 	sb.WriteString(truncateRunes(strings.TrimSpace(p.Content), 1200))
 	sb.WriteString("\n")
 
@@ -205,8 +205,8 @@ func ListPendingSkills(workspaceRoot string, limit int) ([]PendingSkill, error) 
 		return nil, err
 	}
 	type tmp struct {
-		ps  PendingSkill
-		mt  time.Time
+		ps PendingSkill
+		mt time.Time
 	}
 	var items []tmp
 	for _, ent := range entries {

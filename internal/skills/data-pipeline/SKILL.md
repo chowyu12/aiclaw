@@ -1,59 +1,59 @@
 ---
-name: 数据处理
-description: CSV/JSON/Excel 等数据文件的导入、清洗、转换、统计和导出。通过 code_interpreter 编写处理脚本，结合 read/write 完成端到端数据流水线，大批量任务可用 sub_agent 分治处理。
+name: Data Processing
+description: Import, clean, transform, analyze, and export CSV/JSON/Excel data. Use code_interpreter with read/write for end-to-end data pipelines; split large workloads with sub_agent when useful.
 ---
 
-# 数据流水线（data-pipeline）
+# Data Pipeline (data-pipeline)
 
-以数据工程专家角色，在用户给出数据文件或处理需求后编写代码完成流水线。
+Act as a data engineering specialist. When the user provides data files or a processing request, write and run code to complete the pipeline.
 
-## 工作流程
+## Workflow
 
-1. **理解数据**：用 read 工具查看数据文件前几行，了解结构和字段
-2. **确认需求**：与用户确认要做的处理（清洗、转换、统计、合并等）
-3. **编写脚本**：用 code_interpreter 编写 Python 代码完成处理
-4. **验证结果**：输出处理后的数据样本，让用户确认
-5. **导出文件**：用 write 工具将最终结果保存为用户需要的格式
+1. **Understand the data**: use `read` to inspect the first rows and learn the schema.
+2. **Confirm the goal**: clarify the requested cleaning, transformation, analysis, merge, or export.
+3. **Write the script**: use `code_interpreter` to run Python for the data processing task.
+4. **Validate results**: show a sample of the processed output for confirmation.
+5. **Export files**: use `write` to save the final output in the requested format.
 
-## 大批量分治处理
+## Large Workloads
 
-处理多个数据文件或多维度分析时，可用 sub_agent 并行执行：
+For multiple files or multi-dimensional analysis, use `sub_agent` to process independent parts in parallel:
 
+```text
+sub_agent(prompt: "Read sales_2024.csv, calculate monthly sales totals, and return JSON.")
+sub_agent(prompt: "Read users.csv, group users by region, calculate active rate, and return JSON.")
 ```
-sub_agent(prompt: "读取 sales_2024.csv，计算各月销售额汇总，输出 JSON")
-sub_agent(prompt: "读取 users.csv，按地区统计用户数和活跃率，输出 JSON")
-```
 
-父 Agent 收集结果后做关联分析和最终报告。
+The parent Agent should collect results, run cross-analysis, and produce the final report.
 
-## 常见任务
+## Common Tasks
 
-### 数据清洗
+### Data Cleaning
 
-- 去重、空值处理、类型转换
-- 异常值检测和处理
-- 字段标准化（日期格式、编码等）
+- Deduplication, missing-value handling, and type conversion
+- Outlier detection and handling
+- Field normalization, including dates and encodings
 
-### 数据转换
+### Data Transformation
 
-- CSV ↔ JSON ↔ Excel 格式转换
-- 字段映射、拆分、合并
-- 数据透视和聚合
+- CSV, JSON, and Excel conversion
+- Field mapping, splitting, and merging
+- Pivoting and aggregation
 
-### 统计分析
+### Statistical Analysis
 
-- 描述性统计（均值、中位数、标准差、分位数）
-- 分组统计和交叉分析
-- 趋势分析和同比/环比计算
+- Descriptive statistics such as mean, median, standard deviation, and percentiles
+- Grouped statistics and cross-tab analysis
+- Trend analysis and year-over-year / period-over-period comparisons
 
-### 数据可视化
+### Visualization
 
-- 用 code_interpreter 生成 matplotlib/plotly 图表
-- 统计报表输出
+- Generate charts with matplotlib or plotly via `code_interpreter`
+- Produce statistical summaries and reports
 
-## 编码规范
+## Coding Guidelines
 
-- Python 优先，使用 pandas 进行数据处理
-- 代码中添加数据校验步骤（行数、列数、空值统计）
-- 大文件分块读取，避免内存溢出
-- 输出前打印数据样本和统计摘要供用户确认
+- Prefer Python with pandas.
+- Add validation steps for row count, column count, and missing-value statistics.
+- Read large files in chunks to avoid memory pressure.
+- Print samples and summary statistics before final export.

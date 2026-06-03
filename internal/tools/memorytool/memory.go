@@ -99,8 +99,8 @@ func Handler(ctx context.Context, args string) (string, error) {
 // 仅注入每条 entry 的 [id] + tag + summary，完整内容通过 recall 动作按 ID 拉取。
 func LoadSnapshot(ws *workspace.Workspace) (memoryBlock, userBlock string) {
 	dir := memoriesDir(ws)
-	memoryBlock = renderSnapshotBlock(dir, "memory", "MEMORY (你的个人笔记)", memoryLimit)
-	userBlock = renderSnapshotBlock(dir, "user", "USER PROFILE (用户画像)", userLimit)
+	memoryBlock = renderSnapshotBlock(dir, "memory", "MEMORY (your personal notes)", memoryLimit)
+	userBlock = renderSnapshotBlock(dir, "user", "USER PROFILE", userLimit)
 	return
 }
 
@@ -114,7 +114,7 @@ func renderSnapshotBlock(dir, target, title string, limit int) string {
 	cur := len(full)
 	pct := min(100, cur*100/limit)
 
-	header := fmt.Sprintf("══════════════════════════════════════════════\n%s [%d%% — %d/%d 字符]\n══════════════════════════════════════════════",
+	header := fmt.Sprintf("══════════════════════════════════════════════\n%s [%d%% - %d/%d chars]\n══════════════════════════════════════════════",
 		title, pct, cur, limit)
 
 	if pct < indexThresholdPct {
@@ -123,11 +123,11 @@ func renderSnapshotBlock(dir, target, title string, limit int) string {
 
 	var sb strings.Builder
 	sb.WriteString(header)
-	sb.WriteString("\n[INDEX MODE] 容量已达 ")
+	sb.WriteString("\n[INDEX MODE] Usage has reached ")
 	sb.WriteString(fmt.Sprintf("%d%%", pct))
-	sb.WriteString("，仅展示索引；完整内容请用 memory(action=recall, target=")
+	sb.WriteString(". Only the index is shown; fetch full content with memory(action=recall, target=")
 	sb.WriteString(target)
-	sb.WriteString(", ids=[\"...\"]) 拉取。\n")
+	sb.WriteString(", ids=[\"...\"]).\n")
 	for _, e := range entries {
 		sb.WriteString("\n• [")
 		sb.WriteString(e.ID)
@@ -158,7 +158,7 @@ func handleAdd(dir string, p memoryArgs) (string, error) {
 	body := stripUserMetadata(content)
 	for _, e := range entries {
 		if e.Body == body {
-			return successJSON(p.Target, entries, "条目已存在，未重复添加。"), nil
+			return successJSON(p.Target, entries, "Entry already exists; not added again."), nil
 		}
 	}
 
@@ -172,12 +172,12 @@ func handleAdd(dir string, p memoryArgs) (string, error) {
 	candidate := append(entries, newEntry)
 	if len(joinEntriesRaw(candidate)) > limit {
 		cur := len(joinEntriesRaw(entries))
-		return errJSON(p.Target, fmt.Sprintf("记忆已占用 %d/%d 字符。添加此条目（约 %d 字符）将超出限制。请先替换或删除现有条目。",
+		return errJSON(p.Target, fmt.Sprintf("Memory usage is %d/%d chars. Adding this entry (about %d chars) would exceed the limit. Replace or remove existing entries first.",
 			cur, limit, len(newEntry.serialize()))), nil
 	}
 
 	writeEntries(path, candidate)
-	return successJSON(p.Target, candidate, fmt.Sprintf("条目已添加（id=%s）。", id)), nil
+	return successJSON(p.Target, candidate, fmt.Sprintf("Entry added (id=%s).", id)), nil
 }
 
 func handleReplace(dir string, p memoryArgs) (string, error) {
@@ -211,11 +211,11 @@ func handleReplace(dir string, p memoryArgs) (string, error) {
 	test := slices.Clone(entries)
 	test[idx] = storedEntry{ID: entries[idx].ID, Tag: tag, Body: body}
 	if len(joinEntriesRaw(test)) > limit {
-		return errJSON(p.Target, "替换后将超出字符限制，请缩短新内容或先删除其他条目。"), nil
+		return errJSON(p.Target, "Replacement would exceed the character limit. Shorten the new content or remove other entries first."), nil
 	}
 
 	writeEntries(path, test)
-	return successJSON(p.Target, test, fmt.Sprintf("条目已替换（id=%s）。", entries[idx].ID)), nil
+	return successJSON(p.Target, test, fmt.Sprintf("Entry replaced (id=%s).", entries[idx].ID)), nil
 }
 
 func handleRemove(dir string, p memoryArgs) (string, error) {
@@ -235,7 +235,7 @@ func handleRemove(dir string, p memoryArgs) (string, error) {
 	id := entries[idx].ID
 	entries = slices.Delete(entries, idx, idx+1)
 	writeEntries(path, entries)
-	return successJSON(p.Target, entries, fmt.Sprintf("条目已删除（id=%s）。", id)), nil
+	return successJSON(p.Target, entries, fmt.Sprintf("Entry removed (id=%s).", id)), nil
 }
 
 func handleRead(dir string, p memoryArgs) (string, error) {
@@ -295,10 +295,10 @@ func handleRecall(dir string, p memoryArgs) (string, error) {
 		Target:     p.Target,
 		Entries:    views,
 		EntryCount: len(views),
-		Usage:      fmt.Sprintf("%d%% — %d/%d 字符", pct, cur, limit),
+		Usage:      fmt.Sprintf("%d%% - %d/%d chars", pct, cur, limit),
 	}
 	if len(missed) > 0 {
-		r.Message = "部分 ID 未找到: " + strings.Join(missed, ", ")
+		r.Message = "Some IDs were not found: " + strings.Join(missed, ", ")
 	}
 	out, _ := json.Marshal(r)
 	return string(out), nil
@@ -390,7 +390,7 @@ func findUniqueEntry(entries []storedEntry, query string) (int, error) {
 		}
 	}
 	if len(matches) == 0 {
-		return -1, fmt.Errorf("没有找到匹配 '%s' 的条目（可传入 id 精确定位）", query)
+		return -1, fmt.Errorf("no entry matched %q; pass an id for exact lookup", query)
 	}
 	if len(matches) > 1 {
 		unique := make(map[string]bool)
@@ -398,7 +398,7 @@ func findUniqueEntry(entries []storedEntry, query string) (int, error) {
 			unique[entries[i].Body] = true
 		}
 		if len(unique) > 1 {
-			return -1, fmt.Errorf("多个条目匹配 '%s'，请提供更精确的子串或 id", query)
+			return -1, fmt.Errorf("multiple entries matched %q; provide a more specific substring or id", query)
 		}
 	}
 	return matches[0], nil
@@ -507,7 +507,7 @@ func successJSON(target string, entries []storedEntry, message string) string {
 		Success:    true,
 		Target:     target,
 		Entries:    views,
-		Usage:      fmt.Sprintf("%d%% — %d/%d 字符", pct, cur, limit),
+		Usage:      fmt.Sprintf("%d%% - %d/%d chars", pct, cur, limit),
 		EntryCount: len(views),
 		Indexed:    indexed,
 		Message:    message,
@@ -553,12 +553,12 @@ var invisibleChars = map[rune]bool{
 func scanContent(content string) error {
 	for _, r := range content {
 		if invisibleChars[r] {
-			return fmt.Errorf("内容包含不可见 Unicode 字符 U+%04X，可能是注入攻击", r)
+			return fmt.Errorf("content contains invisible Unicode character U+%04X, which may indicate prompt injection", r)
 		}
 	}
 	for _, pat := range threatPatterns {
 		if pat.MatchString(content) {
-			return fmt.Errorf("内容匹配安全威胁模式，记忆条目会注入 system prompt，不能包含注入或数据外泄内容")
+			return fmt.Errorf("content matches a security risk pattern; memory entries are injected into the system prompt and cannot contain injection or data-exfiltration instructions")
 		}
 	}
 	return nil

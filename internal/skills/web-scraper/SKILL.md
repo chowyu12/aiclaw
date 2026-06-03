@@ -1,63 +1,63 @@
 ---
-name: 网页采集
-description: 从网页中结构化提取数据（表格、列表、价格、评论等），支持静态直接抓取和动态浏览器渲染，可通过 sub_agent 并行采集多站点，结果保存为 CSV/JSON。
+name: Web Scraper
+description: Extract structured data from web pages, including tables, lists, prices, and reviews. Supports static fetching, browser rendering, parallel multi-site collection, and CSV/JSON output.
 ---
 
-# 网页数据采集（web-scraper）
+# Web Data Collection (web-scraper)
 
-以网页数据采集工程师角色，在用户描述目标网站与字段需求后高效、准确地提取结构化数据。
+Act as a web data collection engineer. After the user describes target sites and fields, extract structured data accurately and efficiently.
 
-## 工作流程
+## Workflow
 
-1. **分析目标**：确认用户要从哪个网站提取什么数据
-2. **页面探测**：先用 web_fetch 抓取页面，查看返回内容
-3. **策略选择**：
-   - 若 web_fetch 返回了完整内容 → 用 code_interpreter 解析 HTML
-   - 若内容不完整（动态渲染）→ 用 browser 导航 + snapshot 获取元素
-4. **数据提取**：
-   - 静态页面：code_interpreter 用 Python 的 html.parser 或正则提取数据
-   - 动态页面：browser snapshot 获取元素结构 → evaluate 执行 JS 提取数据
-   - 表格数据：browser extract_table 直接提取
-5. **结构化输出**：整理为统一格式，用 write 工具保存为 CSV 或 JSON
+1. **Analyze the target**: confirm which site and which fields the user wants.
+2. **Probe the page**: start with `web_fetch` to inspect returned content.
+3. **Choose a strategy**:
+   - If `web_fetch` returns complete content, parse the HTML with `code_interpreter`.
+   - If content is incomplete or dynamically rendered, use `browser` navigation and `snapshot`.
+4. **Extract data**:
+   - Static pages: use Python HTML parsing in `code_interpreter`.
+   - Dynamic pages: use `browser snapshot` for structure, then evaluate JavaScript when needed.
+   - Tables: use browser table extraction when available.
+5. **Write structured output**: normalize records and save CSV or JSON with `write`.
 
-## 多站点并行采集
+## Multi-Site Collection
 
-需要同时从多个网站采集数据时，用 sub_agent 并行处理：
+When collecting from multiple sites, use `sub_agent` in parallel:
 
+```text
+sub_agent(prompt: "Extract product names and prices from https://site-a.com and return JSON.")
+sub_agent(prompt: "Extract comparable product data from https://site-b.com and return JSON.")
 ```
-sub_agent(prompt: "从 https://site-a.com 提取产品名称和价格，输出 JSON")
-sub_agent(prompt: "从 https://site-b.com 提取同类产品数据，输出 JSON")
-```
 
-父 Agent 收集结果后合并去重，生成最终数据文件。
+The parent Agent should merge, deduplicate, and write the final dataset.
 
-## 工具搭配策略
+## Tool Strategies
 
-### 静态页面（博客、文档、新闻）
+### Static Pages
 
-web_fetch → code_interpreter（解析）→ write（保存）
+`web_fetch` -> `code_interpreter` (parse) -> `write` (save)
 
-### 动态页面（SPA、需要登录）
+### Dynamic Pages
 
-browser navigate → browser snapshot → browser evaluate（JS 提取）→ write（保存）
+`browser navigate` -> `browser snapshot` -> `browser evaluate` (extract) -> `write` (save)
 
-### 表格数据
+### Tables
 
-browser navigate → browser extract_table → write（保存）
+`browser navigate` -> `browser extract_table` -> `write` (save)
 
-### 翻页采集
+### Pagination
 
-browser navigate → 提取当前页 → browser click（下一页）→ 循环
+`browser navigate` -> extract current page -> `browser click` next page -> repeat
 
-## 输出规范
+## Output Guidelines
 
-- 默认输出 CSV 格式（方便 Excel 打开）
-- JSON 格式用于嵌套数据结构
-- 每条记录包含数据来源 URL
-- 采集完成后报告：总记录数、字段列表、数据样本（前 5 行）
+- Default to CSV for Excel-friendly output.
+- Use JSON for nested data.
+- Include the source URL for every record.
+- After collection, report total records, field names, and a sample of the first five rows.
 
-## 注意事项
+## Notes
 
-- 尊重 robots.txt，不采集明确禁止的内容
-- 控制请求频率，避免对目标服务器造成压力
-- 若遇到反爬机制（验证码、IP 限制），告知用户而非强行绕过
+- Respect robots.txt and explicit site restrictions.
+- Control request frequency to avoid stressing target servers.
+- If anti-bot defenses appear, such as CAPTCHA or IP blocking, inform the user instead of bypassing them.

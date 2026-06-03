@@ -109,8 +109,8 @@ func (c *ContextCompressor) Compress(
 	result := make([]openai.ChatCompletionMessage, 0, 1+1+n-tailStart)
 
 	head := working[0]
-	if !strings.Contains(head.Content, "[注意: 部分早期对话已被压缩为摘要]") {
-		head.Content += "\n\n[注意: 部分早期对话已被压缩为摘要]"
+	if !strings.Contains(head.Content, "[Note: some earlier conversation has been compressed into a summary]") {
+		head.Content += "\n\n[Note: some earlier conversation has been compressed into a summary]"
 	}
 	result = append(result, head)
 
@@ -120,7 +120,7 @@ func (c *ContextCompressor) Compress(
 	}
 	result = append(result, openai.ChatCompletionMessage{
 		Role:    summaryRole,
-		Content: "[上下文压缩摘要]\n" + summary,
+		Content: "[Context Compression Summary]\n" + summary,
 	})
 
 	result = append(result, working[tailStart:]...)
@@ -223,7 +223,7 @@ func formatMessagesForSummary(messages []openai.ChatCompletionMessage) string {
 				for _, tc := range msg.ToolCalls {
 					names = append(names, tc.Function.Name)
 				}
-				sb.WriteString(fmt.Sprintf("Assistant [调用工具: %s]: ", strings.Join(names, ", ")))
+				sb.WriteString(fmt.Sprintf("Assistant [tool calls: %s]: ", strings.Join(names, ", ")))
 			} else {
 				sb.WriteString("Assistant: ")
 			}
@@ -245,74 +245,74 @@ func formatMessagesForSummary(messages []openai.ChatCompletionMessage) string {
 
 // ── prompt 模板 ──────────────────────────────────────────────
 
-var compressionPromptTpl = `你是一个对话压缩助手。请将以下对话历史压缩为结构化摘要，保留所有关键上下文信息。
+var compressionPromptTpl = `You are a conversation compression assistant. Compress the following conversation history into a structured summary while preserving all critical context.
 
 %s
 
-请严格按以下模板输出摘要：
+Output the summary strictly using this template:
 
-## 目标
-[用户正在尝试做什么]
+## Goal
+[What the user is trying to accomplish]
 
-## 约束与偏好
-[用户偏好、代码风格、重要约束和决策]
+## Constraints And Preferences
+[User preferences, code style, important constraints, and decisions]
 
-## 进展
-### 已完成
-[已完成的工作 — 具体文件路径、执行的命令、结果]
+## Progress
+### Completed
+[Completed work, including specific file paths, commands run, and results]
 
-### 进行中
-[当前正在进行的工作]
+### In Progress
+[Current work in progress]
 
-### 受阻
-[遇到的阻碍或问题]
+### Blocked
+[Blockers or problems encountered]
 
-## 关键决策
-[重要的技术决策及原因]
+## Key Decisions
+[Important technical decisions and why they were made]
 
-## 相关文件
-[读取、修改或创建的文件 — 附简要说明]
+## Relevant Files
+[Files read, modified, or created, with brief notes]
 
-## 下一步
-[接下来需要做什么]
+## Next Steps
+[What needs to happen next]
 
-## 关键上下文
-[具体的值、错误信息、配置详情等不能丢失的信息]`
+## Critical Context
+[Specific values, errors, configuration details, and other details that must not be lost]`
 
-var iterativeCompressionPromptTpl = `你是一个对话压缩助手。以下是之前的摘要和新增的对话内容。请更新摘要，将新进展合并进来。
+var iterativeCompressionPromptTpl = `You are a conversation compression assistant. Below are the previous summary and new conversation content. Update the summary by merging in the new progress.
 
-### 之前的摘要
+### Previous Summary
 %s
 
-### 新增对话
+### New Conversation
 %s
 
-请严格按以下模板输出更新后的摘要：
+Output the updated summary strictly using this template:
 
-## 目标
-[用户正在尝试做什么]
+## Goal
+[What the user is trying to accomplish]
 
-## 约束与偏好
-[用户偏好、代码风格、重要约束和决策]
+## Constraints And Preferences
+[User preferences, code style, important constraints, and decisions]
 
-## 进展
-### 已完成
-[已完成的工作 — 具体文件路径、执行的命令、结果]
+## Progress
+### Completed
+[Completed work, including specific file paths, commands run, and results]
 
-### 进行中
-[当前正在进行的工作]
+### In Progress
+[Current work in progress]
 
-### 受阻
-[遇到的阻碍或问题]
+### Blocked
+[Blockers or problems encountered]
 
-## 关键决策
-[重要的技术决策及原因]
+## Key Decisions
+[Important technical decisions and why they were made]
 
-## 相关文件
-[读取、修改或创建的文件 — 附简要说明]
+## Relevant Files
+[Files read, modified, or created, with brief notes]
 
-## 下一步
-[接下来需要做什么]
+## Next Steps
+[What needs to happen next]
 
-## 关键上下文
-[具体的值、错误信息、配置详情等不能丢失的信息]`
+## Critical Context
+[Specific values, errors, configuration details, and other details that must not be lost]`

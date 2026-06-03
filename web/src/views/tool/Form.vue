@@ -1,53 +1,53 @@
 <template>
   <div class="tool-form-page aic-page">
     <div class="aic-page-head">
-      <h1 class="aic-title">{{ isEdit ? '编辑工具' : '新增工具' }}</h1>
-      <p class="aic-sub">配置处理器、超时与函数定义；保存后对已关联该工具的 Agent 生效。</p>
+      <h1 class="aic-title">{{ isEdit ? 'Edit Tool' : 'New Tool' }}</h1>
+      <p class="aic-sub">Configure the handler, timeout, and function definition. Changes apply to Agents that reference this tool.</p>
     </div>
     <div class="aic-page-body">
     <div class="form-nav">
       <el-button link type="primary" @click="goBack">
         <el-icon><ArrowLeft /></el-icon>
-        返回工具列表
+        Back to Tools
       </el-button>
     </div>
 
     <el-card class="aic-card" shadow="never" v-loading="pageLoading">
       <el-form :model="form" label-width="120px" class="tool-form-body">
-        <el-divider content-position="left">基本信息</el-divider>
+        <el-divider content-position="left">Basic Info</el-divider>
 
-        <el-form-item label="名称" required>
-          <el-input v-model="form.name" placeholder="工具名称（英文标识，如 weather）" />
+        <el-form-item label="Name" required>
+          <el-input v-model="form.name" placeholder="Tool name, for example weather" />
         </el-form-item>
-        <el-form-item label="描述">
-          <el-input v-model="form.description" type="textarea" :rows="2" placeholder="工具功能描述（管理页展示）" />
+        <el-form-item label="Description">
+          <el-input v-model="form.description" type="textarea" :rows="2" placeholder="Tool description shown in the management page" />
         </el-form-item>
-        <el-form-item label="处理器类型" required>
-          <el-select v-model="form.handler_type" placeholder="选择类型" style="width: 100%">
-            <el-option label="HTTP 回调" value="http" />
-            <el-option label="脚本" value="script" />
+        <el-form-item label="Handler" required>
+          <el-select v-model="form.handler_type" placeholder="Select type" style="width: 100%">
+            <el-option label="HTTP Callback" value="http" />
+            <el-option label="Script" value="script" />
           </el-select>
         </el-form-item>
         <el-row :gutter="24">
           <el-col :span="12">
-            <el-form-item label="超时(秒)">
+            <el-form-item label="Timeout(s)">
               <el-input-number v-model="form.timeout" :min="5" :max="300" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="启用">
+            <el-form-item label="Enabled">
               <el-switch v-model="form.enabled" />
             </el-form-item>
           </el-col>
         </el-row>
 
         <template v-if="form.handler_type === 'http'">
-          <el-divider content-position="left">HTTP 配置</el-divider>
-          <el-form-item label="请求 URL" required>
+          <el-divider content-position="left">HTTP Config</el-divider>
+          <el-form-item label="Request URL" required>
             <el-input v-model="httpConfig.url" placeholder="https://api.example.com/tool?q={param}" />
-            <div class="form-hint">使用 {参数名} 引用 LLM 传入的参数值</div>
+            <div class="form-hint">Use {param_name} to reference values supplied by the LLM.</div>
           </el-form-item>
-          <el-form-item label="请求方法">
+          <el-form-item label="Method">
             <el-select v-model="httpConfig.method" style="width: 100%">
               <el-option label="GET" value="GET" />
               <el-option label="POST" value="POST" />
@@ -56,8 +56,8 @@
         </template>
 
         <template v-if="form.handler_type === 'script'">
-          <el-divider content-position="left">脚本配置</el-divider>
-          <el-form-item label="脚本语言" required>
+          <el-divider content-position="left">Script Config</el-divider>
+          <el-form-item label="Language" required>
             <el-select v-model="scriptConfig.language" style="width: 100%">
               <el-option label="Python" value="python" />
               <el-option label="JavaScript" value="javascript" />
@@ -65,7 +65,7 @@
               <el-option label="Go" value="go" />
             </el-select>
           </el-form-item>
-          <el-form-item label="脚本内容" required>
+          <el-form-item label="Script" required>
             <el-input
               v-model="scriptConfig.content"
               type="textarea"
@@ -73,19 +73,19 @@
               placeholder="#!/bin/sh&#10;echo &quot;Hello {name}, your query is: {query}&quot;"
               style="font-family: monospace"
             />
-            <div class="form-hint">使用 {参数名} 引用 LLM 传入的参数值，执行时会自动替换</div>
+            <div class="form-hint">Use {param_name} to reference LLM-supplied values. They are substituted at runtime.</div>
           </el-form-item>
         </template>
 
         <el-divider content-position="left">
-          <span>函数定义</span>
+          <span>Function Definition</span>
           <el-button link type="primary" style="margin-left: 12px" @click="showRawJson = !showRawJson">
-            {{ showRawJson ? '可视化模式' : '高级 JSON 模式' }}
+            {{ showRawJson ? 'Visual Mode' : 'Advanced JSON Mode' }}
           </el-button>
         </el-divider>
 
         <template v-if="showRawJson">
-          <el-form-item label="原始 JSON">
+          <el-form-item label="Raw JSON">
             <el-input
               v-model="rawJsonStr"
               type="textarea"
@@ -98,19 +98,19 @@
         </template>
 
         <template v-else>
-          <el-form-item label="LLM 描述">
-            <el-input v-model="llmDescription" placeholder="英文描述，告诉大模型这个工具做什么（如 Get weather for a city）" />
-            <div class="form-hint">发送给大模型的函数描述，建议用英文</div>
+          <el-form-item label="LLM Description">
+            <el-input v-model="llmDescription" placeholder="English description telling the model what this tool does, e.g. Get weather for a city" />
+            <div class="form-hint">Function description sent to the model. English is recommended.</div>
           </el-form-item>
 
-          <el-form-item label="参数列表">
+          <el-form-item label="Parameters">
             <div class="params-editor">
               <div v-if="params.length > 0" class="params-header">
-                <span class="col-name">参数名</span>
-                <span class="col-type">类型</span>
-                <span class="col-desc">描述</span>
-                <span class="col-required">必填</span>
-                <span class="col-enum">枚举值</span>
+                <span class="col-name">Name</span>
+                <span class="col-type">Type</span>
+                <span class="col-desc">Description</span>
+                <span class="col-required">Required</span>
+                <span class="col-enum">Enum</span>
                 <span class="col-action"></span>
               </div>
               <div v-for="(p, idx) in params" :key="idx" class="param-row">
@@ -122,7 +122,7 @@
                   <el-option label="boolean" value="boolean" />
                   <el-option label="array" value="array" />
                 </el-select>
-                <el-input v-model="p.description" placeholder="参数描述" class="col-desc" size="small" />
+                <el-input v-model="p.description" placeholder="Parameter description" class="col-desc" size="small" />
                 <el-checkbox v-model="p.required" class="col-required" />
                 <el-input v-model="p.enumStr" placeholder="a,b,c" class="col-enum" size="small" />
                 <el-button link type="danger" class="col-action" @click="params.splice(idx, 1)">
@@ -130,7 +130,7 @@
                 </el-button>
               </div>
               <el-button size="small" @click="addParam" style="margin-top: 8px">
-                <el-icon><Plus /></el-icon> 添加参数
+                <el-icon><Plus /></el-icon> Add Parameter
               </el-button>
             </div>
           </el-form-item>
@@ -138,9 +138,9 @@
 
         <el-form-item>
           <el-button type="primary" @click="handleSubmit" :loading="submitting">
-            {{ isEdit ? '保存' : '创建' }}
+            {{ isEdit ? 'Save' : 'Create' }}
           </el-button>
-          <el-button @click="goBack">取消</el-button>
+          <el-button @click="goBack">Cancel</el-button>
         </el-form-item>
       </el-form>
     </el-card>
@@ -261,7 +261,7 @@ function syncFromRawJson() {
     const obj = JSON.parse(rawJsonStr.value)
     parseFunctionDef(obj)
   } catch {
-    rawJsonError.value = 'JSON 格式错误'
+    rawJsonError.value = 'Invalid JSON'
   }
 }
 
@@ -300,7 +300,7 @@ async function loadTool() {
 
 async function handleSubmit() {
   if (!form.value.name.trim()) {
-    ElMessage.warning('请输入工具名称')
+    ElMessage.warning('Enter a tool name')
     return
   }
   submitting.value = true
@@ -308,7 +308,7 @@ async function handleSubmit() {
     if (showRawJson.value) {
       syncFromRawJson()
       if (rawJsonError.value) {
-        ElMessage.error('Function Def JSON 格式错误')
+        ElMessage.error('Invalid Function Def JSON')
         return
       }
     }
@@ -323,11 +323,11 @@ async function handleSubmit() {
 
     if (isEdit.value) {
       await toolApi.update(toolId.value!, data)
-      ElMessage.success('更新成功')
+      ElMessage.success('Updated')
       goBack()
     } else {
       await toolApi.create(data)
-      ElMessage.success('创建成功')
+      ElMessage.success('Created')
       goBack()
     }
   } finally {

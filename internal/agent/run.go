@@ -211,7 +211,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 		if budget.Exceeded() {
 			finalContent = result.content
 			if finalContent == "" {
-				finalContent = fmt.Sprintf("已达到 token 预算上限（%d），已消耗 %d token。请开始新对话继续。",
+				finalContent = fmt.Sprintf("Token budget limit reached (%d); %d tokens have been used. Start a new conversation to continue.",
 					ec.ag.TokenBudget, budget.Consumed())
 			}
 			completed = true
@@ -240,7 +240,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 
 	if !completed {
 		ec.l.WithField("max_iterations", maxIter).Error("[Execute] max iterations reached")
-		errMsg := fmt.Sprintf("已达到最大迭代次数 %d，Agent 未能给出最终回答", maxIter)
+		errMsg := fmt.Sprintf("Maximum iteration count reached (%d); the Agent did not produce a final answer", maxIter)
 		ec.tracker.RecordStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, "", model.StepError, errMsg, time.Since(totalStart), totalTokens, ec.stepMeta())
 		if ec.plan != nil {
 			ec.plan.FailRunning(ctx, errMsg)

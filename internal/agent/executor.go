@@ -271,7 +271,7 @@ func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
 	if ec.ephemeral {
 		return
 	}
-	content := fmt.Sprintf("[错误] %s", execErr)
+	content := fmt.Sprintf("[Error] %s", execErr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, 0, 0)
@@ -613,7 +613,7 @@ func (e *Executor) buildSkillManifestTools(skillList []model.Skill, tracker *Ste
 			if handler == nil {
 				instruction := sk.Instruction
 				handler = func(_ context.Context, input string) (string, error) {
-					return fmt.Sprintf("[skill:%s] 请根据技能指令处理。输入: %s\n指令: %s", sk.Name, input, instruction), nil
+					return fmt.Sprintf("[skill:%s] Follow the skill instructions. Input: %s\nInstructions: %s", sk.Name, input, instruction), nil
 				}
 			}
 
@@ -754,7 +754,7 @@ func appendAttachmentList(content string, files []*model.File) string {
 	if sb.Len() > 0 {
 		sb.WriteString("\n\n")
 	}
-	sb.WriteString("附件列表:\n")
+	sb.WriteString("Attachments:\n")
 	for _, f := range files {
 		if f == nil {
 			continue

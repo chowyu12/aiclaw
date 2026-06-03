@@ -171,7 +171,7 @@ func TestFormatMessagesForSummary_Basic(t *testing.T) {
 	if !strings.Contains(result, "Assistant: 好的") {
 		t.Error("should contain assistant response")
 	}
-	if !strings.Contains(result, "调用工具: write") {
+	if !strings.Contains(result, "tool calls: write") {
 		t.Error("should contain tool call info")
 	}
 	if !strings.Contains(result, "Tool(write): 文件已写入") {
@@ -262,7 +262,7 @@ func TestContextCompressor_Compress_EndToEnd(t *testing.T) {
 		responses: []openai.ChatCompletionResponse{
 			{Choices: []openai.ChatCompletionChoice{{
 				Message: openai.ChatCompletionMessage{
-					Content: "## 目标\n用户在编写代码\n## 进展\n### 已完成\n- 写了文件\n### 进行中\n无",
+					Content: "## Goal\nThe user is writing code\n## Progress\n### Completed\n- Wrote a file\n### In Progress\nNone",
 				},
 			}}},
 		},
@@ -286,13 +286,13 @@ func TestContextCompressor_Compress_EndToEnd(t *testing.T) {
 	if compressed[0].Role != openai.ChatMessageRoleSystem {
 		t.Error("first message should still be system")
 	}
-	if !strings.Contains(compressed[0].Content, "[注意: 部分早期对话已被压缩为摘要]") {
+	if !strings.Contains(compressed[0].Content, "[Note: some earlier conversation has been compressed into a summary]") {
 		t.Error("system prompt should have compression note")
 	}
 
 	hasSummary := false
 	for _, m := range compressed {
-		if strings.Contains(m.Content, "[上下文压缩摘要]") {
+		if strings.Contains(m.Content, "[Context Compression Summary]") {
 			hasSummary = true
 			break
 		}
@@ -354,7 +354,7 @@ func TestContextCompressor_Compress_IterativeSummary(t *testing.T) {
 
 	lastReq := mockLLM.calls[1]
 	userContent := lastReq.Messages[0].Content
-	if !strings.Contains(userContent, "之前的摘要") {
+	if !strings.Contains(userContent, "Previous Summary") {
 		t.Error("second compression should use iterative prompt with previous summary")
 	}
 }
@@ -507,7 +507,7 @@ func TestContextCompressor_Compress_SystemPromptNoteOnlyOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	noteCount := strings.Count(compressed2[0].Content, "[注意: 部分早期对话已被压缩为摘要]")
+	noteCount := strings.Count(compressed2[0].Content, "[Note: some earlier conversation has been compressed into a summary]")
 	if noteCount != 1 {
 		t.Errorf("compression note should appear exactly once, found %d", noteCount)
 	}

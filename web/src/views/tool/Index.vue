@@ -47,7 +47,7 @@
         <el-table-column :label="i18n.t('common.actions')" width="120" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="router.push({ name: 'ToolEdit', params: { id: row.id } })">{{ i18n.t('common.edit') }}</el-button>
-            <el-popconfirm :title="i18n.isEnglish ? 'Delete this item?' : '确定删除？'" @confirm="handleDelete(row.id)">
+            <el-popconfirm title="Delete this item?" @confirm="handleDelete(row.id)">
               <template #reference>
                 <el-button link type="danger">{{ i18n.t('common.delete') }}</el-button>
               </template>
