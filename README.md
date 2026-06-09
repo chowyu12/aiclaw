@@ -9,7 +9,8 @@ It is designed for people who want an agent system that can do real work: read a
 - Multi-agent management with per-agent prompts, model settings, tools, skills, MCP servers, and token budgets.
 - Runtime Plan State for complex tasks, with live streaming progress and final plan snapshots.
 - Nested `sub_agent` execution for parallel research, exploration, shell work, and delegated tasks.
-- Built-in tools for files, shell commands, browser automation, web fetching, scheduled jobs, code interpretation, memory, session search, and skills.
+- Built-in tools for files, shell commands, browser automation, web search, web fetching, scheduled jobs, code interpretation, memory, session search, and skills.
+- Two-level web search configuration: model-native search for supported models, or external search engines such as Tavily, SerpAPI, and Aliyun IQS.
 - Persistent conversations, execution steps, generated files, and plan state in SQLite, MySQL, or PostgreSQL.
 - Web console for providers, agents, tools, skills, channels, chat, and execution logs.
 - Messaging-channel integrations for WeCom, WeChat, Feishu, DingTalk, WhatsApp, and Telegram.
@@ -125,6 +126,7 @@ AiClaw includes a broad default toolset:
 | `ls` | Directory listing. |
 | `exec` | Run shell commands with working directory and timeout controls. |
 | `process` | Manage long-running background command sessions. |
+| `web_search` | Search the web through an enabled external search engine selected by the agent. |
 | `web_fetch` | Fetch readable content from URLs with browser fallback. |
 | `browser` | Browser automation for navigation, screenshots, snapshots, forms, storage, console, and network inspection. |
 | `canvas` | Render HTML/CSS/JS and capture canvas snapshots. |
@@ -143,6 +145,25 @@ You can also add:
 - Custom command tools.
 - MCP server tools.
 - Skill-provided tools.
+
+## Web Search
+
+Agents can use web search in two modes:
+
+| Mode | Behavior |
+| --- | --- |
+| Built-in | For models whose capability profile supports web search, AiClaw sends `extra_body: {"enable_search": true}` with the model request and records a `web_search` execution step showing the search input and request configuration. |
+| External | AiClaw exposes the `web_search` tool to the agent and routes calls through the selected search engine configuration. Tool input, output, duration, and errors are visible in chat progress and execution logs. |
+
+External search engines are configured from the web console's Search Engine menu. Multiple configurations can be saved, enabled or disabled independently, tested from the list, and tested directly from the create/edit dialog before saving. Supported providers:
+
+| Provider | Notes |
+| --- | --- |
+| Tavily | Uses the Tavily search API. |
+| SerpAPI | Uses SerpAPI organic search results. |
+| Aliyun IQS | Uses Alibaba Cloud IQS `POST https://cloud-iqs.aliyuncs.com/search/unified` with Bearer API key authentication and the `LiteAdvanced` engine. |
+
+When an agent uses external mode, it must select an enabled search engine. Disabled configurations can still be tested from the Search Engine page, but they are not available for live agent execution.
 
 ## Skills
 
@@ -288,6 +309,7 @@ AiClaw records:
 - Token usage.
 - Step duration.
 - Errors.
+- Built-in and external web search activity as `web_search` steps.
 - Final Plan State snapshots.
 
 The execution log page keeps the assistant response, plan snapshot, and step timeline separate so you can understand both the high-level plan and the low-level tool activity.

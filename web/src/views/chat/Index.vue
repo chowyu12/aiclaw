@@ -221,7 +221,7 @@
                         <div class="step-head" :class="{ 'step-head--clickable': node.children.length > 0 }" @click="node.children.length > 0 && (node.step._childrenOpen = node.step._childrenOpen === false ? true : false)">
                           <span class="step-badge" :class="stepBadgeClass(node.step)">{{ stepTypeLabel(node.step.step_type, node.step.name) }}</span>
                           <span v-if="subAgentDepthLabel(node.step)" class="step-depth">{{ subAgentDepthLabel(node.step) }}</span>
-                          <span class="step-title">{{ node.step.name === 'sub_agent' ? (node.step.metadata?.tool_name || 'sub_agent') : node.step.name }}</span>
+                          <span class="step-title">{{ stepDisplayName(node.step) }}</span>
                           <el-tag
                             :type="stepTagType(node.step.status)"
                             size="small" round effect="plain"
@@ -273,7 +273,7 @@
                               <div class="step-body">
                                 <div class="step-head">
                                   <span class="step-badge" :class="stepBadgeClass(child.step)">{{ stepTypeLabel(child.step.step_type, child.step.name) }}</span>
-                                  <span class="step-title">{{ child.step.name }}</span>
+                                  <span class="step-title">{{ stepDisplayName(child.step) }}</span>
                                   <el-tag
                                     :type="stepTagType(child.step.status)"
                                     size="small" round effect="plain"
@@ -353,10 +353,10 @@
               <div v-if="pendingSteps.length > 0 || !streamingContent" class="wf-timeline">
                 <div v-for="node in groupSteps(pendingSteps as ExecutionStep[])" :key="node.step.step_order" class="wf-node">
                   <div class="wf-node-head" @click="node.step._expanded = !node.step._expanded">
-                    <span class="wf-dot" :class="node.step.name === 'sub_agent' ? 'wf-dot--sub_agent' : ('wf-dot--' + node.step.step_type)"></span>
+                    <span class="wf-dot" :class="workflowDotClass(node.step)"></span>
                     <span class="wf-label" :class="{ 'wf-label--sub_agent': node.step.name === 'sub_agent' }">{{ stepTypeLabel(node.step.step_type, node.step.name) }}</span>
                     <span v-if="subAgentDepthLabel(node.step)" class="wf-depth">{{ subAgentDepthLabel(node.step) }}</span>
-                    <span class="wf-name">{{ node.step.name === 'sub_agent' ? (node.step.metadata?.tool_name || 'sub_agent') : node.step.name }}</span>
+                    <span class="wf-name">{{ stepDisplayName(node.step) }}</span>
                     <el-tag v-if="node.step.status === 'success'" type="success" size="small" round effect="plain">{{ node.step.duration_ms }}ms</el-tag>
                     <el-tag v-else-if="node.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
                     <el-tag v-else-if="node.step.status === 'running'" type="info" size="small" round effect="plain">
@@ -402,9 +402,9 @@
                     <div v-if="node.children.length && node.step._childrenOpen !== false" class="wf-sub-steps">
                       <div v-for="child in node.children" :key="child.step.step_order" class="wf-node wf-node--child">
                         <div class="wf-node-head">
-                          <span class="wf-dot" :class="'wf-dot--' + child.step.step_type"></span>
+                          <span class="wf-dot" :class="workflowDotClass(child.step)"></span>
                           <span class="wf-label">{{ stepTypeLabel(child.step.step_type, child.step.name) }}</span>
-                          <span class="wf-name">{{ child.step.name }}</span>
+                          <span class="wf-name">{{ stepDisplayName(child.step) }}</span>
                           <el-tag v-if="child.step.status === 'success'" type="success" size="small" round effect="plain">{{ child.step.duration_ms }}ms</el-tag>
                           <el-tag v-else-if="child.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
                           <el-tag v-else-if="child.step.status === 'running'" type="info" size="small" round effect="plain">
@@ -1071,6 +1071,7 @@ function formatMessage(text: string): string {
 }
 
 function stepTypeLabel(t: string, name?: string) {
+  if (t === 'tool_call' && name === 'web_search') return '联网搜索'
   if (t === 'tool_call' && name === 'sub_agent') return 'Sub Agent'
   switch (t) {
     case 'llm_call': return 'LLM'
@@ -1081,7 +1082,14 @@ function stepTypeLabel(t: string, name?: string) {
   }
 }
 
+function stepDisplayName(step: ExecutionStep) {
+  if (step.step_type === 'tool_call' && step.name === 'web_search') return '联网搜索'
+  if (step.name === 'sub_agent') return step.metadata?.tool_name || 'sub_agent'
+  return step.name
+}
+
 function stepBadgeClass(step: any) {
+  if (step.step_type === 'tool_call' && step.name === 'web_search') return 'badge--web_search'
   if (step.step_type === 'tool_call' && step.name === 'sub_agent') return 'badge--sub_agent'
   return 'badge--' + step.step_type
 }
@@ -1121,8 +1129,15 @@ function pushOrUpdateStep(list: ExecutionStep[], step: ExecutionStep) {
 }
 
 function stepDotClass(step: any) {
+  if (step.step_type === 'tool_call' && step.name === 'web_search') return 'dot--web_search'
   if (step.step_type === 'tool_call' && step.name === 'sub_agent') return 'dot--sub_agent'
   return 'dot--' + step.step_type
+}
+
+function workflowDotClass(step: ExecutionStep) {
+  if (step.step_type === 'tool_call' && step.name === 'web_search') return 'wf-dot--web_search'
+  if (step.step_type === 'tool_call' && step.name === 'sub_agent') return 'wf-dot--sub_agent'
+  return 'wf-dot--' + step.step_type
 }
 
 function subAgentDepthLabel(step: any): string {
@@ -2135,6 +2150,9 @@ function groupSteps(steps: ExecutionStep[]): StepNode[] {
 .dot--tool_call {
   background: #ea580c;
 }
+.dot--web_search {
+  background: #0891b2;
+}
 .dot--sub_agent {
   background: #8b5cf6;
 }
@@ -2178,6 +2196,9 @@ function groupSteps(steps: ExecutionStep[]): StepNode[] {
 }
 .badge--tool_call {
   background: #ea580c;
+}
+.badge--web_search {
+  background: #0891b2;
 }
 .badge--sub_agent {
   background: #8b5cf6;
@@ -2335,6 +2356,9 @@ function groupSteps(steps: ExecutionStep[]): StepNode[] {
 }
 .wf-dot--tool_call {
   background: #ea580c;
+}
+.wf-dot--web_search {
+  background: #0891b2;
 }
 .wf-dot--sub_agent {
   background: #8b5cf6;

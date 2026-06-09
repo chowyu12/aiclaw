@@ -93,7 +93,7 @@
                                 <el-tag v-if="node.step.sub_agent_depth" size="small" effect="plain" class="depth-tag">
                                   L{{ node.step.sub_agent_depth }}
                                 </el-tag>
-                                <span class="step-name">{{ node.step.name }}</span>
+                                <span class="step-name">{{ stepDisplayName(node.step) }}</span>
                                 <el-tag
                                   :type="node.step.status === 'success' ? 'success' : 'danger'"
                                   size="small" round
@@ -156,7 +156,7 @@
                                     <el-tag :type="stepTagType(child.step.step_type, child.step.name)" size="small" effect="dark">
                                       {{ stepTypeLabel(child.step.step_type, child.step.name) }}
                                     </el-tag>
-                                    <span class="step-name">{{ child.step.name }}</span>
+                                    <span class="step-name">{{ stepDisplayName(child.step) }}</span>
                                     <el-tag :type="child.step.status === 'success' ? 'success' : 'danger'" size="small" round>{{ child.step.status }}</el-tag>
                                     <span class="child-duration">{{ child.step.duration_ms }}ms</span>
                                     <span v-if="child.step.tokens_used" class="child-tokens">{{ child.step.tokens_used }} tokens</span>
@@ -346,6 +346,7 @@ function roleLabel(role: string) {
 }
 
 function stepTypeLabel(t: string, name?: string) {
+  if (t === 'tool_call' && name === 'web_search') return '联网搜索'
   if (t === 'tool_call' && name === 'sub_agent') return 'Sub Agent'
   switch (t) {
     case 'llm_call': return 'LLM'
@@ -356,7 +357,13 @@ function stepTypeLabel(t: string, name?: string) {
   }
 }
 
+function stepDisplayName(step: ExecutionStep) {
+  if (step.step_type === 'tool_call' && step.name === 'web_search') return '联网搜索'
+  return step.name
+}
+
 function stepTagType(t: string, name?: string): '' | 'success' | 'warning' | 'danger' | 'info' {
+  if (t === 'tool_call' && name === 'web_search') return 'info'
   if (t === 'tool_call' && name === 'sub_agent') return 'success'
   switch (t) {
     case 'llm_call': return ''

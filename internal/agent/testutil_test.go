@@ -35,9 +35,10 @@ type mockStore struct {
 	planItems     map[int64][]model.PlanItem
 	filesByUUID   map[string]*model.File
 
-	agents       map[int64]*model.Agent
-	agentsByUUID map[string]*model.Agent
-	defaultAgent *model.Agent
+	agents        map[int64]*model.Agent
+	agentsByUUID  map[string]*model.Agent
+	defaultAgent  *model.Agent
+	searchEngines map[int64]*model.SearchEngineConfig
 
 	getConvByUUIDErr error
 }
@@ -55,11 +56,68 @@ func newMockStore() *mockStore {
 		filesByUUID:   make(map[string]*model.File),
 		agents:        make(map[int64]*model.Agent),
 		agentsByUUID:  make(map[string]*model.Agent),
+		searchEngines: make(map[int64]*model.SearchEngineConfig),
 	}
 }
 
 func (s *mockStore) nextID() int64 { return s.nextIDVal.Add(1) }
 func (s *mockStore) Close() error  { return nil }
+
+func (s *mockStore) ListSearchEngineConfigs(_ context.Context, _ model.ListQuery) ([]*model.SearchEngineConfig, int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]*model.SearchEngineConfig, 0, len(s.searchEngines))
+	for _, cfg := range s.searchEngines {
+		cp := *cfg
+		items = append(items, &cp)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (s *mockStore) GetSearchEngineConfig(_ context.Context, id int64) (*model.SearchEngineConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cfg := s.searchEngines[id]
+	if cfg == nil {
+		return nil, sql.ErrNoRows
+	}
+	cp := *cfg
+	return &cp, nil
+}
+
+func (s *mockStore) CreateSearchEngineConfig(_ context.Context, cfg *model.SearchEngineConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := *cfg
+	if cp.ID == 0 {
+		cp.ID = s.nextID()
+	}
+	cfg.ID = cp.ID
+	s.searchEngines[cp.ID] = &cp
+	return nil
+}
+
+func (s *mockStore) UpdateSearchEngineConfig(_ context.Context, id int64, cfg *model.SearchEngineConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.searchEngines[id] == nil {
+		return sql.ErrNoRows
+	}
+	cp := *cfg
+	cp.ID = id
+	s.searchEngines[id] = &cp
+	return nil
+}
+
+func (s *mockStore) DeleteSearchEngineConfig(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.searchEngines[id] == nil {
+		return sql.ErrNoRows
+	}
+	delete(s.searchEngines, id)
+	return nil
+}
 
 func (s *mockStore) CreateProvider(_ context.Context, p *model.Provider) error {
 	s.mu.Lock()
@@ -554,6 +612,9 @@ func (s *mockStore) CreateAgent(_ context.Context, a *model.Agent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	a.ID = s.nextID()
+	if a.WebSearchMode == "" {
+		a.WebSearchMode = model.WebSearchModeBuiltin
+	}
 	cp := *a
 	s.agents[cp.ID] = &cp
 	if cp.UUID != "" {
@@ -625,6 +686,15 @@ func (s *mockStore) UpdateAgent(_ context.Context, id int64, req *model.UpdateAg
 	}
 	if req.ToolSearchEnabled != nil {
 		a.ToolSearchEnabled = *req.ToolSearchEnabled
+	}
+	if req.EnableWebSearch != nil {
+		a.EnableWebSearch = *req.EnableWebSearch
+	}
+	if req.WebSearchMode != nil {
+		a.WebSearchMode = *req.WebSearchMode
+	}
+	if req.SearchEngineID != nil {
+		a.SearchEngineID = *req.SearchEngineID
 	}
 	if req.Name != nil {
 		a.Name = *req.Name

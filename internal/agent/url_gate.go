@@ -10,7 +10,7 @@ import (
 // url_gate.go 实现「URL 门控」策略：
 // 某些内置工具（如 web_fetch）只有在对话上下文中出现了用户显式提供的 URL 时，
 // 才应暴露给 LLM。这样可以避免 LLM 把 web_fetch 当作泛化的联网检索工具使用，
-// 未提供 URL 的场景应交给内置联网搜索（web_search）。
+// 未提供 URL 的场景应交给内置模型联网能力，或外置模式下的 web_search 工具。
 
 // urlGatedTools 列出所有受 URL 门控的工具名。若上下文未发现 URL，则这些工具
 // 不会出现在发给 LLM 的 tool definitions 里。

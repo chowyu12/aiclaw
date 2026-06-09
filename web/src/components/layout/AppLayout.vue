@@ -59,6 +59,10 @@
             <el-icon><Timer /></el-icon>
             <template #title>{{ i18n.t("app.scheduler") }}</template>
           </el-menu-item>
+          <el-menu-item index="/search-engine">
+            <el-icon><Search /></el-icon>
+            <template #title>{{ i18n.t("app.searchEngine") }}</template>
+          </el-menu-item>
 
           <el-menu-item index="/logs">
             <el-icon><Document /></el-icon>

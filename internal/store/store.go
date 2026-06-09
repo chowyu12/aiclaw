@@ -16,6 +16,7 @@ type Store interface {
 	PlanStore
 	FileStore
 	MCPServerStore
+	SearchEngineStore
 	Close() error
 }
 
@@ -52,6 +53,14 @@ type ChannelThreadStore interface {
 type MCPServerStore interface {
 	ListMCPServers(ctx context.Context) ([]model.MCPServer, error)
 	ReplaceMCPServers(ctx context.Context, servers []model.MCPServer) error
+}
+
+type SearchEngineStore interface {
+	ListSearchEngineConfigs(ctx context.Context, q model.ListQuery) ([]*model.SearchEngineConfig, int64, error)
+	GetSearchEngineConfig(ctx context.Context, id int64) (*model.SearchEngineConfig, error)
+	CreateSearchEngineConfig(ctx context.Context, cfg *model.SearchEngineConfig) error
+	UpdateSearchEngineConfig(ctx context.Context, id int64, cfg *model.SearchEngineConfig) error
+	DeleteSearchEngineConfig(ctx context.Context, id int64) error
 }
 
 type ProviderStore interface {

@@ -19,7 +19,7 @@ import (
 func TestBuildSystemPrompt(t *testing.T) {
 	t.Run("empty", func(t *testing.T) {
 		ag := &model.Agent{}
-		result := buildSystemPrompt(ag, nil, nil, nil, false, false, nil)
+		result := buildSystemPrompt(ag, nil, nil, nil, false, false, model.WebSearchModeBuiltin, nil)
 		if result == "" {
 			t.Error("expected default base prompt when system_prompt is empty")
 		}
@@ -30,7 +30,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	t.Run("with_prompt", func(t *testing.T) {
 		ag := &model.Agent{SystemPrompt: "你是助手"}
-		result := buildSystemPrompt(ag, nil, nil, nil, false, false, nil)
+		result := buildSystemPrompt(ag, nil, nil, nil, false, false, model.WebSearchModeBuiltin, nil)
 		if !strings.Contains(result, "你是助手") {
 			t.Errorf("expected '你是助手', got %q", result)
 		}
@@ -39,7 +39,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 	t.Run("with_skills", func(t *testing.T) {
 		ag := &model.Agent{SystemPrompt: "base"}
 		skills := []model.Skill{{Name: "翻译", Description: "翻译技能描述"}}
-		result := buildSystemPrompt(ag, skills, nil, nil, false, false, nil)
+		result := buildSystemPrompt(ag, skills, nil, nil, false, false, model.WebSearchModeBuiltin, nil)
 		if !strings.Contains(result, "翻译") || !strings.Contains(result, "翻译技能描述") {
 			t.Errorf("skill not included: %q", result)
 		}
@@ -51,7 +51,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "read", Description: "读取文件内容", Enabled: true},
 			{Name: "exec", Description: "运行命令", Enabled: true},
 		}
-		result := buildSystemPrompt(ag, nil, tools, nil, false, false, nil)
+		result := buildSystemPrompt(ag, nil, tools, nil, false, false, model.WebSearchModeBuiltin, nil)
 		if !strings.Contains(result, "execution_strategy") {
 			t.Errorf("missing strategy section: %q", result)
 		}
@@ -67,7 +67,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "translate_api", Description: "文本翻译", Enabled: true},
 		}
 		toolSkillMap := map[string]string{"translate_api": "翻译"}
-		result := buildSystemPrompt(ag, skills, tools, toolSkillMap, false, false, nil)
+		result := buildSystemPrompt(ag, skills, tools, toolSkillMap, false, false, model.WebSearchModeBuiltin, nil)
 		if !strings.Contains(result, "Related tools: translate_api") {
 			t.Errorf("missing skill-tool association: %q", result)
 		}
@@ -82,7 +82,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 			{Name: "enabled_tool", Description: "可用", Enabled: true},
 			{Name: "disabled_tool", Description: "禁用", Enabled: false},
 		}
-		result := buildSystemPrompt(ag, nil, tools, nil, false, false, nil)
+		result := buildSystemPrompt(ag, nil, tools, nil, false, false, model.WebSearchModeBuiltin, nil)
 		if !strings.Contains(result, "Answer knowledge questions directly") {
 			t.Errorf("expected judgment principle when tools present: %q", result)
 		}
@@ -94,7 +94,7 @@ func TestBuildSystemPrompt(t *testing.T) {
 		tools := []model.Tool{
 			{Name: "test_tool", Description: "测试工具", Enabled: true},
 		}
-		result := buildSystemPrompt(ag, skills, tools, nil, false, false, nil)
+		result := buildSystemPrompt(ag, skills, tools, nil, false, false, model.WebSearchModeBuiltin, nil)
 		if !strings.Contains(result, "base prompt") {
 			t.Error("missing base prompt")
 		}
@@ -108,22 +108,33 @@ func TestBuildSystemPrompt(t *testing.T) {
 
 	t.Run("web_search_enabled_injects_section", func(t *testing.T) {
 		ag := &model.Agent{}
-		result := buildSystemPrompt(ag, nil, nil, nil, false, true, nil)
-		if !strings.Contains(result, "Built-in web search is enabled") {
+		result := buildSystemPrompt(ag, nil, nil, nil, false, true, model.WebSearchModeBuiltin, nil)
+		if !strings.Contains(result, "Built-in model web search is enabled") {
 			t.Errorf("expected web search section when enabled, got %q", result)
 		}
-		if !strings.Contains(result, "not a function tool") {
-			t.Errorf("expected clarification that web_search is not a function tool: %q", result)
+		if !strings.Contains(result, "enable_search=true") {
+			t.Errorf("expected built-in enable_search guidance: %q", result)
 		}
 		if !strings.Contains(result, "web_fetch") {
 			t.Errorf("expected disambiguation with web_fetch: %q", result)
 		}
 	})
 
+	t.Run("external_web_search_injects_tool_guidance", func(t *testing.T) {
+		ag := &model.Agent{}
+		result := buildSystemPrompt(ag, nil, nil, nil, false, true, model.WebSearchModeExternal, nil)
+		if !strings.Contains(result, "A web_search tool is available") {
+			t.Errorf("expected external web_search tool guidance: %q", result)
+		}
+		if strings.Contains(result, "enable_search=true") {
+			t.Errorf("external web search should not mention built-in enable_search: %q", result)
+		}
+	})
+
 	t.Run("web_search_disabled_no_section", func(t *testing.T) {
 		ag := &model.Agent{}
-		result := buildSystemPrompt(ag, nil, nil, nil, false, false, nil)
-		if strings.Contains(result, "Built-in web search is enabled") {
+		result := buildSystemPrompt(ag, nil, nil, nil, false, false, model.WebSearchModeBuiltin, nil)
+		if strings.Contains(result, "Built-in model web search is enabled") {
 			t.Errorf("should not mention web search when disabled, got %q", result)
 		}
 	})
@@ -131,8 +142,8 @@ func TestBuildSystemPrompt(t *testing.T) {
 	t.Run("web_search_enabled_with_tools", func(t *testing.T) {
 		ag := &model.Agent{}
 		tools := []model.Tool{{Name: "read", Description: "读取", Enabled: true}}
-		result := buildSystemPrompt(ag, nil, tools, nil, false, true, nil)
-		if !strings.Contains(result, "Built-in web search is enabled") {
+		result := buildSystemPrompt(ag, nil, tools, nil, false, true, model.WebSearchModeBuiltin, nil)
+		if !strings.Contains(result, "Built-in model web search is enabled") {
 			t.Errorf("expected web search section alongside tools, got %q", result)
 		}
 		if !strings.Contains(result, "execution_strategy") {
@@ -729,7 +740,7 @@ func TestCollectTools(t *testing.T) {
 		}
 
 		registry := NewToolRegistry()
-		builtinCount := len(registry.BuiltinDefs())
+		builtinCount := len(registry.BuiltinDefs()) - 1
 
 		exec := newTestExecutor(s, registry, &mockLLMProvider{})
 		tools, _, err := exec.collectTools(ctx, ag)
@@ -745,6 +756,40 @@ func TestCollectTools(t *testing.T) {
 		}
 		if !names[directTool.Name] {
 			t.Errorf("expected tool %q in result", directTool.Name)
+		}
+		if names["web_search"] {
+			t.Error("web_search should be hidden unless external web search mode is enabled")
+		}
+	})
+
+	t.Run("external_web_search_includes_web_search_tool", func(t *testing.T) {
+		s := newMockStore()
+		agent, _ := seedAgent(t, s)
+		ctx := t.Context()
+		mode := model.WebSearchModeExternal
+		enabled := true
+		if err := s.UpdateAgent(ctx, agent.ID, &model.UpdateAgentReq{
+			EnableWebSearch: &enabled,
+			WebSearchMode:   &mode,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		ag, err := s.GetDefaultAgent(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		exec := newTestExecutor(s, NewToolRegistry(), &mockLLMProvider{})
+		tools, _, err := exec.collectTools(ctx, ag)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		names := make(map[string]bool)
+		for _, tool := range tools {
+			names[tool.Name] = true
+		}
+		if !names["web_search"] {
+			t.Error("web_search should be included for external web search mode")
 		}
 	})
 

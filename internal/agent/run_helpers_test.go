@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"strings"
 	"testing"
 
 	openai "github.com/chowyu12/go-openai"
+
+	"github.com/chowyu12/aiclaw/internal/model"
 )
 
 // ── sanitizeMessages ────────────────────────────────────────
@@ -45,7 +48,7 @@ func TestSanitizeMessages_FixesBrokenJSON(t *testing.T) {
 	msgs := []openai.ChatCompletionMessage{
 		{Role: openai.ChatMessageRoleUser, Content: "do it"},
 		{
-			Role: openai.ChatMessageRoleAssistant,
+			Role:    openai.ChatMessageRoleAssistant,
 			Content: "calling tool",
 			ToolCalls: []openai.ToolCall{{
 				ID: "tc1", Function: openai.FunctionCall{Name: "exec", Arguments: `{"path": "/tmp/f`},
@@ -123,6 +126,78 @@ func TestMergeMap_Merge(t *testing.T) {
 	}
 	if got["b"] != 2 {
 		t.Error("new key from src should be added")
+	}
+}
+
+func TestWebSearchEffectiveModes(t *testing.T) {
+	builtin := &model.Agent{
+		ModelName:       "qwen-plus-latest",
+		EnableWebSearch: true,
+		WebSearchMode:   model.WebSearchModeBuiltin,
+	}
+	if !webSearchEffective(builtin) {
+		t.Fatal("built-in web search should be effective for supported model")
+	}
+
+	external := &model.Agent{
+		ModelName:       "qwen-plus-latest",
+		EnableWebSearch: true,
+		WebSearchMode:   model.WebSearchModeExternal,
+	}
+	if webSearchEffective(external) {
+		t.Fatal("external mode should not enable built-in model web search")
+	}
+	if !externalWebSearchEffective(external) {
+		t.Fatal("external mode should enable external web search")
+	}
+}
+
+func TestApplyModelCapsBuiltInWebSearchUsesExtraBody(t *testing.T) {
+	ag := &model.Agent{
+		ModelName:       "qwen-plus-latest",
+		EnableWebSearch: true,
+		WebSearchMode:   model.WebSearchModeBuiltin,
+	}
+	req := openai.ChatCompletionRequest{}
+
+	applyModelCaps(&req, ag, model.ProviderQwen, testLogger())
+
+	if req.ExtraBody["enable_search"] != true {
+		t.Fatalf("enable_search extra body = %#v, want true", req.ExtraBody["enable_search"])
+	}
+	if _, ok := req.ExtraBody["web_search_options"]; ok {
+		t.Fatalf("unexpected web_search_options in extra body: %#v", req.ExtraBody)
+	}
+	if req.ChatTemplateKwargs["enable_search"] != true {
+		t.Fatalf("enable_search chat template kwarg = %#v, want true", req.ChatTemplateKwargs["enable_search"])
+	}
+}
+
+func TestRecordBuiltInWebSearchStep(t *testing.T) {
+	store := newMockStore()
+	tracker := NewStepTracker(store, 42)
+	ec := &execContext{
+		ag:      &model.Agent{ModelName: "qwen-plus-latest"},
+		prov:    &model.Provider{Name: "Qwen"},
+		tracker: tracker,
+		userMsg: "今天的 AI 新闻",
+	}
+
+	recordBuiltInWebSearchStep(t.Context(), ec, map[string]any{"enable_search": true})
+
+	steps := tracker.Steps()
+	if len(steps) != 1 {
+		t.Fatalf("expected 1 step, got %d", len(steps))
+	}
+	step := steps[0]
+	if step.StepType != model.StepToolCall || step.Name != "web_search" {
+		t.Fatalf("unexpected step identity: type=%s name=%s", step.StepType, step.Name)
+	}
+	if !strings.Contains(step.Input, "今天的 AI 新闻") {
+		t.Fatalf("step input should include user query, got %s", step.Input)
+	}
+	if !strings.Contains(step.Output, `"enable_search": true`) {
+		t.Fatalf("step output should include enable_search, got %s", step.Output)
 	}
 }
 
