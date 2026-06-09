@@ -4,16 +4,16 @@ import "time"
 
 // Agent 运行时配置，持久化在数据库 agents 表；支持多 Agent。
 type Agent struct {
-	ID                int64      `json:"id" gorm:"primaryKey;autoIncrement"`
-	UUID              string     `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
-	IsDefault         bool       `json:"is_default" gorm:"default:false;index"`
-	Name              string     `json:"name" gorm:"size:200;not null"`
-	Description       string     `json:"description" gorm:"size:500"`
-	SystemPrompt      string     `json:"system_prompt" gorm:"type:text"`
-	ProviderID        int64      `json:"provider_id" gorm:"default:0"`
-	ModelName         string     `json:"model_name" gorm:"size:200"`
-	FastModelName     string     `json:"fast_model_name" gorm:"size:200"`
-	Temperature       float64    `json:"temperature" gorm:"default:0.7"`
+	ID            int64   `json:"id" gorm:"primaryKey;autoIncrement"`
+	UUID          string  `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
+	IsDefault     bool    `json:"is_default" gorm:"default:false;index"`
+	Name          string  `json:"name" gorm:"size:200;not null"`
+	Description   string  `json:"description" gorm:"size:500"`
+	SystemPrompt  string  `json:"system_prompt" gorm:"type:text"`
+	ProviderID    int64   `json:"provider_id" gorm:"default:0"`
+	ModelName     string  `json:"model_name" gorm:"size:200"`
+	FastModelName string  `json:"fast_model_name" gorm:"size:200"`
+	Temperature   float64 `json:"temperature" gorm:"default:0.7"`
 	// MaxTokens 限制单次响应的最大输出 token；0 表示不限制，由模型/服务商自行决定。
 	MaxTokens         int        `json:"max_tokens" gorm:"default:0"`
 	Timeout           int        `json:"timeout" gorm:"default:0"`
@@ -24,6 +24,8 @@ type Agent struct {
 	EnableThinking    bool       `json:"enable_thinking" gorm:"default:true"`
 	ReasoningEffort   string     `json:"reasoning_effort" gorm:"size:20;default:medium"`
 	EnableWebSearch   bool       `json:"enable_web_search" gorm:"default:false"`
+	WebSearchMode     string     `json:"web_search_mode" gorm:"size:20;default:builtin"`
+	SearchEngineID    int64      `json:"search_engine_id" gorm:"default:0"`
 	ToolSearchEnabled bool       `json:"tool_search_enabled" gorm:"default:false"`
 	ToolIDs           Int64Slice `json:"tool_ids,omitempty" gorm:"type:text"`
 	CreatedAt         time.Time  `json:"created_at"`
@@ -36,6 +38,9 @@ type Agent struct {
 const (
 	DefaultAgentMaxHistory    = 30
 	DefaultAgentMaxIterations = 50
+
+	WebSearchModeBuiltin  = "builtin"
+	WebSearchModeExternal = "external"
 )
 
 func (a *Agent) TimeoutSeconds() int {
@@ -65,44 +70,60 @@ func (a *Agent) EffectiveReasoningEffort() string {
 	}
 }
 
+func (a *Agent) EffectiveWebSearchMode() string {
+	if a == nil {
+		return WebSearchModeBuiltin
+	}
+	switch a.WebSearchMode {
+	case WebSearchModeBuiltin, WebSearchModeExternal:
+		return a.WebSearchMode
+	default:
+		return WebSearchModeBuiltin
+	}
+}
+
 type UpdateAgentReq struct {
-	Name              *string      `json:"name,omitzero"`
-	Description       *string      `json:"description,omitzero"`
-	SystemPrompt      *string      `json:"system_prompt,omitzero"`
-	ProviderID        *int64       `json:"provider_id,omitzero"`
-	ModelName         *string      `json:"model_name,omitzero"`
-	FastModelName     *string      `json:"fast_model_name,omitzero"`
-	Temperature       *float64     `json:"temperature,omitzero"`
-	MaxTokens         *int         `json:"max_tokens,omitzero"`
-	Timeout           *int         `json:"timeout,omitzero"`
-	MaxHistory        *int         `json:"max_history,omitzero"`
-	MaxIterations     *int         `json:"max_iterations,omitzero"`
-	TokenBudget       *int         `json:"token_budget,omitzero"`
-	EnableThinking    *bool        `json:"enable_thinking,omitzero"`
-	ReasoningEffort   *string      `json:"reasoning_effort,omitzero"`
-	EnableWebSearch   *bool        `json:"enable_web_search,omitzero"`
-	ToolSearchEnabled *bool        `json:"tool_search_enabled,omitzero"`
-	ToolIDs           []int64      `json:"tool_ids,omitzero"`
-	IsDefault         *bool        `json:"is_default,omitzero"`
+	Name              *string  `json:"name,omitzero"`
+	Description       *string  `json:"description,omitzero"`
+	SystemPrompt      *string  `json:"system_prompt,omitzero"`
+	ProviderID        *int64   `json:"provider_id,omitzero"`
+	ModelName         *string  `json:"model_name,omitzero"`
+	FastModelName     *string  `json:"fast_model_name,omitzero"`
+	Temperature       *float64 `json:"temperature,omitzero"`
+	MaxTokens         *int     `json:"max_tokens,omitzero"`
+	Timeout           *int     `json:"timeout,omitzero"`
+	MaxHistory        *int     `json:"max_history,omitzero"`
+	MaxIterations     *int     `json:"max_iterations,omitzero"`
+	TokenBudget       *int     `json:"token_budget,omitzero"`
+	EnableThinking    *bool    `json:"enable_thinking,omitzero"`
+	ReasoningEffort   *string  `json:"reasoning_effort,omitzero"`
+	EnableWebSearch   *bool    `json:"enable_web_search,omitzero"`
+	WebSearchMode     *string  `json:"web_search_mode,omitzero"`
+	SearchEngineID    *int64   `json:"search_engine_id,omitzero"`
+	ToolSearchEnabled *bool    `json:"tool_search_enabled,omitzero"`
+	ToolIDs           []int64  `json:"tool_ids,omitzero"`
+	IsDefault         *bool    `json:"is_default,omitzero"`
 }
 
 type CreateAgentReq struct {
-	Name              string      `json:"name"`
-	Description       string      `json:"description"`
-	SystemPrompt      string      `json:"system_prompt"`
-	ProviderID        int64       `json:"provider_id"`
-	ModelName         string      `json:"model_name"`
-	FastModelName     string      `json:"fast_model_name"`
-	Temperature       float64     `json:"temperature"`
-	MaxTokens         int         `json:"max_tokens"`
-	Timeout           int         `json:"timeout"`
-	MaxHistory        int         `json:"max_history"`
-	MaxIterations     int         `json:"max_iterations"`
-	TokenBudget       int         `json:"token_budget"`
-	EnableThinking    bool        `json:"enable_thinking"`
-	ReasoningEffort   string      `json:"reasoning_effort"`
-	EnableWebSearch   bool        `json:"enable_web_search"`
-	ToolSearchEnabled bool        `json:"tool_search_enabled"`
-	ToolIDs           []int64     `json:"tool_ids,omitzero"`
-	IsDefault         bool        `json:"is_default"`
+	Name              string  `json:"name"`
+	Description       string  `json:"description"`
+	SystemPrompt      string  `json:"system_prompt"`
+	ProviderID        int64   `json:"provider_id"`
+	ModelName         string  `json:"model_name"`
+	FastModelName     string  `json:"fast_model_name"`
+	Temperature       float64 `json:"temperature"`
+	MaxTokens         int     `json:"max_tokens"`
+	Timeout           int     `json:"timeout"`
+	MaxHistory        int     `json:"max_history"`
+	MaxIterations     int     `json:"max_iterations"`
+	TokenBudget       int     `json:"token_budget"`
+	EnableThinking    bool    `json:"enable_thinking"`
+	ReasoningEffort   string  `json:"reasoning_effort"`
+	EnableWebSearch   bool    `json:"enable_web_search"`
+	WebSearchMode     string  `json:"web_search_mode"`
+	SearchEngineID    int64   `json:"search_engine_id"`
+	ToolSearchEnabled bool    `json:"tool_search_enabled"`
+	ToolIDs           []int64 `json:"tool_ids,omitzero"`
+	IsDefault         bool    `json:"is_default"`
 }

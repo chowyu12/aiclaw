@@ -143,6 +143,7 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 	totalStart := time.Now()
 	maxIter := ec.ag.IterationLimit()
 	completed := false
+	builtinWebSearchStepRecorded := false
 
 	for i := range maxIter {
 		// 上下文压缩检查：token 占用超过模型窗口阈值时，用 LLM 摘要压缩中间轮次
@@ -172,6 +173,10 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 			Tools:    tools,
 		}
 		applyModelCaps(&req, ec.ag, ec.prov.Type, ec.l)
+		if webSearchEffective(ec.ag) && !builtinWebSearchStepRecorded {
+			recordBuiltInWebSearchStep(ctx, ec, req.ExtraBody)
+			builtinWebSearchStepRecorded = true
+		}
 
 		ec.l.WithFields(log.Fields{"round": i + 1, "model": ec.ag.ModelName}).Info("[LLM] >> call")
 		llmStep := ec.tracker.BeginStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, ec.stepMeta())
@@ -344,7 +349,8 @@ func (e *Executor) bootstrapAgentTurn(ctx context.Context, ec *execContext, stre
 		PersistentMemory: persistentMem,
 		PlanBlock:        planBlock,
 		ToolSearchMode:   tsMode,
-		WebSearchEnabled: webSearchEffective(ec.ag),
+		WebSearchEnabled: webSearchPromptEnabled(ec.ag),
+		WebSearchMode:    ec.ag.EffectiveWebSearchMode(),
 		WS:               e.ws,
 	})
 	logMessages(ec.l, messages)
@@ -392,6 +398,35 @@ func toolsSentToLLM(st *agentRunState) []openai.Tool {
 }
 
 // ── 工具函数 ────────────────────────────────────────────────
+
+func recordBuiltInWebSearchStep(ctx context.Context, ec *execContext, extraBody map[string]any) {
+	input := map[string]any{
+		"mode":  model.WebSearchModeBuiltin,
+		"query": ec.userMsg,
+	}
+	output := map[string]any{
+		"enable_search": extraBody["enable_search"] == true,
+		"summary":       "Built-in model web search is enabled for this LLM request. Search results are returned in the model response.",
+	}
+	inputJSON, _ := json.MarshalIndent(input, "", "  ")
+	outputJSON, _ := json.MarshalIndent(output, "", "  ")
+	ec.tracker.RecordStep(
+		ctx,
+		model.StepToolCall,
+		"web_search",
+		string(inputJSON),
+		string(outputJSON),
+		model.StepSuccess,
+		"",
+		0,
+		0,
+		&model.StepMetadata{
+			Provider: ec.prov.Name,
+			Model:    ec.ag.ModelName,
+			ToolName: "builtin_web_search",
+		},
+	)
+}
 
 func extractContent(resp openai.ChatCompletionResponse) string {
 	if len(resp.Choices) == 0 {
@@ -454,15 +489,7 @@ func applyModelCaps(req *openai.ChatCompletionRequest, ag *model.Agent, pt model
 	}
 
 	if webSearchEffective(ag) {
-		switch pt {
-		case model.ProviderQwen:
-			extra["enable_search"] = true
-		case model.ProviderOpenAI:
-			extra["web_search_options"] = map[string]any{
-				"search_context_size": "medium",
-				"user_location":       map[string]any{"type": "approximate"},
-			}
-		}
+		extra["enable_search"] = true
 		req.ChatTemplateKwargs = mergeMap(req.ChatTemplateKwargs, map[string]any{"enable_search": true})
 		l.WithField("model", ag.ModelName).Debug("[LLM] web search enabled")
 	}
@@ -501,12 +528,20 @@ func computeQwenThinkingBudget(maxOut int, effort string) int {
 }
 
 // webSearchEffective 判断当前 Agent 是否真正启用了内置联网搜索能力。
-// 需同时满足：Agent 配置开启 && 模型 caps 支持。
+// 需同时满足：Agent 配置开启 && 选择内置模式 && 模型 caps 支持。
 func webSearchEffective(ag *model.Agent) bool {
-	if ag == nil || !ag.EnableWebSearch {
+	if ag == nil || !ag.EnableWebSearch || ag.EffectiveWebSearchMode() != model.WebSearchModeBuiltin {
 		return false
 	}
 	return modelcaps.GetModelCaps(ag.ModelName).WebSearch
+}
+
+func externalWebSearchEffective(ag *model.Agent) bool {
+	return ag != nil && ag.EnableWebSearch && ag.EffectiveWebSearchMode() == model.WebSearchModeExternal
+}
+
+func webSearchPromptEnabled(ag *model.Agent) bool {
+	return webSearchEffective(ag) || externalWebSearchEffective(ag)
 }
 
 func mergeMap(dst, src map[string]any) map[string]any {

@@ -235,6 +235,31 @@ func DefaultBuiltinDefs() []model.Tool {
 			}),
 		},
 		{
+			Name:        "web_search",
+			Description: "Search the web through the configured search engine and return current result snippets with source URLs. Use for general web research when no concrete URL was supplied.",
+			HandlerType: model.HandlerBuiltin,
+			Enabled:     true,
+			Timeout:     60,
+			FunctionDef: mustJSON(map[string]any{
+				"name":        "web_search",
+				"description": "Search the web through the configured search engine and return current result snippets with source URLs. Use this for recent or time-sensitive information when the user did not provide a concrete URL.",
+				"parameters": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"query": map[string]any{
+							"type":        "string",
+							"description": "Search query",
+						},
+						"limit": map[string]any{
+							"type":        "integer",
+							"description": "Maximum number of results to return (default 5, max 10)",
+						},
+					},
+					"required": []string{"query"},
+				},
+			}),
+		},
+		{
 			Name:        "web_fetch",
 			Description: "Fetch a URL explicitly provided by the user and extract readable content. Use only for concrete http/https URLs, not general web research.",
 			HandlerType: model.HandlerBuiltin,

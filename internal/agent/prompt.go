@@ -27,12 +27,17 @@ func xmlBlock(tag, attrs, content string) string {
 	return open + "\n" + content + "\n</" + tag + ">"
 }
 
-// webSearchPromptSection injects system guidance when built-in web search is enabled.
-const webSearchContent = `Built-in web search is enabled. You can answer questions about recent news, real-time data, latest versions, prices, policies, and similar time-sensitive topics without saying that you do not know or that your knowledge is outdated.
-This search capability is part of the model runtime, not a function tool. Do not try to call a tool named web_search, and do not write tool calls in your response. Answer directly and include sources when factual claims require them.
+const builtinWebSearchContent = `Built-in model web search is enabled. The model request includes enable_search=true, so you can answer questions about recent news, real-time data, latest versions, prices, policies, and similar time-sensitive topics without saying that you do not know or that your knowledge is outdated.
+This capability is part of the model runtime. Answer directly and include sources when factual claims require them.
 Prefer authoritative sources and include links for concrete facts.
-- If the user describes only a topic and does not provide a URL, use built-in web search.
+- If the user describes only a topic and does not provide a URL, use built-in model web search.
 - If the user message contains a concrete http(s):// URL, use the web_fetch tool to fetch that URL.`
+
+const externalWebSearchContent = `External web search is enabled. A web_search tool is available through the configured search engine.
+Use web_search for recent news, real-time data, latest versions, prices, policies, and similar time-sensitive topics when the user did not provide a concrete URL.
+Prefer authoritative sources and include links for concrete facts.
+- If the user message contains a concrete http(s):// URL, use the web_fetch tool to fetch that URL.
+- Base factual claims on web_search or web_fetch results.`
 
 type messagesBuildInput struct {
 	Agent            *model.Agent
@@ -46,11 +51,12 @@ type messagesBuildInput struct {
 	PlanBlock        string
 	ToolSearchMode   bool
 	WebSearchEnabled bool
+	WebSearchMode    string
 	WS               *workspace.Workspace
 }
 
 func buildMessages(in messagesBuildInput) []openai.ChatCompletionMessage {
-	systemPrompt := buildSystemPrompt(in.Agent, in.Skills, in.AgentTools, in.ToolSkillMap, in.ToolSearchMode, in.WebSearchEnabled, in.WS)
+	systemPrompt := buildSystemPrompt(in.Agent, in.Skills, in.AgentTools, in.ToolSkillMap, in.ToolSearchMode, in.WebSearchEnabled, in.WebSearchMode, in.WS)
 
 	if in.PersistentMemory != "" {
 		systemPrompt += "\n\n" + in.PersistentMemory
@@ -157,7 +163,7 @@ func buildUserMessage(userMsg string, textFiles []*model.File, maxInjectionBytes
 	return sb.String()
 }
 
-func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model.Tool, toolSkillMap map[string]string, toolSearchMode, webSearchEnabled bool, ws *workspace.Workspace) string {
+func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model.Tool, toolSkillMap map[string]string, toolSearchMode, webSearchEnabled bool, webSearchMode string, ws *workspace.Workspace) string {
 	l := log.WithField("agent", ag.Name)
 
 	var parts []string
@@ -188,7 +194,7 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 	hasTools := len(enabledTools) > 0
 
 	if webSearchEnabled {
-		parts = append(parts, xmlBlock("web_search", "", webSearchContent))
+		parts = append(parts, xmlBlock("web_search", "", webSearchPromptContent(webSearchMode)))
 	}
 
 	if !hasSkills && !hasTools {
@@ -243,6 +249,7 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 - For complex tasks with 3 or more steps, first use the plan tool to create a runtime plan. The plan is for execution progress only; do not include the plan body in the final answer.
 - During execution, follow <plan_state>: prioritize the current step, and use plan revise/update with a reason when the plan needs to change.
 - When uncertain, use sub_agent(mode=explore) to investigate before making changes.
+- Use web_search for recent or time-sensitive web information only when the web_search tool is listed; use web_fetch only for concrete URLs from the user.
 - Base answers on real tool outputs. Do not fabricate data.`)
 		}
 		if hasTools && toolSearchMode {
@@ -261,6 +268,13 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 		"tools":     len(enabledTools),
 	}).Debug("[Prompt]  system prompt built")
 	return result
+}
+
+func webSearchPromptContent(mode string) string {
+	if mode == model.WebSearchModeExternal {
+		return externalWebSearchContent
+	}
+	return builtinWebSearchContent
 }
 
 func buildLLMToolDefs(modelTools []model.Tool, mcpTools []Tool, skillTools []Tool) []openai.Tool {

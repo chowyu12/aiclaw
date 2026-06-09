@@ -160,6 +160,7 @@ var concurrencySafeBuiltins = map[string]bool{
 	"grep":         true,
 	"find":         true,
 	"ls":           true,
+	"web_search":   true,
 	"web_fetch":    true,
 	"sub_agent":    true,
 }

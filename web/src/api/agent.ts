@@ -19,6 +19,8 @@ export interface Agent {
   enable_thinking: boolean
   reasoning_effort: string
   enable_web_search: boolean
+  web_search_mode: string
+  search_engine_id: number
   tool_search_enabled: boolean
   token: string
   tool_ids?: number[]
@@ -44,6 +46,8 @@ export interface UpdateAgentPayload {
   enable_thinking?: boolean
   reasoning_effort?: string
   enable_web_search?: boolean
+  web_search_mode?: string
+  search_engine_id?: number
   tool_search_enabled?: boolean
   tool_ids?: number[]
   is_default?: boolean
@@ -65,6 +69,8 @@ export interface CreateAgentPayload {
   enable_thinking?: boolean
   reasoning_effort?: string
   enable_web_search?: boolean
+  web_search_mode?: string
+  search_engine_id?: number
   tool_search_enabled?: boolean
   tool_ids?: number[]
   is_default?: boolean
@@ -105,6 +111,6 @@ export const agentApi = {
     request.delete(`/agents/${id}`),
   resetTokenById: (id: number) =>
     request.post<any, { data: { token: string } }>(`/agents/${id}/reset-token`),
-  getModelCaps: (model: string) =>
-    request.get<any, { data: ModelCaps }>('/model-caps', { params: { model } }),
+  getModelCaps: (model: string, signal?: AbortSignal) =>
+    request.get<any, { data: ModelCaps }>('/model-caps', { params: { model }, signal }),
 }

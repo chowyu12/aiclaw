@@ -17,6 +17,9 @@ func (s *GormStore) CreateAgent(ctx context.Context, a *model.Agent) error {
 	if a.Token == "" {
 		a.Token = "ag-" + strings.ReplaceAll(uuid.New().String(), "-", "")
 	}
+	if a.WebSearchMode == "" {
+		a.WebSearchMode = model.WebSearchModeBuiltin
+	}
 	return s.db.WithContext(ctx).Create(a).Error
 }
 
@@ -114,6 +117,12 @@ func (s *GormStore) UpdateAgent(ctx context.Context, id int64, req *model.Update
 	}
 	if req.EnableWebSearch != nil {
 		updates["enable_web_search"] = *req.EnableWebSearch
+	}
+	if req.WebSearchMode != nil {
+		updates["web_search_mode"] = *req.WebSearchMode
+	}
+	if req.SearchEngineID != nil {
+		updates["search_engine_id"] = *req.SearchEngineID
 	}
 	if req.ToolSearchEnabled != nil {
 		updates["tool_search_enabled"] = *req.ToolSearchEnabled

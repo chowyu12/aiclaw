@@ -68,6 +68,8 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		EnableThinking:    req.EnableThinking,
 		ReasoningEffort:   req.ReasoningEffort,
 		EnableWebSearch:   req.EnableWebSearch,
+		WebSearchMode:     normalizeWebSearchMode(req.WebSearchMode),
+		SearchEngineID:    req.SearchEngineID,
 		ToolSearchEnabled: req.ToolSearchEnabled,
 		ToolIDs:           model.Int64Slice(req.ToolIDs),
 		IsDefault:         req.IsDefault,
@@ -80,6 +82,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.MaxIterations == 0 {
 		a.MaxIterations = model.DefaultAgentMaxIterations
+	}
+	if msg, err := h.validateExternalWebSearch(ctx, a); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	} else if msg != "" {
+		httputil.BadRequest(w, msg)
+		return
 	}
 	if err := h.store.CreateAgent(ctx, a); err != nil {
 		httputil.InternalError(w, err.Error())
@@ -116,7 +125,37 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		httputil.BadRequest(w, "invalid request body")
 		return
 	}
+	if req.WebSearchMode != nil {
+		mode := normalizeWebSearchMode(*req.WebSearchMode)
+		req.WebSearchMode = &mode
+	}
 	ctx := r.Context()
+	existing, err := h.store.GetAgent(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NotFound(w, "agent not found")
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	candidate := *existing
+	if req.EnableWebSearch != nil {
+		candidate.EnableWebSearch = *req.EnableWebSearch
+	}
+	if req.WebSearchMode != nil {
+		candidate.WebSearchMode = *req.WebSearchMode
+	}
+	if req.SearchEngineID != nil {
+		candidate.SearchEngineID = *req.SearchEngineID
+	}
+	if msg, err := h.validateExternalWebSearch(ctx, &candidate); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	} else if msg != "" {
+		httputil.BadRequest(w, msg)
+		return
+	}
 	if err := h.store.UpdateAgent(ctx, id, &req); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			httputil.NotFound(w, "agent not found")
@@ -126,6 +165,35 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.OK(w, nil)
+}
+
+func normalizeWebSearchMode(mode string) string {
+	switch mode {
+	case model.WebSearchModeExternal:
+		return model.WebSearchModeExternal
+	default:
+		return model.WebSearchModeBuiltin
+	}
+}
+
+func (h *AgentHandler) validateExternalWebSearch(ctx context.Context, a *model.Agent) (string, error) {
+	if a == nil || !a.EnableWebSearch || a.EffectiveWebSearchMode() != model.WebSearchModeExternal {
+		return "", nil
+	}
+	if a.SearchEngineID <= 0 {
+		return "search_engine_id is required when external web search is enabled", nil
+	}
+	cfg, err := h.store.GetSearchEngineConfig(ctx, a.SearchEngineID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "selected search engine not found", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !cfg.Enabled {
+		return "selected search engine is disabled", nil
+	}
+	return "", nil
 }
 
 func (h *AgentHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -186,4 +254,3 @@ func (h *AgentHandler) resolveTools(ctx context.Context, ids []int64) []model.To
 	}
 	return out
 }
-

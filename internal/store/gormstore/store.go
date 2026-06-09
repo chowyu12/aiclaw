@@ -79,6 +79,7 @@ func autoMigrate(db *gorm.DB) error {
 		&model.PlanRun{},
 		&model.PlanItem{},
 		&model.File{},
+		&model.SearchEngineConfig{},
 	); err != nil {
 		return err
 	}

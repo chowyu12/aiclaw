@@ -95,9 +95,27 @@
                 <div class="af-kv">
                   <div class="af-switch-line">
                     <span>联网搜索</span>
-                    <el-switch v-model="agentForm.enable_web_search" size="small" :disabled="!supportsWebSearch" />
+                    <el-switch v-model="agentForm.enable_web_search" size="small" :disabled="webSearchSwitchDisabled" />
                   </div>
-                  <div v-if="!supportsWebSearch" class="af-hint">当前模型不支持</div>
+                  <el-radio-group v-model="agentForm.web_search_mode" size="small" class="af-search-mode" @change="onWebSearchModeChange">
+                    <el-radio-button label="builtin">内置</el-radio-button>
+                    <el-radio-button label="external">外置</el-radio-button>
+                  </el-radio-group>
+                  <div v-if="agentForm.web_search_mode === 'builtin' && !supportsWebSearch" class="af-hint">当前模型不支持内置</div>
+                  <div v-if="agentForm.web_search_mode === 'external'" class="af-hint">使用搜索引擎配置</div>
+                  <el-select
+                    v-if="agentForm.web_search_mode === 'external'"
+                    v-model="agentForm.search_engine_id"
+                    size="small"
+                    style="width:100%;margin-top:6px"
+                    placeholder="选择搜索引擎"
+                    clearable
+                  >
+                    <el-option v-for="item in enabledSearchEngines" :key="item.id" :label="item.name" :value="item.id">
+                      <span>{{ item.name }}</span>
+                      <el-tag size="small" style="margin-left:8px" type="info">{{ searchEngineProviderLabel(item.provider) }}</el-tag>
+                    </el-option>
+                  </el-select>
                 </div>
               </div>
             </section>
@@ -195,6 +213,7 @@ import { ElMessage } from 'element-plus'
 import { QuestionFilled } from '@element-plus/icons-vue'
 import { agentApi, defaultModelCaps, type Agent, type ModelCaps } from '@/api/agent'
 import { providerApi, type Provider } from '@/api/provider'
+import { searchEngineApi, type SearchEngineConfig, type SearchEngineProvider } from '@/api/search_engine'
 import { toolApi, type Tool } from '@/api/tool'
 import { useAgentStore } from '@/stores/agent'
 
@@ -212,6 +231,7 @@ const agentLoading = ref(false)
 const agentSaving = ref(false)
 const providers = ref<Provider[]>([])
 const allTools = ref<Tool[]>([])
+const searchEngines = ref<SearchEngineConfig[]>([])
 const providerModels = ref<string[]>([])
 const remoteModels = ref<string[]>([])
 const remoteFetched = ref(false)
@@ -235,6 +255,8 @@ const agentForm = ref({
   enable_thinking: true,
   reasoning_effort: 'medium',
   enable_web_search: false,
+  web_search_mode: 'builtin',
+  search_engine_id: 0,
   tool_search_enabled: false,
   tool_ids: [] as number[],
   token: '',
@@ -246,13 +268,19 @@ const modelCaps = ref<ModelCaps>({ ...defaultModelCaps })
 let capsAbort: AbortController | null = null
 async function fetchModelCaps(model: string) {
   capsAbort?.abort()
+  capsAbort = null
   if (!model) { modelCaps.value = { ...defaultModelCaps }; return }
-  capsAbort = new AbortController()
+  const controller = new AbortController()
+  capsAbort = controller
   try {
-    const res: any = await agentApi.getModelCaps(model)
+    const res: any = await agentApi.getModelCaps(model, controller.signal)
+    if (capsAbort !== controller) return
     modelCaps.value = res.data ?? { ...defaultModelCaps }
   } catch {
+    if (controller.signal.aborted || capsAbort !== controller) return
     modelCaps.value = { ...defaultModelCaps }
+  } finally {
+    if (capsAbort === controller) capsAbort = null
   }
 }
 
@@ -261,6 +289,12 @@ watch(() => agentForm.value.model_name, (m) => fetchModelCaps(m))
 const isTemperatureDisabled = computed(() => modelCaps.value.no_temperature)
 const isAlwaysThinking = computed(() => modelCaps.value.always_thinking)
 const supportsWebSearch = computed(() => modelCaps.value.web_search)
+const webSearchSwitchDisabled = computed(() =>
+  agentForm.value.web_search_mode === 'builtin' && !supportsWebSearch.value
+)
+const enabledSearchEngines = computed(() =>
+  searchEngines.value.filter((item) => item.enabled || item.id === agentForm.value.search_engine_id)
+)
 
 const thinkingEnabled = computed({
   get: () => agentForm.value.enable_thinking,
@@ -329,6 +363,8 @@ function applyAgentDetail(detail: Agent) {
     enable_thinking: detail.enable_thinking !== false,
     reasoning_effort: detail.reasoning_effort || 'medium',
     enable_web_search: !!detail.enable_web_search,
+    web_search_mode: detail.web_search_mode || 'builtin',
+    search_engine_id: detail.search_engine_id || 0,
     tool_search_enabled: !!detail.tool_search_enabled,
     tool_ids: detail.tool_ids || detail.tools?.map((t: any) => t.id) || [],
     token: detail.token || '',
@@ -339,12 +375,14 @@ function applyAgentDetail(detail: Agent) {
 async function reloadAgent() {
   agentLoading.value = true
   try {
-    const [p, t] = await Promise.all([
+    const [p, t, se] = await Promise.all([
       providerApi.list({ page: 1, page_size: 100 }),
       toolApi.list({ page: 1, page_size: 500 }),
+      searchEngineApi.list({ page: 1, page_size: 100 }),
     ])
     providers.value = (p as any).data?.list || []
     allTools.value = (t as any).data?.list || []
+    searchEngines.value = (se as any).data?.list || []
     if (isEdit.value) {
       const res = await agentApi.getById(agentId.value)
       const detail = (res as any).data as Agent
@@ -362,6 +400,14 @@ async function reloadAgent() {
 
 async function saveAgent() {
   if (!agentForm.value.name) { ElMessage.warning('请填写名称'); return }
+  if (agentForm.value.enable_web_search && webSearchSwitchDisabled.value) {
+    ElMessage.warning('当前模型不支持内置联网搜索')
+    return
+  }
+  if (agentForm.value.enable_web_search && agentForm.value.web_search_mode === 'external' && !agentForm.value.search_engine_id) {
+    ElMessage.warning('请选择搜索引擎配置')
+    return
+  }
   agentSaving.value = true
   try {
     const payload = {
@@ -380,6 +426,8 @@ async function saveAgent() {
       enable_thinking: agentForm.value.enable_thinking,
       reasoning_effort: agentForm.value.reasoning_effort,
       enable_web_search: agentForm.value.enable_web_search,
+      web_search_mode: agentForm.value.web_search_mode,
+      search_engine_id: agentForm.value.search_engine_id,
       tool_search_enabled: agentForm.value.tool_search_enabled,
       tool_ids: agentForm.value.tool_search_enabled ? [] : agentForm.value.tool_ids,
       is_default: agentForm.value.is_default,
@@ -414,6 +462,26 @@ function copyToken(t: string) {
 
 function onToolSearchChange(en: boolean) {
   if (en) agentForm.value.tool_ids = []
+}
+
+function onWebSearchModeChange() {
+  if (webSearchSwitchDisabled.value) {
+    agentForm.value.enable_web_search = false
+  }
+  if (agentForm.value.web_search_mode === 'external' && !agentForm.value.search_engine_id) {
+    agentForm.value.search_engine_id = enabledSearchEngines.value[0]?.id || 0
+  }
+}
+
+function searchEngineProviderLabel(provider: SearchEngineProvider) {
+  switch (provider) {
+    case 'aliyun-iqs':
+      return 'Aliyun IQS'
+    case 'serpapi':
+      return 'SerpAPI'
+    default:
+      return 'Tavily'
+  }
 }
 
 onMounted(() => reloadAgent())
@@ -512,6 +580,10 @@ onMounted(() => reloadAgent())
 .af-card-head--toggle {
   display: flex; align-items: center; justify-content: space-between;
   cursor: pointer; user-select: none;
+}
+
+.af-search-mode {
+  margin-top: 8px;
 }
 
 .af-fold-arrow {

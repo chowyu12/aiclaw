@@ -18,6 +18,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/store"
 	"github.com/chowyu12/aiclaw/internal/tools/mcp"
 	"github.com/chowyu12/aiclaw/internal/tools/sessionsearch"
+	"github.com/chowyu12/aiclaw/internal/tools/websearch"
 	"github.com/chowyu12/aiclaw/internal/workspace"
 )
 
@@ -98,6 +99,7 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 	registry.RegisterBuiltin("sub_agent", e.subAgentHandler)
 	registry.RegisterBuiltin("skill", e.skillHandler)
 	registry.RegisterBuiltin("session_search", sessionsearch.NewHandler(s))
+	registry.RegisterBuiltin("web_search", websearch.NewHandler(s))
 	registry.RegisterBuiltin(planToolName, e.planHandler)
 	return e
 }
@@ -297,6 +299,9 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 	ctx = workspace.WithWorkdirScope(ctx, ag.UUID)
 	if e.ws != nil {
 		ctx = workspace.WithWorkspace(ctx, e.ws)
+	}
+	if ag.SearchEngineID > 0 {
+		ctx = websearch.WithSearchEngineID(ctx, ag.SearchEngineID)
 	}
 	if e.schedCtxFn != nil {
 		ctx = e.schedCtxFn(ctx)
@@ -645,6 +650,9 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 	seenName := make(map[string]bool)
 
 	for _, bt := range e.registry.BuiltinDefs() {
+		if bt.Name == "web_search" && !externalWebSearchEffective(ag) {
+			continue
+		}
 		agentTools = append(agentTools, bt)
 		seenName[bt.Name] = true
 	}
@@ -819,6 +827,9 @@ func (e *Executor) prepareSubAgent(ctx context.Context, prompt, agentUUID string
 	ctx = workspace.WithWorkdirScope(ctx, ag.UUID)
 	if e.ws != nil {
 		ctx = workspace.WithWorkspace(ctx, e.ws)
+	}
+	if ag.SearchEngineID > 0 {
+		ctx = websearch.WithSearchEngineID(ctx, ag.SearchEngineID)
 	}
 
 	prov, err := e.store.GetProvider(ctx, ag.ProviderID)
