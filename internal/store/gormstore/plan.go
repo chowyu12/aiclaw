@@ -37,7 +37,7 @@ func (s *GormStore) UpdatePlanRun(ctx context.Context, run *model.PlanRun) error
 func (s *GormStore) GetActivePlanRun(ctx context.Context, conversationID int64) (*model.PlanRun, error) {
 	var run model.PlanRun
 	if err := s.db.WithContext(ctx).
-		Where("conversation_id = ? AND message_id = 0", conversationID).
+		Where("conversation_id = ? AND message_id = 0 AND status = ?", conversationID, model.PlanStatusActive).
 		Order("id DESC").
 		First(&run).Error; err != nil {
 		return nil, notFound(err)
@@ -66,15 +66,53 @@ func (s *GormStore) ListPlanItems(ctx context.Context, planRunID int64) ([]model
 
 func (s *GormStore) ReplacePlanItems(ctx context.Context, planRunID int64, items []model.PlanItem) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("plan_run_id = ?", planRunID).Delete(&model.PlanItem{}).Error; err != nil {
+		var existing []model.PlanItem
+		if err := tx.Where("plan_run_id = ?", planRunID).Find(&existing).Error; err != nil {
 			return err
 		}
+		byKey := make(map[string]model.PlanItem, len(existing))
+		for _, item := range existing {
+			byKey[item.ItemKey] = item
+		}
+		keptIDs := make(map[int64]bool, len(items))
 		for i := range items {
 			items[i].PlanRunID = planRunID
 			if items[i].SortOrder == 0 {
 				items[i].SortOrder = i + 1
 			}
+			if old, ok := byKey[items[i].ItemKey]; ok {
+				items[i].ID = old.ID
+				items[i].CreatedAt = old.CreatedAt
+				keptIDs[old.ID] = true
+				if err := tx.Model(&model.PlanItem{}).
+					Where("id = ?", old.ID).
+					Updates(map[string]any{
+						"plan_run_id": items[i].PlanRunID,
+						"item_key":    items[i].ItemKey,
+						"title":       items[i].Title,
+						"detail":      items[i].Detail,
+						"status":      items[i].Status,
+						"reason":      items[i].Reason,
+						"step_id":     items[i].StepID,
+						"sort_order":  items[i].SortOrder,
+					}).Error; err != nil {
+					return err
+				}
+				continue
+			}
 			if err := tx.Create(&items[i]).Error; err != nil {
+				return err
+			}
+			keptIDs[items[i].ID] = true
+		}
+		var deleteIDs []int64
+		for _, item := range existing {
+			if !keptIDs[item.ID] {
+				deleteIDs = append(deleteIDs, item.ID)
+			}
+		}
+		if len(deleteIDs) > 0 {
+			if err := tx.Where("id IN ?", deleteIDs).Delete(&model.PlanItem{}).Error; err != nil {
 				return err
 			}
 		}

@@ -494,6 +494,42 @@ func TestExecute_ToolNotFoundByLLM(t *testing.T) {
 	}
 }
 
+func TestExecute_ToolOutputErrorPrefixDoesNotFailPlan(t *testing.T) {
+	s := newMockStore()
+	agent, _ := seedAgent(t, s)
+
+	registry := NewToolRegistry()
+	registry.RegisterBuiltin("prefix_tool", func(_ context.Context, _ string) (string, error) {
+		return "error: this is a normal payload", nil
+	})
+	seedToolForAgent(t, s, agent.ID, "prefix_tool", "tool with error prefix output")
+
+	mockLLM := &mockLLMProvider{
+		responses: []openai.ChatCompletionResponse{
+			toolCallResp("plan", `{"action":"set","items":[{"id":"a","title":"run prefix tool"}]}`),
+			toolCallResp("prefix_tool", "{}"),
+			textResp("done"),
+		},
+	}
+	exec := newTestExecutor(s, registry, mockLLM)
+
+	result, err := exec.Execute(t.Context(), model.ChatRequest{
+		UserID: "u1", Message: "run a planned tool",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Plan == nil || len(result.Plan.Items) != 1 {
+		t.Fatalf("expected final plan, got %#v", result.Plan)
+	}
+	if result.Plan.Status != model.PlanStatusCompleted {
+		t.Fatalf("expected completed plan, got %q", result.Plan.Status)
+	}
+	if result.Plan.Items[0].Status != model.PlanItemCompleted {
+		t.Fatalf("expected completed plan item, got %#v", result.Plan.Items[0])
+	}
+}
+
 func TestExecute_WithSkills(t *testing.T) {
 	tmpRoot := t.TempDir()
 	ws, err := workspace.New(tmpRoot)

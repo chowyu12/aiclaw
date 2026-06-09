@@ -372,7 +372,7 @@ func (s *mockStore) GetActivePlanRun(_ context.Context, conversationID int64) (*
 	defer s.mu.RUnlock()
 	var best *model.PlanRun
 	for _, run := range s.planRuns {
-		if run.ConversationID == conversationID && run.MessageID == 0 {
+		if run.ConversationID == conversationID && run.MessageID == 0 && run.Status == model.PlanStatusActive {
 			if best == nil || run.ID > best.ID {
 				cp := *run
 				best = &cp
@@ -410,8 +410,17 @@ func (s *mockStore) ReplacePlanItems(_ context.Context, planRunID int64, items [
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := make([]model.PlanItem, len(items))
+	existingByKey := make(map[string]model.PlanItem, len(s.planItems[planRunID]))
+	for _, item := range s.planItems[planRunID] {
+		existingByKey[item.ItemKey] = item
+	}
 	for i := range items {
-		items[i].ID = s.nextID()
+		if old, ok := existingByKey[items[i].ItemKey]; ok {
+			items[i].ID = old.ID
+			items[i].CreatedAt = old.CreatedAt
+		} else {
+			items[i].ID = s.nextID()
+		}
 		items[i].PlanRunID = planRunID
 		out[i] = items[i]
 	}
