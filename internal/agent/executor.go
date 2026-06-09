@@ -279,6 +279,11 @@ func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
 		ec.l.WithError(err).Error("[Execute] save error message failed")
 		return
 	}
+	if ec.plan != nil {
+		if _, linkErr := ec.plan.LinkErrorMessage(ctx, msgID, execErr.Error()); linkErr != nil {
+			ec.l.WithError(linkErr).Warn("[Plan] link failed plan to error message failed")
+		}
+	}
 	ec.tracker.SetMessageID(msgID)
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "error": execErr}).Warn("[Execute] << error saved")
 }

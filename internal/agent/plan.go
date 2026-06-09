@@ -14,6 +14,11 @@ import (
 
 const planToolName = "plan"
 
+const (
+	planPromptMaxFieldRunes  = 240
+	planPromptMaxReasonRunes = 320
+)
+
 type planContextKey struct{}
 
 type PlanManager struct {
@@ -141,12 +146,12 @@ func (pm *PlanManager) PromptBlock(ctx context.Context) string {
 	sb.WriteString("<plan_state>\n")
 	if state.Goal != "" {
 		sb.WriteString("Goal: ")
-		sb.WriteString(state.Goal)
+		sb.WriteString(planPromptText(state.Goal, planPromptMaxFieldRunes))
 		sb.WriteString("\n")
 	}
 	if running != nil {
 		sb.WriteString("Current step: ")
-		sb.WriteString(running.Title)
+		sb.WriteString(planPromptText(running.Title, planPromptMaxFieldRunes))
 		sb.WriteString("\n")
 	} else {
 		sb.WriteString("Current step: not set\n")
@@ -161,13 +166,13 @@ func (pm *PlanManager) PromptBlock(ctx context.Context) string {
 			if i > 0 {
 				sb.WriteString("; ")
 			}
-			sb.WriteString(item.Title)
+			sb.WriteString(planPromptText(item.Title, planPromptMaxFieldRunes))
 		}
 		sb.WriteString("\n")
 	}
 	if state.RevisionReason != "" {
 		sb.WriteString("Latest revision: ")
-		sb.WriteString(state.RevisionReason)
+		sb.WriteString(planPromptText(state.RevisionReason, planPromptMaxReasonRunes))
 		sb.WriteString("\n")
 	}
 	sb.WriteString(fmt.Sprintf("Progress: %d/%d completed\n", done, len(state.Items)))
@@ -240,13 +245,19 @@ func (pm *PlanManager) handleUpdate(ctx context.Context, p planArgs) (string, er
 	for i := range items {
 		byKey[items[i].ItemKey] = i
 	}
+	seenUpdate := make(map[string]bool, len(p.Items))
 	for _, u := range p.Items {
-		if u.ID == "" {
+		itemKey := strings.TrimSpace(u.ID)
+		if itemKey == "" {
 			return planErr("update", "item id is required"), nil
 		}
-		pos, ok := byKey[u.ID]
+		if seenUpdate[itemKey] {
+			return planErr("update", fmt.Sprintf("duplicate item id %q", itemKey)), nil
+		}
+		seenUpdate[itemKey] = true
+		pos, ok := byKey[itemKey]
 		if !ok {
-			return planErr("update", fmt.Sprintf("unknown item id %q", u.ID)), nil
+			return planErr("update", fmt.Sprintf("unknown item id %q", itemKey)), nil
 		}
 		if u.Title != "" {
 			items[pos].Title = strings.TrimSpace(u.Title)
@@ -316,27 +327,71 @@ func (pm *PlanManager) LinkMessage(ctx context.Context, messageID int64) (*model
 	if err != nil {
 		return nil, err
 	}
-	if len(items) == 0 {
-		return nil, nil
-	}
-	allDone := true
 	for i := range items {
 		if items[i].Status == model.PlanItemRunning {
 			items[i].Status = model.PlanItemCompleted
 		}
-		if items[i].Status == model.PlanItemPending || items[i].Status == model.PlanItemRunning {
-			allDone = false
-		}
 	}
-	if allDone {
-		run.Status = model.PlanStatusCompleted
-	}
+	run.Status = planRunStatus(items)
 	run.MessageID = messageID
 	if err := pm.store.UpdatePlanRun(ctx, run); err != nil {
 		return nil, err
 	}
 	if err := pm.store.ReplacePlanItems(ctx, run.ID, items); err != nil {
 		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	state, err := pm.State(ctx)
+	pm.emit(ctx)
+	return state, err
+}
+
+func (pm *PlanManager) LinkErrorMessage(ctx context.Context, messageID int64, reason string) (*model.PlanState, error) {
+	run, err := pm.activeRun(ctx)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	items, err := pm.store.ListPlanItems(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	reason = strings.TrimSpace(reason)
+	marked := false
+	for i := range items {
+		if items[i].Status == model.PlanItemRunning {
+			items[i].Status = model.PlanItemFailed
+			items[i].Reason = reason
+			marked = true
+			break
+		}
+	}
+	if !marked {
+		for i := range items {
+			if items[i].Status == model.PlanItemPending {
+				items[i].Status = model.PlanItemFailed
+				items[i].Reason = reason
+				break
+			}
+		}
+	}
+	run.MessageID = messageID
+	run.Status = model.PlanStatusFailed
+	if reason != "" {
+		run.RevisionReason = reason
+	}
+	if err := pm.store.UpdatePlanRun(ctx, run); err != nil {
+		return nil, err
+	}
+	if err := pm.store.ReplacePlanItems(ctx, run.ID, items); err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, nil
 	}
 	state, err := pm.State(ctx)
 	pm.emit(ctx)
@@ -430,12 +485,18 @@ func (pm *PlanManager) ok(ctx context.Context, action, summary string) string {
 
 func normalizePlanItems(in []planItemArgs) ([]model.PlanItem, error) {
 	items := make([]model.PlanItem, 0, len(in))
+	seen := make(map[string]bool, len(in))
 	for i, p := range in {
-		if strings.TrimSpace(p.ID) == "" {
+		itemKey := strings.TrimSpace(p.ID)
+		if itemKey == "" {
 			return nil, fmt.Errorf("item id is required")
 		}
+		if seen[itemKey] {
+			return nil, fmt.Errorf("duplicate item id %q", itemKey)
+		}
+		seen[itemKey] = true
 		if strings.TrimSpace(p.Title) == "" {
-			return nil, fmt.Errorf("title is required for item %q", p.ID)
+			return nil, fmt.Errorf("title is required for item %q", itemKey)
 		}
 		status := model.PlanItemPending
 		if p.Status != "" {
@@ -446,7 +507,7 @@ func normalizePlanItems(in []planItemArgs) ([]model.PlanItem, error) {
 			status = parsed
 		}
 		items = append(items, model.PlanItem{
-			ItemKey:   strings.TrimSpace(p.ID),
+			ItemKey:   itemKey,
 			Title:     strings.TrimSpace(p.Title),
 			Detail:    strings.TrimSpace(p.Detail),
 			Status:    status,
@@ -458,6 +519,7 @@ func normalizePlanItems(in []planItemArgs) ([]model.PlanItem, error) {
 }
 
 func parsePlanItemStatus(s string) (model.PlanItemStatus, error) {
+	s = strings.TrimSpace(s)
 	switch model.PlanItemStatus(s) {
 	case model.PlanItemPending, model.PlanItemRunning, model.PlanItemCompleted, model.PlanItemBlocked, model.PlanItemFailed, model.PlanItemSkipped:
 		return model.PlanItemStatus(s), nil
@@ -486,6 +548,41 @@ func ensureOneRunning(items []model.PlanItem) {
 			return
 		}
 	}
+}
+
+func planRunStatus(items []model.PlanItem) model.PlanStatus {
+	if len(items) == 0 {
+		return model.PlanStatusCompleted
+	}
+	allDone := true
+	for _, item := range items {
+		switch item.Status {
+		case model.PlanItemFailed, model.PlanItemBlocked:
+			return model.PlanStatusFailed
+		case model.PlanItemPending, model.PlanItemRunning:
+			allDone = false
+		}
+	}
+	if allDone {
+		return model.PlanStatusCompleted
+	}
+	return model.PlanStatusActive
+}
+
+func planPromptText(s string, maxRunes int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if s == "" {
+		return ""
+	}
+	runes := []rune(s)
+	if maxRunes > 0 && len(runes) > maxRunes {
+		s = string(runes[:maxRunes]) + "..."
+	}
+	return strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+	).Replace(s)
 }
 
 func planErr(action, msg string) string {

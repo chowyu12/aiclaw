@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +24,7 @@ type ToolResult struct {
 	ToolCallID string
 	ToolName   string
 	Content    string
+	Error      string
 }
 
 const toolExecutionWall = 5 * time.Minute
@@ -54,7 +54,7 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 		if blocked, guardMsg := st.loopDet.check(toolName, toolArgs); blocked {
 			st.mu.Unlock()
 			ec.l.WithField("tool", toolName).Warn("[LoopGuard] blocked tool_search")
-			return toolResultMsg(tc.ID, toolName, guardMsg), ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: guardMsg}, nil, nil
+			return toolResultMsg(tc.ID, toolName, guardMsg), ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: guardMsg, Error: guardMsg}, nil, nil
 		}
 		st.loopDet.record(toolName, toolArgs)
 		st.mu.Unlock()
@@ -66,14 +66,14 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	if !ok {
 		errMsg := fmt.Sprintf("tool %q not found", toolName)
 		ec.l.WithField("tool", toolName).Warn("[Tool] tool not registered, skipping")
-		return toolResultMsg(tc.ID, toolName, errMsg), ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: errMsg}, nil, nil
+		return toolResultMsg(tc.ID, toolName, errMsg), ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: errMsg, Error: errMsg}, nil, nil
 	}
 
 	st.mu.Lock()
 	if blocked, guardMsg := st.loopDet.check(toolName, toolArgs); blocked {
 		st.mu.Unlock()
 		ec.l.WithFields(log.Fields{"tool": toolName, "args": truncateLog(toolArgs, 120)}).Warn("[LoopGuard] blocked")
-		return toolResultMsg(tc.ID, toolName, guardMsg), ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: guardMsg}, nil, nil
+		return toolResultMsg(tc.ID, toolName, guardMsg), ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: guardMsg, Error: guardMsg}, nil, nil
 	}
 	st.loopDet.record(toolName, toolArgs)
 	st.calledTools[toolName] = true
@@ -83,7 +83,7 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	if action := e.hooks.Fire(ctx, HookPreToolUse, &HookPayload{ToolName: toolName, ToolArgs: toolArgs}); action == HookSkip {
 		ec.l.WithField("tool", toolName).Info("[Hook] tool call skipped by pre_tool_use hook")
 		skipMsg := fmt.Sprintf("tool %q skipped by policy", toolName)
-		return toolResultMsg(tc.ID, toolName, skipMsg), ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: skipMsg}, nil, nil
+		return toolResultMsg(tc.ID, toolName, skipMsg), ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: skipMsg, Error: skipMsg}, nil, nil
 	}
 
 	ec.l.WithFields(log.Fields{"tool": toolName, "args": truncateLog(toolArgs, 200)}).Info("[Tool] >> invoke")
@@ -112,6 +112,10 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	e.hooks.FireAsync(ctx, HookPostToolUse, &HookPayload{ToolName: toolName, ToolArgs: toolArgs, Result: output, Error: callErr})
 
 	toolMsg, fileParts = e.buildToolResponseParts(ctx, tc.ID, toolName, toolResult, callErr == nil, ec.l)
+	errMsg := ""
+	if callErr != nil {
+		errMsg = callErr.Error()
+	}
 
 	if callErr == nil {
 		if toolFile := e.persistToolFile(ctx, ec, toolResult); toolFile != nil {
@@ -127,7 +131,7 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 		}
 	}
 
-	return toolMsg, ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: toolMsg.Content}, fileParts, dedupeFiles(toolFiles)
+	return toolMsg, ToolResult{ToolCallID: tc.ID, ToolName: toolName, Content: toolMsg.Content, Error: errMsg}, fileParts, dedupeFiles(toolFiles)
 }
 
 func (e *Executor) persistToolFile(ctx context.Context, ec *execContext, toolResult string) *model.File {
@@ -277,8 +281,8 @@ func dedupeFiles(files []*model.File) []*model.File {
 }
 
 // appendAssistantToolRound 执行一轮工具调用：并发安全的工具并行执行，其余串行执行。
-// 返回值分别表示：是否执行了非 plan 的真实工具、是否至少一个工具失败。
-func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *agentRunState, assistant openai.ChatCompletionMessage) (bool, bool) {
+// 返回值分别表示：是否执行了非 plan 的真实工具、是否至少一个工具失败、是否调用了 plan 工具。
+func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *agentRunState, assistant openai.ChatCompletionMessage) (bool, bool, bool) {
 	st.Messages = append(st.Messages, assistant)
 	tcs := assistant.ToolCalls
 	n := len(tcs)
@@ -350,13 +354,16 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 	var pendingParts []openai.ChatMessagePart
 	toolFailed := ""
 	hasRealTool := false
+	hasPlanTool := false
 	for i, r := range results {
 		st.Messages = append(st.Messages, r.toolMsg)
 		toolResults = append(toolResults, r.tr)
-		if strings.HasPrefix(r.tr.Content, "error:") && toolFailed == "" {
-			toolFailed = fmt.Sprintf("%s: %s", r.tr.ToolName, r.tr.Content)
+		if r.tr.Error != "" && toolFailed == "" {
+			toolFailed = fmt.Sprintf("%s: %s", r.tr.ToolName, r.tr.Error)
 		}
-		if tcs[i].Function.Name != planToolName {
+		if tcs[i].Function.Name == planToolName {
+			hasPlanTool = true
+		} else {
 			hasRealTool = true
 			persistedToolCalls = append(persistedToolCalls, tcs[i])
 			persistedToolResults = append(persistedToolResults, r.tr)
@@ -386,7 +393,7 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 			MultiContent: parts,
 		})
 	}
-	return hasRealTool, toolFailed != ""
+	return hasRealTool, toolFailed != "", hasPlanTool
 }
 
 func toolResultMsg(toolCallID, toolName, content string) openai.ChatCompletionMessage {

@@ -232,8 +232,8 @@ func (e *Executor) run(ctx context.Context, ec *execContext, call llmCaller, str
 			Content:   result.content,
 			ToolCalls: result.toolCalls,
 		}
-		hasRealTool, toolFailed := e.appendAssistantToolRound(ctx, ec, st, asst)
-		if ec.plan != nil && hasRealTool && !toolFailed {
+		hasRealTool, toolFailed, hasPlanTool := e.appendAssistantToolRound(ctx, ec, st, asst)
+		if ec.plan != nil && hasRealTool && !toolFailed && !hasPlanTool {
 			ec.plan.CompleteRunning(ctx)
 		}
 	}
