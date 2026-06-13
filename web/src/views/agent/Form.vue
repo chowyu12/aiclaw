@@ -110,6 +110,7 @@
                     style="width:100%;margin-top:6px"
                     placeholder="选择搜索引擎"
                     clearable
+                    @change="onSearchEngineChange"
                   >
                     <el-option v-for="item in enabledSearchEngines" :key="item.id" :label="item.name" :value="item.id">
                       <span>{{ item.name }}</span>
@@ -467,9 +468,19 @@ function onToolSearchChange(en: boolean) {
 function onWebSearchModeChange() {
   if (webSearchSwitchDisabled.value) {
     agentForm.value.enable_web_search = false
+    return
   }
   if (agentForm.value.web_search_mode === 'external' && !agentForm.value.search_engine_id) {
     agentForm.value.search_engine_id = enabledSearchEngines.value[0]?.id || 0
+  }
+  if (agentForm.value.web_search_mode === 'external' && agentForm.value.search_engine_id) {
+    agentForm.value.enable_web_search = true
+  }
+}
+
+function onSearchEngineChange() {
+  if (agentForm.value.web_search_mode === 'external' && agentForm.value.search_engine_id) {
+    agentForm.value.enable_web_search = true
   }
 }
 
