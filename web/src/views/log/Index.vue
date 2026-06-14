@@ -1,20 +1,20 @@
 <template>
   <div class="aic-page">
     <div class="aic-page-head">
-      <h1 class="aic-title">执行日志</h1>
-      <p class="aic-sub">按会话查看对话与执行步骤；工具消息与「仅发起工具调用、无正文」的中间轮次 Agent 不在时间线展示，详情见最终回复下的「执行步骤」。</p>
+      <h1 class="aic-title">{{ i18n.t('logs.title') }}</h1>
+      <p class="aic-sub">{{ i18n.t('logs.subtitle') }}</p>
     </div>
     <div class="aic-page-body">
     <el-card class="aic-card" shadow="never">
       <template #header>
         <div class="aic-card-header">
-          <span class="aic-card-title">会话记录</span>
+          <span class="aic-card-title">{{ i18n.t('logs.conversations') }}</span>
           <div class="filter-bar">
-            <el-checkbox v-model="includeChannels" @change="loadData">包含渠道会话</el-checkbox>
-            <el-input v-model="filterUserId" placeholder="用户 ID" clearable style="width: 150px;" @clear="loadData" @keyup.enter="loadData" />
-            <el-input v-model="filterUserPrefix" placeholder="用户前缀（如 channel:xxx:）" clearable style="width: 240px;" @clear="loadData" @keyup.enter="loadData" />
+            <el-checkbox v-model="includeChannels" @change="loadData">{{ i18n.t('logs.includeChannels') }}</el-checkbox>
+            <el-input v-model="filterUserId" :placeholder="i18n.t('logs.userId')" clearable style="width: 150px;" @clear="loadData" @keyup.enter="loadData" />
+            <el-input v-model="filterUserPrefix" :placeholder="i18n.t('logs.userPrefix')" clearable style="width: 240px;" @clear="loadData" @keyup.enter="loadData" />
             <el-button @click="loadData">
-              <el-icon><Search /></el-icon> 查询
+              <el-icon><Search /></el-icon> {{ i18n.t('common.search') }}
             </el-button>
           </div>
         </div>
@@ -31,8 +31,8 @@
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="expand-content" v-loading="row._loading">
-              <div v-if="!row._messages || row._messages.length === 0" class="empty-msg">暂无消息记录</div>
-              <div v-else-if="timelineMessages(row).length === 0" class="empty-msg">暂无对话消息（工具结果请在 Agent 消息的「执行步骤」中查看）</div>
+              <div v-if="!row._messages || row._messages.length === 0" class="empty-msg">{{ i18n.t('logs.noMessages') }}</div>
+              <div v-else-if="timelineMessages(row).length === 0" class="empty-msg">{{ i18n.t('logs.noTimelineMessages') }}</div>
               <div v-else class="message-timeline">
                 <div v-for="msg in timelineMessages(row)" :key="msg.id" class="msg-item">
                   <div class="msg-header">
@@ -48,8 +48,8 @@
                   <div v-if="msg.role === 'assistant' && msg.plan?.items?.length" class="plan-section">
                     <div class="plan-header">
                       <div>
-                        <div class="plan-label">执行计划</div>
-                        <div class="plan-goal">{{ msg.plan.goal || '运行计划' }}</div>
+                        <div class="plan-label">{{ i18n.t('chat.plan') }}</div>
+                        <div class="plan-goal">{{ msg.plan.goal || i18n.t('chat.defaultPlanGoal') }}</div>
                       </div>
                       <span class="plan-progress">{{ planProgress(msg.plan) }}</span>
                     </div>
@@ -69,9 +69,9 @@
                       @click="msg._showSteps = !msg._showSteps"
                     >
                       <el-icon size="14"><Operation /></el-icon>
-                      <span>执行步骤 ({{ msg.steps.length }})</span>
+                      <span>{{ i18n.t('chat.executionSteps', { count: msg.steps.length }) }}</span>
                       <span class="steps-summary">
-                        总耗时 {{ totalDuration(msg.steps) }}ms
+                        {{ i18n.t('chat.totalDuration', { duration: totalDuration(msg.steps) }) }}
                       </span>
                       <el-icon class="arrow" :class="{ expanded: msg._showSteps }"><ArrowDown /></el-icon>
                     </div>
@@ -103,28 +103,28 @@
                                   size="small" effect="plain" class="depth-tag depth-tag--toggle"
                                   @click.stop="node.step._childrenOpen = node.step._childrenOpen === false ? true : false"
                                 >
-                                  {{ node.children.length }} 步
+                                  {{ i18n.t('chat.childSteps', { count: node.children.length }) }}
                                   <el-icon class="depth-tag-arrow" :class="{ open: node.step._childrenOpen !== false }"><ArrowRight /></el-icon>
                                 </el-tag>
                               </div>
 
                               <div v-if="node.step.input" class="step-block">
-                                <div class="step-block-label">输入</div>
+                                <div class="step-block-label">{{ i18n.t('chat.inputLabel') }}</div>
                                 <pre class="step-block-code">{{ truncate(node.step.input, 1000) }}</pre>
                               </div>
                               <div v-if="node.step.output" class="step-block">
-                                <div class="step-block-label">输出</div>
+                                <div class="step-block-label">{{ i18n.t('chat.outputLabel') }}</div>
                                 <pre class="step-block-code">{{ truncate(node.step.output, 1000) }}</pre>
                               </div>
                               <div v-if="node.step.error" class="step-block">
-                                <div class="step-block-label error-label">错误</div>
+                                <div class="step-block-label error-label">{{ i18n.t('chat.errorLabel') }}</div>
                                 <pre class="step-block-code error-code">{{ node.step.error }}</pre>
                               </div>
 
                               <div v-if="node.step.metadata" class="step-meta-row">
                                 <span v-if="node.step.metadata.channel_type">
                                   <el-icon size="12"><ChatDotRound /></el-icon>
-                                  渠道 {{ node.step.metadata.channel_type }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
+                                  {{ i18n.t('chat.channelLabel', { type: node.step.metadata.channel_type }) }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
                                   <template v-if="node.step.metadata.channel_thread_key"> · {{ node.step.metadata.channel_thread_key }}</template>
                                   <template v-if="node.step.metadata.channel_sender_id"> · {{ node.step.metadata.channel_sender_id }}</template>
                                 </span>
@@ -162,15 +162,15 @@
                                     <span v-if="child.step.tokens_used" class="child-tokens">{{ child.step.tokens_used }} tokens</span>
                                   </div>
                                   <div v-if="child.step.input" class="step-block">
-                                    <div class="step-block-label">输入</div>
+                                    <div class="step-block-label">{{ i18n.t('chat.inputLabel') }}</div>
                                     <pre class="step-block-code">{{ truncate(child.step.input, 500) }}</pre>
                                   </div>
                                   <div v-if="child.step.output" class="step-block">
-                                    <div class="step-block-label">输出</div>
+                                    <div class="step-block-label">{{ i18n.t('chat.outputLabel') }}</div>
                                     <pre class="step-block-code">{{ truncate(child.step.output, 500) }}</pre>
                                   </div>
                                   <div v-if="child.step.error" class="step-block">
-                                    <div class="step-block-label error-label">错误</div>
+                                    <div class="step-block-label error-label">{{ i18n.t('chat.errorLabel') }}</div>
                                     <pre class="step-block-code error-code">{{ child.step.error }}</pre>
                                   </div>
                                 </div>
@@ -193,26 +193,26 @@
             {{ defaultAgent?.name || '—' }}
           </template>
         </el-table-column>
-        <el-table-column label="来源" width="100">
+        <el-table-column :label="i18n.t('logs.source')" width="100">
           <template #default="{ row }">
-            <el-tag v-if="row.user_id?.startsWith('channel:')" type="success" size="small" effect="plain">渠道</el-tag>
+            <el-tag v-if="row.user_id?.startsWith('channel:')" type="success" size="small" effect="plain">{{ i18n.t('logs.channel') }}</el-tag>
             <el-tag v-else size="small" effect="plain">Web</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="user_id" label="用户" width="160" show-overflow-tooltip />
-        <el-table-column prop="title" label="标题" min-width="150" show-overflow-tooltip />
-        <el-table-column prop="uuid" label="会话 UUID" width="140" show-overflow-tooltip />
-        <el-table-column label="更新时间" width="180">
+        <el-table-column prop="user_id" :label="i18n.t('logs.user')" width="160" show-overflow-tooltip />
+        <el-table-column prop="title" :label="i18n.t('logs.titleColumn')" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="uuid" :label="i18n.t('logs.conversationUUID')" width="140" show-overflow-tooltip />
+        <el-table-column :label="i18n.t('common.updatedAt')" width="180">
           <template #default="{ row }">{{ formatTime(row.updated_at) }}</template>
         </el-table-column>
-        <el-table-column label="创建时间" width="180">
+        <el-table-column :label="i18n.t('common.createdAt')" width="180">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column :label="i18n.t('common.actions')" width="100" fixed="right">
           <template #default="{ row }">
-            <el-popconfirm title="确定删除此会话及全部记录？" @confirm="handleDelete(row.id)">
+            <el-popconfirm :title="i18n.t('logs.deleteConversationConfirm')" @confirm="handleDelete(row.id)">
               <template #reference>
-                <el-button link type="danger" size="small">删除</el-button>
+                <el-button link type="danger" size="small">{{ i18n.t('common.delete') }}</el-button>
               </template>
             </el-popconfirm>
           </template>
@@ -311,10 +311,10 @@ async function onExpandChange(row: ConvRow, expanded: ConvRow[]) {
 async function handleDelete(id: number) {
   try {
     await chatApi.deleteConversation(id)
-    ElMessage.success('删除成功')
+    ElMessage.success(i18n.t('common.deleteSuccess'))
     loadData()
   } catch {
-    ElMessage.error('删除失败')
+    ElMessage.error(i18n.t('common.deleteFailed'))
   }
 }
 
@@ -337,16 +337,16 @@ function timelineMessages(row: ConvRow): MsgRow[] {
 
 function roleLabel(role: string) {
   switch (role) {
-    case 'user': return '用户'
+    case 'user': return i18n.t('chat.user')
     case 'assistant': return 'Agent'
-    case 'system': return '系统'
-    case 'tool': return '工具'
+    case 'system': return 'System'
+    case 'tool': return i18n.t('app.tools')
     default: return role
   }
 }
 
 function stepTypeLabel(t: string, name?: string) {
-  if (t === 'tool_call' && name === 'web_search') return '联网搜索'
+  if (t === 'tool_call' && name === 'web_search') return i18n.t('chat.webSearch')
   if (t === 'tool_call' && name === 'sub_agent') return 'Sub Agent'
   switch (t) {
     case 'llm_call': return 'LLM'
@@ -358,7 +358,7 @@ function stepTypeLabel(t: string, name?: string) {
 }
 
 function stepDisplayName(step: ExecutionStep) {
-  if (step.step_type === 'tool_call' && step.name === 'web_search') return '联网搜索'
+  if (step.step_type === 'tool_call' && step.name === 'web_search') return i18n.t('chat.webSearch')
   return step.name
 }
 
