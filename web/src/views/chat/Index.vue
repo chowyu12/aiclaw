@@ -72,14 +72,14 @@
             >
               <el-icon :size="14" class="conv-icon"><ChatDotRound /></el-icon>
               <div class="conv-info">
-                <div class="conv-title">{{ conv.title || (i18n.isEnglish ? 'Untitled conversation' : '未命名对话') }}</div>
+                <div class="conv-title">{{ conv.title || i18n.t('chat.untitledConversation') }}</div>
                 <div class="conv-time">{{ formatTime(conv.updated_at) }}</div>
               </div>
               <el-icon
                 class="conv-delete"
                 :size="14"
                 @click.stop="deleteConv(conv.id)"
-                title="删除"
+                :title="i18n.t('chat.delete')"
               ><Delete /></el-icon>
             </div>
             <div v-if="conversations.length === 0" class="aside-conv-hint">
@@ -105,7 +105,7 @@
         <!-- 加载中 -->
         <div v-if="loadingHistory" class="empty-state">
           <el-icon class="is-loading" :size="32" color="#3370ff"><Loading /></el-icon>
-          <div class="empty-desc" style="margin-top: 12px">加载会话中...</div>
+          <div class="empty-desc" style="margin-top: 12px">{{ i18n.t('chat.loadingConversation') }}</div>
         </div>
         <!-- 空状态 -->
         <div v-else-if="!currentAgent || messages.length === 0" class="empty-state">
@@ -135,9 +135,9 @@
                   <span class="msg-time" :title="msg.created_at">{{ formatDateTime(msg.created_at) }}</span>
                 </template>
                 <template v-else-if="msg.role === 'assistant' && msg.created_at">
-                  <span v-if="messageStartedAt(msg)" class="msg-time">开始 {{ messageStartedAt(msg) }}</span>
-                  <span class="msg-time">结束 {{ formatDateTime(msg.created_at) }}</span>
-                  <span v-if="msg.duration_ms" class="msg-duration">耗时 {{ formatDuration(msg.duration_ms) }}</span>
+                  <span v-if="messageStartedAt(msg)" class="msg-time">{{ i18n.t('chat.startedAt', { time: messageStartedAt(msg) }) }}</span>
+                  <span class="msg-time">{{ i18n.t('chat.endedAt', { time: formatDateTime(msg.created_at) }) }}</span>
+                  <span v-if="msg.duration_ms" class="msg-duration">{{ i18n.t('chat.duration', { duration: formatDuration(msg.duration_ms) }) }}</span>
                 </template>
               </div>
 
@@ -145,7 +145,7 @@
                 <div class="plan-head">
                   <div class="plan-title-wrap">
                     <span class="plan-kicker">{{ i18n.t('chat.plan') }}</span>
-                    <span class="plan-goal">{{ msg.plan.goal || '运行计划' }}</span>
+                    <span class="plan-goal">{{ msg.plan.goal || i18n.t('chat.defaultPlanGoal') }}</span>
                   </div>
                   <span class="plan-progress">{{ planProgress(msg.plan) }}</span>
                 </div>
@@ -207,7 +207,7 @@
               <div v-if="msg.role === 'assistant' && msg.steps && msg.steps.length > 0" class="steps-panel">
                 <div class="steps-toggle" @click="msg._showSteps = !msg._showSteps">
                   <el-icon :size="14"><Operation /></el-icon>
-                  <span>{{ msg.steps.length }} 个执行步骤</span>
+                  <span>{{ i18n.t('chat.executionSteps', { count: msg.steps.length }) }}</span>
                   <el-icon class="toggle-icon" :class="{ open: msg._showSteps }"><ArrowDown /></el-icon>
                 </div>
                 <transition name="fold">
@@ -231,28 +231,28 @@
                               {{ i18n.t('chat.running') }}
                             </template>
                             <template v-else-if="node.step.status === 'success'">{{ node.step.duration_ms }}ms</template>
-                            <template v-else>failed</template>
+                            <template v-else>{{ i18n.t('chat.failed') }}</template>
                           </el-tag>
                           <span v-if="node.step.tokens_used" class="step-tokens">{{ node.step.tokens_used }} tokens</span>
-                          <span v-if="node.children.length" class="step-child-count">{{ node.children.length }} 步</span>
+                          <span v-if="node.children.length" class="step-child-count">{{ i18n.t('chat.childSteps', { count: node.children.length }) }}</span>
                           <el-icon v-if="node.children.length" class="step-child-arrow" :class="{ open: node.step._childrenOpen !== false }"><ArrowRight /></el-icon>
                         </div>
                         <div class="step-detail">
                           <template v-if="node.step.input">
-                            <div class="detail-label">Input</div>
+                            <div class="detail-label">{{ i18n.t('chat.inputLabel') }}</div>
                             <pre class="detail-code">{{ truncateText(node.step.input, 500) }}</pre>
                           </template>
                           <template v-if="node.step.output">
-                            <div class="detail-label">Output</div>
+                            <div class="detail-label">{{ i18n.t('chat.outputLabel') }}</div>
                             <pre class="detail-code">{{ truncateText(node.step.output, 500) }}</pre>
                           </template>
                           <template v-if="node.step.error">
-                            <div class="detail-label detail-label--err">Error</div>
+                            <div class="detail-label detail-label--err">{{ i18n.t('chat.errorLabel') }}</div>
                             <pre class="detail-code detail-code--err">{{ node.step.error }}</pre>
                           </template>
                           <div class="detail-meta" v-if="node.step.metadata">
                             <span v-if="node.step.metadata.channel_type" class="step-channel">
-                              渠道 {{ node.step.metadata.channel_type }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
+                              {{ i18n.t('chat.channelLabel', { type: node.step.metadata.channel_type }) }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
                               <template v-if="node.step.metadata.channel_thread_key"> · {{ node.step.metadata.channel_thread_key }}</template>
                               <template v-if="node.step.metadata.channel_sender_id"> · {{ node.step.metadata.channel_sender_id }}</template>
                             </span>
@@ -283,21 +283,21 @@
                                       {{ i18n.t('chat.running') }}
                                     </template>
                                     <template v-else-if="child.step.status === 'success'">{{ child.step.duration_ms }}ms</template>
-                                    <template v-else>failed</template>
+                                    <template v-else>{{ i18n.t('chat.failed') }}</template>
                                   </el-tag>
                                   <span v-if="child.step.tokens_used" class="step-tokens">{{ child.step.tokens_used }} tokens</span>
                                 </div>
                                 <div class="step-detail">
                                   <template v-if="child.step.input">
-                                    <div class="detail-label">Input</div>
+                                    <div class="detail-label">{{ i18n.t('chat.inputLabel') }}</div>
                                     <pre class="detail-code">{{ truncateText(child.step.input, 500) }}</pre>
                                   </template>
                                   <template v-if="child.step.output">
-                                    <div class="detail-label">Output</div>
+                                    <div class="detail-label">{{ i18n.t('chat.outputLabel') }}</div>
                                     <pre class="detail-code">{{ truncateText(child.step.output, 500) }}</pre>
                                   </template>
                                   <template v-if="child.step.error">
-                                    <div class="detail-label detail-label--err">Error</div>
+                                    <div class="detail-label detail-label--err">{{ i18n.t('chat.errorLabel') }}</div>
                                     <pre class="detail-code detail-code--err">{{ child.step.error }}</pre>
                                   </template>
                                   <div class="detail-meta" v-if="child.step.metadata">
@@ -332,7 +332,7 @@
                 <div class="plan-head">
                   <div class="plan-title-wrap">
                     <span class="plan-kicker">{{ i18n.t('chat.plan') }}</span>
-                    <span class="plan-goal">{{ pendingPlan.goal || '运行计划' }}</span>
+                    <span class="plan-goal">{{ pendingPlan.goal || i18n.t('chat.defaultPlanGoal') }}</span>
                   </div>
                   <span class="plan-progress">{{ planProgress(pendingPlan) }}</span>
                 </div>
@@ -358,14 +358,14 @@
                     <span v-if="subAgentDepthLabel(node.step)" class="wf-depth">{{ subAgentDepthLabel(node.step) }}</span>
                     <span class="wf-name">{{ stepDisplayName(node.step) }}</span>
                     <el-tag v-if="node.step.status === 'success'" type="success" size="small" round effect="plain">{{ node.step.duration_ms }}ms</el-tag>
-                    <el-tag v-else-if="node.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
+                    <el-tag v-else-if="node.step.status === 'error'" type="danger" size="small" round effect="plain">{{ i18n.t('chat.failed') }}</el-tag>
                     <el-tag v-else-if="node.step.status === 'running'" type="info" size="small" round effect="plain">
                       <el-icon class="is-loading" :size="10"><Loading /></el-icon>
                       {{ i18n.t('chat.running') }}
                     </el-tag>
                     <span v-if="node.step.tokens_used" class="wf-tokens">{{ node.step.tokens_used }} tokens</span>
                     <span v-if="node.children.length" class="wf-child-count" @click.stop="node.step._childrenOpen = node.step._childrenOpen === false ? true : false">
-                      {{ node.children.length }} 步
+                      {{ i18n.t('chat.childSteps', { count: node.children.length }) }}
                       <el-icon class="step-child-arrow" :class="{ open: node.step._childrenOpen !== false }"><ArrowRight /></el-icon>
                     </span>
                     <el-icon class="wf-arrow" :class="{ open: node.step._expanded }"><ArrowRight /></el-icon>
@@ -373,20 +373,20 @@
                   <transition name="fold">
                     <div v-if="node.step._expanded" class="wf-node-body">
                       <template v-if="node.step.input">
-                        <div class="detail-label">Input</div>
+                        <div class="detail-label">{{ i18n.t('chat.inputLabel') }}</div>
                         <pre class="detail-code">{{ truncateText(node.step.input, 500) }}</pre>
                       </template>
                       <template v-if="node.step.output">
-                        <div class="detail-label">Output</div>
+                        <div class="detail-label">{{ i18n.t('chat.outputLabel') }}</div>
                         <pre class="detail-code">{{ truncateText(node.step.output, 500) }}</pre>
                       </template>
                       <template v-if="node.step.error">
-                        <div class="detail-label detail-label--err">Error</div>
+                        <div class="detail-label detail-label--err">{{ i18n.t('chat.errorLabel') }}</div>
                         <pre class="detail-code detail-code--err">{{ node.step.error }}</pre>
                       </template>
                       <div class="detail-meta" v-if="node.step.metadata">
                         <span v-if="node.step.metadata.channel_type" class="step-channel">
-                          渠道 {{ node.step.metadata.channel_type }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
+                          {{ i18n.t('chat.channelLabel', { type: node.step.metadata.channel_type }) }}<template v-if="node.step.metadata.channel_id"> #{{ node.step.metadata.channel_id }}</template>
                           <template v-if="node.step.metadata.channel_thread_key"> · {{ node.step.metadata.channel_thread_key }}</template>
                           <template v-if="node.step.metadata.channel_sender_id"> · {{ node.step.metadata.channel_sender_id }}</template>
                         </span>
@@ -406,7 +406,7 @@
                           <span class="wf-label">{{ stepTypeLabel(child.step.step_type, child.step.name) }}</span>
                           <span class="wf-name">{{ stepDisplayName(child.step) }}</span>
                           <el-tag v-if="child.step.status === 'success'" type="success" size="small" round effect="plain">{{ child.step.duration_ms }}ms</el-tag>
-                          <el-tag v-else-if="child.step.status === 'error'" type="danger" size="small" round effect="plain">failed</el-tag>
+                          <el-tag v-else-if="child.step.status === 'error'" type="danger" size="small" round effect="plain">{{ i18n.t('chat.failed') }}</el-tag>
                           <el-tag v-else-if="child.step.status === 'running'" type="info" size="small" round effect="plain">
                             <el-icon class="is-loading" :size="10"><Loading /></el-icon>
                             {{ i18n.t('chat.running') }}
@@ -790,15 +790,16 @@ function formatTime(t: string): string {
   const d = new Date(t)
   const now = new Date()
   const isToday = d.toDateString() === now.toDateString()
-  if (isToday) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' }) + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  const locale = i18n.language
+  if (isToday) return d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleDateString(locale, { month: '2-digit', day: '2-digit' }) + ' ' + d.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })
 }
 
 function formatDateTime(t?: string): string {
   if (!t) return ''
   const d = new Date(t)
   if (Number.isNaN(d.getTime())) return ''
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return d.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 function formatDuration(ms?: number): string {
@@ -808,7 +809,7 @@ function formatDuration(ms?: number): string {
   if (sec < 60) return `${sec.toFixed(1)} s`
   const m = Math.floor(sec / 60)
   const s = Math.round(sec % 60)
-  return `${m} 分 ${s} 秒`
+  return i18n.isEnglish ? `${m} min ${s} sec` : `${m} 分 ${s} 秒`
 }
 
 function messageStartedAt(msg: ChatMessage): string {
@@ -858,7 +859,7 @@ async function handleFileUpload(event: Event) {
       const f = res.data as FileInfo
       pendingFiles.value.push({ uuid: f.uuid, filename: f.filename, file_type: f.file_type, file_size: f.file_size })
     } catch {
-      ElMessage.error(`上传 ${file.name} 失败`)
+      ElMessage.error(i18n.t('chat.uploadFailed', { name: file.name }))
     }
   }
   uploading.value = false
@@ -899,9 +900,9 @@ function fileTypeIcon(type: string): string {
 
 function fileTypeLabel(type: string): string {
   switch (type) {
-    case 'image': return '图片'
-    case 'document': return '文档'
-    default: return '文本'
+    case 'image': return i18n.t('chat.fileImage')
+    case 'document': return i18n.t('chat.fileDocument')
+    default: return i18n.t('chat.fileText')
   }
 }
 
@@ -1071,7 +1072,7 @@ function formatMessage(text: string): string {
 }
 
 function stepTypeLabel(t: string, name?: string) {
-  if (t === 'tool_call' && name === 'web_search') return '联网搜索'
+  if (t === 'tool_call' && name === 'web_search') return i18n.t('chat.webSearch')
   if (t === 'tool_call' && name === 'sub_agent') return 'Sub Agent'
   switch (t) {
     case 'llm_call': return 'LLM'
@@ -1083,7 +1084,7 @@ function stepTypeLabel(t: string, name?: string) {
 }
 
 function stepDisplayName(step: ExecutionStep) {
-  if (step.step_type === 'tool_call' && step.name === 'web_search') return '联网搜索'
+  if (step.step_type === 'tool_call' && step.name === 'web_search') return i18n.t('chat.webSearch')
   if (step.name === 'sub_agent') return step.metadata?.tool_name || 'sub_agent'
   return step.name
 }
