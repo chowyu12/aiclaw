@@ -3,15 +3,15 @@ server:
     port: 8080
 database:
     driver: sqlite
-    dsn: /Users/zhouyy/.aiclaw/aiclaw.db
+    dsn: ~/.aiclaw/aiclaw.db
     max_open_conns: 25
     max_idle_conns: 10
 log:
     level: info
 auth:
-    web_token: web-b46d9f03823a4cbaa9b01e862c7aa4d4
+    web_token: change-me
 upload:
-    dir: /Users/zhouyy/.aiclaw/uploads
+    dir: ~/.aiclaw/uploads
     max_size: 20971520
 browser:
     visible: true
