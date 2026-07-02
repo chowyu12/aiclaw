@@ -14,6 +14,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/workspace"
+	harnessproto "github.com/chowyu12/aiclaw/pkg/harness"
 )
 
 func TestBuildSystemPrompt(t *testing.T) {
@@ -271,6 +272,52 @@ func TestExecute_Simple(t *testing.T) {
 	}
 	if len(result.Steps) == 0 {
 		t.Error("expected at least 1 execution step")
+	}
+}
+
+func TestExecuteHarness_EmitsProtocolEvents(t *testing.T) {
+	s := newMockStore()
+	_, _ = seedAgent(t, s)
+	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{textResp("ok")}}
+	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+
+	var events []harnessproto.Event
+	_, err := exec.ExecuteHarness(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"}, harnessproto.EventFunc(func(evt harnessproto.Event) error {
+		events = append(events, evt)
+		return nil
+	}))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	seen := map[harnessproto.EventType]bool{}
+	for _, evt := range events {
+		if evt.RunID == "" {
+			t.Fatalf("event %s missing run id", evt.Type)
+		}
+		if evt.TurnID == "" {
+			t.Fatalf("event %s missing turn id", evt.Type)
+		}
+		if evt.CreatedAt.IsZero() {
+			t.Fatalf("event %s missing created_at", evt.Type)
+		}
+		if evt.Version != harnessproto.ProtocolVersion {
+			t.Fatalf("event %s version = %q, want %q", evt.Type, evt.Version, harnessproto.ProtocolVersion)
+		}
+		seen[evt.Type] = true
+	}
+
+	for _, typ := range []harnessproto.EventType{
+		harnessproto.EventRunStarted,
+		harnessproto.EventContextBuilt,
+		harnessproto.EventModelStarted,
+		harnessproto.EventModelCompleted,
+		harnessproto.EventPersisted,
+		harnessproto.EventRunCompleted,
+	} {
+		if !seen[typ] {
+			t.Fatalf("expected harness event %s", typ)
+		}
 	}
 }
 

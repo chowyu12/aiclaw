@@ -233,7 +233,7 @@ func preloadEssentialBuiltins(discovered map[string]bool) {
 	}
 }
 
-func (e *Executor) handleToolSearch(ctx context.Context, ec *execContext, tc openai.ToolCall, st *agentRunState) openai.ChatCompletionMessage {
+func (e *Executor) handleToolSearch(ctx context.Context, ec *execContext, tc openai.ToolCall, st *harnessTurnState) openai.ChatCompletionMessage {
 	var args struct {
 		Query string `json:"query"`
 	}

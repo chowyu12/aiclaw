@@ -45,7 +45,7 @@ func toolCallContext(parent context.Context) (ctx context.Context, done func()) 
 
 // runOneToolCall 执行单个工具调用，返回消息、结果、文件附件、持久化文件。
 // 方法内部使用 st.mu 保护共享状态（loopDet / calledTools），可安全并行调用。
-func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc openai.ToolCall, st *agentRunState) (toolMsg openai.ChatCompletionMessage, tr ToolResult, fileParts []openai.ChatMessagePart, toolFiles []*model.File) {
+func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc openai.ToolCall, st *harnessTurnState) (toolMsg openai.ChatCompletionMessage, tr ToolResult, fileParts []openai.ChatMessagePart, toolFiles []*model.File) {
 	toolName := tc.Function.Name
 	toolArgs := tc.Function.Arguments
 
@@ -282,7 +282,7 @@ func dedupeFiles(files []*model.File) []*model.File {
 
 // appendAssistantToolRound 执行一轮工具调用：并发安全的工具并行执行，其余串行执行。
 // 返回值分别表示：是否执行了非 plan 的真实工具、是否至少一个工具失败、是否调用了 plan 工具。
-func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *agentRunState, assistant openai.ChatCompletionMessage) (bool, bool, bool) {
+func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *harnessTurnState, assistant openai.ChatCompletionMessage) (bool, bool, bool) {
 	st.Messages = append(st.Messages, assistant)
 	tcs := assistant.ToolCalls
 	n := len(tcs)

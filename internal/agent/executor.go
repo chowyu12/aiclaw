@@ -20,6 +20,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/tools/sessionsearch"
 	"github.com/chowyu12/aiclaw/internal/tools/websearch"
 	"github.com/chowyu12/aiclaw/internal/workspace"
+	harnessproto "github.com/chowyu12/aiclaw/pkg/harness"
 )
 
 type ExecuteResult struct {
@@ -202,6 +203,11 @@ func (e *Executor) Shutdown(timeout time.Duration) {
 }
 
 func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*ExecuteResult, error) {
+	return e.ExecuteHarness(ctx, req, harnessproto.NoopSink{})
+}
+
+// ExecuteHarness runs one agent turn and emits stable harness protocol events.
+func (e *Executor) ExecuteHarness(ctx context.Context, req model.ChatRequest, sink harnessproto.Sink) (*ExecuteResult, error) {
 	if err := e.checkShutdown(); err != nil {
 		return nil, err
 	}
@@ -215,7 +221,7 @@ func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*Execute
 
 	ec.l.WithField("user", req.UserID).Debug("[Execute] >> start")
 
-	res, err := e.run(ec.ctx, ec, blockingCaller(ec.llmProv), false)
+	res, err := e.runHarness(ec.ctx, ec, blockingCaller(ec.llmProv), false, sink)
 	if err != nil {
 		e.saveErrorMessage(ec, err)
 		return nil, err
@@ -224,6 +230,12 @@ func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*Execute
 }
 
 func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error) error {
+	return e.ExecuteStreamHarness(ctx, req, chunkHandler, harnessproto.NoopSink{})
+}
+
+// ExecuteStreamHarness runs one streaming agent turn and emits both legacy
+// StreamChunk updates and stable harness protocol events.
+func (e *Executor) ExecuteStreamHarness(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error, sink harnessproto.Sink) error {
 	if err := e.checkShutdown(); err != nil {
 		return err
 	}
@@ -246,7 +258,8 @@ func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chu
 		})
 	}
 
-	res, err := e.run(ec.ctx, ec, streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler), true)
+	streamCall := streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler)
+	res, err := e.runHarness(ec.ctx, ec, streamCall, true, sink)
 	if err != nil {
 		e.saveErrorMessage(ec, err)
 		return err
@@ -688,7 +701,7 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 	return agentTools, toolSkillMap, nil
 }
 
-func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *agentRunState, content string, tokensUsed int, duration time.Duration) (*ExecuteResult, error) {
+func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *harnessTurnState, content string, tokensUsed int, duration time.Duration) (*ExecuteResult, error) {
 	ec.toolFiles = dedupeFiles(ec.toolFiles)
 	content = appendAttachmentList(content, ec.toolFiles)
 
