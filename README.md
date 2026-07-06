@@ -8,6 +8,7 @@ It is designed for people who want an agent system that can do real work: read a
 
 - Multi-agent management with per-agent prompts, model settings, tools, skills, MCP servers, and token budgets.
 - Runtime Plan State for complex tasks, with live streaming progress and final plan snapshots.
+- Harness runtime validation with contract, evidence, validation gates, correction prompts, and traceable self-check steps.
 - Nested `sub_agent` execution for parallel research, exploration, shell work, and delegated tasks.
 - Built-in tools for files, shell commands, browser automation, web search, web fetching, scheduled jobs, code interpretation, memory, session search, and skills.
 - Two-level web search configuration: model-native search for supported models, or external search engines such as Tavily, SerpAPI, and Aliyun IQS.
@@ -40,12 +41,13 @@ By default, AiClaw stores configuration and runtime data under `~/.aiclaw/` and 
 
 ## What AiClaw Runs
 
-AiClaw has four major runtime layers:
+AiClaw has five major runtime layers:
 
 | Layer | Purpose |
 | --- | --- |
 | Web console | Configure providers, agents, tools, skills, channels, chat, and inspect logs. |
 | Agent executor | Builds prompts, calls LLMs, runs tools, manages Plan State, tracks files, and streams output. |
+| Harness runtime | Turns the user objective into a task contract, records evidence, validates tool/final/save stages, and asks the model to correct incomplete work. |
 | Tool system | Built-in tools, custom HTTP tools, custom command tools, MCP tools, and skill-defined tools. |
 | Persistence | Conversations, messages, execution steps, generated files, memory, schedules, and runtime plans. |
 
@@ -54,13 +56,14 @@ The normal execution loop is:
 1. Load the agent, provider, tools, skills, memory, files, and conversation history.
 2. Inject compact runtime context, including persistent memory and current Plan State.
 3. Call the model with function-calling tools.
-4. Execute tool calls, track steps, collect generated files, and stream updates.
-5. Let the harness advance Plan State after success or failure.
-6. Save the final assistant message, files, execution timeline, and plan snapshot.
+4. Validate requested tools, execute allowed tool calls, track steps, collect generated files, and stream updates.
+5. Let the control plane advance Plan State after success or failure while the verifier records execution evidence.
+6. Validate candidate final answers; if a response is empty, progress-only, missing required evidence, or missing promised artifacts, inject a correction prompt and continue.
+7. Validate the final content before saving, then persist the assistant message, files, execution timeline, and plan snapshot.
 
 ## Runtime Plan State
 
-AiClaw uses Plan State instead of chat-visible TODO blocks. The model proposes plan changes through the internal `plan` control tool, while the executor harness owns validation, persistence, lifecycle transitions, streaming, and failure recovery.
+AiClaw uses Plan State instead of chat-visible TODO blocks. The model proposes plan changes through the internal `plan` control tool, while the agent harness owns validation, persistence, lifecycle transitions, streaming, and failure recovery.
 
 Plan item states:
 
@@ -82,6 +85,26 @@ Plan State behavior:
 - Streaming chat and execution logs show the plan separately from the assistant's answer.
 
 This keeps progress visible without polluting the final response body or ordinary tool-call history.
+
+## Harness Runtime
+
+AiClaw exposes a stable `pkg/harness` package for both harness events and execution validation. The executor still owns the main loop: the control plane handles budget, plan advancement, and persistence, while the verifier layer owns four validation stages:
+
+| Stage | Purpose |
+| --- | --- |
+| `pre_tool` | Enforce tool policy before a tool call is executed. |
+| `post_tool` | Record tool results, failures, and generated files into the evidence ledger. |
+| `pre_final` | Gate candidate final answers before the run can finish. |
+| `pre_save` | Recheck the final content after attachment links are rendered and before the assistant message is stored. |
+
+The runtime is based on `Contract -> Evidence -> Validate -> Correct`:
+
+- `TaskContract` captures the objective, output mode, required evidence, artifact expectations, plan requirements, and correction budget.
+- `EvidenceLedger` records execution tools, tool events, generated file evidence, plan snapshots, validation events, and correction events.
+- Validators reject empty final answers, progress-only final answers, unfinished plans, missing successful evidence after failed tools, missing artifacts, and invalid structured JSON when enabled.
+- Failed validation creates `harness` execution steps and, while attempts remain, appends a correction prompt to the next model round.
+
+This makes the execution trace explicit: the model can propose completion, but the harness decides whether there is enough evidence to finish.
 
 ## Sub-Agents
 
@@ -310,6 +333,7 @@ AiClaw records:
 - Step duration.
 - Errors.
 - Built-in and external web search activity as `web_search` steps.
+- Harness validation and correction activity as `harness` steps.
 - Final Plan State snapshots.
 
 The execution log page keeps the assistant response, plan snapshot, and step timeline separate so you can understand both the high-level plan and the low-level tool activity.
@@ -333,6 +357,7 @@ AiClaw is actively evolving. The architecture is intentionally pragmatic: it fav
 Useful starting points:
 
 - `internal/agent/` for the executor, Plan State, sub-agents, prompts, and tool execution.
+- `pkg/harness/` for the stable harness event protocol and runtime validation primitives.
 - `internal/tools/` for built-in tool implementations.
 - `internal/store/` for persistence interfaces and GORM storage.
 - `internal/handler/` for HTTP handlers.

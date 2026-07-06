@@ -38,6 +38,7 @@ const (
 	StepLLMCall    StepType = "llm_call"
 	StepToolCall   StepType = "tool_call"
 	StepSkillMatch StepType = "skill_match"
+	StepHarness    StepType = "harness"
 )
 
 type StepStatus string
@@ -71,18 +72,41 @@ type ExecutionStep struct {
 }
 
 type StepMetadata struct {
-	Provider    string   `json:"provider,omitzero"`
-	Model       string   `json:"model,omitzero"`
-	Temperature float64  `json:"temperature,omitzero"`
-	ToolName    string   `json:"tool_name,omitzero"`
-	SkillName   string   `json:"skill_name,omitzero"`
-	SkillTools  []string `json:"skill_tools,omitzero"`
+	Provider    string           `json:"provider,omitzero"`
+	Model       string           `json:"model,omitzero"`
+	Temperature float64          `json:"temperature,omitzero"`
+	ToolName    string           `json:"tool_name,omitzero"`
+	SkillName   string           `json:"skill_name,omitzero"`
+	SkillTools  []string         `json:"skill_tools,omitzero"`
+	Harness     *StepHarnessMeta `json:"harness,omitzero"`
 	// 以下字段由渠道 Bridge 注入，写入执行步骤 metadata，便于控制台「执行日志」追溯来源。
 	ChannelID        int64  `json:"channel_id,omitzero"`
 	ChannelUUID      string `json:"channel_uuid,omitzero"`
 	ChannelType      string `json:"channel_type,omitzero"`
 	ChannelThreadKey string `json:"channel_thread_key,omitzero"`
 	ChannelSenderID  string `json:"channel_sender_id,omitzero"`
+}
+
+type StepHarnessMeta struct {
+	Stage           string                  `json:"stage,omitzero"`
+	Allowed         bool                    `json:"allowed"`
+	ViolationCodes  []string                `json:"violation_codes,omitzero"`
+	RequiredActions []string                `json:"required_actions,omitzero"`
+	Correction      *StepHarnessCorrection  `json:"correction,omitzero"`
+	Evidence        StepHarnessEvidenceMeta `json:"evidence,omitzero"`
+}
+
+type StepHarnessCorrection struct {
+	Attempt     int    `json:"attempt,omitzero"`
+	MaxAttempts int    `json:"max_attempts,omitzero"`
+	Outcome     string `json:"outcome,omitzero"`
+}
+
+type StepHarnessEvidenceMeta struct {
+	ExecutionTools []string `json:"execution_tools,omitzero"`
+	ToolEventCount int      `json:"tool_event_count,omitzero"`
+	ArtifactCount  int      `json:"artifact_count,omitzero"`
+	PlanTerminal   bool     `json:"plan_terminal"`
 }
 
 // ChannelExecTrace 标记请求来自第三方渠道（仅服务端内存传递，不参与 ChatRequest 的 JSON）。

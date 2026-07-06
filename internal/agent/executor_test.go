@@ -14,7 +14,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/workspace"
-	harnessproto "github.com/chowyu12/aiclaw/pkg/harness"
+	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 )
 
 func TestBuildSystemPrompt(t *testing.T) {
@@ -281,8 +281,8 @@ func TestExecuteHarness_EmitsProtocolEvents(t *testing.T) {
 	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{textResp("ok")}}
 	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
 
-	var events []harnessproto.Event
-	_, err := exec.ExecuteHarness(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"}, harnessproto.EventFunc(func(evt harnessproto.Event) error {
+	var events []harnesspkg.Event
+	_, err := exec.ExecuteHarness(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"}, harnesspkg.EventFunc(func(evt harnesspkg.Event) error {
 		events = append(events, evt)
 		return nil
 	}))
@@ -290,7 +290,7 @@ func TestExecuteHarness_EmitsProtocolEvents(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	seen := map[harnessproto.EventType]bool{}
+	seen := map[harnesspkg.EventType]bool{}
 	for _, evt := range events {
 		if evt.RunID == "" {
 			t.Fatalf("event %s missing run id", evt.Type)
@@ -301,19 +301,19 @@ func TestExecuteHarness_EmitsProtocolEvents(t *testing.T) {
 		if evt.CreatedAt.IsZero() {
 			t.Fatalf("event %s missing created_at", evt.Type)
 		}
-		if evt.Version != harnessproto.ProtocolVersion {
-			t.Fatalf("event %s version = %q, want %q", evt.Type, evt.Version, harnessproto.ProtocolVersion)
+		if evt.Version != harnesspkg.ProtocolVersion {
+			t.Fatalf("event %s version = %q, want %q", evt.Type, evt.Version, harnesspkg.ProtocolVersion)
 		}
 		seen[evt.Type] = true
 	}
 
-	for _, typ := range []harnessproto.EventType{
-		harnessproto.EventRunStarted,
-		harnessproto.EventContextBuilt,
-		harnessproto.EventModelStarted,
-		harnessproto.EventModelCompleted,
-		harnessproto.EventPersisted,
-		harnessproto.EventRunCompleted,
+	for _, typ := range []harnesspkg.EventType{
+		harnesspkg.EventRunStarted,
+		harnesspkg.EventContextBuilt,
+		harnesspkg.EventModelStarted,
+		harnesspkg.EventModelCompleted,
+		harnesspkg.EventPersisted,
+		harnesspkg.EventRunCompleted,
 	} {
 		if !seen[typ] {
 			t.Fatalf("expected harness event %s", typ)
@@ -436,6 +436,84 @@ func TestExecute_WithToolCall(t *testing.T) {
 			break
 		}
 	}
+}
+
+func TestExecute_HarnessCorrectsEmptyFinalAnswerAfterTools(t *testing.T) {
+	s := newMockStore()
+	agent, _ := seedAgent(t, s)
+
+	registry := NewToolRegistry()
+	registry.RegisterBuiltin("test_echo", func(_ context.Context, args string) (string, error) {
+		return "ECHO:" + args, nil
+	})
+	seedToolForAgent(t, s, agent.ID, "test_echo", "echo tool for test")
+
+	mockLLM := &mockLLMProvider{
+		responses: []openai.ChatCompletionResponse{
+			toolCallResp("test_echo", `{"text":"ping"}`),
+			textResp(""),
+			textResp("最终答复：工具返回了 ECHO"),
+		},
+	}
+	exec := newTestExecutor(s, registry, mockLLM)
+
+	result, err := exec.Execute(t.Context(), model.ChatRequest{
+		UserID: "u1", Message: "测试工具",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Content != "最终答复：工具返回了 ECHO" {
+		t.Fatalf("content = %q, want corrected final answer", result.Content)
+	}
+	if mockLLM.callCount() != 3 {
+		t.Fatalf("expected 3 LLM calls (tool + empty candidate + corrected final), got %d", mockLLM.callCount())
+	}
+	lastReq := mockLLM.calls[2]
+	if len(lastReq.Messages) == 0 || !strings.Contains(lastReq.Messages[len(lastReq.Messages)-1].Content, "当前还不能直接结束") {
+		t.Fatalf("last retry request missing harness correction: %#v", lastReq.Messages)
+	}
+	if !hasExecutionStep(result.Steps, model.StepHarness, "validate_pre_final", model.StepError) {
+		t.Fatalf("missing harness validation step: %+v", result.Steps)
+	}
+	if !hasExecutionStep(result.Steps, model.StepHarness, "correct_pre_final", model.StepSuccess) {
+		t.Fatalf("missing harness correction step: %+v", result.Steps)
+	}
+}
+
+func TestExecute_HarnessMarksLastRoundCorrectionFailed(t *testing.T) {
+	s := newMockStore()
+	agent, _ := seedAgent(t, s)
+	s.mu.Lock()
+	s.agents[agent.ID].MaxIterations = 1
+	s.mu.Unlock()
+
+	mockLLM := &mockLLMProvider{
+		responses: []openai.ChatCompletionResponse{textResp("")},
+	}
+	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+
+	result, err := exec.Execute(t.Context(), model.ChatRequest{
+		UserID: "u1", Message: "请回答",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result.Content, "自检未通过") {
+		t.Fatalf("content = %q, want harness failure message", result.Content)
+	}
+	if !hasExecutionStep(result.Steps, model.StepHarness, "correct_pre_final", model.StepError) {
+		t.Fatalf("missing failed harness correction step: %+v", result.Steps)
+	}
+}
+
+func hasExecutionStep(steps []model.ExecutionStep, stepType model.StepType, name string, status model.StepStatus) bool {
+	for _, step := range steps {
+		if step.StepType == stepType && step.Name == name && step.Status == status {
+			return true
+		}
+	}
+	return false
 }
 
 func TestExecute_WithMultipleToolCalls(t *testing.T) {

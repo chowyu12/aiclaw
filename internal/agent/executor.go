@@ -20,7 +20,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/tools/sessionsearch"
 	"github.com/chowyu12/aiclaw/internal/tools/websearch"
 	"github.com/chowyu12/aiclaw/internal/workspace"
-	harnessproto "github.com/chowyu12/aiclaw/pkg/harness"
+	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 )
 
 type ExecuteResult struct {
@@ -203,11 +203,11 @@ func (e *Executor) Shutdown(timeout time.Duration) {
 }
 
 func (e *Executor) Execute(ctx context.Context, req model.ChatRequest) (*ExecuteResult, error) {
-	return e.ExecuteHarness(ctx, req, harnessproto.NoopSink{})
+	return e.ExecuteHarness(ctx, req, harnesspkg.NoopSink{})
 }
 
 // ExecuteHarness runs one agent turn and emits stable harness protocol events.
-func (e *Executor) ExecuteHarness(ctx context.Context, req model.ChatRequest, sink harnessproto.Sink) (*ExecuteResult, error) {
+func (e *Executor) ExecuteHarness(ctx context.Context, req model.ChatRequest, sink harnesspkg.Sink) (*ExecuteResult, error) {
 	if err := e.checkShutdown(); err != nil {
 		return nil, err
 	}
@@ -230,12 +230,12 @@ func (e *Executor) ExecuteHarness(ctx context.Context, req model.ChatRequest, si
 }
 
 func (e *Executor) ExecuteStream(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error) error {
-	return e.ExecuteStreamHarness(ctx, req, chunkHandler, harnessproto.NoopSink{})
+	return e.ExecuteStreamHarness(ctx, req, chunkHandler, harnesspkg.NoopSink{})
 }
 
 // ExecuteStreamHarness runs one streaming agent turn and emits both legacy
 // StreamChunk updates and stable harness protocol events.
-func (e *Executor) ExecuteStreamHarness(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error, sink harnessproto.Sink) error {
+func (e *Executor) ExecuteStreamHarness(ctx context.Context, req model.ChatRequest, chunkHandler func(chunk model.StreamChunk) error, sink harnesspkg.Sink) error {
 	if err := e.checkShutdown(); err != nil {
 		return err
 	}
@@ -704,6 +704,16 @@ func (e *Executor) collectTools(ctx context.Context, ag *model.Agent) ([]model.T
 func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *harnessTurnState, content string, tokensUsed int, duration time.Duration) (*ExecuteResult, error) {
 	ec.toolFiles = dedupeFiles(ec.toolFiles)
 	content = appendAttachmentList(content, ec.toolFiles)
+	if st == nil || !st.verifier.FinalFailed {
+		saveValidation := newHarnessRuntimeWithFiles(ctx, ec, st, ec.toolFiles).BeforeSave(content)
+		recordHarnessValidation(st, saveValidation)
+		recordHarnessValidationStep(ctx, ec, saveValidation)
+		if !saveValidation.Allowed {
+			errMsg := "Harness save validation failed: " + strings.Join(saveValidation.Reasons(), "; ")
+			ec.l.WithFields(log.Fields{"reasons": saveValidation.Reasons()}).Warn("[Harness] final answer rejected before save")
+			return nil, errors.New(errMsg)
+		}
+	}
 
 	// ephemeral 模式（sub_agent）：只记录执行步骤，跳过消息持久化和 HookAgentDone
 	if ec.ephemeral {
