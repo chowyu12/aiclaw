@@ -13,7 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/chowyu12/aiclaw/internal/model"
-	harnessproto "github.com/chowyu12/aiclaw/pkg/harness"
+	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 )
 
 type harnessTurnState struct {
@@ -29,6 +29,8 @@ type harnessTurnState struct {
 
 	lastDiscoveredLen int
 	cachedLLMDefs     []openai.Tool
+
+	verifier harnessVerifierState
 }
 
 type agentHarness struct {
@@ -36,7 +38,7 @@ type agentHarness struct {
 	ec        *execContext
 	call      llmCaller
 	streaming bool
-	sink      harnessproto.Sink
+	sink      harnesspkg.Sink
 
 	runID  string
 	turnID string
@@ -53,12 +55,13 @@ type agentHarness struct {
 	context   *harnessContextCompilerLayer
 	model     *harnessModelDriverLayer
 	action    *harnessActionRuntimeLayer
+	verifier  *harnessVerifierLayer
 	control   *harnessControlPlaneLayer
 }
 
-func newAgentHarness(e *Executor, ec *execContext, call llmCaller, streaming bool, sink harnessproto.Sink) *agentHarness {
+func newAgentHarness(e *Executor, ec *execContext, call llmCaller, streaming bool, sink harnesspkg.Sink) *agentHarness {
 	if sink == nil {
-		sink = harnessproto.NoopSink{}
+		sink = harnesspkg.NoopSink{}
 	}
 	h := &agentHarness{
 		executor:   e,
@@ -76,13 +79,14 @@ func newAgentHarness(e *Executor, ec *execContext, call llmCaller, streaming boo
 	h.context = &harnessContextCompilerLayer{h: h}
 	h.model = &harnessModelDriverLayer{h: h}
 	h.action = &harnessActionRuntimeLayer{h: h}
+	h.verifier = &harnessVerifierLayer{h: h}
 	h.control = &harnessControlPlaneLayer{h: h}
 	return h
 }
 
-func (h *agentHarness) emit(evt harnessproto.Event) {
+func (h *agentHarness) emit(evt harnesspkg.Event) {
 	if evt.Version == "" {
-		evt.Version = harnessproto.ProtocolVersion
+		evt.Version = harnesspkg.ProtocolVersion
 	}
 	if evt.CreatedAt.IsZero() {
 		evt.CreatedAt = time.Now()
@@ -98,7 +102,7 @@ func (h *agentHarness) emit(evt harnessproto.Event) {
 	}
 }
 
-func (e *Executor) runHarness(ctx context.Context, ec *execContext, call llmCaller, streaming bool, sink harnessproto.Sink) (*ExecuteResult, error) {
+func (e *Executor) runHarness(ctx context.Context, ec *execContext, call llmCaller, streaming bool, sink harnesspkg.Sink) (*ExecuteResult, error) {
 	return newAgentHarness(e, ec, call, streaming, sink).Run(ctx)
 }
 
@@ -134,8 +138,13 @@ func (h *agentHarness) Run(ctx context.Context) (*ExecuteResult, error) {
 		}
 
 		if len(result.toolCalls) == 0 {
-			finalContent = result.content
-			completed = true
+			content, done, retry := h.verifier.verifyFinalAnswer(ctx, round, maxIter, result.content)
+			if retry {
+				h.lifecycle.completeTurn(round)
+				continue
+			}
+			finalContent = content
+			completed = done
 			h.lifecycle.completeTurn(round)
 			break
 		}
@@ -153,6 +162,17 @@ func (h *agentHarness) Run(ctx context.Context) (*ExecuteResult, error) {
 
 		hasRealTool, toolFailed, hasPlanTool := h.action.executeRound(ctx, result)
 		h.control.afterToolRound(ctx, hasRealTool, toolFailed, hasPlanTool)
+		content, done, retry := h.verifier.verifyToolRound(ctx, round, maxIter)
+		if retry {
+			h.lifecycle.completeTurn(round)
+			continue
+		}
+		if done {
+			finalContent = content
+			completed = true
+			h.lifecycle.completeTurn(round)
+			break
+		}
 		h.lifecycle.completeTurn(round)
 	}
 
@@ -178,10 +198,10 @@ type harnessLifecycleLayer struct {
 }
 
 func (l *harnessLifecycleLayer) begin(ctx context.Context) (context.Context, context.CancelFunc) {
-	l.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventRunStarted,
-		Layer:  harnessproto.LayerLifecycle,
-		Status: harnessproto.StatusRunning,
+	l.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventRunStarted,
+		Layer:  harnesspkg.LayerLifecycle,
+		Status: harnesspkg.StatusRunning,
 		Metadata: map[string]any{
 			"agent":           l.h.ec.ag.Name,
 			"model":           l.h.ec.ag.ModelName,
@@ -198,10 +218,10 @@ func (l *harnessLifecycleLayer) begin(ctx context.Context) (context.Context, con
 }
 
 func (l *harnessLifecycleLayer) beginTurn(round int) {
-	l.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventTurnStarted,
-		Layer:  harnessproto.LayerLifecycle,
-		Status: harnessproto.StatusRunning,
+	l.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventTurnStarted,
+		Layer:  harnesspkg.LayerLifecycle,
+		Status: harnesspkg.StatusRunning,
 		Metadata: map[string]any{
 			"round": round,
 		},
@@ -209,10 +229,10 @@ func (l *harnessLifecycleLayer) beginTurn(round int) {
 }
 
 func (l *harnessLifecycleLayer) completeTurn(round int) {
-	l.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventTurnCompleted,
-		Layer:  harnessproto.LayerLifecycle,
-		Status: harnessproto.StatusCompleted,
+	l.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventTurnCompleted,
+		Layer:  harnesspkg.LayerLifecycle,
+		Status: harnesspkg.StatusCompleted,
 		Metadata: map[string]any{
 			"round": round,
 		},
@@ -220,10 +240,10 @@ func (l *harnessLifecycleLayer) completeTurn(round int) {
 }
 
 func (l *harnessLifecycleLayer) complete() {
-	l.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventRunCompleted,
-		Layer:  harnessproto.LayerLifecycle,
-		Status: harnessproto.StatusCompleted,
+	l.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventRunCompleted,
+		Layer:  harnesspkg.LayerLifecycle,
+		Status: harnesspkg.StatusCompleted,
 		Metadata: map[string]any{
 			"duration_ms": time.Since(l.h.startedAt).Milliseconds(),
 			"tokens":      l.h.totalTokens,
@@ -232,10 +252,10 @@ func (l *harnessLifecycleLayer) complete() {
 }
 
 func (l *harnessLifecycleLayer) fail(err error) {
-	l.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventRunFailed,
-		Layer:  harnessproto.LayerLifecycle,
-		Status: harnessproto.StatusFailed,
+	l.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventRunFailed,
+		Layer:  harnesspkg.LayerLifecycle,
+		Status: harnesspkg.StatusFailed,
 		Error:  err.Error(),
 		Metadata: map[string]any{
 			"duration_ms": time.Since(l.h.startedAt).Milliseconds(),
@@ -295,10 +315,10 @@ func (c *harnessContextCompilerLayer) bootstrap(ctx context.Context) (*harnessTu
 	})
 	logMessages(ec.l, messages)
 
-	c.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventContextBuilt,
-		Layer:  harnessproto.LayerContext,
-		Status: harnessproto.StatusCompleted,
+	c.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventContextBuilt,
+		Layer:  harnesspkg.LayerContext,
+		Status: harnesspkg.StatusCompleted,
 		Metadata: map[string]any{
 			"messages":      len(messages),
 			"tools":         len(allToolDefs),
@@ -372,11 +392,11 @@ func (c *harnessContextCompilerLayer) compileRound(ctx context.Context, round in
 			ec.l.WithError(compErr).Warn("[Compress] context compression failed, continuing with full context")
 		} else {
 			st.Messages = compressed
-			c.h.emit(harnessproto.Event{
-				Type:   harnessproto.EventControlUpdate,
-				Layer:  harnessproto.LayerContext,
+			c.h.emit(harnesspkg.Event{
+				Type:   harnesspkg.EventControlUpdate,
+				Layer:  harnesspkg.LayerContext,
 				Name:   "context_compression",
-				Status: harnessproto.StatusCompleted,
+				Status: harnesspkg.StatusCompleted,
 				Metadata: map[string]any{
 					"round":    round,
 					"messages": len(st.Messages),
@@ -398,10 +418,10 @@ func (c *harnessContextCompilerLayer) compileRound(ctx context.Context, round in
 		recordBuiltInWebSearchStep(ctx, ec, req.ExtraBody)
 		c.h.builtinWebSearchStepRecorded = true
 	}
-	c.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventContextBuilt,
-		Layer:  harnessproto.LayerContext,
-		Status: harnessproto.StatusCompleted,
+	c.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventContextBuilt,
+		Layer:  harnesspkg.LayerContext,
+		Status: harnesspkg.StatusCompleted,
 		Metadata: map[string]any{
 			"round":    round,
 			"messages": len(msgs),
@@ -422,11 +442,11 @@ func (m *harnessModelDriverLayer) callRound(ctx context.Context, round int, req 
 		return llmRoundResult{}, errors.New("agent execution aborted by hook")
 	}
 
-	m.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventModelStarted,
-		Layer:  harnessproto.LayerModel,
+	m.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventModelStarted,
+		Layer:  harnesspkg.LayerModel,
 		Name:   ec.ag.ModelName,
-		Status: harnessproto.StatusRunning,
+		Status: harnesspkg.StatusRunning,
 		Metadata: map[string]any{
 			"round": round,
 		},
@@ -442,11 +462,11 @@ func (m *harnessModelDriverLayer) callRound(ctx context.Context, round int, req 
 		ec.l.WithFields(log.Fields{"round": round, "duration": dur}).WithError(callErr).Error("[LLM] << failed")
 		ec.tracker.FinalizeStep(ctx, llmStep, "", model.StepError, callErr.Error(), dur, 0, ec.stepMeta())
 		err := fmt.Errorf("generate content: %w", callErr)
-		m.h.emit(harnessproto.Event{
-			Type:   harnessproto.EventModelFailed,
-			Layer:  harnessproto.LayerModel,
+		m.h.emit(harnesspkg.Event{
+			Type:   harnesspkg.EventModelFailed,
+			Layer:  harnesspkg.LayerModel,
 			Name:   ec.ag.ModelName,
-			Status: harnessproto.StatusFailed,
+			Status: harnesspkg.StatusFailed,
 			Error:  err.Error(),
 			Metadata: map[string]any{
 				"round":       round,
@@ -462,11 +482,11 @@ func (m *harnessModelDriverLayer) callRound(ctx context.Context, round int, req 
 	m.h.compressor.UpdatePromptTokens(result.promptTokens)
 	m.h.executor.hooks.Fire(ctx, HookPostLLMCall, &HookPayload{Model: ec.ag.ModelName, Round: round, Tokens: result.tokens})
 
-	m.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventModelCompleted,
-		Layer:  harnessproto.LayerModel,
+	m.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventModelCompleted,
+		Layer:  harnesspkg.LayerModel,
 		Name:   ec.ag.ModelName,
-		Status: harnessproto.StatusCompleted,
+		Status: harnesspkg.StatusCompleted,
 		Output: map[string]any{
 			"tool_calls":  len(result.toolCalls),
 			"content_len": len(result.content),
@@ -505,24 +525,24 @@ func (a *harnessActionRuntimeLayer) executeRound(ctx context.Context, result llm
 		ToolCalls: result.toolCalls,
 	}
 	for _, tc := range result.toolCalls {
-		a.h.emit(harnessproto.Event{
-			Type:   harnessproto.EventActionStarted,
-			Layer:  harnessproto.LayerAction,
+		a.h.emit(harnesspkg.Event{
+			Type:   harnesspkg.EventActionStarted,
+			Layer:  harnesspkg.LayerAction,
 			ItemID: tc.ID,
 			Name:   tc.Function.Name,
-			Status: harnessproto.StatusRunning,
+			Status: harnesspkg.StatusRunning,
 			Input:  tc.Function.Arguments,
 		})
 	}
 	hasRealTool, toolFailed, hasPlanTool := a.h.executor.appendAssistantToolRound(ctx, a.h.ec, a.h.state, asst)
 	for _, tc := range result.toolCalls {
-		status := harnessproto.StatusCompleted
+		status := harnesspkg.StatusCompleted
 		if toolFailed {
-			status = harnessproto.StatusFailed
+			status = harnesspkg.StatusFailed
 		}
-		a.h.emit(harnessproto.Event{
-			Type:   harnessproto.EventActionFinished,
-			Layer:  harnessproto.LayerAction,
+		a.h.emit(harnesspkg.Event{
+			Type:   harnesspkg.EventActionFinished,
+			Layer:  harnesspkg.LayerAction,
 			ItemID: tc.ID,
 			Name:   tc.Function.Name,
 			Status: status,
@@ -543,11 +563,11 @@ func (c *harnessControlPlaneLayer) tokenBudgetExceeded() bool {
 		"budget_limit": c.h.ec.ag.TokenBudget,
 		"consumed":     c.h.budget.Consumed(),
 	}).Warn("[Budget] token budget exceeded, stopping after this round")
-	c.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventControlUpdate,
-		Layer:  harnessproto.LayerControl,
+	c.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventControlUpdate,
+		Layer:  harnesspkg.LayerControl,
 		Name:   "token_budget",
-		Status: harnessproto.StatusCompleted,
+		Status: harnesspkg.StatusCompleted,
 		Metadata: map[string]any{
 			"budget_limit": c.h.ec.ag.TokenBudget,
 			"consumed":     c.h.budget.Consumed(),
@@ -559,11 +579,11 @@ func (c *harnessControlPlaneLayer) tokenBudgetExceeded() bool {
 func (c *harnessControlPlaneLayer) afterToolRound(ctx context.Context, hasRealTool, toolFailed, hasPlanTool bool) {
 	if c.h.ec.plan != nil && hasRealTool && !toolFailed && !hasPlanTool {
 		c.h.ec.plan.CompleteRunning(ctx)
-		c.h.emit(harnessproto.Event{
-			Type:   harnessproto.EventControlUpdate,
-			Layer:  harnessproto.LayerControl,
+		c.h.emit(harnesspkg.Event{
+			Type:   harnesspkg.EventControlUpdate,
+			Layer:  harnesspkg.LayerControl,
 			Name:   "plan_advance",
-			Status: harnessproto.StatusCompleted,
+			Status: harnesspkg.StatusCompleted,
 		})
 	}
 }
@@ -572,11 +592,11 @@ func (c *harnessControlPlaneLayer) failRunningPlan(ctx context.Context, reason s
 	if c.h.ec.plan != nil {
 		c.h.ec.plan.FailRunning(ctx, reason)
 	}
-	c.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventControlUpdate,
-		Layer:  harnessproto.LayerControl,
+	c.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventControlUpdate,
+		Layer:  harnesspkg.LayerControl,
 		Name:   "plan_failed",
-		Status: harnessproto.StatusFailed,
+		Status: harnesspkg.StatusFailed,
 		Error:  reason,
 	})
 }
@@ -593,10 +613,10 @@ func (c *harnessControlPlaneLayer) save(ctx context.Context, finalContent string
 	if err != nil {
 		return nil, err
 	}
-	c.h.emit(harnessproto.Event{
-		Type:   harnessproto.EventPersisted,
-		Layer:  harnessproto.LayerPersistence,
-		Status: harnessproto.StatusCompleted,
+	c.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventPersisted,
+		Layer:  harnesspkg.LayerPersistence,
+		Status: harnesspkg.StatusCompleted,
 		Metadata: map[string]any{
 			"message_id":      res.MessageID,
 			"conversation_id": res.ConversationID,
