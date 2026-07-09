@@ -32,6 +32,13 @@ type ToolResult struct {
 	Files      []*model.File
 }
 
+type toolRoundResult struct {
+	HasRealTool bool
+	ToolFailed  bool
+	HasPlanTool bool
+	ToolEvents  []harnesspkg.ToolEvent
+}
+
 const toolExecutionWall = 5 * time.Minute
 
 func toolCallContext(parent context.Context) (ctx context.Context, done func()) {
@@ -328,8 +335,7 @@ func dedupeFiles(files []*model.File) []*model.File {
 }
 
 // appendAssistantToolRound 执行一轮工具调用：并发安全的工具并行执行，其余串行执行。
-// 返回值分别表示：是否执行了非 plan 的真实工具、是否至少一个工具失败、是否调用了 plan 工具。
-func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *harnessTurnState, assistant openai.ChatCompletionMessage) (bool, bool, bool) {
+func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *harnessTurnState, assistant openai.ChatCompletionMessage) toolRoundResult {
 	st.Messages = append(st.Messages, assistant)
 	tcs := assistant.ToolCalls
 	n := len(tcs)
@@ -402,15 +408,19 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 	toolFailed := ""
 	hasRealTool := false
 	hasPlanTool := false
+	roundEvents := make([]harnesspkg.ToolEvent, 0, len(results))
 	for i, r := range results {
 		st.Messages = append(st.Messages, r.toolMsg)
 		toolResults = append(toolResults, r.tr)
+		if ev, ok := harnessToolEventFromResult(tcs[i].Function.Arguments, r.tr); ok {
+			roundEvents = append(roundEvents, ev)
+		}
 		if r.tr.Error != "" && toolFailed == "" {
 			toolFailed = fmt.Sprintf("%s: %s", r.tr.ToolName, r.tr.Error)
 		}
 		if tcs[i].Function.Name == planToolName {
 			hasPlanTool = true
-		} else {
+		} else if tcs[i].Function.Name != finishToolName {
 			hasRealTool = true
 			persistedToolCalls = append(persistedToolCalls, tcs[i])
 			persistedToolResults = append(persistedToolResults, r.tr)
@@ -440,7 +450,12 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 			MultiContent: parts,
 		})
 	}
-	return hasRealTool, toolFailed != "", hasPlanTool
+	return toolRoundResult{
+		HasRealTool: hasRealTool,
+		ToolFailed:  toolFailed != "",
+		HasPlanTool: hasPlanTool,
+		ToolEvents:  roundEvents,
+	}
 }
 
 func toolResultMsg(toolCallID, toolName, content string) openai.ChatCompletionMessage {

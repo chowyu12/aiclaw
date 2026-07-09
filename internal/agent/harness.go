@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,10 @@ type harnessTurnState struct {
 	cachedLLMDefs     []openai.Tool
 
 	verifier harnessVerifierState
+
+	streamMidwayRetries int
+	fallbackActivated   bool
+	activeModel         string
 }
 
 type agentHarness struct {
@@ -116,81 +121,215 @@ func (h *agentHarness) Run(ctx context.Context) (*ExecuteResult, error) {
 		return nil, err
 	}
 	h.state = st
-
-	var finalContent string
-	completed := false
-	maxIter := h.ec.ag.IterationLimit()
-
-	for round := 1; round <= maxIter; round++ {
-		h.lifecycle.beginTurn(round)
-
-		req, err := h.context.compileRound(ctx, round)
-		if err != nil {
-			h.lifecycle.fail(err)
-			return nil, err
-		}
-
-		result, err := h.model.callRound(ctx, round, req)
-		if err != nil {
-			h.control.failRunningPlan(ctx, err.Error())
-			h.lifecycle.fail(err)
-			return nil, err
-		}
-
-		if len(result.toolCalls) == 0 {
-			content, done, retry := h.verifier.verifyFinalAnswer(ctx, round, maxIter, result.content)
-			if retry {
-				h.lifecycle.completeTurn(round)
-				continue
-			}
-			finalContent = content
-			completed = done
-			h.lifecycle.completeTurn(round)
-			break
-		}
-
-		if h.control.tokenBudgetExceeded() {
-			finalContent = result.content
-			if finalContent == "" {
-				finalContent = fmt.Sprintf("Token budget limit reached (%d); %d tokens have been used. Start a new conversation to continue.",
-					h.ec.ag.TokenBudget, h.budget.Consumed())
-			}
-			completed = true
-			h.lifecycle.completeTurn(round)
-			break
-		}
-
-		hasRealTool, toolFailed, hasPlanTool := h.action.executeRound(ctx, result)
-		h.control.afterToolRound(ctx, hasRealTool, toolFailed, hasPlanTool)
-		content, done, retry := h.verifier.verifyToolRound(ctx, round, maxIter)
-		if retry {
-			h.lifecycle.completeTurn(round)
-			continue
-		}
-		if done {
-			finalContent = content
-			completed = true
-			h.lifecycle.completeTurn(round)
-			break
-		}
-		h.lifecycle.completeTurn(round)
-	}
-
-	if !completed {
-		errMsg := fmt.Sprintf("Maximum iteration count reached (%d); the Agent did not produce a final answer", maxIter)
-		err := errors.New(errMsg)
-		h.control.maxIterationsReached(ctx, errMsg)
+	if err := h.bootstrapHarnessPlan(ctx); err != nil {
 		h.lifecycle.fail(err)
 		return nil, err
 	}
 
-	res, err := h.control.save(ctx, finalContent)
+	runner := &agentTurnRunner{
+		h:       h,
+		maxIter: h.ec.ag.IterationLimit(),
+	}
+	return runner.run(ctx)
+}
+
+func (h *agentHarness) bootstrapHarnessPlan(ctx context.Context) error {
+	if h.ec == nil || h.ec.plan == nil || h.state == nil {
+		return nil
+	}
+	runtime := newHarnessRuntime(ctx, h.ec, h.state)
+	if !runtime.Contract.RequirePlan {
+		return nil
+	}
+	output, created, err := h.ec.plan.BootstrapHarnessPlan(ctx, runtime.Contract, "")
 	if err != nil {
-		h.lifecycle.fail(err)
+		return err
+	}
+	if !created {
+		return nil
+	}
+	meta := h.ec.stepMeta()
+	meta.Harness = &model.StepHarnessMeta{
+		Stage:    "plan_bootstrap",
+		Allowed:  true,
+		Evidence: harnessEvidenceMeta(runtime.Evidence),
+	}
+	h.ec.tracker.RecordStep(ctx, model.StepHarness, "bootstrap_plan", runtime.Contract.Objective, output, model.StepSuccess, "", 0, 0, meta)
+	h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventControlUpdate,
+		Layer:  harnesspkg.LayerControl,
+		Name:   "plan_bootstrap",
+		Status: harnesspkg.StatusCompleted,
+		Metadata: map[string]any{
+			"items": len(harnesspkg.InitialPlanTemplate(runtime.Contract, "")),
+		},
+	})
+	return nil
+}
+
+type agentTurnRunner struct {
+	h       *agentHarness
+	maxIter int
+
+	finalContent string
+	completed    bool
+}
+
+type harnessRoundControl int
+
+const (
+	harnessRoundNext harnessRoundControl = iota
+	harnessRoundBreak
+)
+
+func (r *agentTurnRunner) run(ctx context.Context) (*ExecuteResult, error) {
+	for round := 1; round <= r.maxIter; round++ {
+		r.h.lifecycle.beginTurn(round)
+
+		ctrl, err := r.runRound(ctx, round)
+		if err != nil {
+			r.h.lifecycle.fail(err)
+			return nil, err
+		}
+		r.h.lifecycle.completeTurn(round)
+		if ctrl == harnessRoundBreak {
+			break
+		}
+	}
+
+	if !r.completed {
+		errMsg := fmt.Sprintf("Maximum iteration count reached (%d); the Agent did not produce a final answer", r.maxIter)
+		err := errors.New(errMsg)
+		r.h.control.maxIterationsReached(ctx, errMsg)
+		r.h.lifecycle.fail(err)
 		return nil, err
 	}
-	h.lifecycle.complete()
+
+	res, err := r.h.control.save(ctx, r.finalContent)
+	if err != nil {
+		r.h.lifecycle.fail(err)
+		return nil, err
+	}
+	r.h.lifecycle.complete()
 	return res, nil
+}
+
+func (r *agentTurnRunner) runRound(ctx context.Context, round int) (harnessRoundControl, error) {
+	req, err := r.h.context.compileRound(ctx, round)
+	if err != nil {
+		return harnessRoundBreak, err
+	}
+
+	result, err := r.h.model.callRound(ctx, round, req)
+	if err != nil {
+		if r.h.streaming && r.h.state.shouldRetryStreamMidway(err) {
+			backoff := streamMidwayBackoff(r.h.state.streamMidwayRetries)
+			r.h.ec.l.WithFields(log.Fields{
+				"retry":   r.h.state.streamMidwayRetries,
+				"max":     maxStreamMidwayRetries,
+				"backoff": backoff,
+			}).Warn("[LLM] stream midway error, retrying current round")
+			select {
+			case <-ctx.Done():
+				return harnessRoundBreak, ctx.Err()
+			case <-time.After(backoff):
+			}
+			return harnessRoundNext, nil
+		}
+		r.h.control.failRunningPlan(ctx, err.Error())
+		return harnessRoundBreak, err
+	}
+
+	if result.outcome != llmRoundCompleteToolCalls {
+		return r.handleFinalCandidate(ctx, round, result)
+	}
+	return r.handleToolRound(ctx, round, result)
+}
+
+func (r *agentTurnRunner) handleFinalCandidate(ctx context.Context, round int, result llmRoundResult) (harnessRoundControl, error) {
+	runtime := newHarnessRuntime(ctx, r.h.ec, r.h.state)
+	if recovery, ok := llmRoundRecoveryFor(result, runtime.Contract, runtime.Evidence); ok {
+		return r.handleLLMRoundRecovery(ctx, round, result, runtime.Contract, runtime.Evidence, recovery)
+	}
+	outputDecision := runtime.DecideAssistantOutput(result.content)
+	if outputDecision.ShouldContinueExecution() && r.h.state.canNudge(maxHarnessNudges(runtime.Contract), round, r.maxIter) {
+		attempt := r.h.state.consumeNudge()
+		recordHarnessContinuationStep(ctx, r.h.ec, runtime.Evidence, outputDecision, attempt, maxHarnessNudges(runtime.Contract))
+		r.h.state.Messages = append(r.h.state.Messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: outputDecision.Prompt(),
+		})
+		return harnessRoundNext, nil
+	}
+	return r.gateFinalAnswer(ctx, round, result.content, false)
+}
+
+func (r *agentTurnRunner) gateFinalAnswer(ctx context.Context, round int, content string, explicit bool) (harnessRoundControl, error) {
+	answer, done, retry := r.h.verifier.verifyFinalAnswer(ctx, round, r.maxIter, content, explicit)
+	if retry {
+		return harnessRoundNext, nil
+	}
+	r.finalContent = answer
+	r.completed = done
+	return harnessRoundBreak, nil
+}
+
+func (r *agentTurnRunner) handleLLMRoundRecovery(ctx context.Context, round int, result llmRoundResult, contract harnesspkg.TaskContract, evidence harnesspkg.EvidenceLedger, recovery llmRoundRecovery) (harnessRoundControl, error) {
+	maxNudges := maxHarnessNudges(contract)
+	if recovery.retryable && r.h.state.canNudge(maxNudges, round, r.maxIter) {
+		attempt := r.h.state.consumeNudge()
+		recordLLMRoundRecoveryStep(ctx, r.h.ec, evidence, result, recovery, attempt, maxNudges, model.StepSuccess)
+		r.h.state.Messages = append(r.h.state.Messages, openai.ChatCompletionMessage{
+			Role:    openai.ChatMessageRoleUser,
+			Content: recovery.Prompt(),
+		})
+		return harnessRoundNext, nil
+	}
+	r.h.state.verifier.FinalFailed = true
+	if strings.TrimSpace(recovery.finalMessage) != "" {
+		r.finalContent = recovery.finalMessage
+	} else {
+		r.finalContent = "Agent 未能完成本轮模型输出恢复：" + strings.TrimSpace(recovery.reason)
+	}
+	recordLLMRoundRecoveryStep(ctx, r.h.ec, evidence, result, recovery, r.h.state.currentNudges(), maxNudges, model.StepError)
+	r.completed = true
+	return harnessRoundBreak, nil
+}
+
+func (r *agentTurnRunner) handleToolRound(ctx context.Context, round int, result llmRoundResult) (harnessRoundControl, error) {
+	if r.h.control.tokenBudgetExceeded() {
+		r.finalContent = result.content
+		if r.finalContent == "" {
+			r.finalContent = fmt.Sprintf("Token budget limit reached (%d); %d tokens have been used. Start a new conversation to continue.",
+				r.h.ec.ag.TokenBudget, r.h.budget.Consumed())
+		}
+		r.completed = true
+		return harnessRoundBreak, nil
+	}
+
+	finishSink := &finishResultSink{}
+	toolCtx := withFinishResultSink(ctx, finishSink)
+	toolRound := r.h.action.executeRound(toolCtx, result)
+	r.h.control.afterToolRound(ctx, toolRound)
+	if called, answer := finishSink.result(); called {
+		if !toolRound.ToolFailed {
+			r.h.state.resetNudges()
+		}
+		return r.gateFinalAnswer(ctx, round, answer, true)
+	}
+	content, done, retry := r.h.verifier.verifyToolRound(ctx, round, r.maxIter, toolRound)
+	if retry {
+		return harnessRoundNext, nil
+	}
+	if done {
+		r.finalContent = content
+		r.completed = true
+		return harnessRoundBreak, nil
+	}
+	if !toolRound.ToolFailed {
+		r.h.state.resetNudges()
+	}
+	return harnessRoundNext, nil
 }
 
 type harnessLifecycleLayer struct {
@@ -386,7 +525,8 @@ func (c *harnessContextCompilerLayer) compileRound(ctx context.Context, round in
 	st := c.h.state
 	ec := c.h.ec
 	if c.h.compressor.NeedCompress(st.Messages) {
-		compressionModel := cmp.Or(ec.ag.FastModelName, ec.ag.ModelName)
+		activeModel := st.currentModel(ec.ag.ModelName)
+		compressionModel := cmp.Or(ec.ag.FastModelName, activeModel)
 		compressed, compErr := c.h.compressor.Compress(ctx, st.Messages, ec.llmProv, compressionModel)
 		if compErr != nil {
 			ec.l.WithError(compErr).Warn("[Compress] context compression failed, continuing with full context")
@@ -408,13 +548,16 @@ func (c *harnessContextCompilerLayer) compileRound(ctx context.Context, round in
 	refreshPlanInSystemMessage(st.Messages, ec.plan)
 	msgs := sanitizeMessages(st.Messages)
 	tools := filterURLGatedTools(toolsSentToLLM(st), userMessagesHaveURL(msgs))
+	modelName := st.currentModel(ec.ag.ModelName)
+	reqAgent := *ec.ag
+	reqAgent.ModelName = modelName
 	req := openai.ChatCompletionRequest{
-		Model:    ec.ag.ModelName,
+		Model:    modelName,
 		Messages: msgs,
 		Tools:    tools,
 	}
-	applyModelCaps(&req, ec.ag, ec.prov.Type, ec.l)
-	if webSearchEffective(ec.ag) && !c.h.builtinWebSearchStepRecorded {
+	applyModelCaps(&req, &reqAgent, ec.prov.Type, ec.l)
+	if webSearchEffective(&reqAgent) && !c.h.builtinWebSearchStepRecorded {
 		recordBuiltInWebSearchStep(ctx, ec, req.ExtraBody)
 		c.h.builtinWebSearchStepRecorded = true
 	}
@@ -437,7 +580,11 @@ type harnessModelDriverLayer struct {
 
 func (m *harnessModelDriverLayer) callRound(ctx context.Context, round int, req openai.ChatCompletionRequest) (llmRoundResult, error) {
 	ec := m.h.ec
-	if action := m.h.executor.hooks.Fire(ctx, HookPreLLMCall, &HookPayload{Model: ec.ag.ModelName, Round: round}); action == HookAbort {
+	primaryModel := strings.TrimSpace(req.Model)
+	if primaryModel == "" {
+		primaryModel = ec.ag.ModelName
+	}
+	if action := m.h.executor.hooks.Fire(ctx, HookPreLLMCall, &HookPayload{Model: primaryModel, Round: round}); action == HookAbort {
 		ec.l.WithField("round", round).Warn("[Hook] agent execution aborted by pre_llm_call hook")
 		return llmRoundResult{}, errors.New("agent execution aborted by hook")
 	}
@@ -445,27 +592,27 @@ func (m *harnessModelDriverLayer) callRound(ctx context.Context, round int, req 
 	m.h.emit(harnesspkg.Event{
 		Type:   harnesspkg.EventModelStarted,
 		Layer:  harnesspkg.LayerModel,
-		Name:   ec.ag.ModelName,
+		Name:   primaryModel,
 		Status: harnesspkg.StatusRunning,
 		Metadata: map[string]any{
 			"round": round,
 		},
 	})
 
-	ec.l.WithFields(log.Fields{"round": round, "model": ec.ag.ModelName}).Info("[LLM] >> call")
-	llmStep := ec.tracker.BeginStep(ctx, model.StepLLMCall, ec.ag.ModelName, ec.userMsg, ec.stepMeta())
+	ec.l.WithFields(log.Fields{"round": round, "model": primaryModel}).Info("[LLM] >> call")
+	llmStep := ec.tracker.BeginStep(ctx, model.StepLLMCall, primaryModel, ec.userMsg, stepMetaForModel(ec, primaryModel))
 	start := time.Now()
 	result, callErr := m.h.call(ctx, req)
 	dur := time.Since(start)
 
 	if callErr != nil {
-		ec.l.WithFields(log.Fields{"round": round, "duration": dur}).WithError(callErr).Error("[LLM] << failed")
-		ec.tracker.FinalizeStep(ctx, llmStep, "", model.StepError, callErr.Error(), dur, 0, ec.stepMeta())
+		ec.l.WithFields(log.Fields{"round": round, "duration": dur, "model": primaryModel}).WithError(callErr).Error("[LLM] << failed")
+		ec.tracker.FinalizeStep(ctx, llmStep, "", model.StepError, callErr.Error(), dur, 0, stepMetaForModel(ec, primaryModel))
 		err := fmt.Errorf("generate content: %w", callErr)
 		m.h.emit(harnesspkg.Event{
 			Type:   harnesspkg.EventModelFailed,
 			Layer:  harnesspkg.LayerModel,
-			Name:   ec.ag.ModelName,
+			Name:   primaryModel,
 			Status: harnesspkg.StatusFailed,
 			Error:  err.Error(),
 			Metadata: map[string]any{
@@ -473,35 +620,124 @@ func (m *harnessModelDriverLayer) callRound(ctx context.Context, round int, req 
 				"duration_ms": dur.Milliseconds(),
 			},
 		})
-		return llmRoundResult{}, err
+		fallbackModel := fallbackModelForLLMError(ec.ag, primaryModel, callErr, m.h.state.fallbackAlreadyActivated())
+		if fallbackModel == "" {
+			return llmRoundResult{}, err
+		}
+		return m.callFallbackRound(ctx, round, req, primaryModel, fallbackModel, callErr)
 	}
 
-	ec.tracker.FinalizeStep(ctx, llmStep, result.content, model.StepSuccess, "", dur, result.tokens, ec.stepMeta())
+	m.recordLLMSuccess(ctx, round, primaryModel, llmStep, result, dur, nil)
+	return result, nil
+}
+
+func (m *harnessModelDriverLayer) callFallbackRound(ctx context.Context, round int, req openai.ChatCompletionRequest, primaryModel, fallbackModel string, reason error) (llmRoundResult, error) {
+	ec := m.h.ec
+	m.h.state.markFallbackActivated()
+	m.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventControlUpdate,
+		Layer:  harnesspkg.LayerModel,
+		Name:   "llm_fallback",
+		Status: harnesspkg.StatusRunning,
+		Metadata: map[string]any{
+			"round":    round,
+			"primary":  primaryModel,
+			"fallback": fallbackModel,
+			"reason":   reason.Error(),
+		},
+	})
+	if action := m.h.executor.hooks.Fire(ctx, HookPreLLMCall, &HookPayload{Model: fallbackModel, Round: round}); action == HookAbort {
+		ec.l.WithFields(log.Fields{"round": round, "model": fallbackModel}).Warn("[Hook] fallback LLM call aborted by pre_llm_call hook")
+		return llmRoundResult{}, errors.New("agent execution aborted by hook")
+	}
+
+	m.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventModelStarted,
+		Layer:  harnesspkg.LayerModel,
+		Name:   fallbackModel,
+		Status: harnesspkg.StatusRunning,
+		Metadata: map[string]any{
+			"round":    round,
+			"fallback": true,
+			"primary":  primaryModel,
+		},
+	})
+	ec.l.WithFields(log.Fields{"round": round, "model": fallbackModel, "primary": primaryModel}).Info("[LLM] >> fallback call")
+	fallbackReq := requestForFallbackModel(req, ec.ag, fallbackModel, ec.prov.Type, ec.l)
+	fallbackStep := ec.tracker.BeginStep(ctx, model.StepLLMCall, fallbackModel, ec.userMsg, stepMetaForModel(ec, fallbackModel))
+	start := time.Now()
+	result, callErr := m.h.call(ctx, fallbackReq)
+	dur := time.Since(start)
+	if callErr != nil {
+		ec.l.WithFields(log.Fields{"round": round, "duration": dur, "model": fallbackModel}).WithError(callErr).Error("[LLM] << fallback failed")
+		ec.tracker.FinalizeStep(ctx, fallbackStep, "", model.StepError, callErr.Error(), dur, 0, stepMetaForModel(ec, fallbackModel))
+		err := fmt.Errorf("generate content with fallback %s after %s failed: %w", fallbackModel, primaryModel, callErr)
+		m.h.emit(harnesspkg.Event{
+			Type:   harnesspkg.EventModelFailed,
+			Layer:  harnesspkg.LayerModel,
+			Name:   fallbackModel,
+			Status: harnesspkg.StatusFailed,
+			Error:  err.Error(),
+			Metadata: map[string]any{
+				"round":       round,
+				"fallback":    true,
+				"primary":     primaryModel,
+				"duration_ms": dur.Milliseconds(),
+			},
+		})
+		return llmRoundResult{}, err
+	}
+	m.h.state.activateFallbackModel(fallbackModel)
+	m.recordLLMSuccess(ctx, round, fallbackModel, fallbackStep, result, dur, map[string]any{
+		"fallback": true,
+		"primary":  primaryModel,
+	})
+	m.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventControlUpdate,
+		Layer:  harnesspkg.LayerModel,
+		Name:   "llm_fallback",
+		Status: harnesspkg.StatusCompleted,
+		Metadata: map[string]any{
+			"round":    round,
+			"primary":  primaryModel,
+			"fallback": fallbackModel,
+		},
+	})
+	return result, nil
+}
+
+func (m *harnessModelDriverLayer) recordLLMSuccess(ctx context.Context, round int, modelName string, llmStep *model.ExecutionStep, result llmRoundResult, dur time.Duration, extra map[string]any) {
+	ec := m.h.ec
+	ec.tracker.FinalizeStep(ctx, llmStep, result.content, model.StepSuccess, "", dur, result.tokens, stepMetaForModel(ec, modelName))
 	m.h.totalTokens += result.tokens
 	m.h.budget.Add(result.tokens)
 	m.h.compressor.UpdatePromptTokens(result.promptTokens)
-	m.h.executor.hooks.Fire(ctx, HookPostLLMCall, &HookPayload{Model: ec.ag.ModelName, Round: round, Tokens: result.tokens})
+	m.h.executor.hooks.Fire(ctx, HookPostLLMCall, &HookPayload{Model: modelName, Round: round, Tokens: result.tokens})
 
+	metadata := map[string]any{
+		"round":         round,
+		"duration_ms":   dur.Milliseconds(),
+		"tokens":        result.tokens,
+		"prompt_tokens": result.promptTokens,
+	}
+	for k, v := range extra {
+		metadata[k] = v
+	}
 	m.h.emit(harnesspkg.Event{
 		Type:   harnesspkg.EventModelCompleted,
 		Layer:  harnesspkg.LayerModel,
-		Name:   ec.ag.ModelName,
+		Name:   modelName,
 		Status: harnesspkg.StatusCompleted,
 		Output: map[string]any{
 			"tool_calls":  len(result.toolCalls),
 			"content_len": len(result.content),
 		},
-		Metadata: map[string]any{
-			"round":         round,
-			"duration_ms":   dur.Milliseconds(),
-			"tokens":        result.tokens,
-			"prompt_tokens": result.promptTokens,
-		},
+		Metadata: metadata,
 	})
 
 	if len(result.toolCalls) == 0 {
 		ec.l.WithFields(log.Fields{
-			"round": round, "duration": dur, "tokens": result.tokens,
+			"round": round, "model": modelName, "duration": dur, "tokens": result.tokens,
 			"len": len(result.content), "preview": truncateLog(result.content, 200),
 		}).Info("[LLM] << final answer")
 	} else {
@@ -509,16 +745,15 @@ func (m *harnessModelDriverLayer) callRound(ctx context.Context, round int, req 
 		for _, tc := range result.toolCalls {
 			names = append(names, tc.Function.Name)
 		}
-		ec.l.WithFields(log.Fields{"round": round, "duration": dur, "tokens": result.tokens, "tool_calls": names}).Info("[LLM] << tool calls")
+		ec.l.WithFields(log.Fields{"round": round, "model": modelName, "duration": dur, "tokens": result.tokens, "tool_calls": names}).Info("[LLM] << tool calls")
 	}
-	return result, nil
 }
 
 type harnessActionRuntimeLayer struct {
 	h *agentHarness
 }
 
-func (a *harnessActionRuntimeLayer) executeRound(ctx context.Context, result llmRoundResult) (bool, bool, bool) {
+func (a *harnessActionRuntimeLayer) executeRound(ctx context.Context, result llmRoundResult) toolRoundResult {
 	asst := openai.ChatCompletionMessage{
 		Role:      openai.ChatMessageRoleAssistant,
 		Content:   result.content,
@@ -534,10 +769,10 @@ func (a *harnessActionRuntimeLayer) executeRound(ctx context.Context, result llm
 			Input:  tc.Function.Arguments,
 		})
 	}
-	hasRealTool, toolFailed, hasPlanTool := a.h.executor.appendAssistantToolRound(ctx, a.h.ec, a.h.state, asst)
+	toolRound := a.h.executor.appendAssistantToolRound(ctx, a.h.ec, a.h.state, asst)
 	for _, tc := range result.toolCalls {
 		status := harnesspkg.StatusCompleted
-		if toolFailed {
+		if toolRound.ToolFailed {
 			status = harnesspkg.StatusFailed
 		}
 		a.h.emit(harnesspkg.Event{
@@ -548,7 +783,7 @@ func (a *harnessActionRuntimeLayer) executeRound(ctx context.Context, result llm
 			Status: status,
 		})
 	}
-	return hasRealTool, toolFailed, hasPlanTool
+	return toolRound
 }
 
 type harnessControlPlaneLayer struct {
@@ -576,8 +811,8 @@ func (c *harnessControlPlaneLayer) tokenBudgetExceeded() bool {
 	return true
 }
 
-func (c *harnessControlPlaneLayer) afterToolRound(ctx context.Context, hasRealTool, toolFailed, hasPlanTool bool) {
-	if c.h.ec.plan != nil && hasRealTool && !toolFailed && !hasPlanTool {
+func (c *harnessControlPlaneLayer) afterToolRound(ctx context.Context, toolRound toolRoundResult) {
+	if c.h.ec.plan != nil && toolRound.HasRealTool && !toolRound.ToolFailed && !toolRound.HasPlanTool {
 		c.h.ec.plan.CompleteRunning(ctx)
 		c.h.emit(harnesspkg.Event{
 			Type:   harnesspkg.EventControlUpdate,

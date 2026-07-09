@@ -201,6 +201,57 @@ func TestRecordBuiltInWebSearchStep(t *testing.T) {
 	}
 }
 
+func TestClassifyLLMRoundExecutesToolCallsWithoutFinishReason(t *testing.T) {
+	toolCalls := []openai.ToolCall{{
+		ID:       "tc_lookup",
+		Type:     openai.ToolTypeFunction,
+		Function: openai.FunctionCall{Name: "lookup", Arguments: `{}`},
+	}}
+
+	outcome, executable := classifyLLMRound("", toolCalls, "")
+
+	if outcome != llmRoundCompleteToolCalls {
+		t.Fatalf("outcome = %s, want %s", outcome, llmRoundCompleteToolCalls)
+	}
+	if len(executable) != 1 || executable[0].Function.Name != "lookup" {
+		t.Fatalf("executable tool calls = %#v", executable)
+	}
+}
+
+func TestClassifyLLMRoundBlocksTruncatedToolCalls(t *testing.T) {
+	toolCalls := []openai.ToolCall{{
+		ID:       "tc_write",
+		Type:     openai.ToolTypeFunction,
+		Function: openai.FunctionCall{Name: "write", Arguments: `{"path":`},
+	}}
+
+	outcome, executable := classifyLLMRound("", toolCalls, openai.FinishReasonLength)
+
+	if outcome != llmRoundTruncatedToolCall {
+		t.Fatalf("outcome = %s, want %s", outcome, llmRoundTruncatedToolCall)
+	}
+	if len(executable) != 0 {
+		t.Fatalf("truncated tool calls should not be executable: %#v", executable)
+	}
+}
+
+func TestClassifyLLMRoundDoesNotExecuteToolCallsWithStopFinishReason(t *testing.T) {
+	toolCalls := []openai.ToolCall{{
+		ID:       "tc_write",
+		Type:     openai.ToolTypeFunction,
+		Function: openai.FunctionCall{Name: "write", Arguments: `{}`},
+	}}
+
+	outcome, executable := classifyLLMRound("", toolCalls, openai.FinishReasonStop)
+
+	if outcome != llmRoundTruncatedToolCall {
+		t.Fatalf("outcome = %s, want %s", outcome, llmRoundTruncatedToolCall)
+	}
+	if len(executable) != 0 {
+		t.Fatalf("tool calls with stop finish reason should not be executable: %#v", executable)
+	}
+}
+
 // ── generateSummary empty choices ───────────────────────────
 
 func TestContextCompressor_Compress_EmptyChoices(t *testing.T) {

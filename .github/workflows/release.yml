@@ -14,6 +14,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare release notes
+        run: |
+          git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)' > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Release ${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -63,6 +72,7 @@ jobs:
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             aiclaw-linux-amd64
             aiclaw-linux-arm64

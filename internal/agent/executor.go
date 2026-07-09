@@ -102,6 +102,8 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 	registry.RegisterBuiltin("session_search", sessionsearch.NewHandler(s))
 	registry.RegisterBuiltin("web_search", websearch.NewHandler(s))
 	registry.RegisterBuiltin(planToolName, e.planHandler)
+	registry.RegisterBuiltin(finishToolName, finishHandler)
+	registry.RegisterBuiltinDef(finishToolDef())
 	return e
 }
 

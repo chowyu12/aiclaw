@@ -49,6 +49,13 @@ func (r Runtime) FinalGate(content string) ValidationResult {
 	return r.ValidateStage(StagePreFinal, Candidate{Content: strings.TrimSpace(content)})
 }
 
+// FinalGateExplicit validates a final answer submitted through a structured
+// completion signal. It skips progress-only text heuristics while keeping
+// evidence, plan, artifact, and JSON checks.
+func (r Runtime) FinalGateExplicit(content string) ValidationResult {
+	return r.ValidateStage(StagePreFinal, Candidate{Content: strings.TrimSpace(content), ExplicitFinal: true})
+}
+
 func (r Runtime) BeforeSave(content string) ValidationResult {
 	return r.ValidateStage(StagePreSave, Candidate{Content: strings.TrimSpace(content)})
 }
