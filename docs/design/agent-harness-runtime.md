@@ -6,7 +6,7 @@ Harness Runtime 负责把 Agent 执行从“模型说完成”推进到“执行
 
 它参考 `ickey-claw` 的 Harness 思路，但适配 AiClaw 当前架构：
 
-- 主循环仍由 `internal/agent/harness.go` 管理。
+- 主循环由 `internal/agent/harness.go` 中的 `agentTurnRunner` 管理，按 request/model/final/tool/finalize 阶段拆分。
 - 稳定协议和校验原语放在独立包 `pkg/harness`。
 - Agent 内部由 `harnessVerifierLayer` 负责校验/纠偏编排，并通过 `internal/agent/harness_verifier.go` 把运行态转换为 harness 输入。
 - 不新增数据库表，校验和纠偏记录复用 `execution_steps.metadata.harness`。
@@ -29,17 +29,22 @@ Contract -> Evidence -> Validate -> Correct
 ```text
 prepare
   -> bootstrap context
-  -> for each round
+  -> bootstrap harness plan when contract requires plan and no active plan exists
+  -> agentTurnRunner
+     -> for each round
        -> compile model request
-       -> call model
-       -> if tool_calls
+       -> call model and classify round outcome
+       -> recover truncated/empty/filter/resource-interrupted model rounds when retryable
+       -> if complete tool_calls
             -> StagePreTool for each tool
             -> execute tools
-            -> record ToolEvent/File evidence
+            -> if finish tool was called, run explicit final gate and close turn
+            -> return toolRoundResult with current-round ToolEvent snapshot
             -> control plane advances Plan State
-            -> verifier runs StagePostTool
+            -> verifier runs StagePostTool against current-round evidence
             -> correction prompt if needed
           else
+            -> decide whether assistant output is progress-only and should continue execution
             -> verifier runs StagePreFinal
             -> correction prompt if needed
             -> finish when allowed
@@ -61,8 +66,10 @@ prepare
 
 AiClaw verifier 当前采集这些证据：
 
-- `calledTools`: 去掉 `plan` 和 `tool_search` 后的业务工具集合。
-- `ToolEvent`: tool call id、工具名、参数摘要、输出摘要、状态、错误、耗时、文件。
+- `calledTools`: 去掉 `plan`、`tool_search`、`finish` 后的业务工具集合。
+- `InformEvent`: 已加载工具、输入附件等上下文型证据。
+- `ToolEvent`: tool call id、工具名、参数摘要、输出摘要、状态、错误、失败分类、耗时、文件；`post_tool` 使用当前工具轮快照，最终答复和保存阶段使用全量 ledger。
+- `BlockerEvidence`: 从失败工具事件推导权限、认证、策略拦截、限流、超时、资源不存在等阻塞类型，并区分可恢复/不可恢复。
 - `Artifacts`: 持久化到 `model.File` 的工具产物，使用 `uuid/storage_path/filename/mime/size` 描述。
 - `PlanSnapshot`: 从 `PlanManager.activeState` 转换为轻量快照。
 - `ValidationEvents` 和 `CorrectionEvents`: 用于后续 trace 和调试。
@@ -88,6 +95,8 @@ Plan item 的 harness 终态与 AiClaw Plan State 保持一致：
 - `validate_pre_save`
 - `correct_pre_final`
 - `correct_post_tool`
+- `continue_execution`
+- `recover_llm_round`
 
 `metadata.harness` 包含：
 
@@ -115,3 +124,11 @@ Plan item 的 harness 终态与 AiClaw Plan State 保持一致：
 - 最后一轮才触发纠偏时，`correct_*` step 记录为 failed，避免没有下一轮可执行时仍显示 correction success。
 - 对 evidence 中的 execution tools 排序，保证 trace 稳定。
 - 将临时 bridge 收敛为 `harnessVerifierLayer`：校验状态集中在 `harnessTurnState.verifier`，control 不再混入校验/纠偏职责。
+- 将执行循环收敛为 `agentTurnRunner`：主循环只负责阶段流转，request/model/final/tool/finalize 逻辑分别落在小方法里。
+- 将工具轮返回值从布尔三元组升级为 `toolRoundResult`：控制层读 `HasRealTool/ToolFailed/HasPlanTool`，校验层读 `ToolEvents`，避免 `post_tool` 从共享全量证据里误读历史工具事件。
+- 统一 nudge 预算：final gate 纠偏、progress-only 续跑、LLM round recovery 共用 `harnessTurnState.verifier.Nudges`，避免各通道各自重试。
+- 增加 LLM round recovery：截断工具调用不会执行，截断内容/资源中断/空输出按契约和证据生成恢复提示；不可恢复的安全过滤显式失败收口。
+- 增加 `finish` 内置工具：模型可用显式 final answer 结束本轮，finish 不计入业务执行工具，也不持久化为普通工具轮记忆。
+- 增加 harness plan bootstrap：Contract 推导出 `RequirePlan` 时，如果当前会话没有 active plan，执行层会用 `InitialPlanTemplate` 初始化运行计划。
+- 增加 fallback model 和流式中断恢复：主模型 transient/stream-midway 失败时可切到 `fast_model_name`，fallback 成功后本 turn 后续轮次继续使用 fallback；流式中途断开在 runner 层重试当前轮。
+- 扩展 Contract/Evidence：根据 Agent profile、工具数量、附件、文件意图、sub-agent 上下文推导契约；证据 ledger 增加 inform events、failure kind、blocker evidence。

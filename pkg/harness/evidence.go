@@ -32,6 +32,11 @@ type ArtifactEvidence struct {
 	SourceTool    string `json:"source_tool,omitempty"`
 }
 
+type InformEvent struct {
+	Key     string `json:"key"`
+	Summary string `json:"summary"`
+}
+
 type ToolEvent struct {
 	CallID            string             `json:"call_id,omitempty"`
 	ToolName          string             `json:"tool_name"`
@@ -39,6 +44,7 @@ type ToolEvent struct {
 	OutputSummary     string             `json:"output_summary,omitempty"`
 	Status            ToolStatus         `json:"status"`
 	Error             string             `json:"error,omitempty"`
+	FailureKind       BlockerKind        `json:"failure_kind,omitempty"`
 	Files             []ArtifactEvidence `json:"files,omitempty"`
 	DurationMs        int                `json:"duration_ms,omitempty"`
 	RelatedPlanItemID string             `json:"related_plan_item_id,omitempty"`
@@ -58,12 +64,14 @@ type CorrectionEvent struct {
 }
 
 type EvidenceLedger struct {
+	InformEvents     []InformEvent      `json:"inform_events,omitempty"`
 	ExecutionTools   []string           `json:"execution_tools,omitempty"`
 	ArtifactCount    int                `json:"artifact_count,omitempty"`
 	Plan             *PlanSnapshot      `json:"plan,omitempty"`
 	PlanSource       string             `json:"plan_source,omitempty"`
 	ToolEvents       []ToolEvent        `json:"tool_events,omitempty"`
 	Artifacts        []ArtifactEvidence `json:"artifacts,omitempty"`
+	Blockers         []BlockerEvidence  `json:"blockers,omitempty"`
 	ValidationEvents []ValidationEvent  `json:"validation_events,omitempty"`
 	Corrections      []CorrectionEvent  `json:"corrections,omitempty"`
 }
@@ -101,6 +109,65 @@ func (e EvidenceLedger) FailedToolEvents() []ToolEvent {
 	return out
 }
 
+func (e EvidenceLedger) ConstraintViolations() []ValidationEvent {
+	if len(e.ValidationEvents) == 0 {
+		return nil
+	}
+	out := make([]ValidationEvent, 0, len(e.ValidationEvents))
+	for _, ev := range e.ValidationEvents {
+		if ev.Allowed || ev.Stage != StagePreTool {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+func (e EvidenceLedger) BlockingEvidence() []BlockerEvidence {
+	if len(e.Blockers) > 0 {
+		return append([]BlockerEvidence(nil), e.Blockers...)
+	}
+	if len(e.ToolEvents) == 0 {
+		return nil
+	}
+	out := make([]BlockerEvidence, 0)
+	for _, ev := range e.ToolEvents {
+		blocker, ok := BlockerEvidenceFromToolEvent(ev)
+		if ok {
+			out = append(out, blocker)
+		}
+	}
+	return out
+}
+
+func (e EvidenceLedger) TerminalBlockers() []BlockerEvidence {
+	blockers := e.BlockingEvidence()
+	if len(blockers) == 0 {
+		return nil
+	}
+	out := make([]BlockerEvidence, 0, len(blockers))
+	for _, b := range blockers {
+		if !b.Recoverable {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+func (e EvidenceLedger) RecoverableBlockers() []BlockerEvidence {
+	blockers := e.BlockingEvidence()
+	if len(blockers) == 0 {
+		return nil
+	}
+	out := make([]BlockerEvidence, 0, len(blockers))
+	for _, b := range blockers {
+		if b.Recoverable {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 func (e EvidenceLedger) HasSuccessfulEvidence() bool {
 	return len(e.SuccessfulToolEvents()) > 0 || e.ActualArtifactCount() > 0
 }
@@ -119,4 +186,28 @@ func (e EvidenceLedger) ArtifactsMissingReference() []ArtifactEvidence {
 		}
 	}
 	return missing
+}
+
+func BlockerEvidenceFromToolEvent(ev ToolEvent) (BlockerEvidence, bool) {
+	if ev.Status != ToolStatusError && ev.Status != ToolStatusBlocked {
+		return BlockerEvidence{}, false
+	}
+	kind := ev.FailureKind
+	if kind == "" {
+		kind = ClassifyToolFailureKind(ev.Status, strings.TrimSpace(ev.Error+" "+ev.OutputSummary))
+	}
+	if kind == "" {
+		return BlockerEvidence{}, false
+	}
+	message := strings.TrimSpace(ev.Error)
+	if message == "" {
+		message = strings.TrimSpace(ev.OutputSummary)
+	}
+	return BlockerEvidence{
+		ToolName:       strings.TrimSpace(ev.ToolName),
+		Kind:           kind,
+		Message:        message,
+		Recoverable:    ToolFailureRecoverable(kind),
+		RequiredAction: blockerRequiredAction(kind),
+	}, true
 }

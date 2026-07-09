@@ -21,9 +21,10 @@ const (
 )
 
 type Candidate struct {
-	Content  string
-	ToolName string
-	ToolArgs string
+	Content       string
+	ToolName      string
+	ToolArgs      string
+	ExplicitFinal bool
 }
 
 type Violation struct {
@@ -102,6 +103,7 @@ func DefaultValidators() []Validator {
 		ValidatorFunc(validatePlanTerminal),
 		ValidatorFunc(validateHarnessInitialEvidence),
 		ValidatorFunc(validateFailedToolEvidence),
+		ValidatorFunc(validateToolExecutionEvidence),
 		ValidatorFunc(validateRequiredArtifacts),
 		ValidatorFunc(validateJSONOutput),
 	}
@@ -146,8 +148,12 @@ func validateNonEmptyFinal(stage ValidationStage, contract TaskContract, _ Evide
 	}}
 }
 
-func validateFinalAnswerCompletion(stage ValidationStage, contract TaskContract, _ EvidenceLedger, candidate Candidate) []Violation {
-	if !isFinalStage(stage) || !contract.RequireFinalAnswer || !candidateLooksLikeProgressOnly(candidate.Content) {
+func validateFinalAnswerCompletion(stage ValidationStage, contract TaskContract, evidence EvidenceLedger, candidate Candidate) []Violation {
+	if !isFinalStage(stage) || !contract.RequireFinalAnswer || candidate.ExplicitFinal {
+		return nil
+	}
+	assessment := AssessFinalOutcome(contract, evidence, candidate)
+	if assessment.CandidateOutcome != OutcomeProgressOnly {
 		return nil
 	}
 	return []Violation{{
@@ -188,7 +194,7 @@ func validateHarnessInitialEvidence(stage ValidationStage, contract TaskContract
 	}}
 }
 
-func validateFailedToolEvidence(stage ValidationStage, contract TaskContract, evidence EvidenceLedger, _ Candidate) []Violation {
+func validateFailedToolEvidence(stage ValidationStage, contract TaskContract, evidence EvidenceLedger, candidate Candidate) []Violation {
 	failed := evidence.FailedToolEvents()
 	if len(failed) == 0 {
 		return nil
@@ -201,7 +207,12 @@ func validateFailedToolEvidence(stage ValidationStage, contract TaskContract, ev
 			RequiredAction: "后续最终答复前需要补齐失败工具对应的证据，或明确说明无法完成的原因",
 		}}
 	}
-	if !isFinalStage(stage) || !contract.RequireEvidence || evidence.HasSuccessfulEvidence() {
+	requiresEvidence := contract.RequireEvidence || (contract.RequireToolEvidence && len(evidence.ExecutionTools) > 0)
+	if !isFinalStage(stage) || !requiresEvidence || evidence.HasSuccessfulEvidence() {
+		return nil
+	}
+	assessment := AssessFinalOutcome(contract, evidence, candidate)
+	if assessment.EvidenceOutcome == OutcomeBlocked && assessment.CandidateExplainsBlocker {
 		return nil
 	}
 	return []Violation{{
@@ -209,6 +220,18 @@ func validateFailedToolEvidence(stage ValidationStage, contract TaskContract, ev
 		Message:        "工具调用失败后没有可用的成功证据",
 		Severity:       SeverityCritical,
 		RequiredAction: "重新调用可用工具获取证据；如果确实无法继续，说明阻塞原因而不是声称已完成",
+	}}
+}
+
+func validateToolExecutionEvidence(stage ValidationStage, contract TaskContract, evidence EvidenceLedger, _ Candidate) []Violation {
+	if !isFinalStage(stage) || !contract.RequireToolEvidence || len(evidence.ExecutionTools) == 0 || evidence.HasSuccessfulEvidence() || len(evidence.FailedToolEvents()) > 0 {
+		return nil
+	}
+	return []Violation{{
+		Code:           "tool_evidence_missing",
+		Message:        "已执行工具但没有可用的成功证据",
+		Severity:       SeverityCritical,
+		RequiredAction: "基于成功工具结果继续完成答复；如果工具都失败，请重试可用工具或明确说明阻塞原因",
 	}}
 }
 
@@ -398,52 +421,6 @@ func artifactRefInContent(content string, art ArtifactEvidence) bool {
 
 func escapeMarkdownURLForValidation(s string) string {
 	return strings.NewReplacer(" ", "%20", "(", "%28", ")", "%29").Replace(s)
-}
-
-func candidateLooksLikeProgressOnly(content string) bool {
-	s := strings.ToLower(strings.TrimSpace(content))
-	if s == "" {
-		return false
-	}
-	if json.Valid([]byte(s)) || containsAnySubstring(s, []string{
-		"无法继续", "无法完成", "不能继续", "不能完成", "权限不足", "缺少权限", "缺少必要", "被拒绝",
-		"blocked", "failed", "error",
-	}) {
-		return false
-	}
-	if containsAnySubstring(s, []string{
-		"请稍等", "稍等", "稍后", "马上",
-		"让我直接", "让我继续", "我来继续", "我会继续", "我将继续",
-		"继续执行", "继续生成", "继续整理", "继续查询", "继续分析",
-		"现在正在", "正在生成报告", "正在生成文件", "正在生成 html", "正在生成html",
-		"正在编写", "正在整理", "正在处理", "正在执行", "正在调用", "正在查询", "正在分析", "正在导出", "正在保存",
-		"生成中", "编写中", "整理中", "处理中", "执行中",
-	}) {
-		return true
-	}
-	if !candidateHasResultCue(s) && containsAnySubstring(s, []string{
-		"现在用", "现在使用", "现在开始", "现在整理", "现在生成", "现在编写", "现在处理",
-		"现在执行", "现在查询", "现在分析", "现在运行", "现在导出", "现在保存", "现在汇总",
-		"接下来我会", "接下来我将", "接下来会", "接下来将", "下一步我会", "下一步我将", "下一步会", "下一步将",
-	}) {
-		return true
-	}
-	return false
-}
-
-func candidateHasResultCue(s string) bool {
-	return containsAnySubstring(s, []string{
-		"如下", "结果如下", "结论", "概览", "摘要", "明细", "清单", "排名", "列表", "报告内容",
-	})
-}
-
-func containsAnySubstring(s string, markers []string) bool {
-	for _, marker := range markers {
-		if strings.Contains(s, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func stringInSlice(needle string, haystack []string) bool {

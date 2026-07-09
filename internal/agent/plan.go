@@ -10,6 +10,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
+	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 )
 
 const planToolName = "plan"
@@ -198,6 +199,45 @@ func (pm *PlanManager) HandleTool(ctx context.Context, args string) (string, err
 	default:
 		return planErr(p.Action, `unknown action, use: set, update, revise, read`), nil
 	}
+}
+
+func (pm *PlanManager) BootstrapHarnessPlan(ctx context.Context, contract harnesspkg.TaskContract, nextTool string) (string, bool, error) {
+	if pm == nil || !contract.RequirePlan {
+		return "", false, nil
+	}
+	state, err := pm.activeState(ctx)
+	if err == nil && state != nil && len(state.Items) > 0 {
+		return "", false, nil
+	}
+	if err != nil && err != sql.ErrNoRows {
+		return "", false, err
+	}
+	templates := harnesspkg.InitialPlanTemplate(contract, nextTool)
+	if len(templates) == 0 {
+		return "", false, nil
+	}
+	items := make([]planItemArgs, 0, len(templates))
+	for _, tpl := range templates {
+		items = append(items, planItemArgs{
+			ID:     tpl.ID,
+			Title:  tpl.Title,
+			Detail: tpl.Note,
+		})
+	}
+	goal := strings.TrimSpace(contract.Objective)
+	if goal == "" {
+		goal = "执行用户请求"
+	}
+	output, err := pm.handleSet(ctx, planArgs{
+		Action: "set",
+		Goal:   goal,
+		Items:  items,
+		Reason: "harness init",
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return output, true, nil
 }
 
 func (pm *PlanManager) handleSet(ctx context.Context, p planArgs) (string, error) {

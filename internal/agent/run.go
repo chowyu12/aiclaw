@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/provider"
+	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 	"github.com/chowyu12/aiclaw/pkg/modelcaps"
 )
 
@@ -19,14 +21,142 @@ import (
 
 // llmRoundResult 一次 LLM 调用的结果（流式/阻塞通用）。
 type llmRoundResult struct {
-	content      string
-	toolCalls    []openai.ToolCall
-	tokens       int
-	promptTokens int
+	content          string
+	toolCalls        []openai.ToolCall
+	rawToolCallCount int
+	tokens           int
+	promptTokens     int
+	finishReason     openai.FinishReason
+	outcome          llmRoundOutcome
 }
 
 // llmCaller 封装单次 LLM 请求，流式与阻塞各实现一份。
 type llmCaller func(ctx context.Context, req openai.ChatCompletionRequest) (llmRoundResult, error)
+
+type llmRoundOutcome string
+
+const (
+	llmRoundFinalCandidate              llmRoundOutcome = "final_candidate"
+	llmRoundCompleteToolCalls           llmRoundOutcome = "complete_tool_calls"
+	llmRoundTruncatedToolCall           llmRoundOutcome = "truncated_tool_call"
+	llmRoundTruncatedContent            llmRoundOutcome = "truncated_content"
+	llmRoundContentFiltered             llmRoundOutcome = "content_filtered"
+	llmRoundProviderResourceInterrupted llmRoundOutcome = "provider_resource_interrupted"
+	llmRoundEmptyResponse               llmRoundOutcome = "empty_response"
+)
+
+func newLLMRoundResult(content string, toolCalls []openai.ToolCall, tokens, promptTokens int, finishReason openai.FinishReason) llmRoundResult {
+	outcome, executableToolCalls := classifyLLMRound(content, toolCalls, finishReason)
+	return llmRoundResult{
+		content:          content,
+		toolCalls:        executableToolCalls,
+		rawToolCallCount: len(toolCalls),
+		tokens:           tokens,
+		promptTokens:     promptTokens,
+		finishReason:     finishReason,
+		outcome:          outcome,
+	}
+}
+
+func classifyLLMRound(content string, toolCalls []openai.ToolCall, finishReason openai.FinishReason) (llmRoundOutcome, []openai.ToolCall) {
+	switch finishReason {
+	case openai.FinishReasonContentFilter:
+		return llmRoundContentFiltered, nil
+	case openai.FinishReasonLength:
+		if len(toolCalls) > 0 {
+			return llmRoundTruncatedToolCall, nil
+		}
+		return llmRoundTruncatedContent, nil
+	}
+	if string(finishReason) == "insufficient_system_resource" {
+		return llmRoundProviderResourceInterrupted, nil
+	}
+	if len(toolCalls) > 0 {
+		if finishReason == "" || finishReason == openai.FinishReasonToolCalls || finishReason == openai.FinishReasonFunctionCall {
+			return llmRoundCompleteToolCalls, toolCalls
+		}
+		return llmRoundTruncatedToolCall, nil
+	}
+	if strings.TrimSpace(content) == "" {
+		return llmRoundEmptyResponse, nil
+	}
+	return llmRoundFinalCandidate, nil
+}
+
+type llmRoundRecovery struct {
+	reason       string
+	action       string
+	finalMessage string
+	retryable    bool
+}
+
+func (r llmRoundRecovery) Prompt() string {
+	action := strings.TrimSpace(r.action)
+	if action == "" {
+		action = "请重新生成本轮输出；如果无法继续，请明确说明阻塞原因。"
+	}
+	reason := strings.TrimSpace(r.reason)
+	if reason == "" {
+		reason = "上一轮模型输出未形成可执行或可交付结果"
+	}
+	return reason + "。\n" + action
+}
+
+func llmRoundRecoveryFor(result llmRoundResult, contract harnesspkg.TaskContract, evidence harnesspkg.EvidenceLedger) (llmRoundRecovery, bool) {
+	switch result.outcome {
+	case llmRoundTruncatedToolCall:
+		return llmRoundRecovery{
+			reason:    fmt.Sprintf("模型工具调用被截断（finish_reason=%s），本轮工具未执行", result.finishReason),
+			action:    "请重新发起完整工具调用；如果参数过长，请缩短代码、减少内联数据、分批处理，或先生成较小的中间结果。",
+			retryable: true,
+		}, true
+	case llmRoundTruncatedContent:
+		return llmRoundRecovery{
+			reason:    fmt.Sprintf("模型输出被截断（finish_reason=%s）", result.finishReason),
+			action:    "请继续完成未输出的结果；如果需要生成文件或运行代码，请改用完整工具调用，不要只输出进度说明。",
+			retryable: true,
+		}, true
+	case llmRoundProviderResourceInterrupted:
+		return llmRoundRecovery{
+			reason:    "模型服务推理资源不足，上一轮生成被中断",
+			action:    "请重新尝试本轮输出；如果仍然失败，请简化输出规模或分批完成。",
+			retryable: true,
+		}, true
+	case llmRoundContentFiltered:
+		return llmRoundRecovery{
+			reason:       "模型输出被安全策略过滤",
+			finalMessage: "模型输出被安全策略过滤，无法返回本轮结果。请调整输入或输出要求后重试。",
+		}, true
+	case llmRoundEmptyResponse:
+		if !shouldRecoverEmptyLLMRound(contract, evidence) {
+			return llmRoundRecovery{}, false
+		}
+		return llmRoundRecovery{
+			reason:    "模型返回空内容且没有工具调用，但执行契约尚未闭合",
+			action:    "请不要空回复；如果任务尚未完成，直接调用下一步工具或更新 plan；如果无法继续，请明确说明阻塞原因。",
+			retryable: true,
+		}, true
+	default:
+		return llmRoundRecovery{}, false
+	}
+}
+
+func shouldRecoverEmptyLLMRound(contract harnesspkg.TaskContract, evidence harnesspkg.EvidenceLedger) bool {
+	if len(evidence.TerminalBlockers()) > 0 {
+		return false
+	}
+	if contract.RequirePlanTerminal && !harnesspkg.PlanReadyForFinalAnswer(evidence.Plan) {
+		return true
+	}
+	requiredArtifacts := contract.RequiredArtifactCount
+	if requiredArtifacts == 0 && (contract.OutputMode == harnesspkg.OutputModeFile || contract.OutputMode == harnesspkg.OutputModeMixed) {
+		requiredArtifacts = 1
+	}
+	if requiredArtifacts > 0 && evidence.ActualArtifactCount() < requiredArtifacts {
+		return true
+	}
+	return contract.RequireEvidence && !evidence.HasSuccessfulEvidence()
+}
 
 func blockingCaller(llm provider.LLMProvider) llmCaller {
 	return func(ctx context.Context, req openai.ChatCompletionRequest) (llmRoundResult, error) {
@@ -35,15 +165,10 @@ func blockingCaller(llm provider.LLMProvider) llmCaller {
 			return llmRoundResult{}, err
 		}
 		if len(resp.Choices) == 0 {
-			return llmRoundResult{tokens: resp.Usage.TotalTokens, promptTokens: resp.Usage.PromptTokens}, nil
+			return newLLMRoundResult("", nil, resp.Usage.TotalTokens, resp.Usage.PromptTokens, ""), nil
 		}
 		ch := resp.Choices[0]
-		return llmRoundResult{
-			content:      ch.Message.Content,
-			toolCalls:    ch.Message.ToolCalls,
-			tokens:       resp.Usage.TotalTokens,
-			promptTokens: resp.Usage.PromptTokens,
-		}, nil
+		return newLLMRoundResult(ch.Message.Content, ch.Message.ToolCalls, resp.Usage.TotalTokens, resp.Usage.PromptTokens, ch.FinishReason), nil
 	}
 }
 
@@ -107,10 +232,7 @@ func streamingCaller(llm provider.LLMProvider, convUUID string, onChunk func(mod
 			}
 		}
 
-		if finishReason != openai.FinishReasonToolCalls {
-			toolCalls = nil
-		}
-		return llmRoundResult{content: buf.String(), toolCalls: toolCalls, tokens: tokens, promptTokens: promptTokens}, nil
+		return newLLMRoundResult(buf.String(), toolCalls, tokens, promptTokens, finishReason), nil
 	}
 }
 

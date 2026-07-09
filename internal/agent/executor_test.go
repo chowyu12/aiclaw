@@ -438,6 +438,194 @@ func TestExecute_WithToolCall(t *testing.T) {
 	}
 }
 
+func TestExecute_FinishToolEndsTurnWithExplicitFinalAnswer(t *testing.T) {
+	s := newMockStore()
+	_, _ = seedAgent(t, s)
+
+	mockLLM := &mockLLMProvider{
+		responses: []openai.ChatCompletionResponse{
+			toolCallResp(finishToolName, `{"answer":"最终答复：已经完成"}`),
+			textResp("should not be called"),
+		},
+	}
+	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+
+	result, err := exec.Execute(t.Context(), model.ChatRequest{
+		UserID: "u1", Message: "请完成后结束",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Content != "最终答复：已经完成" {
+		t.Fatalf("content = %q, want finish answer", result.Content)
+	}
+	if mockLLM.callCount() != 1 {
+		t.Fatalf("expected finish tool to end the turn after 1 LLM call, got %d", mockLLM.callCount())
+	}
+	if !hasExecutionStep(result.Steps, model.StepToolCall, finishToolName, model.StepSuccess) {
+		t.Fatalf("missing finish tool execution step: %+v", result.Steps)
+	}
+}
+
+func TestExecute_RecoversTruncatedToolCallWithoutExecutingIt(t *testing.T) {
+	s := newMockStore()
+	agent, _ := seedAgent(t, s)
+
+	toolExecuted := false
+	registry := NewToolRegistry()
+	registry.RegisterBuiltin("test_echo", func(_ context.Context, args string) (string, error) {
+		toolExecuted = true
+		return "ECHO:" + args, nil
+	})
+	seedToolForAgent(t, s, agent.ID, "test_echo", "echo tool for test")
+
+	truncatedToolCall := toolCallResp("test_echo", `{"text":`)
+	truncatedToolCall.Choices[0].FinishReason = openai.FinishReasonLength
+	mockLLM := &mockLLMProvider{
+		responses: []openai.ChatCompletionResponse{
+			truncatedToolCall,
+			textResp("最终答复：已重新完成"),
+		},
+	}
+	exec := newTestExecutor(s, registry, mockLLM)
+
+	result, err := exec.Execute(t.Context(), model.ChatRequest{
+		UserID: "u1", Message: "测试截断工具调用恢复",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if toolExecuted {
+		t.Fatal("truncated tool call should not be executed")
+	}
+	if result.Content != "最终答复：已重新完成" {
+		t.Fatalf("content = %q, want recovered final answer", result.Content)
+	}
+	if mockLLM.callCount() != 2 {
+		t.Fatalf("expected recovery prompt to trigger second LLM call, got %d", mockLLM.callCount())
+	}
+	if !hasExecutionStep(result.Steps, model.StepHarness, "recover_llm_round", model.StepSuccess) {
+		t.Fatalf("missing LLM round recovery step: %+v", result.Steps)
+	}
+}
+
+func TestExecute_FallsBackToFastModelOnTransientPrimaryError(t *testing.T) {
+	s := newMockStore()
+	agent, _ := seedAgent(t, s)
+	s.mu.Lock()
+	s.agents[agent.ID].FastModelName = "gpt-fast"
+	s.mu.Unlock()
+
+	mockLLM := &mockLLMProvider{
+		errors: []error{errors.New("unexpected EOF")},
+		responses: []openai.ChatCompletionResponse{
+			{},
+			textResp("fallback ok"),
+		},
+	}
+	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+
+	result, err := exec.Execute(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Content != "fallback ok" {
+		t.Fatalf("content = %q, want fallback response", result.Content)
+	}
+	if mockLLM.callCount() != 2 {
+		t.Fatalf("expected primary + fallback calls, got %d", mockLLM.callCount())
+	}
+	if got := mockLLM.calls[0].Model; got != "gpt-test" {
+		t.Fatalf("primary call model = %q, want gpt-test", got)
+	}
+	if got := mockLLM.calls[1].Model; got != "gpt-fast" {
+		t.Fatalf("fallback call model = %q, want gpt-fast", got)
+	}
+	if !hasExecutionStep(result.Steps, model.StepLLMCall, "gpt-test", model.StepError) {
+		t.Fatalf("missing failed primary LLM step: %+v", result.Steps)
+	}
+	if !hasExecutionStep(result.Steps, model.StepLLMCall, "gpt-fast", model.StepSuccess) {
+		t.Fatalf("missing successful fallback LLM step: %+v", result.Steps)
+	}
+}
+
+func TestExecute_FallbackModelPersistsAcrossToolRounds(t *testing.T) {
+	s := newMockStore()
+	agent, _ := seedAgent(t, s)
+	s.mu.Lock()
+	s.agents[agent.ID].FastModelName = "gpt-fast"
+	s.mu.Unlock()
+
+	registry := NewToolRegistry()
+	registry.RegisterBuiltin("test_echo", func(_ context.Context, args string) (string, error) {
+		return "ECHO:" + args, nil
+	})
+	seedToolForAgent(t, s, agent.ID, "test_echo", "echo tool for test")
+
+	mockLLM := &mockLLMProvider{
+		errors: []error{errors.New("unexpected EOF")},
+		responses: []openai.ChatCompletionResponse{
+			{},
+			toolCallResp("test_echo", `{"text":"ping"}`),
+			textResp("fallback final"),
+		},
+	}
+	exec := newTestExecutor(s, registry, mockLLM)
+
+	result, err := exec.Execute(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Content != "fallback final" {
+		t.Fatalf("content = %q, want fallback final", result.Content)
+	}
+	if mockLLM.callCount() != 3 {
+		t.Fatalf("expected primary + fallback tool + fallback final calls, got %d", mockLLM.callCount())
+	}
+	if got := mockLLM.calls[1].Model; got != "gpt-fast" {
+		t.Fatalf("fallback tool round model = %q, want gpt-fast", got)
+	}
+	if got := mockLLM.calls[2].Model; got != "gpt-fast" {
+		t.Fatalf("second round should keep fallback model, got %q", got)
+	}
+}
+
+func TestExecute_BootstrapsHarnessPlanForComplexTask(t *testing.T) {
+	s := newMockStore()
+	agent, _ := seedAgent(t, s)
+
+	registry := NewToolRegistry()
+	registry.RegisterBuiltin("test_echo", func(_ context.Context, args string) (string, error) {
+		return "ECHO:" + args, nil
+	})
+	seedToolForAgent(t, s, agent.ID, "test_echo", "echo tool for test")
+
+	mockLLM := &mockLLMProvider{
+		responses: []openai.ChatCompletionResponse{
+			toolCallResp("test_echo", `{"text":"ping"}`),
+			toolCallResp("plan", `{"action":"update","items":[{"id":"understand","status":"completed"},{"id":"execute","status":"completed"},{"id":"validate","status":"completed"},{"id":"deliver","status":"completed"}]}`),
+			textResp("最终答复：已完成"),
+		},
+	}
+	exec := newTestExecutor(s, registry, mockLLM)
+
+	result, err := exec.Execute(t.Context(), model.ChatRequest{
+		UserID: "u1", Message: "完整重构 agent 执行计划并补测试",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Content != "最终答复：已完成" {
+		t.Fatalf("content = %q, want final answer", result.Content)
+	}
+	if !hasExecutionStep(result.Steps, model.StepHarness, "bootstrap_plan", model.StepSuccess) {
+		t.Fatalf("missing harness bootstrap plan step: %+v", result.Steps)
+	}
+	if result.Plan == nil || result.Plan.Status != model.PlanStatusCompleted {
+		t.Fatalf("expected completed bootstrapped plan, got %#v", result.Plan)
+	}
+}
+
 func TestExecute_HarnessCorrectsEmptyFinalAnswerAfterTools(t *testing.T) {
 	s := newMockStore()
 	agent, _ := seedAgent(t, s)
@@ -865,9 +1053,8 @@ func TestCollectTools(t *testing.T) {
 		}
 
 		registry := NewToolRegistry()
-		builtinCount := len(registry.BuiltinDefs()) - 1
-
 		exec := newTestExecutor(s, registry, &mockLLMProvider{})
+		builtinCount := len(registry.BuiltinDefs()) - 1
 		tools, _, err := exec.collectTools(ctx, ag)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -881,6 +1068,9 @@ func TestCollectTools(t *testing.T) {
 		}
 		if !names[directTool.Name] {
 			t.Errorf("expected tool %q in result", directTool.Name)
+		}
+		if !names[finishToolName] {
+			t.Errorf("expected builtin %q in result", finishToolName)
 		}
 		if names["web_search"] {
 			t.Error("web_search should be hidden unless external web search mode is enabled")

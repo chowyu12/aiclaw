@@ -248,6 +248,7 @@ func buildSystemPrompt(ag *model.Agent, skills []model.Skill, agentTools []model
 - Use tools for operational tasks such as file reading/writing, command execution, information retrieval, web extraction, or when the user explicitly asks you to act.
 - For complex tasks with 3 or more steps, first use the plan tool to create a runtime plan. The plan is for execution progress only; do not include the plan body in the final answer.
 - During execution, follow <plan_state>: prioritize the current step, and use plan revise/update with a reason when the plan needs to change.
+- When the task is complete, call the finish tool with the final user-facing answer. Do not use progress phrases such as "working on it" as the final delivery.
 - When uncertain, use sub_agent(mode=explore) to investigate before making changes.
 - Use web_search for recent or time-sensitive web information only when the web_search tool is listed; use web_fetch only for concrete URLs from the user.
 - Base answers on real tool outputs. Do not fabricate data.`)

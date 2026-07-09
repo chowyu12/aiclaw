@@ -38,6 +38,16 @@ func (r *ToolRegistry) RegisterBuiltin(name string, handler BuiltinHandler) {
 	r.builtins[name] = handler
 }
 
+func (r *ToolRegistry) RegisterBuiltinDef(def model.Tool) {
+	for i := range r.builtinDefs {
+		if r.builtinDefs[i].Name == def.Name {
+			r.builtinDefs[i] = def
+			return
+		}
+	}
+	r.builtinDefs = append(r.builtinDefs, def)
+}
+
 // BuiltinDefs 返回所有内置工具的元数据定义，始终 Enabled。
 func (r *ToolRegistry) BuiltinDefs() []model.Tool {
 	return r.builtinDefs
