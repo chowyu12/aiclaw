@@ -57,7 +57,7 @@ The normal execution loop is:
 2. Inject compact runtime context, including persistent memory and current Plan State.
 3. Call the model with function-calling tools.
 4. Validate requested tools, execute allowed tool calls, track steps, collect generated files, and stream updates.
-5. Let the control plane advance Plan State after success or failure while the verifier records execution evidence.
+5. Link each business-tool step to its active Plan item as evidence; only explicit `plan` updates and final lifecycle closure change item status.
 6. Validate candidate final answers; if a response is empty, progress-only, missing required evidence, or missing promised artifacts, inject a correction prompt and continue.
 7. Validate the final content before saving, then persist the assistant message, files, execution timeline, and plan snapshot.
 
@@ -78,17 +78,37 @@ Plan State behavior:
 
 - Complex tasks can start with a structured plan.
 - Only one item can be `running` in a single plan.
-- If no item is running, the harness advances the first pending item.
-- Tool or LLM failures mark the running item as `failed`.
-- Successful tool rounds can mark the running item as `completed` and advance the next item.
+- If no item is running, the harness initializes the first pending item as `running`.
+- Tool outcomes are evidence, not implicit status transitions. The model uses `plan` to complete, block, skip, or revise items.
+- A terminal execution failure marks the active item as `failed`; a validated final response closes any still-running item.
 - The final assistant message is linked to the final plan snapshot.
 - Streaming chat and execution logs show the plan separately from the assistant's answer.
 
 This keeps progress visible without polluting the final response body or ordinary tool-call history.
 
+## Durable Agent Runs
+
+Chat keeps using Server-Sent Events for low-latency updates, but an SSE
+connection is no longer the lifetime of an Agent turn. Every top-level turn is
+stored as an `AgentRun` with a stable run ID, input, status, final message,
+token count, duration, and execution steps. Each execution step also carries
+the run ID, which makes concurrent histories and reconnects unambiguous.
+
+The web chat starts a background run and then subscribes to it:
+
+1. `POST /api/v1/chat/runs` creates the durable run and immediately returns its `uuid`.
+2. `GET /api/v1/agent-runs/{runID}/stream` streams existing `message` and `harness` SSE events, plus lifecycle `run` events and periodic `ping` events.
+3. `GET /api/v1/agent-runs/{runID}` returns the durable final snapshot, including steps, generated files, and Plan State, for page reloads or missed live events.
+4. `DELETE /api/v1/agent-runs/{runID}` requests cancellation without deleting the audit trail.
+
+Disconnecting or refreshing the browser only detaches that subscriber. The run
+continues in the executor until it succeeds, fails, or is explicitly cancelled.
+The live event hub keeps a bounded replay for short reconnects; the database is
+the source of truth for completed runs and after a service restart.
+
 ## Harness Runtime
 
-AiClaw exposes a stable `pkg/harness` package for both harness events and execution validation. The executor still owns the main loop: the control plane handles budget, plan advancement, and persistence, while the verifier layer owns four validation stages:
+AiClaw exposes a stable `pkg/harness` package for both harness events and execution validation. The executor still owns the main loop: the control plane handles budget, plan lifecycle closure, and persistence, while the verifier layer owns four validation stages:
 
 | Stage | Purpose |
 | --- | --- |
@@ -234,7 +254,7 @@ AiClaw supports multiple model providers:
 - Anthropic Claude.
 - Google Gemini.
 
-Each provider can define its base URL, API key, and model list. Agents choose a provider model and can optionally define a fast model for lightweight sub-agent tasks.
+Each provider can define its base URL, API key, and model list. Agents may define a fast model for lightweight sub-agent tasks and a separate fallback model for transient primary-model failures. Fallbacks are used only when their known streaming and tool-calling capabilities are compatible with the active request.
 
 ## Configuration
 
@@ -317,6 +337,7 @@ Streaming responses use SSE and can include:
 - `step`: a single execution step update.
 - `steps`: final or batched execution steps.
 - `plan`: current or final Plan State snapshot.
+- `harness`: a stable `harness.v1` protocol event, sent as its own SSE event type.
 - `files`: files produced during execution.
 - `done`: completion marker.
 

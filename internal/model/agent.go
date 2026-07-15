@@ -4,16 +4,19 @@ import "time"
 
 // Agent 运行时配置，持久化在数据库 agents 表；支持多 Agent。
 type Agent struct {
-	ID            int64   `json:"id" gorm:"primaryKey;autoIncrement"`
-	UUID          string  `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
-	IsDefault     bool    `json:"is_default" gorm:"default:false;index"`
-	Name          string  `json:"name" gorm:"size:200;not null"`
-	Description   string  `json:"description" gorm:"size:500"`
-	SystemPrompt  string  `json:"system_prompt" gorm:"type:text"`
-	ProviderID    int64   `json:"provider_id" gorm:"default:0"`
-	ModelName     string  `json:"model_name" gorm:"size:200"`
-	FastModelName string  `json:"fast_model_name" gorm:"size:200"`
-	Temperature   float64 `json:"temperature" gorm:"default:0.7"`
+	ID            int64  `json:"id" gorm:"primaryKey;autoIncrement"`
+	UUID          string `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
+	IsDefault     bool   `json:"is_default" gorm:"default:false;index"`
+	Name          string `json:"name" gorm:"size:200;not null"`
+	Description   string `json:"description" gorm:"size:500"`
+	SystemPrompt  string `json:"system_prompt" gorm:"type:text"`
+	ProviderID    int64  `json:"provider_id" gorm:"default:0"`
+	ModelName     string `json:"model_name" gorm:"size:200"`
+	FastModelName string `json:"fast_model_name" gorm:"size:200"`
+	// FallbackModelName is used only for transient primary-model failures.
+	// FastModelName remains dedicated to lightweight sub-agent work.
+	FallbackModelName string  `json:"fallback_model_name" gorm:"size:200"`
+	Temperature       float64 `json:"temperature" gorm:"default:0.7"`
 	// MaxTokens 限制单次响应的最大输出 token；0 表示不限制，由模型/服务商自行决定。
 	MaxTokens         int        `json:"max_tokens" gorm:"default:0"`
 	Timeout           int        `json:"timeout" gorm:"default:0"`
@@ -89,6 +92,7 @@ type UpdateAgentReq struct {
 	ProviderID        *int64   `json:"provider_id,omitzero"`
 	ModelName         *string  `json:"model_name,omitzero"`
 	FastModelName     *string  `json:"fast_model_name,omitzero"`
+	FallbackModelName *string  `json:"fallback_model_name,omitzero"`
 	Temperature       *float64 `json:"temperature,omitzero"`
 	MaxTokens         *int     `json:"max_tokens,omitzero"`
 	Timeout           *int     `json:"timeout,omitzero"`
@@ -112,6 +116,7 @@ type CreateAgentReq struct {
 	ProviderID        int64   `json:"provider_id"`
 	ModelName         string  `json:"model_name"`
 	FastModelName     string  `json:"fast_model_name"`
+	FallbackModelName string  `json:"fallback_model_name"`
 	Temperature       float64 `json:"temperature"`
 	MaxTokens         int     `json:"max_tokens"`
 	Timeout           int     `json:"timeout"`

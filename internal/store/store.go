@@ -13,11 +13,20 @@ type Store interface {
 	ChannelStore
 	ChannelThreadStore
 	ConversationStore
+	AgentRunStore
 	PlanStore
 	FileStore
 	MCPServerStore
 	SearchEngineStore
 	Close() error
+}
+
+type AgentRunStore interface {
+	CreateAgentRun(ctx context.Context, run *model.AgentRun) error
+	UpdateAgentRun(ctx context.Context, id int64, updates map[string]any) error
+	GetAgentRunByUUID(ctx context.Context, runUUID string) (*model.AgentRun, error)
+	ListAgentRuns(ctx context.Context, q model.AgentRunListQuery) ([]*model.AgentRun, int64, error)
+	ListExecutionStepsByRun(ctx context.Context, runUUID string) ([]model.ExecutionStep, error)
 }
 
 type AgentStore interface {
@@ -98,6 +107,7 @@ type ConversationStore interface {
 	CreateExecutionStep(ctx context.Context, step *model.ExecutionStep) error
 	UpdateExecutionStep(ctx context.Context, step *model.ExecutionStep) error
 	UpdateStepsMessageID(ctx context.Context, conversationID, messageID int64) error
+	UpdateStepsMessageIDByRun(ctx context.Context, conversationID int64, runUUID string, messageID int64) error
 	ListExecutionSteps(ctx context.Context, messageID int64) ([]model.ExecutionStep, error)
 	ListExecutionStepsByConversation(ctx context.Context, conversationID int64) ([]model.ExecutionStep, error)
 }

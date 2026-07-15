@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/chowyu12/aiclaw/internal/model"
@@ -62,7 +63,7 @@ func TestToolRegistry_BuildTrackedTools(t *testing.T) {
 		if len(tools) != 1 {
 			t.Fatal("expected 1 tool")
 		}
-		_, err := tools[0].Call(t.Context(), `{"path":"."}`)
+		_, err := tools[0].Call(withPlanEvidenceItem(t.Context(), "inspect"), `{"path":"."}`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -75,6 +76,13 @@ func TestToolRegistry_BuildTrackedTools(t *testing.T) {
 		}
 		if steps[0].Status != model.StepSuccess {
 			t.Errorf("expected success status, got %s", steps[0].Status)
+		}
+		var meta model.StepMetadata
+		if err := json.Unmarshal(steps[0].Metadata, &meta); err != nil {
+			t.Fatalf("decode step metadata: %v", err)
+		}
+		if meta.PlanItemID != "inspect" {
+			t.Errorf("plan_item_id = %q, want inspect", meta.PlanItemID)
 		}
 	})
 }

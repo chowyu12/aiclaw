@@ -321,6 +321,24 @@ func TestExecuteHarness_EmitsProtocolEvents(t *testing.T) {
 	}
 }
 
+func TestExecuteHarness_StopsWhenEventSinkFails(t *testing.T) {
+	s := newMockStore()
+	_, _ = seedAgent(t, s)
+	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{textResp("should not run")}}
+	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+	want := errors.New("event consumer disconnected")
+
+	_, err := exec.ExecuteHarness(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"}, harnesspkg.EventFunc(func(harnesspkg.Event) error {
+		return want
+	}))
+	if !errors.Is(err, want) {
+		t.Fatalf("error = %v, want sink error %v", err, want)
+	}
+	if mockLLM.callCount() != 0 {
+		t.Fatalf("LLM calls = %d, want 0 after the start event failed", mockLLM.callCount())
+	}
+}
+
 func TestExecute_AgentNotInitialized(t *testing.T) {
 	s := newMockStore()
 	mockLLM := &mockLLMProvider{}
@@ -509,11 +527,11 @@ func TestExecute_RecoversTruncatedToolCallWithoutExecutingIt(t *testing.T) {
 	}
 }
 
-func TestExecute_FallsBackToFastModelOnTransientPrimaryError(t *testing.T) {
+func TestExecute_FallsBackToConfiguredFallbackModelOnTransientPrimaryError(t *testing.T) {
 	s := newMockStore()
 	agent, _ := seedAgent(t, s)
 	s.mu.Lock()
-	s.agents[agent.ID].FastModelName = "gpt-fast"
+	s.agents[agent.ID].FallbackModelName = "gpt-fallback"
 	s.mu.Unlock()
 
 	mockLLM := &mockLLMProvider{
@@ -538,13 +556,13 @@ func TestExecute_FallsBackToFastModelOnTransientPrimaryError(t *testing.T) {
 	if got := mockLLM.calls[0].Model; got != "gpt-test" {
 		t.Fatalf("primary call model = %q, want gpt-test", got)
 	}
-	if got := mockLLM.calls[1].Model; got != "gpt-fast" {
-		t.Fatalf("fallback call model = %q, want gpt-fast", got)
+	if got := mockLLM.calls[1].Model; got != "gpt-fallback" {
+		t.Fatalf("fallback call model = %q, want gpt-fallback", got)
 	}
 	if !hasExecutionStep(result.Steps, model.StepLLMCall, "gpt-test", model.StepError) {
 		t.Fatalf("missing failed primary LLM step: %+v", result.Steps)
 	}
-	if !hasExecutionStep(result.Steps, model.StepLLMCall, "gpt-fast", model.StepSuccess) {
+	if !hasExecutionStep(result.Steps, model.StepLLMCall, "gpt-fallback", model.StepSuccess) {
 		t.Fatalf("missing successful fallback LLM step: %+v", result.Steps)
 	}
 }
@@ -553,7 +571,7 @@ func TestExecute_FallbackModelPersistsAcrossToolRounds(t *testing.T) {
 	s := newMockStore()
 	agent, _ := seedAgent(t, s)
 	s.mu.Lock()
-	s.agents[agent.ID].FastModelName = "gpt-fast"
+	s.agents[agent.ID].FallbackModelName = "gpt-fallback"
 	s.mu.Unlock()
 
 	registry := NewToolRegistry()
@@ -582,10 +600,10 @@ func TestExecute_FallbackModelPersistsAcrossToolRounds(t *testing.T) {
 	if mockLLM.callCount() != 3 {
 		t.Fatalf("expected primary + fallback tool + fallback final calls, got %d", mockLLM.callCount())
 	}
-	if got := mockLLM.calls[1].Model; got != "gpt-fast" {
-		t.Fatalf("fallback tool round model = %q, want gpt-fast", got)
+	if got := mockLLM.calls[1].Model; got != "gpt-fallback" {
+		t.Fatalf("fallback tool round model = %q, want gpt-fallback", got)
 	}
-	if got := mockLLM.calls[2].Model; got != "gpt-fast" {
+	if got := mockLLM.calls[2].Model; got != "gpt-fallback" {
 		t.Fatalf("second round should keep fallback model, got %q", got)
 	}
 }
@@ -832,6 +850,7 @@ func TestExecute_ToolOutputErrorPrefixDoesNotFailPlan(t *testing.T) {
 		responses: []openai.ChatCompletionResponse{
 			toolCallResp("plan", `{"action":"set","items":[{"id":"a","title":"run prefix tool"}]}`),
 			toolCallResp("prefix_tool", "{}"),
+			toolCallResp("plan", `{"action":"update","items":[{"id":"a","status":"completed"}]}`),
 			textResp("done"),
 		},
 	}
@@ -852,6 +871,20 @@ func TestExecute_ToolOutputErrorPrefixDoesNotFailPlan(t *testing.T) {
 	if result.Plan.Items[0].Status != model.PlanItemCompleted {
 		t.Fatalf("expected completed plan item, got %#v", result.Plan.Items[0])
 	}
+	for _, step := range result.Steps {
+		if step.StepType != model.StepToolCall || step.Name != "prefix_tool" {
+			continue
+		}
+		var meta model.StepMetadata
+		if err := json.Unmarshal(step.Metadata, &meta); err != nil {
+			t.Fatalf("decode tool step metadata: %v", err)
+		}
+		if meta.PlanItemID != "a" {
+			t.Fatalf("tool evidence plan_item_id = %q, want a", meta.PlanItemID)
+		}
+		return
+	}
+	t.Fatalf("missing prefix_tool execution step: %+v", result.Steps)
 }
 
 func TestExecute_WithSkills(t *testing.T) {
@@ -975,6 +1008,99 @@ func TestExecuteStream_Simple(t *testing.T) {
 	}
 	if !strings.Contains(content.String(), "这是流式响应内容") {
 		t.Errorf("content mismatch: %q", content.String())
+	}
+}
+
+func TestExecuteStream_PublishesOnlyValidatedFinalCandidate(t *testing.T) {
+	s := newMockStore()
+	_, _ = seedAgent(t, s)
+	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{
+		textResp("正在生成报告，请稍等。"),
+		textResp("最终结果如下：报告已完成。"),
+	}}
+	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+
+	var chunks []model.StreamChunk
+	err := exec.ExecuteStream(t.Context(), model.ChatRequest{UserID: "u1", Message: "生成报告"}, func(chunk model.StreamChunk) error {
+		chunks = append(chunks, chunk)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("ExecuteStream: %v", err)
+	}
+
+	var output strings.Builder
+	for _, chunk := range chunks {
+		output.WriteString(chunk.Delta)
+	}
+	if strings.Contains(output.String(), "正在生成报告") {
+		t.Fatalf("unvalidated progress leaked into stream: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "最终结果如下") {
+		t.Fatalf("validated final answer missing from stream: %q", output.String())
+	}
+}
+
+func TestExecuteStreamHarness_EmitsValidatedModelDelta(t *testing.T) {
+	s := newMockStore()
+	_, _ = seedAgent(t, s)
+	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{textResp("verified response")}}
+	exec := newTestExecutor(s, NewToolRegistry(), mockLLM)
+
+	var events []harnesspkg.Event
+	err := exec.ExecuteStreamHarness(t.Context(), model.ChatRequest{UserID: "u1", Message: "hello"}, func(model.StreamChunk) error {
+		return nil
+	}, harnesspkg.EventFunc(func(event harnesspkg.Event) error {
+		events = append(events, event)
+		return nil
+	}))
+	if err != nil {
+		t.Fatalf("ExecuteStreamHarness: %v", err)
+	}
+	var deltas strings.Builder
+	for _, event := range events {
+		if event.Type == harnesspkg.EventModelDelta {
+			deltas.WriteString(event.Delta)
+		}
+	}
+	if deltas.String() == "verified response" {
+		return
+	}
+	t.Fatalf("missing validated model.delta event: %#v", events)
+}
+
+func TestExecuteHarness_ReportsEachToolActionStatus(t *testing.T) {
+	s := newMockStore()
+	agent, _ := seedAgent(t, s)
+	registry := NewToolRegistry()
+	registry.RegisterBuiltin("ok_tool", func(context.Context, string) (string, error) { return "ok", nil })
+	registry.RegisterBuiltin("bad_tool", func(context.Context, string) (string, error) { return "", errors.New("boom") })
+	seedToolForAgent(t, s, agent.ID, "ok_tool", "success tool")
+	seedToolForAgent(t, s, agent.ID, "bad_tool", "failing tool")
+	mockLLM := &mockLLMProvider{responses: []openai.ChatCompletionResponse{
+		{Choices: []openai.ChatCompletionChoice{{Message: openai.ChatCompletionMessage{
+			Role: openai.ChatMessageRoleAssistant,
+			ToolCalls: []openai.ToolCall{
+				{ID: "ok", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "ok_tool", Arguments: "{}"}},
+				{ID: "bad", Type: openai.ToolTypeFunction, Function: openai.FunctionCall{Name: "bad_tool", Arguments: "{}"}},
+			},
+		}}}},
+		textResp("Partial result: the successful tool returned ok."),
+	}}
+	exec := newTestExecutor(s, registry, mockLLM)
+
+	statuses := map[string]harnesspkg.Status{}
+	_, err := exec.ExecuteHarness(t.Context(), model.ChatRequest{UserID: "u1", Message: "run tools"}, harnesspkg.EventFunc(func(event harnesspkg.Event) error {
+		if event.Type == harnesspkg.EventActionFinished {
+			statuses[event.Name] = event.Status
+		}
+		return nil
+	}))
+	if err != nil {
+		t.Fatalf("ExecuteHarness: %v", err)
+	}
+	if statuses["ok_tool"] != harnesspkg.StatusCompleted || statuses["bad_tool"] != harnesspkg.StatusFailed {
+		t.Fatalf("action statuses = %#v", statuses)
 	}
 }
 

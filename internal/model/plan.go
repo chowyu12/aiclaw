@@ -21,12 +21,20 @@ const (
 	PlanItemSkipped   PlanItemStatus = "skipped"
 )
 
+type PlanSource string
+
+const (
+	PlanSourceModel   PlanSource = "model"
+	PlanSourceHarness PlanSource = "harness"
+)
+
 type PlanRun struct {
 	ID             int64      `json:"id" gorm:"primaryKey;autoIncrement"`
 	UUID           string     `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
 	ConversationID int64      `json:"conversation_id" gorm:"index;not null"`
 	MessageID      int64      `json:"message_id" gorm:"index;default:0"`
 	Goal           string     `json:"goal" gorm:"type:text"`
+	Source         PlanSource `json:"source" gorm:"size:50;not null;default:model"`
 	Status         PlanStatus `json:"status" gorm:"size:50;not null;default:active"`
 	RevisionReason string     `json:"revision_reason,omitzero" gorm:"type:text"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -53,6 +61,7 @@ type PlanState struct {
 	ConversationID int64      `json:"conversation_id"`
 	MessageID      int64      `json:"message_id,omitzero"`
 	Goal           string     `json:"goal,omitzero"`
+	Source         PlanSource `json:"source,omitzero"`
 	Status         PlanStatus `json:"status"`
 	RevisionReason string     `json:"revision_reason,omitzero"`
 	Items          []PlanItem `json:"items"`

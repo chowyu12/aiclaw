@@ -33,6 +33,7 @@ export interface FileInfo {
 
 export interface ExecutionStep {
   id: number
+  run_uuid?: string
   message_id: number
   conversation_id: number
   step_order: number
@@ -51,6 +52,7 @@ export interface ExecutionStep {
     tool_name?: string
     skill_name?: string
     skill_tools?: string[]
+    plan_item_id?: string
     channel_id?: number
     channel_uuid?: string
     channel_type?: string
@@ -87,6 +89,7 @@ export interface PlanState {
   conversation_id: number
   message_id?: number
   goal?: string
+  source?: 'model' | 'harness'
   status: PlanStatus
   revision_reason?: string
   items: PlanItem[]
@@ -99,6 +102,7 @@ export interface StepNode {
 }
 
 export interface ChatResponse {
+  run_id?: string
   conversation_id: string
   message: string
   tokens_used: number
@@ -108,6 +112,7 @@ export interface ChatResponse {
 }
 
 export interface StreamChunk {
+  run_id?: string
   conversation_id?: string
   message_id?: number
   delta?: string
@@ -119,6 +124,55 @@ export interface StreamChunk {
   steps?: ExecutionStep[]
   files?: FileInfo[]
   plan?: PlanState
+  harness_event?: HarnessEvent
+}
+
+export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled'
+
+export interface AgentRun {
+  id: number
+  uuid: string
+  agent_id: number
+  agent_uuid: string
+  conversation_id: number
+  conversation_uuid: string
+  message_id?: number
+  user_id: string
+  input: string
+  content?: string
+  status: AgentRunStatus
+  error?: string
+  tokens_used: number
+  duration_ms: number
+  started_at: string
+  finished_at?: string
+}
+
+export interface AgentRunEvent {
+  type: string
+  run_id: string
+  status?: AgentRunStatus
+  run?: AgentRun
+  error?: string
+  created_at?: string
+}
+
+export interface HarnessEvent {
+  version: string
+  type: string
+  layer: string
+  run_id?: string
+  turn_id?: string
+  item_id?: string
+  parent_item_id?: string
+  name?: string
+  status?: string
+  delta?: string
+  input?: unknown
+  output?: unknown
+  error?: string
+  metadata?: Record<string, unknown>
+  created_at: string
 }
 
 export interface Conversation {
@@ -236,6 +290,10 @@ function streamRequest(
             if (currentEvent === 'ping') {
               continue
             }
+            if (currentEvent === 'harness') {
+              onChunk({ done: false, harness_event: JSON.parse(payload) as HarnessEvent })
+              continue
+            }
             const chunk: StreamChunk = JSON.parse(payload)
             onChunk(chunk)
           } catch {
@@ -278,4 +336,158 @@ export function retryStream(
   onError: (err: string) => void,
 ) {
   return streamRequest('/api/v1/chat/retry', data, onChunk, onDone, onError)
+}
+
+// streamBackgroundChat starts a durable run first, then attaches SSE to that
+// run. Aborting the browser stream sends an explicit cancellation request;
+// closing a tab alone does not interrupt the Agent on the server.
+export function streamBackgroundChat(
+  data: ChatRequest,
+  onChunk: (chunk: StreamChunk) => void,
+  onDone: () => void,
+  onError: (err: string) => void,
+  onRun?: (run: AgentRun) => void,
+) {
+  const controller = new AbortController()
+  const token = localStorage.getItem('token') || ''
+  const headers = { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+  const IDLE_TIMEOUT_MS = 300_000
+  let runID = ''
+  let finished = false
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+
+  const finish = () => {
+    if (finished) return
+    finished = true
+    if (idleTimer) clearTimeout(idleTimer)
+    onDone()
+  }
+  const fail = (message: string) => {
+    if (finished) return
+    finished = true
+    if (idleTimer) clearTimeout(idleTimer)
+    onError(message)
+  }
+  const resetIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => {
+      controller.abort()
+      fail('Stream idle timeout (no data for 300s)')
+    }, IDLE_TIMEOUT_MS)
+  }
+
+  controller.signal.addEventListener('abort', () => {
+    if (runID) {
+      void fetch(`/api/v1/agent-runs/${encodeURIComponent(runID)}`, {
+        method: 'DELETE',
+        headers,
+      })
+    }
+  })
+
+  void (async () => {
+    try {
+      // Do not bind creation to controller.signal: if Stop is pressed while
+      // creation is in flight, wait for the ID and then cancel that exact run.
+      const startResponse = await fetch('/api/v1/chat/runs', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(data),
+      })
+      if (!startResponse.ok) {
+        fail(`HTTP ${startResponse.status}`)
+        return
+      }
+      const startPayload = await startResponse.json() as { code?: number; message?: string; data?: AgentRun }
+      if (startPayload.code !== 0 || !startPayload.data?.uuid) {
+        fail(startPayload.message || 'Unable to start agent run')
+        return
+      }
+      const run = startPayload.data
+      runID = run.uuid
+      onRun?.(run)
+      if (controller.signal.aborted) {
+		void fetch(`/api/v1/agent-runs/${encodeURIComponent(runID)}`, { method: 'DELETE', headers })
+        finish()
+        return
+      }
+
+      resetIdleTimer()
+      const streamResponse = await fetch(`/api/v1/agent-runs/${encodeURIComponent(runID)}/stream`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: controller.signal,
+      })
+      if (!streamResponse.ok) {
+        fail(`HTTP ${streamResponse.status}`)
+        return
+      }
+      const reader = streamResponse.body?.getReader()
+      if (!reader) {
+        fail('No stream reader')
+        return
+      }
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let currentEvent = ''
+      while (!finished) {
+        const { done, value } = await reader.read()
+        if (done) break
+        resetIdleTimer()
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim()
+            continue
+          }
+          if (line.startsWith('data: ')) {
+            const payload = line.slice(6).trim()
+            if (payload === '[DONE]') {
+              finish()
+              return
+            }
+            try {
+              if (currentEvent === 'ping') {
+                continue
+              }
+              if (currentEvent === 'error') {
+                const errData = JSON.parse(payload) as { error?: string }
+                fail(errData.error || 'Unknown stream error')
+                return
+              }
+              if (currentEvent === 'harness') {
+                onChunk({ done: false, harness_event: JSON.parse(payload) as HarnessEvent })
+                continue
+              }
+              if (currentEvent === 'run') {
+                const event = JSON.parse(payload) as AgentRunEvent
+                if (event.run) onRun?.(event.run)
+                if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
+                  finish()
+                  return
+                }
+                continue
+              }
+              onChunk(JSON.parse(payload) as StreamChunk)
+            } catch {
+              // Ignore malformed event payloads and keep the connection alive.
+            } finally {
+              currentEvent = ''
+            }
+          }
+          if (line === '') currentEvent = ''
+        }
+      }
+      finish()
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        finish()
+      } else {
+        fail(err?.message || 'Network error')
+      }
+    }
+  })()
+
+  return controller
 }

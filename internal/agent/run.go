@@ -22,6 +22,7 @@ import (
 // llmRoundResult 一次 LLM 调用的结果（流式/阻塞通用）。
 type llmRoundResult struct {
 	content          string
+	deltas           []string
 	toolCalls        []openai.ToolCall
 	rawToolCallCount int
 	tokens           int
@@ -172,7 +173,7 @@ func blockingCaller(llm provider.LLMProvider) llmCaller {
 	}
 }
 
-func streamingCaller(llm provider.LLMProvider, convUUID string, onChunk func(model.StreamChunk) error) llmCaller {
+func streamingCaller(llm provider.LLMProvider) llmCaller {
 	return func(ctx context.Context, req openai.ChatCompletionRequest) (llmRoundResult, error) {
 		req.Stream = true
 		req.StreamOptions = &openai.StreamOptions{IncludeUsage: true}
@@ -184,6 +185,7 @@ func streamingCaller(llm provider.LLMProvider, convUUID string, onChunk func(mod
 		defer s.Close()
 
 		var buf strings.Builder
+		var deltas []string
 		var toolCalls []openai.ToolCall
 		var tokens, promptTokens int
 		var finishReason openai.FinishReason
@@ -209,9 +211,7 @@ func streamingCaller(llm provider.LLMProvider, convUUID string, onChunk func(mod
 			}
 			if choice.Delta.Content != "" {
 				buf.WriteString(choice.Delta.Content)
-				if err := onChunk(model.StreamChunk{ConversationID: convUUID, Delta: choice.Delta.Content}); err != nil {
-					return llmRoundResult{}, err
-				}
+				deltas = append(deltas, choice.Delta.Content)
 			}
 			for _, tc := range choice.Delta.ToolCalls {
 				idx := 0
@@ -232,7 +232,9 @@ func streamingCaller(llm provider.LLMProvider, convUUID string, onChunk func(mod
 			}
 		}
 
-		return newLLMRoundResult(buf.String(), toolCalls, tokens, promptTokens, finishReason), nil
+		result := newLLMRoundResult(buf.String(), toolCalls, tokens, promptTokens, finishReason)
+		result.deltas = deltas
+		return result, nil
 	}
 }
 

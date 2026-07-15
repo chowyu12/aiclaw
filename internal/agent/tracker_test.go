@@ -58,6 +58,38 @@ func TestStepTracker_SetMessageID_UpdatesExistingSteps(t *testing.T) {
 	}
 }
 
+func TestStepTracker_SetMessageIDScopesStepsToRun(t *testing.T) {
+	s := newMockStore()
+	first := NewStepTracker(s, 1)
+	second := NewStepTracker(s, 1)
+	first.SetRunUUID("run-first")
+	second.SetRunUUID("run-second")
+
+	first.RecordStep(t.Context(), model.StepToolCall, "first", "", "", model.StepSuccess, "", 0, 0, nil)
+	second.RecordStep(t.Context(), model.StepToolCall, "second", "", "", model.StepSuccess, "", 0, 0, nil)
+	first.SetMessageID(101)
+
+	steps, err := s.ListExecutionStepsByConversation(t.Context(), 1)
+	if err != nil {
+		t.Fatalf("ListExecutionStepsByConversation: %v", err)
+	}
+	if len(steps) != 2 {
+		t.Fatalf("steps = %#v", steps)
+	}
+	for _, step := range steps {
+		switch step.RunUUID {
+		case "run-first":
+			if step.MessageID != 101 {
+				t.Fatalf("first run message ID = %d, want 101", step.MessageID)
+			}
+		case "run-second":
+			if step.MessageID != 0 {
+				t.Fatalf("second run must remain unlinked, got message ID %d", step.MessageID)
+			}
+		}
+	}
+}
+
 func TestStepTracker_ConcurrentRecordAndSetMessageID(t *testing.T) {
 	s := newMockStore()
 	tracker := NewStepTracker(s, 1)

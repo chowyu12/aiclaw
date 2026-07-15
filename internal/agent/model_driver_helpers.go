@@ -12,6 +12,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/provider"
+	"github.com/chowyu12/aiclaw/pkg/modelcaps"
 )
 
 const maxStreamMidwayRetries = 2
@@ -97,7 +98,7 @@ func (st *harnessTurnState) activateFallbackModel(modelName string) {
 	st.mu.Unlock()
 }
 
-func fallbackModelForLLMError(ag *model.Agent, currentModel string, err error, fallbackUsed bool) string {
+func fallbackModelForLLMError(ag *model.Agent, currentModel string, err error, fallbackUsed bool, req openai.ChatCompletionRequest) string {
 	if ag == nil || fallbackUsed {
 		return ""
 	}
@@ -108,8 +109,15 @@ func fallbackModelForLLMError(ag *model.Agent, currentModel string, err error, f
 	if current == "" {
 		current = strings.TrimSpace(ag.ModelName)
 	}
-	fallback := strings.TrimSpace(ag.FastModelName)
+	fallback := strings.TrimSpace(ag.FallbackModelName)
 	if fallback == "" || fallback == current {
+		return ""
+	}
+	caps := modelcaps.GetModelCaps(fallback)
+	if len(req.Tools) > 0 && !caps.FunctionCalling {
+		return ""
+	}
+	if req.Stream && caps.NoStreaming {
 		return ""
 	}
 	return fallback

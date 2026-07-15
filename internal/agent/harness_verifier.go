@@ -264,7 +264,7 @@ func newHarnessRuntimeEvidence(ctx context.Context, ec *execContext, st *harness
 		if ec.plan != nil {
 			if plan := planSnapshot(ctx, ec.plan); plan != nil {
 				evidence.Plan = plan
-				evidence.PlanSource = "plan"
+				evidence.PlanSource = string(plan.Source)
 			}
 		}
 	}
@@ -291,7 +291,7 @@ func planSnapshot(ctx context.Context, pm *PlanManager) *harnesspkg.PlanSnapshot
 	if err != nil || state == nil || len(state.Items) == 0 {
 		return nil
 	}
-	out := &harnesspkg.PlanSnapshot{Items: make([]harnesspkg.PlanItemSnapshot, 0, len(state.Items))}
+	out := &harnesspkg.PlanSnapshot{Source: string(state.Source), Items: make([]harnesspkg.PlanItemSnapshot, 0, len(state.Items))}
 	for _, item := range state.Items {
 		out.Items = append(out.Items, harnesspkg.PlanItemSnapshot{
 			ID:     strings.TrimSpace(item.ItemKey),
@@ -365,15 +365,16 @@ func harnessToolEventFromResult(args string, tr ToolResult) (harnesspkg.ToolEven
 		files = append(files, artifactEvidenceFromFile(f, tr.ToolName))
 	}
 	return harnesspkg.ToolEvent{
-		CallID:        tr.ToolCallID,
-		ToolName:      tr.ToolName,
-		ArgsSummary:   truncateLog(args, 600),
-		OutputSummary: truncateLog(tr.Content, 1200),
-		Status:        tr.Status,
-		Error:         tr.Error,
-		FailureKind:   harnesspkg.ClassifyToolFailureKind(tr.Status, tr.Error+" "+tr.Content),
-		Files:         files,
-		DurationMs:    tr.DurationMs,
+		CallID:            tr.ToolCallID,
+		ToolName:          tr.ToolName,
+		ArgsSummary:       truncateLog(args, 600),
+		OutputSummary:     truncateLog(tr.Content, 1200),
+		Status:            tr.Status,
+		Error:             tr.Error,
+		FailureKind:       harnesspkg.ClassifyToolFailureKind(tr.Status, tr.Error+" "+tr.Content),
+		Files:             files,
+		DurationMs:        tr.DurationMs,
+		RelatedPlanItemID: tr.PlanItemID,
 	}, true
 }
 

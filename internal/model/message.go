@@ -54,6 +54,7 @@ const (
 
 type ExecutionStep struct {
 	ID             int64      `json:"id" gorm:"primaryKey;autoIncrement"`
+	RunUUID        string     `json:"run_uuid,omitzero" gorm:"size:36;index"`
 	MessageID      int64      `json:"message_id" gorm:"index;default:0"`
 	ConversationID int64      `json:"conversation_id" gorm:"index;not null"`
 	StepOrder      int        `json:"step_order" gorm:"not null"`
@@ -78,6 +79,7 @@ type StepMetadata struct {
 	ToolName    string           `json:"tool_name,omitzero"`
 	SkillName   string           `json:"skill_name,omitzero"`
 	SkillTools  []string         `json:"skill_tools,omitzero"`
+	PlanItemID  string           `json:"plan_item_id,omitzero"`
 	Harness     *StepHarnessMeta `json:"harness,omitzero"`
 	// 以下字段由渠道 Bridge 注入，写入执行步骤 metadata，便于控制台「执行日志」追溯来源。
 	ChannelID        int64  `json:"channel_id,omitzero"`
@@ -159,6 +161,7 @@ type RetryRequest struct {
 }
 
 type ChatResponse struct {
+	RunID          string          `json:"run_id,omitzero"`
 	ConversationID string          `json:"conversation_id"`
 	Message        string          `json:"message"`
 	TokensUsed     int             `json:"tokens_used"`
@@ -168,6 +171,7 @@ type ChatResponse struct {
 }
 
 type StreamChunk struct {
+	RunID          string `json:"run_id,omitzero"`
 	ConversationID string `json:"conversation_id,omitzero"`
 	MessageID      int64  `json:"message_id,omitzero"`
 	Delta          string `json:"delta,omitzero"`
@@ -180,6 +184,9 @@ type StreamChunk struct {
 	Steps      []ExecutionStep `json:"steps,omitzero"`
 	Files      []*File         `json:"files,omitzero"`
 	Plan       *PlanState      `json:"plan,omitzero"`
+	// HarnessEvent carries the stable harness protocol event alongside the
+	// legacy stream payload during the migration period.
+	HarnessEvent any `json:"harness_event,omitzero"`
 }
 
 type ListQuery struct {

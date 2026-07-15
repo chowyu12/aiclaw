@@ -91,6 +91,7 @@ func (s *GormStore) DeleteConversation(ctx context.Context, id int64) error {
 		tx.Where("conversation_id = ?", id).Delete(&model.PlanRun{})
 		tx.Where("conversation_id = ?", id).Delete(&model.File{})
 		tx.Where("conversation_id = ?", id).Delete(&model.ExecutionStep{})
+		tx.Where("conversation_id = ?", id).Delete(&model.AgentRun{})
 		tx.Where("conversation_id = ?", id).Delete(&model.Message{})
 		return tx.Delete(&model.Conversation{}, id).Error
 	})
@@ -120,6 +121,7 @@ func (s *GormStore) DeleteMessagesFrom(ctx context.Context, conversationID, from
 		subQuery := tx.Model(&model.Message{}).Select("id").Where(cond, conversationID, fromMessageID)
 		tx.Where(msgCond, conversationID, subQuery).Delete(&model.File{})
 		tx.Where(msgCond, conversationID, subQuery).Delete(&model.ExecutionStep{})
+		tx.Where("conversation_id = ? AND (message_id = 0 OR message_id >= ?)", conversationID, fromMessageID).Delete(&model.AgentRun{})
 		return tx.Where(cond, conversationID, fromMessageID).Delete(&model.Message{}).Error
 	})
 }
@@ -205,6 +207,13 @@ func (s *GormStore) UpdateStepsMessageID(ctx context.Context, conversationID, me
 		Update("message_id", messageID).Error
 }
 
+func (s *GormStore) UpdateStepsMessageIDByRun(ctx context.Context, conversationID int64, runUUID string, messageID int64) error {
+	return s.db.WithContext(ctx).
+		Model(&model.ExecutionStep{}).
+		Where("conversation_id = ? AND run_uuid = ? AND message_id = 0", conversationID, runUUID).
+		Update("message_id", messageID).Error
+}
+
 func (s *GormStore) ListExecutionSteps(ctx context.Context, messageID int64) ([]model.ExecutionStep, error) {
 	var steps []model.ExecutionStep
 	if err := s.db.WithContext(ctx).
@@ -221,6 +230,17 @@ func (s *GormStore) ListExecutionStepsByConversation(ctx context.Context, conver
 	if err := s.db.WithContext(ctx).
 		Where("conversation_id = ?", conversationID).
 		Order("id ASC").
+		Find(&steps).Error; err != nil {
+		return nil, err
+	}
+	return steps, nil
+}
+
+func (s *GormStore) ListExecutionStepsByRun(ctx context.Context, runUUID string) ([]model.ExecutionStep, error) {
+	var steps []model.ExecutionStep
+	if err := s.db.WithContext(ctx).
+		Where("run_uuid = ?", runUUID).
+		Order("step_order ASC, id ASC").
 		Find(&steps).Error; err != nil {
 		return nil, err
 	}

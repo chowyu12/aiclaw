@@ -24,6 +24,7 @@ import (
 )
 
 type ExecuteResult struct {
+	RunID          string
 	ConversationID string
 	MessageID      int64
 	Content        string
@@ -69,6 +70,7 @@ type Executor struct {
 	shutdownMu   sync.Mutex
 	shutdownDone bool
 	activeExecs  sync.WaitGroup
+	runHub       *agentRunHub
 
 	// mcpMu 保护跨请求复用的 MCP Manager，避免每次 Execute 都重启 stdio 子进程。
 	mcpMu          sync.Mutex
@@ -90,6 +92,7 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 		ws:              ws,
 		sc:              &skillCache{},
 		tc:              &toolsCache{},
+		runHub:          newAgentRunHub(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -128,6 +131,7 @@ type execContext struct {
 	skills  []model.Skill
 	tracker *StepTracker
 	plan    *PlanManager
+	run     *model.AgentRun
 	// files 包含本轮所有可用文件（新上传 + 会话历史文件），用于 LLM 上下文构建。
 	files []*model.File
 	// uploadedFiles 仅包含本次请求中用户显式上传的文件，用于关联到当前用户消息记录。
@@ -220,14 +224,19 @@ func (e *Executor) ExecuteHarness(ctx context.Context, req model.ChatRequest, si
 		return nil, err
 	}
 	defer ec.closeMCP()
+	if _, err := e.beginAgentRun(ctx, ec); err != nil {
+		return nil, err
+	}
 
 	ec.l.WithField("user", req.UserID).Debug("[Execute] >> start")
 
-	res, err := e.runHarness(ec.ctx, ec, blockingCaller(ec.llmProv), false, sink)
+	res, err := e.runHarness(ec.ctx, ec, blockingCaller(ec.llmProv), false, sink, nil)
 	if err != nil {
-		e.saveErrorMessage(ec, err)
+		errorMessageID := e.saveErrorMessage(ec, err)
+		e.finishAgentRun(ec, nil, err, errorMessageID)
 		return nil, err
 	}
+	e.finishAgentRun(ec, res, nil, 0)
 	return res, nil
 }
 
@@ -248,25 +257,61 @@ func (e *Executor) ExecuteStreamHarness(ctx context.Context, req model.ChatReque
 		return err
 	}
 	defer ec.closeMCP()
+	if _, err := e.beginAgentRun(ctx, ec); err != nil {
+		return err
+	}
 
 	ec.l.WithField("user", req.UserID).Debug("[Execute] >> start (stream)")
+	res, err := e.runPreparedStream(ec.ctx, ec, chunkHandler, sink)
+	if err != nil {
+		var errorMessageID int64
+		if res == nil {
+			errorMessageID = e.saveErrorMessage(ec, err)
+		}
+		e.finishAgentRun(ec, res, err, errorMessageID)
+		return err
+	}
+	e.finishAgentRun(ec, res, nil, 0)
+	return nil
+}
 
+// runPreparedStream streams a prepared execution context. Background runs use
+// the same path as request-bound SSE execution, but their chunk handler writes
+// to the run event hub instead of an HTTP response.
+func (e *Executor) runPreparedStream(ctx context.Context, ec *execContext, chunkHandler func(chunk model.StreamChunk) error, sink harnesspkg.Sink) (*ExecuteResult, error) {
+	dispatcher, streamCtx := newStreamDispatcher(ctx, chunkHandler)
+	runID := ""
+	if ec.run != nil {
+		runID = ec.run.UUID
+	}
 	ec.tracker.SetOnStep(func(step model.ExecutionStep) {
-		_ = chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Step: &step})
+		_ = dispatcher.Emit(model.StreamChunk{RunID: runID, ConversationID: ec.conv.UUID, Step: &step})
 	})
 	if ec.plan != nil {
 		ec.plan.SetOnChange(func(plan *model.PlanState) {
-			_ = chunkHandler(model.StreamChunk{ConversationID: ec.conv.UUID, Plan: plan})
+			_ = dispatcher.Emit(model.StreamChunk{RunID: runID, ConversationID: ec.conv.UUID, Plan: plan})
 		})
 	}
 
-	streamCall := streamingCaller(ec.llmProv, ec.conv.UUID, chunkHandler)
-	res, err := e.runHarness(ec.ctx, ec, streamCall, true, sink)
+	streamCall := streamingCaller(ec.llmProv)
+	streamSink := fanoutHarnessSinks(
+		&streamHarnessSink{dispatcher: dispatcher, runID: runID, conversationID: ec.conv.UUID},
+		sink,
+	)
+	res, err := e.runHarness(streamCtx, ec, streamCall, true, streamSink, func(delta string) error {
+		return dispatcher.Emit(model.StreamChunk{RunID: runID, ConversationID: ec.conv.UUID, Delta: delta})
+	})
 	if err != nil {
-		e.saveErrorMessage(ec, err)
-		return err
+		if streamErr := dispatcher.Err(); streamErr != nil {
+			return nil, streamErr
+		}
+		return nil, err
+	}
+	if ec.run != nil {
+		res.RunID = ec.run.UUID
 	}
 	doneChunk := model.StreamChunk{
+		RunID:          runID,
 		ConversationID: ec.conv.UUID,
 		MessageID:      res.MessageID,
 		Done:           true,
@@ -279,14 +324,17 @@ func (e *Executor) ExecuteStreamHarness(ctx context.Context, req model.ChatReque
 	if len(ec.toolFiles) > 0 {
 		doneChunk.Files = ec.toolFiles
 	}
-	return chunkHandler(doneChunk)
+	if err := dispatcher.Emit(doneChunk); err != nil {
+		return res, err
+	}
+	return res, nil
 }
 
 // saveErrorMessage 执行失败时保存一条错误 assistant 消息，确保刷新页面后能看到失败记录。
 // ephemeral 模式（sub_agent）下跳过持久化，错误通过返回值传递。
-func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
+func (e *Executor) saveErrorMessage(ec *execContext, execErr error) int64 {
 	if ec.ephemeral {
-		return
+		return 0
 	}
 	content := fmt.Sprintf("[Error] %s", execErr)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -294,7 +342,7 @@ func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
 	msgID, err := e.memory.SaveAssistantMessage(ctx, ec.conv.ID, content, 0, 0)
 	if err != nil {
 		ec.l.WithError(err).Error("[Execute] save error message failed")
-		return
+		return 0
 	}
 	if ec.plan != nil {
 		if _, linkErr := ec.plan.LinkErrorMessage(ctx, msgID, execErr.Error()); linkErr != nil {
@@ -303,6 +351,7 @@ func (e *Executor) saveErrorMessage(ec *execContext, execErr error) {
 	}
 	ec.tracker.SetMessageID(msgID)
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "error": execErr}).Warn("[Execute] << error saved")
+	return msgID
 }
 
 func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execContext, error) {
@@ -736,7 +785,14 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *harnessT
 	}
 	var planState *model.PlanState
 	if ec.plan != nil {
-		if state, linkErr := ec.plan.LinkMessage(ctx, msgID); linkErr != nil {
+		var state *model.PlanState
+		var linkErr error
+		if st != nil && st.verifier.FinalFailed {
+			state, linkErr = ec.plan.LinkErrorMessage(ctx, msgID, "final validation failed")
+		} else {
+			state, linkErr = ec.plan.LinkMessage(ctx, msgID)
+		}
+		if linkErr != nil {
 			ec.l.WithError(linkErr).Warn("[Plan] link plan to message failed")
 		} else {
 			planState = state

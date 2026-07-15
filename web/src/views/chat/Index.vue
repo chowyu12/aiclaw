@@ -555,7 +555,7 @@ let _streamController: AbortController | null = null
 import { computed, onMounted, nextTick, reactive } from 'vue'
 import { type Agent } from '../../api/agent'
 import { useAgentStore } from '../../stores/agent'
-import { chatApi, streamChat, retryStream, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
+import { chatApi, streamBackgroundChat, retryStream, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18nStore } from '../../stores/i18n'
 import { Marked } from 'marked'
@@ -975,7 +975,7 @@ function sendMessage() {
     focusInput()
   }
 
-  _streamController = streamChat(
+  _streamController = streamBackgroundChat(
     { agent_uuid: currentAgent.value?.uuid, conversation_id: conversationId.value, message: text, user_id: 'default', files: chatFiles.length > 0 ? chatFiles : undefined },
     (chunk: StreamChunk) => {
       if (chunk.conversation_id) conversationId.value = chunk.conversation_id
@@ -1004,6 +1004,9 @@ function sendMessage() {
     },
     () => finishSend(),
     (_err: string) => finishSend(),
+    (run) => {
+      if (run.conversation_uuid) conversationId.value = run.conversation_uuid
+    },
   )
 }
 

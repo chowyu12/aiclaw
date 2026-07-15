@@ -60,6 +60,8 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		SystemPrompt:      req.SystemPrompt,
 		ProviderID:        req.ProviderID,
 		ModelName:         req.ModelName,
+		FastModelName:     req.FastModelName,
+		FallbackModelName: req.FallbackModelName,
 		Temperature:       req.Temperature,
 		MaxTokens:         req.MaxTokens,
 		Timeout:           req.Timeout,

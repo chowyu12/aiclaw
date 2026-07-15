@@ -21,6 +21,7 @@ const (
 )
 
 type planContextKey struct{}
+type planEvidenceItemContextKey struct{}
 
 type PlanManager struct {
 	store          store.PlanStore
@@ -71,6 +72,20 @@ func planManagerFromContext(ctx context.Context) *PlanManager {
 	return nil
 }
 
+// withPlanEvidenceItem annotates a business-tool call with the Plan item it
+// contributes evidence to. It deliberately does not change Plan State.
+func withPlanEvidenceItem(ctx context.Context, itemID string) context.Context {
+	if strings.TrimSpace(itemID) == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, planEvidenceItemContextKey{}, itemID)
+}
+
+func planEvidenceItemFromContext(ctx context.Context) string {
+	itemID, _ := ctx.Value(planEvidenceItemContextKey{}).(string)
+	return itemID
+}
+
 func (pm *PlanManager) SetOnChange(fn func(*model.PlanState)) {
 	pm.mu.Lock()
 	pm.onChange = fn
@@ -78,6 +93,10 @@ func (pm *PlanManager) SetOnChange(fn func(*model.PlanState)) {
 }
 
 func (pm *PlanManager) EnsureRun(ctx context.Context, goal string) (*model.PlanRun, error) {
+	return pm.ensureRun(ctx, goal, model.PlanSourceModel)
+}
+
+func (pm *PlanManager) ensureRun(ctx context.Context, goal string, source model.PlanSource) (*model.PlanRun, error) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	if pm.run != nil {
@@ -94,6 +113,7 @@ func (pm *PlanManager) EnsureRun(ctx context.Context, goal string) (*model.PlanR
 	run = &model.PlanRun{
 		ConversationID: pm.conversationID,
 		Goal:           strings.TrimSpace(goal),
+		Source:         source,
 		Status:         model.PlanStatusActive,
 	}
 	if err := pm.store.CreatePlanRun(ctx, run); err != nil {
@@ -118,6 +138,7 @@ func (pm *PlanManager) State(ctx context.Context) (*model.PlanState, error) {
 		ConversationID: run.ConversationID,
 		MessageID:      run.MessageID,
 		Goal:           run.Goal,
+		Source:         run.Source,
 		Status:         run.Status,
 		RevisionReason: run.RevisionReason,
 		Items:          items,
@@ -228,12 +249,12 @@ func (pm *PlanManager) BootstrapHarnessPlan(ctx context.Context, contract harnes
 	if goal == "" {
 		goal = "执行用户请求"
 	}
-	output, err := pm.handleSet(ctx, planArgs{
+	output, err := pm.handleSetWithSource(ctx, planArgs{
 		Action: "set",
 		Goal:   goal,
 		Items:  items,
 		Reason: "harness init",
-	})
+	}, model.PlanSourceHarness)
 	if err != nil {
 		return "", false, err
 	}
@@ -241,10 +262,14 @@ func (pm *PlanManager) BootstrapHarnessPlan(ctx context.Context, contract harnes
 }
 
 func (pm *PlanManager) handleSet(ctx context.Context, p planArgs) (string, error) {
+	return pm.handleSetWithSource(ctx, p, model.PlanSourceModel)
+}
+
+func (pm *PlanManager) handleSetWithSource(ctx context.Context, p planArgs, source model.PlanSource) (string, error) {
 	if len(p.Items) == 0 {
 		return planErr("set", "items are required"), nil
 	}
-	run, err := pm.EnsureRun(ctx, p.Goal)
+	run, err := pm.ensureRun(ctx, p.Goal, source)
 	if err != nil {
 		return "", err
 	}
@@ -497,11 +522,27 @@ func (pm *PlanManager) activeState(ctx context.Context) (*model.PlanState, error
 		ConversationID: run.ConversationID,
 		MessageID:      run.MessageID,
 		Goal:           run.Goal,
+		Source:         run.Source,
 		Status:         run.Status,
 		RevisionReason: run.RevisionReason,
 		Items:          items,
 		UpdatedAt:      run.UpdatedAt,
 	}, nil
+}
+
+// CurrentRunningItemID returns the plan item that receives newly recorded tool evidence.
+// It does not advance or otherwise mutate the plan.
+func (pm *PlanManager) CurrentRunningItemID(ctx context.Context) string {
+	state, err := pm.activeState(ctx)
+	if err != nil || state == nil {
+		return ""
+	}
+	for _, item := range state.Items {
+		if item.Status == model.PlanItemRunning {
+			return item.ItemKey
+		}
+	}
+	return ""
 }
 
 func (pm *PlanManager) emit(ctx context.Context) {
