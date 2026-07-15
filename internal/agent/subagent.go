@@ -299,7 +299,7 @@ func (e *Executor) executeOneTask(ctx context.Context, prompt, agentUUID string,
 		ec.ag.ModelName = ec.ag.FastModelName
 	}
 
-	res, err := e.runHarness(ec.ctx, ec, blockingCaller(ec.llmProv), false, nil)
+	res, err := e.runHarness(ec.ctx, ec, blockingCaller(ec.llmProv), false, nil, nil)
 	if err != nil {
 		return "", 0, nil, nil, err
 	}

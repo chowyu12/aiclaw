@@ -25,6 +25,7 @@ import (
 type ToolResult struct {
 	ToolCallID string
 	ToolName   string
+	PlanItemID string
 	Content    string
 	Error      string
 	Status     harnesspkg.ToolStatus
@@ -72,6 +73,15 @@ func newToolResult(callID, toolName, content string, status harnesspkg.ToolStatu
 func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc openai.ToolCall, st *harnessTurnState) (toolMsg openai.ChatCompletionMessage, tr ToolResult, fileParts []openai.ChatMessagePart, toolFiles []*model.File) {
 	toolName := tc.Function.Name
 	toolArgs := tc.Function.Arguments
+	planItemID := ""
+	if ec.plan != nil && isExecutionTool(toolName) {
+		planItemID = ec.plan.CurrentRunningItemID(ctx)
+	}
+	recordResult := func(result ToolResult) ToolResult {
+		result.PlanItemID = planItemID
+		recordHarnessToolResult(st, toolArgs, result)
+		return result
+	}
 
 	preTool := newHarnessRuntime(ctx, ec, st).BeforeTool(toolName, toolArgs)
 	recordHarnessValidation(st, preTool)
@@ -81,8 +91,7 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 		if strings.TrimSpace(msg) == "" {
 			msg = fmt.Sprintf("tool %q blocked by harness contract", toolName)
 		}
-		tr := newToolResult(tc.ID, toolName, msg, harnesspkg.ToolStatusBlocked, msg, 0, nil)
-		recordHarnessToolResult(st, toolArgs, tr)
+		tr := recordResult(newToolResult(tc.ID, toolName, msg, harnesspkg.ToolStatusBlocked, msg, 0, nil))
 		return toolResultMsg(tc.ID, toolName, msg), tr, nil, nil
 	}
 
@@ -91,15 +100,13 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 		if blocked, guardMsg := st.loopDet.check(toolName, toolArgs); blocked {
 			st.mu.Unlock()
 			ec.l.WithField("tool", toolName).Warn("[LoopGuard] blocked tool_search")
-			tr := newToolResult(tc.ID, toolName, guardMsg, harnesspkg.ToolStatusBlocked, guardMsg, 0, nil)
-			recordHarnessToolResult(st, toolArgs, tr)
+			tr := recordResult(newToolResult(tc.ID, toolName, guardMsg, harnesspkg.ToolStatusBlocked, guardMsg, 0, nil))
 			return toolResultMsg(tc.ID, toolName, guardMsg), tr, nil, nil
 		}
 		st.loopDet.record(toolName, toolArgs)
 		st.mu.Unlock()
 		toolMsg = e.handleToolSearch(ctx, ec, tc, st)
-		tr := newToolResult(tc.ID, toolName, toolMsg.Content, harnesspkg.ToolStatusSuccess, "", 0, nil)
-		recordHarnessToolResult(st, toolArgs, tr)
+		tr := recordResult(newToolResult(tc.ID, toolName, toolMsg.Content, harnesspkg.ToolStatusSuccess, "", 0, nil))
 		return toolMsg, tr, nil, nil
 	}
 
@@ -107,8 +114,7 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	if !ok {
 		errMsg := fmt.Sprintf("tool %q not found", toolName)
 		ec.l.WithField("tool", toolName).Warn("[Tool] tool not registered, skipping")
-		tr := newToolResult(tc.ID, toolName, errMsg, harnesspkg.ToolStatusError, errMsg, 0, nil)
-		recordHarnessToolResult(st, toolArgs, tr)
+		tr := recordResult(newToolResult(tc.ID, toolName, errMsg, harnesspkg.ToolStatusError, errMsg, 0, nil))
 		return toolResultMsg(tc.ID, toolName, errMsg), tr, nil, nil
 	}
 
@@ -116,8 +122,7 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	if blocked, guardMsg := st.loopDet.check(toolName, toolArgs); blocked {
 		st.mu.Unlock()
 		ec.l.WithFields(log.Fields{"tool": toolName, "args": truncateLog(toolArgs, 120)}).Warn("[LoopGuard] blocked")
-		tr := newToolResult(tc.ID, toolName, guardMsg, harnesspkg.ToolStatusBlocked, guardMsg, 0, nil)
-		recordHarnessToolResult(st, toolArgs, tr)
+		tr := recordResult(newToolResult(tc.ID, toolName, guardMsg, harnesspkg.ToolStatusBlocked, guardMsg, 0, nil))
 		return toolResultMsg(tc.ID, toolName, guardMsg), tr, nil, nil
 	}
 	st.loopDet.record(toolName, toolArgs)
@@ -128,14 +133,14 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	if action := e.hooks.Fire(ctx, HookPreToolUse, &HookPayload{ToolName: toolName, ToolArgs: toolArgs}); action == HookSkip {
 		ec.l.WithField("tool", toolName).Info("[Hook] tool call skipped by pre_tool_use hook")
 		skipMsg := fmt.Sprintf("tool %q skipped by policy", toolName)
-		tr := newToolResult(tc.ID, toolName, skipMsg, harnesspkg.ToolStatusSkipped, skipMsg, 0, nil)
-		recordHarnessToolResult(st, toolArgs, tr)
+		tr := recordResult(newToolResult(tc.ID, toolName, skipMsg, harnesspkg.ToolStatusSkipped, skipMsg, 0, nil))
 		return toolResultMsg(tc.ID, toolName, skipMsg), tr, nil, nil
 	}
 
 	ec.l.WithFields(log.Fields{"tool": toolName, "args": truncateLog(toolArgs, 200)}).Info("[Tool] >> invoke")
 	toolCtx, toolDone := toolCallContext(ctx)
 	defer toolDone()
+	toolCtx = withPlanEvidenceItem(toolCtx, planItemID)
 	if toolName == "sub_agent" {
 		toolCtx = withSubAgentCallID(toolCtx, tc.ID)
 	}
@@ -183,8 +188,7 @@ func (e *Executor) runOneToolCall(ctx context.Context, ec *execContext, tc opena
 	if callErr != nil {
 		status = harnesspkg.ToolStatusError
 	}
-	tr = newToolResult(tc.ID, toolName, toolMsg.Content, status, errMsg, callDur, toolFiles)
-	recordHarnessToolResult(st, toolArgs, tr)
+	tr = recordResult(newToolResult(tc.ID, toolName, toolMsg.Content, status, errMsg, callDur, toolFiles))
 	return toolMsg, tr, fileParts, toolFiles
 }
 
@@ -335,7 +339,7 @@ func dedupeFiles(files []*model.File) []*model.File {
 }
 
 // appendAssistantToolRound 执行一轮工具调用：并发安全的工具并行执行，其余串行执行。
-func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *harnessTurnState, assistant openai.ChatCompletionMessage) toolRoundResult {
+func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext, st *harnessTurnState, assistant openai.ChatCompletionMessage, onResult func(openai.ToolCall, ToolResult)) toolRoundResult {
 	st.Messages = append(st.Messages, assistant)
 	tcs := assistant.ToolCalls
 	n := len(tcs)
@@ -361,6 +365,13 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 		toolFiles []*model.File
 	}
 	results := make([]callResult, n)
+	runCall := func(idx int) {
+		msg, tr, fps, tf := e.runOneToolCall(ctx, ec, tcs[idx], st)
+		results[idx] = callResult{msg, tr, fps, tf}
+		if onResult != nil {
+			onResult(tcs[idx], tr)
+		}
+	}
 
 	// 分类：并发安全 vs 需要串行执行
 	var safeIdx, seqIdx []int
@@ -383,21 +394,18 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 		var wg sync.WaitGroup
 		for _, idx := range safeIdx {
 			wg.Go(func() {
-				msg, tr, fps, tf := e.runOneToolCall(ctx, ec, tcs[idx], st)
-				results[idx] = callResult{msg, tr, fps, tf}
+				runCall(idx)
 			})
 		}
 		wg.Wait()
 	} else if len(safeIdx) == 1 {
 		idx := safeIdx[0]
-		msg, tr, fps, tf := e.runOneToolCall(ctx, ec, tcs[idx], st)
-		results[idx] = callResult{msg, tr, fps, tf}
+		runCall(idx)
 	}
 
 	// 非安全工具：顺序执行
 	for _, idx := range seqIdx {
-		msg, tr, fps, tf := e.runOneToolCall(ctx, ec, tcs[idx], st)
-		results[idx] = callResult{msg, tr, fps, tf}
+		runCall(idx)
 	}
 
 	// 按原始顺序收集结果
@@ -431,10 +439,6 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 		}
 	}
 	ec.toolFiles = dedupeFiles(ec.toolFiles)
-	if toolFailed != "" && ec.plan != nil {
-		ec.plan.FailRunning(ctx, toolFailed)
-	}
-
 	_ = toolResults
 	if !ec.ephemeral && len(persistedToolCalls) > 0 {
 		if err := e.memory.SaveToolCallRound(ctx, ec.conv.ID, assistant.Content, persistedToolCalls, persistedToolResults); err != nil {
@@ -455,6 +459,15 @@ func (e *Executor) appendAssistantToolRound(ctx context.Context, ec *execContext
 		ToolFailed:  toolFailed != "",
 		HasPlanTool: hasPlanTool,
 		ToolEvents:  roundEvents,
+	}
+}
+
+func isExecutionTool(name string) bool {
+	switch name {
+	case "", planToolName, toolSearchName, finishToolName:
+		return false
+	default:
+		return true
 	}
 }
 

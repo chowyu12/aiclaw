@@ -60,6 +60,22 @@
                   </el-option-group>
                 </el-select>
               </el-form-item>
+              <el-form-item class="af-cell">
+                <template #label>
+                  <span>故障降级模型</span>
+                  <el-tooltip content="主模型出现临时网络或服务错误时使用。留空则不自动切换。" placement="top">
+                    <el-icon style="margin-left:4px;vertical-align:middle;cursor:help"><QuestionFilled /></el-icon>
+                  </el-tooltip>
+                </template>
+                <el-select v-model="agentForm.fallback_model_name" filterable allow-create clearable default-first-option style="width:100%" :loading="modelLoading" :disabled="!agentForm.provider_id" @focus="onModelFocus" placeholder="可选，如 gpt-4o">
+                  <el-option-group v-if="remoteModels.length > 0" label="远程模型">
+                    <el-option v-for="m in remoteModels" :key="'fb-'+m" :label="m" :value="m" />
+                  </el-option-group>
+                  <el-option-group v-if="localOnlyModels.length > 0" :label="remoteModels.length ? '本地配置' : '模型列表'">
+                    <el-option v-for="m in localOnlyModels" :key="'fbl-'+m" :label="m" :value="m" />
+                  </el-option-group>
+                </el-select>
+              </el-form-item>
             </div>
 
             <!-- 模型参数（内嵌左栏） -->
@@ -247,6 +263,7 @@ const agentForm = ref({
   provider_id: null as number | null,
   model_name: '',
   fast_model_name: '',
+  fallback_model_name: '',
   temperature: 0.7,
   max_tokens: 0,
   timeout: 0,
@@ -355,6 +372,7 @@ function applyAgentDetail(detail: Agent) {
     provider_id: detail.provider_id,
     model_name: detail.model_name || '',
     fast_model_name: detail.fast_model_name || '',
+    fallback_model_name: detail.fallback_model_name || '',
     temperature: detail.temperature ?? 0.7,
     max_tokens: detail.max_tokens ?? 0,
     timeout: detail.timeout ?? 0,
@@ -418,6 +436,7 @@ async function saveAgent() {
       provider_id: agentForm.value.provider_id ?? undefined,
       model_name: agentForm.value.model_name,
       fast_model_name: agentForm.value.fast_model_name,
+      fallback_model_name: agentForm.value.fallback_model_name,
       temperature: agentForm.value.temperature,
       max_tokens: agentForm.value.max_tokens,
       timeout: agentForm.value.timeout,

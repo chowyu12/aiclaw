@@ -16,6 +16,7 @@ type StepTracker struct {
 	store          store.ConversationStore
 	conversationID int64
 	messageID      int64
+	runUUID        string
 	channelTrace   *model.ChannelExecTrace
 
 	mu        sync.Mutex
@@ -34,12 +35,27 @@ func NewStepTracker(s store.ConversationStore, conversationID int64) *StepTracke
 func (t *StepTracker) SetMessageID(id int64) {
 	t.mu.Lock()
 	t.messageID = id
+	runUUID := t.runUUID
 	for i := range t.steps {
 		t.steps[i].MessageID = id
 	}
 	t.mu.Unlock()
 
+	if runUUID != "" {
+		t.store.UpdateStepsMessageIDByRun(context.Background(), t.conversationID, runUUID, id)
+		return
+	}
 	t.store.UpdateStepsMessageID(context.Background(), t.conversationID, id)
+}
+
+// SetRunUUID links subsequent execution steps to one durable Agent run.
+func (t *StepTracker) SetRunUUID(runUUID string) {
+	t.mu.Lock()
+	t.runUUID = runUUID
+	for i := range t.steps {
+		t.steps[i].RunUUID = runUUID
+	}
+	t.mu.Unlock()
 }
 
 // SetChannelTrace 在首轮 RecordStep 之前调用；之后所有步骤 metadata 会附带渠道追溯字段。
@@ -132,9 +148,11 @@ func (t *StepTracker) newStep(ctx context.Context, stepType model.StepType, name
 	t.stepOrder++
 	order := t.stepOrder
 	msgID := t.messageID
+	runUUID := t.runUUID
 	t.mu.Unlock()
 
 	return &model.ExecutionStep{
+		RunUUID:        runUUID,
 		MessageID:      msgID,
 		ConversationID: t.conversationID,
 		StepOrder:      order,

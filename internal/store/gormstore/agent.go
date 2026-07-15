@@ -94,6 +94,12 @@ func (s *GormStore) UpdateAgent(ctx context.Context, id int64, req *model.Update
 	if req.ModelName != nil {
 		updates["model_name"] = *req.ModelName
 	}
+	if req.FastModelName != nil {
+		updates["fast_model_name"] = *req.FastModelName
+	}
+	if req.FallbackModelName != nil {
+		updates["fallback_model_name"] = *req.FallbackModelName
+	}
 	if req.Temperature != nil {
 		updates["temperature"] = *req.Temperature
 	}

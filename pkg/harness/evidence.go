@@ -18,6 +18,7 @@ type PlanItemSnapshot struct {
 }
 
 type PlanSnapshot struct {
+	Source string             `json:"source,omitempty"`
 	Items []PlanItemSnapshot `json:"items,omitempty"`
 }
 

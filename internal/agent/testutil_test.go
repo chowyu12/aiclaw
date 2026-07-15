@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	openai "github.com/chowyu12/go-openai"
 
@@ -31,6 +32,7 @@ type mockStore struct {
 	convByUUID    map[string]*model.Conversation
 	messages      map[int64][]model.Message
 	execSteps     map[int64][]model.ExecutionStep
+	agentRuns     map[string]*model.AgentRun
 	planRuns      map[int64]*model.PlanRun
 	planItems     map[int64][]model.PlanItem
 	filesByUUID   map[string]*model.File
@@ -51,6 +53,7 @@ func newMockStore() *mockStore {
 		convByUUID:    make(map[string]*model.Conversation),
 		messages:      make(map[int64][]model.Message),
 		execSteps:     make(map[int64][]model.ExecutionStep),
+		agentRuns:     make(map[string]*model.AgentRun),
 		planRuns:      make(map[int64]*model.PlanRun),
 		planItems:     make(map[int64][]model.PlanItem),
 		filesByUUID:   make(map[string]*model.File),
@@ -275,6 +278,11 @@ func (s *mockStore) DeleteConversation(_ context.Context, id int64) error {
 	delete(s.convByUUID, c.UUID)
 	delete(s.messages, id)
 	delete(s.execSteps, id)
+	for runUUID, run := range s.agentRuns {
+		if run.ConversationID == id {
+			delete(s.agentRuns, runUUID)
+		}
+	}
 	return nil
 }
 func (s *mockStore) CreateMessage(_ context.Context, m *model.Message) error {
@@ -342,6 +350,11 @@ func (s *mockStore) DeleteMessagesFrom(_ context.Context, conversationID, fromMe
 			delete(s.planRuns, id)
 		}
 	}
+	for runUUID, run := range s.agentRuns {
+		if run.ConversationID == conversationID && (run.MessageID == 0 || run.MessageID >= fromMessageID) {
+			delete(s.agentRuns, runUUID)
+		}
+	}
 	return nil
 }
 
@@ -380,6 +393,18 @@ func (s *mockStore) UpdateStepsMessageID(_ context.Context, conversationID, mess
 	s.execSteps[conversationID] = steps
 	return nil
 }
+func (s *mockStore) UpdateStepsMessageIDByRun(_ context.Context, conversationID int64, runUUID string, messageID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	steps := s.execSteps[conversationID]
+	for i := range steps {
+		if steps[i].RunUUID == runUUID && steps[i].MessageID == 0 {
+			steps[i].MessageID = messageID
+		}
+	}
+	s.execSteps[conversationID] = steps
+	return nil
+}
 func (s *mockStore) ListExecutionSteps(_ context.Context, messageID int64) ([]model.ExecutionStep, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -397,6 +422,103 @@ func (s *mockStore) ListExecutionStepsByConversation(_ context.Context, convID i
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.execSteps[convID], nil
+}
+
+func (s *mockStore) CreateAgentRun(_ context.Context, run *model.AgentRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if run.ID == 0 {
+		run.ID = s.nextID()
+	}
+	if run.UUID == "" {
+		run.UUID = fmt.Sprintf("run-%d", run.ID)
+	}
+	if run.Status == "" {
+		run.Status = model.AgentRunRunning
+	}
+	if run.StartedAt.IsZero() {
+		run.StartedAt = time.Now()
+	}
+	cp := *run
+	s.agentRuns[run.UUID] = &cp
+	return nil
+}
+
+func (s *mockStore) UpdateAgentRun(_ context.Context, id int64, updates map[string]any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, run := range s.agentRuns {
+		if run.ID != id {
+			continue
+		}
+		if value, ok := updates["message_id"].(int64); ok {
+			run.MessageID = value
+		}
+		if value, ok := updates["content"].(string); ok {
+			run.Content = value
+		}
+		if value, ok := updates["error"].(string); ok {
+			run.Error = value
+		}
+		if value, ok := updates["status"].(model.AgentRunStatus); ok {
+			run.Status = value
+		} else if value, ok := updates["status"].(string); ok {
+			run.Status = model.AgentRunStatus(value)
+		}
+		if value, ok := updates["tokens_used"].(int); ok {
+			run.TokensUsed = value
+		}
+		if value, ok := updates["duration_ms"].(int); ok {
+			run.DurationMs = value
+		}
+		if value, ok := updates["finished_at"].(time.Time); ok {
+			run.FinishedAt = &value
+		}
+		return nil
+	}
+	return sql.ErrNoRows
+}
+
+func (s *mockStore) GetAgentRunByUUID(_ context.Context, runUUID string) (*model.AgentRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	run := s.agentRuns[runUUID]
+	if run == nil {
+		return nil, sql.ErrNoRows
+	}
+	cp := *run
+	return &cp, nil
+}
+
+func (s *mockStore) ListAgentRuns(_ context.Context, q model.AgentRunListQuery) ([]*model.AgentRun, int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]*model.AgentRun, 0, len(s.agentRuns))
+	for _, run := range s.agentRuns {
+		if q.AgentUUID != "" && run.AgentUUID != q.AgentUUID ||
+			q.ConversationUUID != "" && run.ConversationUUID != q.ConversationUUID ||
+			q.UserID != "" && run.UserID != q.UserID ||
+			q.Status != "" && run.Status != q.Status {
+			continue
+		}
+		cp := *run
+		items = append(items, &cp)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (s *mockStore) ListExecutionStepsByRun(_ context.Context, runUUID string) ([]model.ExecutionStep, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []model.ExecutionStep
+	for _, steps := range s.execSteps {
+		for _, step := range steps {
+			if step.RunUUID == runUUID {
+				result = append(result, step)
+			}
+		}
+	}
+	return result, nil
 }
 
 func (s *mockStore) CreatePlanRun(_ context.Context, run *model.PlanRun) error {

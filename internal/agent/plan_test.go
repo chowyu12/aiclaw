@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/chowyu12/aiclaw/internal/model"
+	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 )
 
 func TestPlanManagerSetNormalizesSingleRunning(t *testing.T) {
@@ -185,6 +186,27 @@ func TestPlanManagerLinkErrorMessageClearsActivePlan(t *testing.T) {
 	}
 	if _, err := st.GetActivePlanRun(ctx, 1); err != sql.ErrNoRows {
 		t.Fatalf("expected no active plan, got %v", err)
+	}
+}
+
+func TestPlanManagerBootstrapRecordsHarnessSource(t *testing.T) {
+	ctx := context.Background()
+	pm := NewPlanManager(newMockStore(), 1)
+	_, created, err := pm.BootstrapHarnessPlan(ctx, harnesspkg.TaskContract{
+		Objective:       "implement the requested change",
+		Complexity:      harnesspkg.ComplexityComplex,
+		RequirePlan:     true,
+		RequireEvidence: true,
+	}, "")
+	if err != nil || !created {
+		t.Fatalf("BootstrapHarnessPlan = created:%v err:%v", created, err)
+	}
+	state, err := pm.State(ctx)
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	if state.Source != model.PlanSourceHarness {
+		t.Fatalf("plan source = %q, want %q", state.Source, model.PlanSourceHarness)
 	}
 }
 

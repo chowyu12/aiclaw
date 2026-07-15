@@ -75,6 +75,7 @@ func autoMigrate(db *gorm.DB) error {
 		&model.MCPServer{},
 		&model.Conversation{},
 		&model.Message{},
+		&model.AgentRun{},
 		&model.ExecutionStep{},
 		&model.PlanRun{},
 		&model.PlanItem{},

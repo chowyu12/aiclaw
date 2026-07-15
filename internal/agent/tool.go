@@ -150,8 +150,9 @@ func (t *trackedTool) Call(ctx context.Context, input string) (string, error) {
 	}
 
 	meta := &model.StepMetadata{
-		ToolName:  t.name,
-		SkillName: t.skillName,
+		ToolName:   t.name,
+		SkillName:  t.skillName,
+		PlanItemID: planEvidenceItemFromContext(ctx),
 	}
 	recordCtx := ctx
 	if t.name == "sub_agent" {

@@ -44,6 +44,11 @@ type agentHarness struct {
 	call      llmCaller
 	streaming bool
 	sink      harnesspkg.Sink
+	onDelta   func(string) error
+
+	emitMu     sync.Mutex
+	sinkErr    error
+	sinkCancel context.CancelCauseFunc
 
 	runID  string
 	turnID string
@@ -64,9 +69,13 @@ type agentHarness struct {
 	control   *harnessControlPlaneLayer
 }
 
-func newAgentHarness(e *Executor, ec *execContext, call llmCaller, streaming bool, sink harnesspkg.Sink) *agentHarness {
+func newAgentHarness(e *Executor, ec *execContext, call llmCaller, streaming bool, sink harnesspkg.Sink, onDelta func(string) error) *agentHarness {
 	if sink == nil {
 		sink = harnesspkg.NoopSink{}
+	}
+	runID := uuid.NewString()
+	if ec != nil && ec.run != nil && ec.run.UUID != "" {
+		runID = ec.run.UUID
 	}
 	h := &agentHarness{
 		executor:   e,
@@ -74,7 +83,8 @@ func newAgentHarness(e *Executor, ec *execContext, call llmCaller, streaming boo
 		call:       call,
 		streaming:  streaming,
 		sink:       sink,
-		runID:      uuid.NewString(),
+		onDelta:    onDelta,
+		runID:      runID,
 		turnID:     uuid.NewString(),
 		budget:     NewBudgetTracker(ec.ag.TokenBudget),
 		compressor: NewContextCompressor(ec.ag.ModelName, ec.l),
@@ -89,7 +99,12 @@ func newAgentHarness(e *Executor, ec *execContext, call llmCaller, streaming boo
 	return h
 }
 
-func (h *agentHarness) emit(evt harnesspkg.Event) {
+func (h *agentHarness) emit(evt harnesspkg.Event) error {
+	h.emitMu.Lock()
+	defer h.emitMu.Unlock()
+	if h.sinkErr != nil {
+		return h.sinkErr
+	}
 	if evt.Version == "" {
 		evt.Version = harnesspkg.ProtocolVersion
 	}
@@ -103,17 +118,35 @@ func (h *agentHarness) emit(evt harnesspkg.Event) {
 		evt.TurnID = h.turnID
 	}
 	if err := h.sink.Emit(evt); err != nil {
+		h.sinkErr = err
 		h.ec.l.WithError(err).WithField("event", evt.Type).Warn("[Harness] event sink failed")
+		if h.sinkCancel != nil {
+			h.sinkCancel(err)
+		}
+		return err
 	}
+	return nil
 }
 
-func (e *Executor) runHarness(ctx context.Context, ec *execContext, call llmCaller, streaming bool, sink harnesspkg.Sink) (*ExecuteResult, error) {
-	return newAgentHarness(e, ec, call, streaming, sink).Run(ctx)
+func (h *agentHarness) eventError() error {
+	h.emitMu.Lock()
+	defer h.emitMu.Unlock()
+	return h.sinkErr
+}
+
+func (e *Executor) runHarness(ctx context.Context, ec *execContext, call llmCaller, streaming bool, sink harnesspkg.Sink, onDelta func(string) error) (*ExecuteResult, error) {
+	return newAgentHarness(e, ec, call, streaming, sink, onDelta).Run(ctx)
 }
 
 func (h *agentHarness) Run(ctx context.Context) (*ExecuteResult, error) {
-	ctx, cancel := h.lifecycle.begin(ctx)
-	defer cancel()
+	baseCtx, cancelSink := context.WithCancelCause(ctx)
+	h.sinkCancel = cancelSink
+	defer cancelSink(nil)
+	ctx, cancelTimeout := h.lifecycle.begin(baseCtx)
+	defer cancelTimeout()
+	if err := h.eventError(); err != nil {
+		return nil, err
+	}
 
 	st, err := h.context.bootstrap(ctx)
 	if err != nil {
@@ -122,6 +155,10 @@ func (h *agentHarness) Run(ctx context.Context) (*ExecuteResult, error) {
 	}
 	h.state = st
 	if err := h.bootstrapHarnessPlan(ctx); err != nil {
+		h.lifecycle.fail(err)
+		return nil, err
+	}
+	if err := h.eventError(); err != nil {
 		h.lifecycle.fail(err)
 		return nil, err
 	}
@@ -184,7 +221,15 @@ const (
 
 func (r *agentTurnRunner) run(ctx context.Context) (*ExecuteResult, error) {
 	for round := 1; round <= r.maxIter; round++ {
+		if err := r.h.eventError(); err != nil {
+			r.h.lifecycle.fail(err)
+			return nil, err
+		}
 		r.h.lifecycle.beginTurn(round)
+		if err := r.h.eventError(); err != nil {
+			r.h.lifecycle.fail(err)
+			return nil, err
+		}
 
 		ctrl, err := r.runRound(ctx, round)
 		if err != nil {
@@ -192,6 +237,10 @@ func (r *agentTurnRunner) run(ctx context.Context) (*ExecuteResult, error) {
 			return nil, err
 		}
 		r.h.lifecycle.completeTurn(round)
+		if err := r.h.eventError(); err != nil {
+			r.h.lifecycle.fail(err)
+			return nil, err
+		}
 		if ctrl == harnessRoundBreak {
 			break
 		}
@@ -211,6 +260,9 @@ func (r *agentTurnRunner) run(ctx context.Context) (*ExecuteResult, error) {
 		return nil, err
 	}
 	r.h.lifecycle.complete()
+	if err := r.h.eventError(); err != nil {
+		return nil, err
+	}
 	return res, nil
 }
 
@@ -261,17 +313,56 @@ func (r *agentTurnRunner) handleFinalCandidate(ctx context.Context, round int, r
 		})
 		return harnessRoundNext, nil
 	}
-	return r.gateFinalAnswer(ctx, round, result.content, false)
+	return r.gateFinalAnswer(ctx, round, result.content, result.deltas, false)
 }
 
-func (r *agentTurnRunner) gateFinalAnswer(ctx context.Context, round int, content string, explicit bool) (harnessRoundControl, error) {
+func (r *agentTurnRunner) gateFinalAnswer(ctx context.Context, round int, content string, deltas []string, explicit bool) (harnessRoundControl, error) {
 	answer, done, retry := r.h.verifier.verifyFinalAnswer(ctx, round, r.maxIter, content, explicit)
 	if retry {
 		return harnessRoundNext, nil
 	}
 	r.finalContent = answer
 	r.completed = done
+	if done {
+		if r.h.state.verifier.FinalFailed {
+			if err := r.h.publishValidatedOutput([]string{answer}); err != nil {
+				return harnessRoundBreak, err
+			}
+		} else if err := r.h.publishValidatedOutput(deltas, answer); err != nil {
+			return harnessRoundBreak, err
+		}
+	}
 	return harnessRoundBreak, nil
+}
+
+// publishValidatedOutput releases text only after the final gate accepts it.
+// Intermediate, retried, and corrected model rounds stay inside the harness.
+func (h *agentHarness) publishValidatedOutput(deltas []string, fallback ...string) error {
+	if !h.streaming {
+		return nil
+	}
+	if len(deltas) == 0 && len(fallback) > 0 && strings.TrimSpace(fallback[0]) != "" {
+		deltas = []string{fallback[0]}
+	}
+	for _, delta := range deltas {
+		if delta == "" {
+			continue
+		}
+		if err := h.emit(harnesspkg.Event{
+			Type:   harnesspkg.EventModelDelta,
+			Layer:  harnesspkg.LayerModel,
+			Status: harnesspkg.StatusRunning,
+			Delta:  delta,
+		}); err != nil {
+			return err
+		}
+		if h.onDelta != nil {
+			if err := h.onDelta(delta); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (r *agentTurnRunner) handleLLMRoundRecovery(ctx context.Context, round int, result llmRoundResult, contract harnesspkg.TaskContract, evidence harnesspkg.EvidenceLedger, recovery llmRoundRecovery) (harnessRoundControl, error) {
@@ -315,7 +406,7 @@ func (r *agentTurnRunner) handleToolRound(ctx context.Context, round int, result
 		if !toolRound.ToolFailed {
 			r.h.state.resetNudges()
 		}
-		return r.gateFinalAnswer(ctx, round, answer, true)
+		return r.gateFinalAnswer(ctx, round, answer, nil, true)
 	}
 	content, done, retry := r.h.verifier.verifyToolRound(ctx, round, r.maxIter, toolRound)
 	if retry {
@@ -620,7 +711,7 @@ func (m *harnessModelDriverLayer) callRound(ctx context.Context, round int, req 
 				"duration_ms": dur.Milliseconds(),
 			},
 		})
-		fallbackModel := fallbackModelForLLMError(ec.ag, primaryModel, callErr, m.h.state.fallbackAlreadyActivated())
+		fallbackModel := fallbackModelForLLMError(ec.ag, primaryModel, callErr, m.h.state.fallbackAlreadyActivated(), req)
 		if fallbackModel == "" {
 			return llmRoundResult{}, err
 		}
@@ -769,21 +860,34 @@ func (a *harnessActionRuntimeLayer) executeRound(ctx context.Context, result llm
 			Input:  tc.Function.Arguments,
 		})
 	}
-	toolRound := a.h.executor.appendAssistantToolRound(ctx, a.h.ec, a.h.state, asst)
-	for _, tc := range result.toolCalls {
-		status := harnesspkg.StatusCompleted
-		if toolRound.ToolFailed {
-			status = harnesspkg.StatusFailed
-		}
+	toolRound := a.h.executor.appendAssistantToolRound(ctx, a.h.ec, a.h.state, asst, func(tc openai.ToolCall, result ToolResult) {
+		status := harnessActionStatus(result.Status)
 		a.h.emit(harnesspkg.Event{
 			Type:   harnesspkg.EventActionFinished,
 			Layer:  harnesspkg.LayerAction,
 			ItemID: tc.ID,
 			Name:   tc.Function.Name,
 			Status: status,
+			Output: result.Content,
+			Error:  result.Error,
+			Metadata: map[string]any{
+				"duration_ms":          result.DurationMs,
+				"related_plan_item_id": result.PlanItemID,
+			},
 		})
-	}
+	})
 	return toolRound
+}
+
+func harnessActionStatus(status harnesspkg.ToolStatus) harnesspkg.Status {
+	switch status {
+	case harnesspkg.ToolStatusError, harnesspkg.ToolStatusBlocked:
+		return harnesspkg.StatusFailed
+	case harnesspkg.ToolStatusSkipped:
+		return harnesspkg.StatusSkipped
+	default:
+		return harnesspkg.StatusCompleted
+	}
 }
 
 type harnessControlPlaneLayer struct {
@@ -812,15 +916,18 @@ func (c *harnessControlPlaneLayer) tokenBudgetExceeded() bool {
 }
 
 func (c *harnessControlPlaneLayer) afterToolRound(ctx context.Context, toolRound toolRoundResult) {
-	if c.h.ec.plan != nil && toolRound.HasRealTool && !toolRound.ToolFailed && !toolRound.HasPlanTool {
-		c.h.ec.plan.CompleteRunning(ctx)
-		c.h.emit(harnesspkg.Event{
-			Type:   harnesspkg.EventControlUpdate,
-			Layer:  harnesspkg.LayerControl,
-			Name:   "plan_advance",
-			Status: harnesspkg.StatusCompleted,
-		})
+	if c.h.ec.plan == nil || !toolRound.HasRealTool || toolRound.HasPlanTool {
+		return
 	}
+	// Tool evidence is associated with the currently running item, but evidence
+	// alone must not change Plan State. The model's plan update or final lifecycle
+	// decides whether that item is actually complete.
+	c.h.emit(harnesspkg.Event{
+		Type:   harnesspkg.EventControlUpdate,
+		Layer:  harnesspkg.LayerControl,
+		Name:   "plan_evidence_recorded",
+		Status: harnesspkg.StatusCompleted,
+	})
 }
 
 func (c *harnessControlPlaneLayer) failRunningPlan(ctx context.Context, reason string) {

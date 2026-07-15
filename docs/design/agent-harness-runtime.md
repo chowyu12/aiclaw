@@ -112,7 +112,7 @@ Plan item 的 harness 终态与 AiClaw Plan State 保持一致：
 ## 设计边界
 
 - Harness Runtime 不替代主执行循环；它只做阶段校验和纠偏决策。
-- `harnessControlPlaneLayer` 只负责预算、计划推进、失败收口和保存；`harnessVerifierLayer` 负责 Contract/Evidence/Validate/Correct。
+- `harnessControlPlaneLayer` 只负责预算、计划生命周期收口和保存；工具结果只作为带 `plan_item_id` 的证据，不会隐式推进或失败 Plan item。`harnessVerifierLayer` 负责 Contract/Evidence/Validate/Correct。
 - 当前没有迁移 `ickey-claw` 的 response_format 二次整理器；`pkg/harness` 只保留 JSON 校验能力，等待 AiClaw 有明确结构化输出配置后再接入。
 - 文件证据按 AiClaw 的 `model.File` 语义校验，接受 `uuid/storage_path/filename`，不强制要求公网 URL。
 - 进度型答复识别是启发式规则，可能对少数“用户询问计划/下一步”的自然语言回答偏严格；如果后续误判频繁，应把该 validator 限制到需要证据的任务。
@@ -130,5 +130,6 @@ Plan item 的 harness 终态与 AiClaw Plan State 保持一致：
 - 增加 LLM round recovery：截断工具调用不会执行，截断内容/资源中断/空输出按契约和证据生成恢复提示；不可恢复的安全过滤显式失败收口。
 - 增加 `finish` 内置工具：模型可用显式 final answer 结束本轮，finish 不计入业务执行工具，也不持久化为普通工具轮记忆。
 - 增加 harness plan bootstrap：Contract 推导出 `RequirePlan` 时，如果当前会话没有 active plan，执行层会用 `InitialPlanTemplate` 初始化运行计划。
-- 增加 fallback model 和流式中断恢复：主模型 transient/stream-midway 失败时可切到 `fast_model_name`，fallback 成功后本 turn 后续轮次继续使用 fallback；流式中途断开在 runner 层重试当前轮。
+- 增加 fallback model 和流式中断恢复：主模型 transient/stream-midway 失败时可切到独立的 `fallback_model_name`，并在切换前校验工具调用和流式能力；`fast_model_name` 仅用于子代理的轻量模型选择。fallback 成功后本 turn 后续轮次继续使用 fallback；流式中途断开在 runner 层重试当前轮。
 - 扩展 Contract/Evidence：根据 Agent profile、工具数量、附件、文件意图、sub-agent 上下文推导契约；证据 ledger 增加 inform events、failure kind、blocker evidence。
+- 流式协议同时保留 `message` 兼容事件，并将稳定记录以 SSE `event: harness` 下发；`model.delta` 只在最终答复通过验证 gate 后发送。

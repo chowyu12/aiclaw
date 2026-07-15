@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,6 +11,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/auth"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
+	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 	"github.com/chowyu12/aiclaw/pkg/httputil"
 	"github.com/chowyu12/aiclaw/pkg/sse"
 )
@@ -16,6 +19,13 @@ import (
 type ChatHandler struct {
 	store    store.Store
 	executor *agent.Executor
+}
+
+type agentRunDetail struct {
+	Run   *model.AgentRun       `json:"run"`
+	Steps []model.ExecutionStep `json:"steps"`
+	Files []*model.File         `json:"files,omitzero"`
+	Plan  *model.PlanState      `json:"plan,omitzero"`
 }
 
 func NewChatHandler(s store.Store, executor *agent.Executor) *ChatHandler {
@@ -26,6 +36,11 @@ func (h *ChatHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/chat/completions", h.Complete)
 	mux.HandleFunc("POST /api/v1/chat/stream", h.Stream)
 	mux.HandleFunc("POST /api/v1/chat/retry", h.RetryStream)
+	mux.HandleFunc("POST /api/v1/chat/runs", h.StartRun)
+	mux.HandleFunc("GET /api/v1/agent-runs", h.ListRuns)
+	mux.HandleFunc("GET /api/v1/agent-runs/{id}", h.GetRun)
+	mux.HandleFunc("GET /api/v1/agent-runs/{id}/stream", h.StreamRun)
+	mux.HandleFunc("DELETE /api/v1/agent-runs/{id}", h.CancelRun)
 	mux.HandleFunc("GET /api/v1/conversations", h.ListConversations)
 	mux.HandleFunc("GET /api/v1/conversations/{id}/messages", h.ListMessages)
 	mux.HandleFunc("DELETE /api/v1/conversations/{id}", h.DeleteConversation)
@@ -66,6 +81,7 @@ func (h *ChatHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.OK(w, model.ChatResponse{
+		RunID:          result.RunID,
 		ConversationID: result.ConversationID,
 		Message:        result.Content,
 		TokensUsed:     result.TokensUsed,
@@ -73,6 +89,193 @@ func (h *ChatHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		Files:          result.ToolFiles,
 		Plan:           result.Plan,
 	})
+}
+
+// StartRun starts an Agent independently from the request lifetime. Clients
+// receive the run ID immediately and consume the same StreamChunk protocol via
+// GET /agent-runs/{id}/stream.
+func (h *ChatHandler) StartRun(w http.ResponseWriter, r *http.Request) {
+	var req model.ChatRequest
+	if err := httputil.BindJSON(r, &req); err != nil {
+		httputil.BadRequest(w, "invalid request body")
+		return
+	}
+	fillIdentity(r, &req)
+	if req.Message == "" {
+		httputil.BadRequest(w, "message is required")
+		return
+	}
+	if req.UserID == "" {
+		req.UserID = "anonymous"
+	}
+
+	Metrics.IncChat()
+	run, err := h.executor.StartBackgroundRun(r.Context(), req)
+	if err != nil {
+		Metrics.IncErr()
+		if strings.Contains(err.Error(), "already has a running") {
+			httputil.Error(w, http.StatusConflict, err.Error())
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	httputil.OK(w, run)
+}
+
+func (h *ChatHandler) ListRuns(w http.ResponseWriter, r *http.Request) {
+	q := model.AgentRunListQuery{
+		AgentUUID:        strings.TrimSpace(r.URL.Query().Get("agent_uuid")),
+		ConversationUUID: strings.TrimSpace(r.URL.Query().Get("conversation_id")),
+		UserID:           strings.TrimSpace(r.URL.Query().Get("user_id")),
+		Status:           model.AgentRunStatus(strings.TrimSpace(r.URL.Query().Get("status"))),
+	}
+	q.Page, _ = strconv.Atoi(r.URL.Query().Get("page"))
+	q.PageSize, _ = strconv.Atoi(r.URL.Query().Get("page_size"))
+	if q.UserID == "" {
+		if identity := auth.IdentityFromContext(r.Context()); identity != nil && identity.IsWebSession() {
+			q.UserID = auth.DefaultChatUserID
+		}
+	}
+	runs, total, err := h.store.ListAgentRuns(r.Context(), q)
+	if err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	httputil.OKList(w, runs, total)
+}
+
+func (h *ChatHandler) GetRun(w http.ResponseWriter, r *http.Request) {
+	detail, err := h.loadRunDetail(r, r.PathValue("id"))
+	if err != nil {
+		h.writeRunLoadError(w, err)
+		return
+	}
+	httputil.OK(w, detail)
+}
+
+func (h *ChatHandler) StreamRun(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	run, events, unsubscribe, active, err := h.executor.SubscribeAgentRun(r.Context(), runID)
+	if err != nil {
+		h.writeRunLoadError(w, err)
+		return
+	}
+	sseWriter, ok := sse.NewWriter(w)
+	if !ok {
+		httputil.InternalError(w, "streaming not supported")
+		return
+	}
+	_ = sseWriter.WritePing()
+	stopPing := sseWriter.StartPing(r.Context(), 0)
+	defer stopPing()
+	if unsubscribe != nil {
+		defer unsubscribe()
+	}
+
+	if !active {
+		h.writeStoredRunTerminal(sseWriter, r, run)
+		return
+	}
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case event, ok := <-events:
+			if !ok {
+				latest, getErr := h.executor.GetAgentRun(r.Context(), runID)
+				if getErr == nil {
+					h.writeStoredRunTerminal(sseWriter, r, latest)
+				}
+				return
+			}
+			if event.Chunk != nil {
+				if err := writeStreamChunk(sseWriter, *event.Chunk); err != nil {
+					return
+				}
+				continue
+			}
+			if err := sseWriter.WriteJSON("run", event); err != nil {
+				return
+			}
+			if event.Type == model.AgentRunEventCompleted || event.Type == model.AgentRunEventFailed || event.Type == model.AgentRunEventCancelled {
+				_ = sseWriter.WriteDone()
+				return
+			}
+		}
+	}
+}
+
+func (h *ChatHandler) CancelRun(w http.ResponseWriter, r *http.Request) {
+	run, err := h.executor.CancelAgentRun(r.Context(), r.PathValue("id"))
+	if err != nil {
+		h.writeRunLoadError(w, err)
+		return
+	}
+	httputil.OK(w, run)
+}
+
+func (h *ChatHandler) loadRunDetail(r *http.Request, runID string) (*agentRunDetail, error) {
+	run, err := h.executor.GetAgentRun(r.Context(), runID)
+	if err != nil {
+		return nil, err
+	}
+	steps, err := h.store.ListExecutionStepsByRun(r.Context(), runID)
+	if err != nil {
+		return nil, err
+	}
+	detail := &agentRunDetail{Run: run, Steps: steps}
+	if run.MessageID == 0 {
+		return detail, nil
+	}
+	files, err := h.store.ListFilesByMessage(r.Context(), run.MessageID)
+	if err == nil {
+		detail.Files = files
+	}
+	detail.Plan = h.planForMessage(r, run.MessageID)
+	return detail, nil
+}
+
+func (h *ChatHandler) writeStoredRunTerminal(sseWriter *sse.Writer, r *http.Request, run *model.AgentRun) {
+	detail, err := h.loadRunDetail(r, run.UUID)
+	if err == nil {
+		run = detail.Run
+	}
+	if err == nil && run.Status == model.AgentRunSucceeded {
+		_ = writeStreamChunk(sseWriter, model.StreamChunk{
+			RunID:          detail.Run.UUID,
+			ConversationID: detail.Run.ConversationUUID,
+			MessageID:      detail.Run.MessageID,
+			Done:           true,
+			Content:        detail.Run.Content,
+			TokensUsed:     detail.Run.TokensUsed,
+			DurationMs:     detail.Run.DurationMs,
+			Steps:          detail.Steps,
+			Files:          detail.Files,
+			Plan:           detail.Plan,
+		})
+	}
+	eventType := model.AgentRunEventCompleted
+	if run.Status == model.AgentRunFailed {
+		eventType = model.AgentRunEventFailed
+	}
+	if run.Status == model.AgentRunCancelled {
+		eventType = model.AgentRunEventCancelled
+	}
+	_ = sseWriter.WriteJSON("run", model.AgentRunEvent{Type: eventType, RunID: run.UUID, Status: run.Status, Run: run, Error: run.Error})
+	_ = sseWriter.WriteDone()
+}
+
+func (h *ChatHandler) writeRunLoadError(w http.ResponseWriter, err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		httputil.NotFound(w, "agent run not found")
+		return
+	}
+	httputil.InternalError(w, err.Error())
 }
 
 func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +304,7 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 
 	Metrics.IncChat()
 	err := h.executor.ExecuteStream(r.Context(), req, func(chunk model.StreamChunk) error {
-		return sseWriter.WriteJSON("message", chunk)
+		return writeStreamChunk(sseWriter, chunk)
 	})
 	if err != nil {
 		Metrics.IncErr()
@@ -128,6 +331,13 @@ func (h *ChatHandler) RetryStream(w http.ResponseWriter, r *http.Request) {
 	conv, err := h.store.GetConversationByUUID(r.Context(), req.ConversationID)
 	if err != nil {
 		httputil.NotFound(w, "conversation not found")
+		return
+	}
+	if active, err := h.hasActiveConversationRun(r, conv.UUID); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	} else if active {
+		httputil.Error(w, http.StatusConflict, "stop the active agent run before retrying")
 		return
 	}
 
@@ -179,12 +389,24 @@ func (h *ChatHandler) RetryStream(w http.ResponseWriter, r *http.Request) {
 	defer stopPing()
 
 	if err := h.executor.ExecuteStream(r.Context(), chatReq, func(chunk model.StreamChunk) error {
-		return sseWriter.WriteJSON("message", chunk)
+		return writeStreamChunk(sseWriter, chunk)
 	}); err != nil {
 		sseWriter.WriteJSON("error", map[string]string{"error": err.Error()})
 		return
 	}
 	sseWriter.WriteDone()
+}
+
+// writeStreamChunk preserves the legacy message event while exposing stable
+// harness protocol records as their own SSE event type.
+func writeStreamChunk(sseWriter *sse.Writer, chunk model.StreamChunk) error {
+	if event, ok := chunk.HarnessEvent.(harnesspkg.Event); ok {
+		return sseWriter.WriteJSON("harness", event)
+	}
+	if event, ok := chunk.HarnessEvent.(*harnesspkg.Event); ok && event != nil {
+		return sseWriter.WriteJSON("harness", event)
+	}
+	return sseWriter.WriteJSON("message", chunk)
 }
 
 func (h *ChatHandler) ListConversations(w http.ResponseWriter, r *http.Request) {
@@ -245,25 +467,34 @@ func (h *ChatHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 			msgs[i].Files = files
 		}
 		if msg.Role == "assistant" {
-			if run, err := h.store.GetPlanRunByMessage(r.Context(), msg.ID); err == nil && run != nil {
-				if items, err := h.store.ListPlanItems(r.Context(), run.ID); err == nil {
-					msgs[i].Plan = &model.PlanState{
-						ID:             run.ID,
-						UUID:           run.UUID,
-						ConversationID: run.ConversationID,
-						MessageID:      run.MessageID,
-						Goal:           run.Goal,
-						Status:         run.Status,
-						RevisionReason: run.RevisionReason,
-						Items:          items,
-						UpdatedAt:      run.UpdatedAt,
-					}
-				}
-			}
+			msgs[i].Plan = h.planForMessage(r, msg.ID)
 		}
 	}
 
 	httputil.OK(w, msgs)
+}
+
+func (h *ChatHandler) planForMessage(r *http.Request, messageID int64) *model.PlanState {
+	run, err := h.store.GetPlanRunByMessage(r.Context(), messageID)
+	if err != nil || run == nil {
+		return nil
+	}
+	items, err := h.store.ListPlanItems(r.Context(), run.ID)
+	if err != nil {
+		return nil
+	}
+	return &model.PlanState{
+		ID:             run.ID,
+		UUID:           run.UUID,
+		ConversationID: run.ConversationID,
+		MessageID:      run.MessageID,
+		Goal:           run.Goal,
+		Source:         run.Source,
+		Status:         run.Status,
+		RevisionReason: run.RevisionReason,
+		Items:          items,
+		UpdatedAt:      run.UpdatedAt,
+	}
 }
 
 func (h *ChatHandler) ListSteps(w http.ResponseWriter, r *http.Request) {
@@ -300,9 +531,38 @@ func (h *ChatHandler) DeleteConversation(w http.ResponseWriter, r *http.Request)
 		httputil.BadRequest(w, "invalid id")
 		return
 	}
+	conv, err := h.store.GetConversation(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NotFound(w, "conversation not found")
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	if active, err := h.hasActiveConversationRun(r, conv.UUID); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	} else if active {
+		httputil.Error(w, http.StatusConflict, "stop the active agent run before deleting this conversation")
+		return
+	}
 	if err := h.store.DeleteConversation(r.Context(), id); err != nil {
 		httputil.InternalError(w, err.Error())
 		return
 	}
 	httputil.OK(w, nil)
+}
+
+func (h *ChatHandler) hasActiveConversationRun(r *http.Request, conversationUUID string) (bool, error) {
+	runs, _, err := h.store.ListAgentRuns(r.Context(), model.AgentRunListQuery{
+		ConversationUUID: conversationUUID,
+		Status:           model.AgentRunRunning,
+		Page:             1,
+		PageSize:         1,
+	})
+	if err != nil {
+		return false, err
+	}
+	return len(runs) > 0, nil
 }
