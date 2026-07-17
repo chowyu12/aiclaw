@@ -49,18 +49,9 @@ func Run(args []string, version string) error {
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
-	baseURL, err := normalizeServerURL(*serverURL)
+	c, err := newClient(*serverURL, *token, version)
 	if err != nil {
 		return err
-	}
-	if !strings.HasPrefix(strings.TrimSpace(*token), "rt-") {
-		return errors.New("a valid runtime token is required")
-	}
-	c := &client{
-		baseURL: baseURL,
-		token:   strings.TrimSpace(*token),
-		version: version,
-		http:    &http.Client{Timeout: 35 * time.Second},
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -71,6 +62,54 @@ func Run(args []string, version string) error {
 	fmt.Printf("Runtime connected to %s\n", c.baseURL)
 
 	go c.heartbeatLoop(ctx)
+	return c.claimLoop(ctx)
+}
+
+// StartEmbedded starts a local runtime worker inside the AiClaw server
+// process. It is intentionally not a separate daemon or shell command.
+func StartEmbedded(ctx context.Context, serverURL, token, version string) error {
+	c, err := newClient(serverURL, token, version)
+	if err != nil {
+		return err
+	}
+	go c.runEmbedded(ctx)
+	return nil
+}
+
+func newClient(serverURL, token, version string) (*client, error) {
+	baseURL, err := normalizeServerURL(serverURL)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.HasPrefix(strings.TrimSpace(token), "rt-") {
+		return nil, errors.New("a valid runtime token is required")
+	}
+	return &client{
+		baseURL: baseURL,
+		token:   strings.TrimSpace(token),
+		version: version,
+		http:    &http.Client{Timeout: 35 * time.Second},
+	}, nil
+}
+
+func (c *client) runEmbedded(ctx context.Context) {
+	for {
+		if err := c.heartbeat(ctx); err == nil {
+			break
+		} else if ctx.Err() != nil {
+			return
+		} else {
+			fmt.Fprintf(os.Stderr, "embedded runtime heartbeat failed: %v\n", err)
+		}
+		if !waitContext(ctx, defaultPollInterval) {
+			return
+		}
+	}
+	go c.heartbeatLoop(ctx)
+	_ = c.claimLoop(ctx)
+}
+
+func (c *client) claimLoop(ctx context.Context) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
@@ -122,7 +161,36 @@ func (c *client) heartbeatLoop(ctx context.Context) {
 }
 
 func (c *client) heartbeat(ctx context.Context) error {
-	return c.post(ctx, "/api/v1/runtime-daemon/heartbeat", map[string]string{"version": c.version}, nil)
+	return c.post(ctx, "/api/v1/runtime-daemon/heartbeat", map[string]any{
+		"version": c.version,
+		"agents":  DetectLocalAgents(),
+	}, nil)
+}
+
+// DetectLocalAgents returns supported agent CLIs available on this machine.
+func DetectLocalAgents() []string {
+	return detectLocalAgents(exec.LookPath)
+}
+
+func detectLocalAgents(lookPath func(string) (string, error)) []string {
+	known := []struct {
+		agentType string
+		command   string
+	}{
+		{model.RuntimeAgentTypeCodex, "codex"},
+		{model.RuntimeAgentTypeCursor, "cursor-agent"},
+		{model.RuntimeAgentTypeClaudeCode, "claude"},
+		{model.RuntimeAgentTypeCodeBuddy, "codebuddy"},
+		{model.RuntimeAgentTypeOpenClaw, "openclaw"},
+		{model.RuntimeAgentTypeHermes, "hermes"},
+	}
+	detected := make([]string, 0, len(known))
+	for _, candidate := range known {
+		if _, err := lookPath(candidate.command); err == nil {
+			detected = append(detected, candidate.agentType)
+		}
+	}
+	return detected
 }
 
 func (c *client) claim(ctx context.Context) (*model.RuntimeTask, error) {
@@ -146,6 +214,11 @@ func (c *client) execute(parent context.Context, task *model.RuntimeTask) {
 		ctx, cancel = context.WithCancel(parent)
 	}
 	defer cancel()
+	if agentType, ok := model.NormalizeRuntimeAgentType(task.AgentType); ok && agentType != model.RuntimeAgentTypeCustom {
+		content, errorText := c.executeKnownProvider(parent, ctx, task)
+		c.complete(parent, task.RunID, content, errorText)
+		return
+	}
 
 	cmd, err := commandForTask(ctx, task)
 	if err != nil {

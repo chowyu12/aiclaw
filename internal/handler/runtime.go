@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net/http"
@@ -31,6 +32,8 @@ func (h *RuntimeHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/v1/runtimes/{id}", h.Update)
 	mux.HandleFunc("DELETE /api/v1/runtimes/{id}", h.Delete)
 	mux.HandleFunc("POST /api/v1/runtimes/{id}/reset-token", h.ResetToken)
+	mux.HandleFunc("GET /api/v1/runtimes/{id}/agents", h.ListRuntimeAgents)
+	mux.HandleFunc("PUT /api/v1/runtimes/{id}/agents/{agentType}", h.UpdateRuntimeAgent)
 
 	mux.HandleFunc("POST /api/v1/runtime-daemon/heartbeat", h.Heartbeat)
 	mux.HandleFunc("POST /api/v1/runtime-daemon/tasks/claim", h.Claim)
@@ -47,6 +50,10 @@ func (h *RuntimeHandler) List(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	for _, item := range items {
 		item.RefreshStatus(now)
+		if err := h.attachRuntimeAgentConfigs(r.Context(), item); err != nil {
+			httputil.InternalError(w, err.Error())
+			return
+		}
 	}
 	httputil.OKList(w, items, total)
 }
@@ -59,8 +66,8 @@ func (h *RuntimeHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	req.Command = strings.TrimSpace(req.Command)
-	if req.Name == "" || req.Command == "" {
-		httputil.BadRequest(w, "name and command are required")
+	if req.Name == "" {
+		httputil.BadRequest(w, "name is required")
 		return
 	}
 	agentType, ok := model.NormalizeRuntimeAgentType(req.AgentType)
@@ -102,6 +109,10 @@ func (h *RuntimeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runtime.RefreshStatus(time.Now())
+	if err := h.attachRuntimeAgentConfigs(r.Context(), runtime); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	}
 	httputil.OK(w, runtime)
 }
 
@@ -119,6 +130,10 @@ func (h *RuntimeHandler) Update(w http.ResponseWriter, r *http.Request) {
 		httputil.InternalError(w, err.Error())
 		return
 	}
+	if existing.Builtin {
+		httputil.BadRequest(w, "built-in local runtime is managed automatically")
+		return
+	}
 	var req model.UpdateRuntimeReq
 	if err := httputil.BindJSON(r, &req); err != nil {
 		httputil.BadRequest(w, "invalid request body")
@@ -134,10 +149,6 @@ func (h *RuntimeHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Command != nil {
 		command := strings.TrimSpace(*req.Command)
-		if command == "" {
-			httputil.BadRequest(w, "command is required")
-			return
-		}
 		req.Command = &command
 	}
 	if req.Args != nil && !validRuntimeArgs(*req.Args) {
@@ -185,6 +196,19 @@ func (h *RuntimeHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	runtime, err := h.store.GetRuntime(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NotFound(w, "runtime not found")
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	if runtime.Builtin {
+		httputil.Error(w, http.StatusConflict, "built-in local runtime cannot be deleted")
+		return
+	}
 	agents, _, err := h.store.ListAgents(r.Context(), model.ListQuery{Page: 1, PageSize: 10000})
 	if err != nil {
 		httputil.InternalError(w, err.Error())
@@ -212,6 +236,19 @@ func (h *RuntimeHandler) ResetToken(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	runtime, err := h.store.GetRuntime(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NotFound(w, "runtime not found")
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	if runtime.Builtin {
+		httputil.Error(w, http.StatusConflict, "built-in local runtime does not use a connection token")
+		return
+	}
 	token, err := h.store.ResetRuntimeToken(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -230,17 +267,105 @@ func (h *RuntimeHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Version string `json:"version"`
+		Version string   `json:"version"`
+		Agents  []string `json:"agents"`
 	}
 	if err := httputil.BindJSON(r, &req); err != nil {
 		httputil.BadRequest(w, "invalid request body")
 		return
 	}
-	if err := h.store.TouchRuntime(r.Context(), runtimeID, req.Version, time.Now()); err != nil {
+	agents, ok := normalizeDetectedAgents(req.Agents)
+	if !ok {
+		httputil.BadRequest(w, "unsupported detected runtime agent")
+		return
+	}
+	if err := h.store.TouchRuntime(r.Context(), runtimeID, req.Version, agents, time.Now()); err != nil {
 		httputil.InternalError(w, err.Error())
 		return
 	}
-	httputil.OK(w, map[string]string{"status": model.RuntimeStatusOnline})
+	if err := h.store.EnsureRuntimeAgentConfigs(r.Context(), runtimeID, agents); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	httputil.OK(w, map[string]any{"status": model.RuntimeStatusOnline, "agents": agents})
+}
+
+func (h *RuntimeHandler) ListRuntimeAgents(w http.ResponseWriter, r *http.Request) {
+	id, ok := runtimePathID(w, r)
+	if !ok {
+		return
+	}
+	runtime, err := h.store.GetRuntime(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NotFound(w, "runtime not found")
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	if err := h.attachRuntimeAgentConfigs(r.Context(), runtime); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	httputil.OK(w, runtime.AgentConfigs)
+}
+
+func (h *RuntimeHandler) UpdateRuntimeAgent(w http.ResponseWriter, r *http.Request) {
+	id, ok := runtimePathID(w, r)
+	if !ok {
+		return
+	}
+	agentType, valid := model.NormalizeRuntimeAgentType(r.PathValue("agentType"))
+	if !valid || agentType == model.RuntimeAgentTypeCustom {
+		httputil.BadRequest(w, "unsupported runtime agent type")
+		return
+	}
+	runtime, err := h.store.GetRuntime(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NotFound(w, "runtime not found")
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	if !runtime.HasDetectedAgent(agentType) {
+		httputil.BadRequest(w, "runtime has not detected this local agent CLI")
+		return
+	}
+	var req model.UpdateRuntimeAgentConfigReq
+	if err := httputil.BindJSON(r, &req); err != nil {
+		httputil.BadRequest(w, "invalid request body")
+		return
+	}
+	if req.ModelName != nil {
+		modelName := strings.TrimSpace(*req.ModelName)
+		req.ModelName = &modelName
+		spec, _ := model.LocalCLISpecFor(agentType)
+		if modelName != "" && !spec.SupportsModel() {
+			httputil.BadRequest(w, "this local agent CLI does not support per-task model selection")
+			return
+		}
+	}
+	if err := h.store.EnsureRuntimeAgentConfigs(r.Context(), id, []string{agentType}); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	if err := h.store.UpdateRuntimeAgentConfig(r.Context(), id, agentType, req); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			httputil.NotFound(w, "runtime agent not found")
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	config, err := h.store.GetRuntimeAgentConfig(r.Context(), id, agentType)
+	if err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	httputil.OK(w, config)
 }
 
 func (h *RuntimeHandler) Claim(w http.ResponseWriter, r *http.Request) {
@@ -320,4 +445,42 @@ func validRuntimeArgs(args []string) bool {
 		}
 	}
 	return true
+}
+
+func normalizeDetectedAgents(items []string) ([]string, bool) {
+	seen := make(map[string]struct{}, len(items))
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		agentType, ok := model.NormalizeRuntimeAgentType(item)
+		if !ok || agentType == model.RuntimeAgentTypeCustom {
+			return nil, false
+		}
+		if _, exists := seen[agentType]; exists {
+			continue
+		}
+		seen[agentType] = struct{}{}
+		result = append(result, agentType)
+	}
+	return result, true
+}
+
+func (h *RuntimeHandler) attachRuntimeAgentConfigs(ctx context.Context, runtime *model.Runtime) error {
+	if runtime == nil {
+		return nil
+	}
+	configs, err := h.store.ListRuntimeAgentConfigs(ctx, runtime.ID)
+	if err != nil {
+		return err
+	}
+	byType := make(map[string]model.RuntimeAgentConfig, len(configs))
+	for _, config := range configs {
+		byType[config.AgentType] = config
+	}
+	runtime.AgentConfigs = runtime.AgentConfigs[:0]
+	for _, agentType := range runtime.DetectedAgents {
+		if config, ok := byType[agentType]; ok {
+			runtime.AgentConfigs = append(runtime.AgentConfigs, config)
+		}
+	}
+	return nil
 }

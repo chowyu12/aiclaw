@@ -10,6 +10,7 @@ import (
 type Store interface {
 	AgentStore
 	RuntimeStore
+	RuntimeAgentConfigStore
 	ProviderStore
 	ToolStore
 	ChannelStore
@@ -38,9 +39,16 @@ type RuntimeStore interface {
 	GetRuntimeByToken(ctx context.Context, token string) (*model.Runtime, error)
 	ListRuntimes(ctx context.Context, q model.ListQuery) ([]*model.Runtime, int64, error)
 	UpdateRuntime(ctx context.Context, id int64, req model.UpdateRuntimeReq) error
-	TouchRuntime(ctx context.Context, id int64, version string, seenAt time.Time) error
+	TouchRuntime(ctx context.Context, id int64, version string, detectedAgents []string, seenAt time.Time) error
 	ResetRuntimeToken(ctx context.Context, id int64) (string, error)
 	DeleteRuntime(ctx context.Context, id int64) error
+}
+
+type RuntimeAgentConfigStore interface {
+	EnsureRuntimeAgentConfigs(ctx context.Context, runtimeID int64, agentTypes []string) error
+	ListRuntimeAgentConfigs(ctx context.Context, runtimeID int64) ([]model.RuntimeAgentConfig, error)
+	GetRuntimeAgentConfig(ctx context.Context, runtimeID int64, agentType string) (*model.RuntimeAgentConfig, error)
+	UpdateRuntimeAgentConfig(ctx context.Context, runtimeID int64, agentType string, req model.UpdateRuntimeAgentConfigReq) error
 }
 
 type AgentStore interface {

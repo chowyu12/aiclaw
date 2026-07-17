@@ -34,7 +34,7 @@
           </template>
         </el-table-column>
         <el-table-column :label="i18n.t('agents.model')" min-width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.execution_mode === 'local' ? 'Local CLI' : row.model_name }}</template>
+          <template #default="{ row }">{{ row.execution_mode === 'local' ? agentTypeName(row.local_agent_type) : row.model_name }}</template>
         </el-table-column>
         <el-table-column :label="i18n.t('agents.maxIterations')" prop="max_iterations" width="110" align="center" />
         <el-table-column :label="i18n.t('agents.maxHistory')" prop="max_history" width="90" align="center" />
@@ -84,6 +84,10 @@ function providerName(id: number): string {
 
 function runtimeName(id: number): string {
   return runtimes.value.find((runtime) => runtime.id === id)?.name ?? '-'
+}
+
+function agentTypeName(agentType: string): string {
+  return ({ codex: 'Codex', cursor: 'Cursor', 'claude-code': 'Claude Code', codebuddy: 'Tencent CodeBuddy', openclaw: 'OpenClaw', hermes: 'Hermes Agent' } as Record<string, string>)[agentType] ?? 'Local CLI'
 }
 
 async function loadAgents() {

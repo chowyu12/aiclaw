@@ -13,7 +13,7 @@ func TestLocalAgentRunLifecycle(t *testing.T) {
 	store := newMockStore()
 	now := time.Now()
 	runtime := &model.Runtime{
-		Name: "Local Codex", Command: "codex", Args: model.StringSlice{"exec", "-"},
+		Name: "Local Codex", DetectedAgents: model.StringSlice{model.RuntimeAgentTypeCodex},
 		Status: model.RuntimeStatusOnline, LastSeenAt: &now,
 	}
 	if err := store.CreateRuntime(ctx, runtime); err != nil {
@@ -21,7 +21,7 @@ func TestLocalAgentRunLifecycle(t *testing.T) {
 	}
 	agent := &model.Agent{
 		UUID: "local-agent", Name: "Local Agent", IsDefault: true,
-		ExecutionMode: model.AgentExecutionLocal, RuntimeID: runtime.ID,
+		ExecutionMode: model.AgentExecutionLocal, RuntimeID: runtime.ID, LocalAgentType: model.RuntimeAgentTypeCodex,
 		WorkingDir: "/tmp/project", SystemPrompt: "Answer concisely.", MaxHistory: 10,
 	}
 	if err := store.CreateAgent(ctx, agent); err != nil {
@@ -99,6 +99,53 @@ func TestLocalAgentRunRejectsOfflineRuntime(t *testing.T) {
 	_, err := executor.StartBackgroundRun(ctx, model.ChatRequest{AgentUUID: agent.UUID, UserID: "user", Message: "hello"})
 	if err == nil || !strings.Contains(err.Error(), "offline") {
 		t.Fatalf("expected offline error, got %v", err)
+	}
+}
+
+func TestLocalAgentConfigControlsEnablementAndModel(t *testing.T) {
+	ctx := t.Context()
+	store := newMockStore()
+	now := time.Now()
+	runtime := &model.Runtime{
+		Name: "Local Codex", DetectedAgents: model.StringSlice{model.RuntimeAgentTypeCodex},
+		Status: model.RuntimeStatusOnline, LastSeenAt: &now,
+	}
+	if err := store.CreateRuntime(ctx, runtime); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnsureRuntimeAgentConfigs(ctx, runtime.ID, []string{model.RuntimeAgentTypeCodex}); err != nil {
+		t.Fatal(err)
+	}
+	disabled := false
+	if err := store.UpdateRuntimeAgentConfig(ctx, runtime.ID, model.RuntimeAgentTypeCodex, model.UpdateRuntimeAgentConfigReq{Enabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	agent := &model.Agent{UUID: "local-agent", Name: "Local Agent", ExecutionMode: model.AgentExecutionLocal, RuntimeID: runtime.ID, LocalAgentType: model.RuntimeAgentTypeCodex}
+	if err := store.CreateAgent(ctx, agent); err != nil {
+		t.Fatal(err)
+	}
+	executor := NewExecutor(store, NewToolRegistry(), nil)
+	if _, err := executor.StartBackgroundRun(ctx, model.ChatRequest{AgentUUID: agent.UUID, UserID: "user", Message: "hello"}); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("expected disabled runtime agent error, got %v", err)
+	}
+
+	enabled := true
+	modelName := "gpt-test"
+	if err := store.UpdateRuntimeAgentConfig(ctx, runtime.ID, model.RuntimeAgentTypeCodex, model.UpdateRuntimeAgentConfigReq{Enabled: &enabled, ModelName: &modelName}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executor.StartBackgroundRun(ctx, model.ChatRequest{AgentUUID: agent.UUID, UserID: "user", Message: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := executor.ClaimLocalAgentRun(ctx, runtime.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(task.Args, " "); got != "exec -m gpt-test -" {
+		t.Fatalf("task args = %q", got)
+	}
+	if task.AgentType != model.RuntimeAgentTypeCodex || task.ModelName != "gpt-test" {
+		t.Fatalf("provider task metadata = type=%q model=%q", task.AgentType, task.ModelName)
 	}
 }
 

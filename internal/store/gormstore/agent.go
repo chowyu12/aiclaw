@@ -23,6 +23,9 @@ func (s *GormStore) CreateAgent(ctx context.Context, a *model.Agent) error {
 	if a.ExecutionMode == "" {
 		a.ExecutionMode = model.AgentExecutionManaged
 	}
+	if a.LocalAgentType == "" {
+		a.LocalAgentType = model.RuntimeAgentTypeCustom
+	}
 	return s.db.WithContext(ctx).Create(a).Error
 }
 
@@ -93,6 +96,9 @@ func (s *GormStore) UpdateAgent(ctx context.Context, id int64, req *model.Update
 	}
 	if req.RuntimeID != nil {
 		updates["runtime_id"] = *req.RuntimeID
+	}
+	if req.LocalAgentType != nil {
+		updates["local_agent_type"] = *req.LocalAgentType
 	}
 	if req.WorkingDir != nil {
 		updates["working_dir"] = *req.WorkingDir

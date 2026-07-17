@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -24,6 +26,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/daemon"
 	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/internal/runtimeclient"
 	"github.com/chowyu12/aiclaw/internal/scheduler"
 	"github.com/chowyu12/aiclaw/internal/server"
 	skillspkg "github.com/chowyu12/aiclaw/internal/skills"
@@ -135,6 +138,14 @@ func Run(opts Options) {
 
 	registry := agentpkg.NewToolRegistry()
 	executor := agentpkg.NewExecutor(store, registry, ws)
+	localRuntime, err := runtimeclient.EnsureBuiltinRuntime(context.Background(), store, opts.Version)
+	if err != nil {
+		log.WithError(err).Fatal("initialize built-in local runtime failed")
+	}
+	if err := store.EnsureRuntimeAgentConfigs(context.Background(), localRuntime.ID, []string(localRuntime.DetectedAgents)); err != nil {
+		log.WithError(err).Fatal("initialize built-in runtime agents failed")
+	}
+	log.WithFields(log.Fields{"runtime": localRuntime.Name, "agents": localRuntime.DetectedAgents}).Info("built-in local runtime initialized")
 
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
@@ -173,6 +184,9 @@ func Run(opts Options) {
 			log.WithError(err).Fatal("server error")
 		}
 	}()
+	if err := runtimeclient.StartEmbedded(appCtx, localRuntimeURL(cfg.Server.Host, cfg.Server.Port), localRuntime.Token, opts.Version); err != nil {
+		log.WithError(err).Fatal("start built-in local runtime failed")
+	}
 
 	startConfigHotReload(rt)
 	startTmpCleanup(ws)
@@ -284,4 +298,13 @@ func webConsoleURL(host string, port int, token string) string {
 		h = "localhost"
 	}
 	return fmt.Sprintf("http://%s:%d/?token=%s", h, port, url.QueryEscape(strings.TrimSpace(token)))
+}
+
+func localRuntimeURL(host string, port int) string {
+	h := strings.TrimSpace(host)
+	switch h {
+	case "", "0.0.0.0", "::", "[::]":
+		h = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(h, strconv.Itoa(port))
 }
