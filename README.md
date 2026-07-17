@@ -14,6 +14,7 @@ It is designed for people who want an agent system that can do real work: read a
 - Two-level web search configuration: model-native search for supported models, or external search engines such as Tavily, SerpAPI, and Aliyun IQS.
 - Persistent conversations, execution steps, generated files, and plan state in SQLite, MySQL, or PostgreSQL.
 - Web console for providers, agents, tools, skills, channels, chat, and execution logs.
+- Local agent runtimes that connect outward, execute user-configured CLI agents, and stream replies into the same chat UI.
 - Messaging-channel integrations for WeCom, WeChat, Feishu, DingTalk, WhatsApp, and Telegram.
 - Single-binary deployment with the frontend embedded into the Go server.
 
@@ -50,6 +51,7 @@ AiClaw has five major runtime layers:
 | Harness runtime | Turns the user objective into a task contract, records evidence, validates tool/final/save stages, and asks the model to correct incomplete work. |
 | Tool system | Built-in tools, custom HTTP tools, custom command tools, MCP tools, and skill-defined tools. |
 | Persistence | Conversations, messages, execution steps, generated files, memory, schedules, and runtime plans. |
+| Local runtime client | Claims queued local-Agent runs and launches argv commands on the user's machine without a shell. |
 
 The normal execution loop is:
 
@@ -105,6 +107,48 @@ Disconnecting or refreshing the browser only detaches that subscriber. The run
 continues in the executor until it succeeds, fails, or is explicitly cancelled.
 The live event hub keeps a bounded replay for short reconnects; the database is
 the source of truth for completed runs and after a service restart.
+
+## Local Agent Runtimes
+
+AiClaw can chat with an agent CLI installed on another machine without exposing
+that machine to inbound network traffic:
+
+1. Open **Runtimes** in the web console and create a runtime. Configure an
+   executable and fixed argv arguments, for example `codex` with
+   `["exec", "-"]`.
+2. Copy the generated connection command and run it on the machine that has the
+   CLI installed:
+
+   ```bash
+   aiclaw runtime connect --server https://your-aiclaw.example.com --token rt-...
+   ```
+
+3. Create an Agent with execution mode **Local**, bind it to the runtime, and
+   optionally set a local working directory.
+4. Select that Agent in Chat. The runtime claims the queued turn, supplies the
+   conversation using the selected CLI profile, and streams stdout back into
+   the existing durable run.
+
+Runtime commands are executed directly as `command + args`; they are never
+passed through a shell. Runtime tokens are restricted to heartbeat, claim,
+stream, and completion endpoints.
+
+The Runtime form includes these non-interactive CLI presets:
+
+| CLI | Baseline command | Prompt delivery |
+| --- | --- | --- |
+| OpenAI Codex | `codex exec -` | stdin |
+| Cursor | `cursor-agent -p --output-format text` | final argv argument |
+| Claude Code | `claude -p --output-format text` | final argv argument |
+| Tencent CodeBuddy | `codebuddy -p --output-format text` | final argv argument |
+| OpenClaw | `openclaw agent --local --message` | final argv argument |
+| Hermes Agent | `hermes chat -q` | final argv argument |
+| Custom CLI | user configured | stdin or final argv argument |
+
+The presets do not change local CLI login, approval, or sandbox behavior. The
+similarly named WorkBuddy product does not currently have a documented
+standalone headless CLI; it needs an official API or CLI contract before it can
+be added as a Runtime profile.
 
 ## Harness Runtime
 

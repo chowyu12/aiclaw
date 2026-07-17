@@ -6,6 +6,9 @@ export interface Agent {
   is_default: boolean
   name: string
   description: string
+  execution_mode: 'managed' | 'local'
+  runtime_id: number
+  working_dir: string
   system_prompt: string
   provider_id: number
   model_name: string
@@ -34,6 +37,9 @@ export interface Agent {
 export interface UpdateAgentPayload {
   name?: string
   description?: string
+  execution_mode?: 'managed' | 'local'
+  runtime_id?: number
+  working_dir?: string
   system_prompt?: string
   provider_id?: number
   model_name?: string
@@ -58,6 +64,9 @@ export interface UpdateAgentPayload {
 export interface CreateAgentPayload {
   name: string
   description?: string
+  execution_mode?: 'managed' | 'local'
+  runtime_id?: number
+  working_dir?: string
   system_prompt?: string
   provider_id?: number
   model_name?: string

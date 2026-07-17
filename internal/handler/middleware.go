@@ -70,7 +70,7 @@ func (rl *RateLimiter) Rejected() int64 { return rl.rejected.Load() }
 
 func (rl *RateLimiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/api/v1/runtime-daemon/") {
 			next.ServeHTTP(w, r)
 			return
 		}

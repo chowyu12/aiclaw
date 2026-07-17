@@ -36,7 +36,9 @@ func (h *agentRunHub) start(runID string, cancel context.CancelFunc) {
 		return
 	}
 	h.mu.Lock()
-	h.active[runID] = &activeAgentRun{cancel: cancel, subscribers: make(map[uint64]chan model.AgentRunEvent)}
+	if _, exists := h.active[runID]; !exists {
+		h.active[runID] = &activeAgentRun{cancel: cancel, subscribers: make(map[uint64]chan model.AgentRunEvent)}
+	}
 	h.mu.Unlock()
 }
 

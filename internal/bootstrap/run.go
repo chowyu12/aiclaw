@@ -20,10 +20,10 @@ import (
 
 	agentpkg "github.com/chowyu12/aiclaw/internal/agent"
 	"github.com/chowyu12/aiclaw/internal/auth"
-	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/channels"
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/daemon"
+	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/scheduler"
 	"github.com/chowyu12/aiclaw/internal/server"
 	skillspkg "github.com/chowyu12/aiclaw/internal/skills"
@@ -157,7 +157,7 @@ func Run(opts Options) {
 	})
 	server.MountEmbeddedFrontend(mux)
 
-	authCfg := auth.Config{AgentStore: store}
+	authCfg := auth.Config{AgentStore: store, RuntimeStore: store}
 	wrapped := server.WrapWithAuthAndLog(mux, authCfg)
 
 	srv := &http.Server{

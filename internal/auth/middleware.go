@@ -15,8 +15,13 @@ type AgentStore interface {
 	GetAgentByToken(ctx context.Context, token string) (*model.Agent, error)
 }
 
+type RuntimeStore interface {
+	GetRuntimeByToken(ctx context.Context, token string) (*model.Runtime, error)
+}
+
 type Config struct {
-	AgentStore AgentStore
+	AgentStore   AgentStore
+	RuntimeStore RuntimeStore
 }
 
 // Middleware 认证流程：提取 token → Web token 或 Agent token 校验 → 权限检查 → 放行。
@@ -62,6 +67,16 @@ func extractToken(r *http.Request) string {
 }
 
 func authenticate(cfg Config, ctx context.Context, token string) (*Identity, error) {
+	if strings.HasPrefix(token, "rt-") {
+		if cfg.RuntimeStore == nil {
+			return nil, errors.New("runtime authentication is disabled")
+		}
+		runtime, err := cfg.RuntimeStore.GetRuntimeByToken(ctx, token)
+		if err != nil || runtime == nil || runtime.Token == "" {
+			return nil, errors.New("invalid runtime token")
+		}
+		return &Identity{Kind: KindRuntime, RuntimeID: runtime.ID}, nil
+	}
 	if strings.HasPrefix(token, "ag-") {
 		ag, err := cfg.AgentStore.GetAgentByToken(ctx, token)
 		if err != nil || ag == nil || ag.Token == "" {
@@ -77,6 +92,12 @@ func authenticate(cfg Config, ctx context.Context, token string) (*Identity, err
 }
 
 func authorize(id *Identity, path string) error {
+	if id.IsRuntime() {
+		if !strings.HasPrefix(path, "/api/v1/runtime-daemon/") {
+			return errors.New("runtime token can only access runtime daemon endpoints")
+		}
+		return nil
+	}
 	if id.IsAgentToken() {
 		if !strings.HasPrefix(path, "/api/v1/chat/") {
 			return errors.New("agent token can only access chat endpoints")

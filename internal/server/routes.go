@@ -30,6 +30,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, p APIParams) {
 	handler.NewAuthHandler(p.DatabaseConfigured).Register(mux)
 	handler.NewProviderHandler(p.Store).Register(mux)
 	handler.NewAgentHandler(p.Store, p.WS).Register(mux)
+	handler.NewRuntimeHandler(p.Store, p.Executor).Register(mux)
 	handler.NewToolHandler(p.Store).Register(mux)
 	handler.NewSkillsHandler(p.WS).Register(mux)
 	handler.NewMCPHandler(p.Store).Register(mux)

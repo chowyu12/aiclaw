@@ -48,7 +48,7 @@
               <el-icon :size="22"><Cpu /></el-icon>
             </div>
             <div class="agent-info">
-              <div class="agent-model agent-model--solo">{{ currentAgent.model_name }}</div>
+              <div class="agent-model agent-model--solo">{{ currentAgentTarget }}</div>
             </div>
             <router-link :to="currentAgent?.id ? `/agents/${currentAgent.id}/edit` : '/agents'" class="settings-link">
               <el-icon :size="14"><Setting /></el-icon>
@@ -95,7 +95,7 @@
       <header class="chat-main-head">
         <div class="chat-main-head-left">
           <h1 class="chat-main-title">{{ i18n.t('chat.title') }}</h1>
-          <p v-if="currentAgent" class="chat-main-sub">{{ currentAgentName }} · {{ currentAgent.model_name }}</p>
+          <p v-if="currentAgent" class="chat-main-sub">{{ currentAgentName }} · {{ currentAgentTarget }}</p>
           <p v-else class="chat-main-sub muted">{{ i18n.t('chat.notConfigured') }}</p>
         </div>
       </header>
@@ -197,7 +197,7 @@
                   <el-icon :size="14"><CopyDocument /></el-icon>
                   <span>{{ copiedMsgIdx === i ? i18n.t('chat.copied') : i18n.t('chat.copy') }}</span>
                 </button>
-                <button v-if="msg.role === 'assistant'" class="action-btn" @click="retryMessage(i)" :disabled="streaming" :title="i18n.t('chat.retry')">
+                <button v-if="msg.role === 'assistant' && currentAgent?.execution_mode !== 'local'" class="action-btn" @click="retryMessage(i)" :disabled="streaming" :title="i18n.t('chat.retry')">
                   <el-icon :size="14"><RefreshRight /></el-icon>
                   <span>{{ i18n.t('chat.retry') }}</span>
                 </button>
@@ -469,19 +469,19 @@
         <!-- 输入框 -->
         <div class="composer">
           <div class="composer-tools">
-            <label class="tool-btn" :class="{ off: !defaultAgent || streaming || uploading }" :title="i18n.t('chat.uploadFile')">
+            <label class="tool-btn" :class="{ off: !defaultAgent || streaming || uploading || isLocalAgentSelected }" :title="i18n.t('chat.uploadFile')">
               <el-icon :size="18"><UploadFilled /></el-icon>
               <input
                 type="file" multiple style="display:none"
                 accept=".txt,.md,.json,.csv,.xml,.yaml,.yml,.log,.pdf,.docx,.doc,.xlsx,.xls,.png,.jpg,.jpeg,.gif,.webp"
-                :disabled="!defaultAgent || streaming || uploading"
+                :disabled="!defaultAgent || streaming || uploading || isLocalAgentSelected"
                 @change="handleFileUpload"
               />
             </label>
             <button
               class="tool-btn"
-              :class="{ off: !defaultAgent || streaming, active: showURLInput }"
-              :disabled="!defaultAgent || streaming"
+              :class="{ off: !defaultAgent || streaming || isLocalAgentSelected, active: showURLInput }"
+              :disabled="!defaultAgent || streaming || isLocalAgentSelected"
               @click="showURLInput = !showURLInput"
               :title="i18n.t('chat.addUrl')"
             >
@@ -656,6 +656,8 @@ const i18n = useI18nStore()
 const currentAgentName = computed(() => agentStore.activeAgent?.name || defaultAgent.value?.name || 'Agent')
 
 const currentAgent = computed(() => agentStore.activeAgent || defaultAgent.value)
+const currentAgentTarget = computed(() => currentAgent.value?.execution_mode === 'local' ? 'Local Runtime' : (currentAgent.value?.model_name || '-'))
+const isLocalAgentSelected = computed(() => currentAgent.value?.execution_mode === 'local')
 
 onMounted(async () => {
   await agentStore.loadAgents()
@@ -1003,7 +1005,7 @@ function sendMessage() {
       }
     },
     () => finishSend(),
-    (_err: string) => finishSend(),
+    (err: string) => { ElMessage.error(err); finishSend() },
     (run) => {
       if (run.conversation_uuid) conversationId.value = run.conversation_uuid
     },

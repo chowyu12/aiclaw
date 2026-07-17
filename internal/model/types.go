@@ -88,3 +88,41 @@ func (s *Int64Slice) Scan(value any) error {
 }
 
 func (Int64Slice) GormDataType() string { return "text" }
+
+// StringSlice stores an argv-style string slice as JSON. It is used for
+// runtime fixed arguments so commands are executed directly, without a shell.
+type StringSlice []string
+
+func (s StringSlice) Value() (driver.Value, error) {
+	if len(s) == 0 {
+		return "[]", nil
+	}
+	b, err := json.Marshal([]string(s))
+	if err != nil {
+		return nil, err
+	}
+	return string(b), nil
+}
+
+func (s *StringSlice) Scan(value any) error {
+	if value == nil {
+		*s = nil
+		return nil
+	}
+	var data []byte
+	switch v := value.(type) {
+	case []byte:
+		data = v
+	case string:
+		data = []byte(v)
+	default:
+		return fmt.Errorf("stringslice: unsupported scan type %T", value)
+	}
+	if len(data) == 0 || string(data) == "null" {
+		*s = nil
+		return nil
+	}
+	return json.Unmarshal(data, (*[]string)(s))
+}
+
+func (StringSlice) GormDataType() string { return "text" }

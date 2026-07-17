@@ -22,9 +22,32 @@
               <el-form-item label="描述" class="af-cell af-cell--desc">
                 <el-input v-model="agentForm.description" placeholder="简要描述用途（可选）" />
               </el-form-item>
+              <el-form-item label="执行方式" class="af-cell af-cell--mode">
+                <el-radio-group v-model="agentForm.execution_mode">
+                  <el-radio-button label="managed">内置</el-radio-button>
+                  <el-radio-button label="local">本地</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
             </div>
 
-            <div class="af-row-inline">
+            <div v-if="isLocalAgent" class="af-row-inline">
+              <el-form-item label="运行时" required class="af-cell">
+                <el-select v-model="agentForm.runtime_id" filterable style="width:100%" placeholder="选择已连接的运行时">
+                  <el-option v-for="runtime in runtimes" :key="runtime.id" :label="runtime.name" :value="runtime.id">
+                    <span>{{ runtime.name }}</span>
+                    <el-tag size="small" style="margin-left:8px" :type="runtime.status === 'online' ? 'success' : 'info'">
+                      {{ runtime.status === 'online' ? '在线' : '离线' }}
+                    </el-tag>
+                  </el-option>
+                </el-select>
+                <div class="af-hint">请先在“运行时”页面创建并连接本地 Runtime。</div>
+              </el-form-item>
+              <el-form-item label="工作目录" class="af-cell">
+                <el-input v-model="agentForm.working_dir" placeholder="本机绝对路径（可选）" />
+              </el-form-item>
+            </div>
+
+            <div v-if="!isLocalAgent" class="af-row-inline">
               <el-form-item label="供应商" required class="af-cell">
                 <el-select v-model="agentForm.provider_id" filterable style="width:100%" @change="onProviderChange" placeholder="选择">
                   <el-option v-for="p in providers" :key="p.id" :label="p.name" :value="p.id">
@@ -79,7 +102,7 @@
             </div>
 
             <!-- 模型参数（内嵌左栏） -->
-            <section class="af-card af-card--inline">
+            <section v-if="!isLocalAgent" class="af-card af-card--inline">
               <h4 class="af-card-head">模型参数</h4>
               <div class="af-params-grid">
                 <label class="af-kv af-kv--wide">
@@ -151,7 +174,7 @@
           <div class="af-right">
             <div class="af-right-inner">
               <!-- 工具 -->
-              <section class="af-card">
+              <section v-if="!isLocalAgent" class="af-card">
                 <h4 class="af-card-head">工具</h4>
                 <div class="af-switch-line">
                   <span>Tool Search</span>
@@ -179,11 +202,11 @@
                       <span class="af-kv-k">历史条数</span>
                       <el-input-number v-model="agentForm.max_history" :min="1" :max="500" controls-position="right" size="small" class="af-kv-num" />
                     </label>
-                    <label class="af-kv">
+                    <label v-if="!isLocalAgent" class="af-kv">
                       <span class="af-kv-k">最大迭代</span>
                       <el-input-number v-model="agentForm.max_iterations" :min="1" :max="200" controls-position="right" size="small" class="af-kv-num" />
                     </label>
-                    <label class="af-kv">
+                    <label v-if="!isLocalAgent" class="af-kv">
                       <span class="af-kv-k">Token 预算 <span class="af-kv-sub">0=不限</span></span>
                       <el-input-number v-model="agentForm.token_budget" :min="0" :max="10000000" :step="10000" controls-position="right" size="small" class="af-kv-num" />
                     </label>
@@ -232,6 +255,7 @@ import { agentApi, defaultModelCaps, type Agent, type ModelCaps } from '@/api/ag
 import { providerApi, type Provider } from '@/api/provider'
 import { searchEngineApi, type SearchEngineConfig, type SearchEngineProvider } from '@/api/search_engine'
 import { toolApi, type Tool } from '@/api/tool'
+import { runtimeApi, type Runtime } from '@/api/runtime'
 import { useAgentStore } from '@/stores/agent'
 
 const route = useRoute()
@@ -249,6 +273,7 @@ const agentSaving = ref(false)
 const providers = ref<Provider[]>([])
 const allTools = ref<Tool[]>([])
 const searchEngines = ref<SearchEngineConfig[]>([])
+const runtimes = ref<Runtime[]>([])
 const providerModels = ref<string[]>([])
 const remoteModels = ref<string[]>([])
 const remoteFetched = ref(false)
@@ -259,6 +284,9 @@ const agentForm = ref({
   id: 0,
   name: '',
   description: '',
+  execution_mode: 'managed' as 'managed' | 'local',
+  runtime_id: 0,
+  working_dir: '',
   system_prompt: '',
   provider_id: null as number | null,
   model_name: '',
@@ -282,6 +310,7 @@ const agentForm = ref({
 })
 
 const modelCaps = ref<ModelCaps>({ ...defaultModelCaps })
+const isLocalAgent = computed(() => agentForm.value.execution_mode === 'local')
 
 let capsAbort: AbortController | null = null
 async function fetchModelCaps(model: string) {
@@ -368,6 +397,9 @@ function applyAgentDetail(detail: Agent) {
     id: detail.id,
     name: detail.name || '',
     description: detail.description || '',
+    execution_mode: detail.execution_mode || 'managed',
+    runtime_id: detail.runtime_id || 0,
+    working_dir: detail.working_dir || '',
     system_prompt: detail.system_prompt || '',
     provider_id: detail.provider_id,
     model_name: detail.model_name || '',
@@ -394,14 +426,16 @@ function applyAgentDetail(detail: Agent) {
 async function reloadAgent() {
   agentLoading.value = true
   try {
-    const [p, t, se] = await Promise.all([
+    const [p, t, se, rt] = await Promise.all([
       providerApi.list({ page: 1, page_size: 100 }),
       toolApi.list({ page: 1, page_size: 500 }),
       searchEngineApi.list({ page: 1, page_size: 100 }),
+      runtimeApi.list({ page: 1, page_size: 100 }),
     ])
     providers.value = (p as any).data?.list || []
     allTools.value = (t as any).data?.list || []
     searchEngines.value = (se as any).data?.list || []
+    runtimes.value = (rt as any).data?.list || []
     if (isEdit.value) {
       const res = await agentApi.getById(agentId.value)
       const detail = (res as any).data as Agent
@@ -419,11 +453,15 @@ async function reloadAgent() {
 
 async function saveAgent() {
   if (!agentForm.value.name) { ElMessage.warning('请填写名称'); return }
-  if (agentForm.value.enable_web_search && webSearchSwitchDisabled.value) {
+  if (isLocalAgent.value && !agentForm.value.runtime_id) {
+    ElMessage.warning('请选择运行时')
+    return
+  }
+  if (!isLocalAgent.value && agentForm.value.enable_web_search && webSearchSwitchDisabled.value) {
     ElMessage.warning('当前模型不支持内置联网搜索')
     return
   }
-  if (agentForm.value.enable_web_search && agentForm.value.web_search_mode === 'external' && !agentForm.value.search_engine_id) {
+  if (!isLocalAgent.value && agentForm.value.enable_web_search && agentForm.value.web_search_mode === 'external' && !agentForm.value.search_engine_id) {
     ElMessage.warning('请选择搜索引擎配置')
     return
   }
@@ -432,8 +470,11 @@ async function saveAgent() {
     const payload = {
       name: agentForm.value.name,
       description: agentForm.value.description,
+      execution_mode: agentForm.value.execution_mode,
+      runtime_id: isLocalAgent.value ? agentForm.value.runtime_id : 0,
+      working_dir: isLocalAgent.value ? agentForm.value.working_dir : '',
       system_prompt: agentForm.value.system_prompt,
-      provider_id: agentForm.value.provider_id ?? undefined,
+      provider_id: isLocalAgent.value ? 0 : (agentForm.value.provider_id ?? undefined),
       model_name: agentForm.value.model_name,
       fast_model_name: agentForm.value.fast_model_name,
       fallback_model_name: agentForm.value.fallback_model_name,
@@ -557,6 +598,7 @@ onMounted(() => reloadAgent())
 .af-cell { flex: 1; min-width: 0; margin-bottom: 0 !important; }
 .af-cell--name { max-width: 220px; flex: 0 0 220px; }
 .af-cell--desc { flex: 1; }
+.af-cell--mode { max-width: 170px; flex: 0 0 170px; }
 
 /* ===== 左栏内嵌卡片 ===== */
 .af-card--inline {

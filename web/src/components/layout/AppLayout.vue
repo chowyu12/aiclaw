@@ -35,6 +35,10 @@
             <el-icon><User /></el-icon>
             <template #title>{{ i18n.t("app.agents") }}</template>
           </el-menu-item>
+          <el-menu-item index="/runtimes">
+            <el-icon><Monitor /></el-icon>
+            <template #title>{{ i18n.t("app.runtimes") }}</template>
+          </el-menu-item>
           <el-menu-item index="/skill">
             <el-icon><Reading /></el-icon>
             <template #title>{{ i18n.t("app.skills") }}</template>
@@ -200,6 +204,7 @@ const activeMenu = computed(() => {
   const p = route.path;
   if (p === "/" || p === "") return "/chat";
   if (p.startsWith("/agents")) return "/agents";
+  if (p.startsWith("/runtimes")) return "/runtimes";
   return p;
 });
 

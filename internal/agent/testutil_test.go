@@ -33,6 +33,7 @@ type mockStore struct {
 	messages      map[int64][]model.Message
 	execSteps     map[int64][]model.ExecutionStep
 	agentRuns     map[string]*model.AgentRun
+	runtimes      map[int64]*model.Runtime
 	planRuns      map[int64]*model.PlanRun
 	planItems     map[int64][]model.PlanItem
 	filesByUUID   map[string]*model.File
@@ -54,6 +55,7 @@ func newMockStore() *mockStore {
 		messages:      make(map[int64][]model.Message),
 		execSteps:     make(map[int64][]model.ExecutionStep),
 		agentRuns:     make(map[string]*model.AgentRun),
+		runtimes:      make(map[int64]*model.Runtime),
 		planRuns:      make(map[int64]*model.PlanRun),
 		planItems:     make(map[int64][]model.PlanItem),
 		filesByUUID:   make(map[string]*model.File),
@@ -65,6 +67,122 @@ func newMockStore() *mockStore {
 
 func (s *mockStore) nextID() int64 { return s.nextIDVal.Add(1) }
 func (s *mockStore) Close() error  { return nil }
+
+func (s *mockStore) CreateRuntime(_ context.Context, runtime *model.Runtime) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if runtime.ID == 0 {
+		runtime.ID = s.nextID()
+	}
+	if runtime.UUID == "" {
+		runtime.UUID = fmt.Sprintf("runtime-%d", runtime.ID)
+	}
+	if runtime.AgentType == "" {
+		runtime.AgentType = model.RuntimeAgentTypeCustom
+	}
+	if runtime.PromptMode == "" {
+		runtime.PromptMode = runtime.EffectivePromptMode()
+	}
+	cp := *runtime
+	s.runtimes[runtime.ID] = &cp
+	return nil
+}
+
+func (s *mockStore) GetRuntime(_ context.Context, id int64) (*model.Runtime, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	runtime := s.runtimes[id]
+	if runtime == nil {
+		return nil, sql.ErrNoRows
+	}
+	cp := *runtime
+	return &cp, nil
+}
+
+func (s *mockStore) GetRuntimeByToken(_ context.Context, token string) (*model.Runtime, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, runtime := range s.runtimes {
+		if runtime.Token == token {
+			cp := *runtime
+			return &cp, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (s *mockStore) ListRuntimes(_ context.Context, _ model.ListQuery) ([]*model.Runtime, int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]*model.Runtime, 0, len(s.runtimes))
+	for _, runtime := range s.runtimes {
+		cp := *runtime
+		items = append(items, &cp)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (s *mockStore) UpdateRuntime(_ context.Context, id int64, req model.UpdateRuntimeReq) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runtime := s.runtimes[id]
+	if runtime == nil {
+		return sql.ErrNoRows
+	}
+	if req.Name != nil {
+		runtime.Name = *req.Name
+	}
+	if req.Description != nil {
+		runtime.Description = *req.Description
+	}
+	if req.AgentType != nil {
+		runtime.AgentType = *req.AgentType
+	}
+	if req.Command != nil {
+		runtime.Command = *req.Command
+	}
+	if req.Args != nil {
+		runtime.Args = model.StringSlice(*req.Args)
+	}
+	if req.PromptMode != nil {
+		runtime.PromptMode = *req.PromptMode
+	}
+	return nil
+}
+
+func (s *mockStore) TouchRuntime(_ context.Context, id int64, version string, seenAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runtime := s.runtimes[id]
+	if runtime == nil {
+		return sql.ErrNoRows
+	}
+	runtime.Status = model.RuntimeStatusOnline
+	runtime.Version = version
+	runtime.LastSeenAt = &seenAt
+	return nil
+}
+
+func (s *mockStore) ResetRuntimeToken(_ context.Context, id int64) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	runtime := s.runtimes[id]
+	if runtime == nil {
+		return "", sql.ErrNoRows
+	}
+	runtime.Token = fmt.Sprintf("rt-%d", id)
+	return runtime.Token, nil
+}
+
+func (s *mockStore) DeleteRuntime(_ context.Context, id int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.runtimes[id] == nil {
+		return sql.ErrNoRows
+	}
+	delete(s.runtimes, id)
+	return nil
+}
 
 func (s *mockStore) ListSearchEngineConfigs(_ context.Context, _ model.ListQuery) ([]*model.SearchEngineConfig, int64, error) {
 	s.mu.RLock()
@@ -521,6 +639,29 @@ func (s *mockStore) ListExecutionStepsByRun(_ context.Context, runUUID string) (
 	return result, nil
 }
 
+func (s *mockStore) ClaimQueuedAgentRun(_ context.Context, runtimeID int64) (*model.AgentRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var selected *model.AgentRun
+	for _, run := range s.agentRuns {
+		if run.RuntimeID != runtimeID || run.Status != model.AgentRunQueued {
+			continue
+		}
+		if selected == nil || run.ID < selected.ID {
+			selected = run
+		}
+	}
+	if selected == nil {
+		return nil, sql.ErrNoRows
+	}
+	now := time.Now()
+	selected.Status = model.AgentRunRunning
+	selected.ClaimedAt = &now
+	selected.StartedAt = now
+	cp := *selected
+	return &cp, nil
+}
+
 func (s *mockStore) CreatePlanRun(_ context.Context, run *model.PlanRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -820,6 +961,15 @@ func (s *mockStore) UpdateAgent(_ context.Context, id int64, req *model.UpdateAg
 	}
 	if req.Name != nil {
 		a.Name = *req.Name
+	}
+	if req.ExecutionMode != nil {
+		a.ExecutionMode = *req.ExecutionMode
+	}
+	if req.RuntimeID != nil {
+		a.RuntimeID = *req.RuntimeID
+	}
+	if req.WorkingDir != nil {
+		a.WorkingDir = *req.WorkingDir
 	}
 	if a.UUID != "" {
 		s.agentsByUUID[a.UUID] = a

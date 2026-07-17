@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 )
 
 type Store interface {
 	AgentStore
+	RuntimeStore
 	ProviderStore
 	ToolStore
 	ChannelStore
@@ -27,6 +29,18 @@ type AgentRunStore interface {
 	GetAgentRunByUUID(ctx context.Context, runUUID string) (*model.AgentRun, error)
 	ListAgentRuns(ctx context.Context, q model.AgentRunListQuery) ([]*model.AgentRun, int64, error)
 	ListExecutionStepsByRun(ctx context.Context, runUUID string) ([]model.ExecutionStep, error)
+	ClaimQueuedAgentRun(ctx context.Context, runtimeID int64) (*model.AgentRun, error)
+}
+
+type RuntimeStore interface {
+	CreateRuntime(ctx context.Context, runtime *model.Runtime) error
+	GetRuntime(ctx context.Context, id int64) (*model.Runtime, error)
+	GetRuntimeByToken(ctx context.Context, token string) (*model.Runtime, error)
+	ListRuntimes(ctx context.Context, q model.ListQuery) ([]*model.Runtime, int64, error)
+	UpdateRuntime(ctx context.Context, id int64, req model.UpdateRuntimeReq) error
+	TouchRuntime(ctx context.Context, id int64, version string, seenAt time.Time) error
+	ResetRuntimeToken(ctx context.Context, id int64) (string, error)
+	DeleteRuntime(ctx context.Context, id int64) error
 }
 
 type AgentStore interface {

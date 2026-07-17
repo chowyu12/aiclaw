@@ -470,6 +470,9 @@ func (e *Executor) loadAgent(ctx context.Context, agentUUID string) (*model.Agen
 }
 
 func normalizeAgent(a *model.Agent) {
+	if a.ExecutionMode == "" {
+		a.ExecutionMode = model.AgentExecutionManaged
+	}
 	// MaxTokens=0 视为"不限制，由服务商决定"，保持 0 直达 provider 层；
 	// applyModelCaps 仅在 MaxTokens>0 时才下发 max_completion_tokens。
 	if a.MaxHistory == 0 {

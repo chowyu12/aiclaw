@@ -20,6 +20,9 @@ func (s *GormStore) CreateAgent(ctx context.Context, a *model.Agent) error {
 	if a.WebSearchMode == "" {
 		a.WebSearchMode = model.WebSearchModeBuiltin
 	}
+	if a.ExecutionMode == "" {
+		a.ExecutionMode = model.AgentExecutionManaged
+	}
 	return s.db.WithContext(ctx).Create(a).Error
 }
 
@@ -85,6 +88,15 @@ func (s *GormStore) UpdateAgent(ctx context.Context, id int64, req *model.Update
 	if req.Description != nil {
 		updates["description"] = *req.Description
 	}
+	if req.ExecutionMode != nil {
+		updates["execution_mode"] = *req.ExecutionMode
+	}
+	if req.RuntimeID != nil {
+		updates["runtime_id"] = *req.RuntimeID
+	}
+	if req.WorkingDir != nil {
+		updates["working_dir"] = *req.WorkingDir
+	}
 	if req.SystemPrompt != nil {
 		updates["system_prompt"] = *req.SystemPrompt
 	}
@@ -114,6 +126,9 @@ func (s *GormStore) UpdateAgent(ctx context.Context, id int64, req *model.Update
 	}
 	if req.MaxIterations != nil {
 		updates["max_iterations"] = *req.MaxIterations
+	}
+	if req.TokenBudget != nil {
+		updates["token_budget"] = *req.TokenBudget
 	}
 	if req.EnableThinking != nil {
 		updates["enable_thinking"] = *req.EnableThinking
