@@ -55,11 +55,17 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	localAgentType, ok := model.NormalizeRuntimeAgentType(req.LocalAgentType)
+	if !ok {
+		httputil.BadRequest(w, "unsupported local_agent_type")
+		return
+	}
 	a := &model.Agent{
 		Name:              req.Name,
 		Description:       req.Description,
 		ExecutionMode:     normalizeExecutionMode(req.ExecutionMode),
 		RuntimeID:         req.RuntimeID,
+		LocalAgentType:    localAgentType,
 		WorkingDir:        strings.TrimSpace(req.WorkingDir),
 		SystemPrompt:      req.SystemPrompt,
 		ProviderID:        req.ProviderID,
@@ -162,6 +168,15 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if req.RuntimeID != nil {
 		candidate.RuntimeID = *req.RuntimeID
 	}
+	if req.LocalAgentType != nil {
+		localAgentType, ok := model.NormalizeRuntimeAgentType(*req.LocalAgentType)
+		if !ok {
+			httputil.BadRequest(w, "unsupported local_agent_type")
+			return
+		}
+		req.LocalAgentType = &localAgentType
+		candidate.LocalAgentType = localAgentType
+	}
 	if req.WorkingDir != nil {
 		workingDir := strings.TrimSpace(*req.WorkingDir)
 		req.WorkingDir = &workingDir
@@ -224,10 +239,30 @@ func (h *AgentHandler) validateExecution(ctx context.Context, a *model.Agent) (s
 	if a.RuntimeID <= 0 {
 		return "runtime_id is required for a local agent", nil
 	}
-	if _, err := h.store.GetRuntime(ctx, a.RuntimeID); errors.Is(err, sql.ErrNoRows) {
+	runtime, err := h.store.GetRuntime(ctx, a.RuntimeID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return "selected runtime not found", nil
 	} else if err != nil {
 		return "", err
+	}
+	if a.EffectiveLocalAgentType() == model.RuntimeAgentTypeCustom {
+		if strings.TrimSpace(runtime.Command) == "" {
+			if len(runtime.DetectedAgents) == 0 {
+				return "runtime has not detected a local agent CLI yet", nil
+			}
+			return "select a detected local agent CLI", nil
+		}
+		return "", nil
+	}
+	if !runtime.HasDetectedAgent(a.EffectiveLocalAgentType()) {
+		return "selected local agent CLI is not detected on this runtime", nil
+	}
+	config, err := h.store.GetRuntimeAgentConfig(ctx, runtime.ID, a.EffectiveLocalAgentType())
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if config != nil && !config.Enabled {
+		return "selected local agent CLI is disabled on this runtime", nil
 	}
 	return "", nil
 }

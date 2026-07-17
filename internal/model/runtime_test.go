@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -37,5 +38,34 @@ func TestRuntimeAgentPromptMode(t *testing.T) {
 	custom := &Runtime{AgentType: RuntimeAgentTypeCustom, PromptMode: RuntimePromptArgument}
 	if got := custom.EffectivePromptMode(); got != RuntimePromptArgument {
 		t.Fatalf("custom prompt mode = %s, want argument", got)
+	}
+}
+
+func TestRuntimeDetectedAgentAndSpec(t *testing.T) {
+	runtime := &Runtime{DetectedAgents: StringSlice{RuntimeAgentTypeCodex, RuntimeAgentTypeHermes}}
+	if !runtime.HasDetectedAgent(RuntimeAgentTypeCodex) || runtime.HasDetectedAgent(RuntimeAgentTypeCursor) {
+		t.Fatal("detected-agent membership is incorrect")
+	}
+	spec, ok := LocalCLISpecFor(RuntimeAgentTypeClaudeCode)
+	if !ok || spec.Command != "claude" || spec.PromptMode != RuntimePromptArgument {
+		t.Fatalf("unexpected Claude Code spec: %#v, %v", spec, ok)
+	}
+}
+
+func TestLocalCLISpecArgsWithModel(t *testing.T) {
+	codex, ok := LocalCLISpecFor(RuntimeAgentTypeCodex)
+	if !ok || !codex.SupportsModel() {
+		t.Fatal("codex should support model selection")
+	}
+	if got := strings.Join(codex.ArgsWithModel("gpt-test"), " "); got != "exec -m gpt-test -" {
+		t.Fatalf("codex args = %q", got)
+	}
+
+	openclaw, ok := LocalCLISpecFor(RuntimeAgentTypeOpenClaw)
+	if !ok || !openclaw.SupportsModel() {
+		t.Fatal("openclaw should support selecting a registered agent")
+	}
+	if got := strings.Join(openclaw.ArgsWithModel("ops"), " "); got != "agent --local --message --agent ops" {
+		t.Fatalf("openclaw args = %q", got)
 	}
 }

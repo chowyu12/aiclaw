@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 )
@@ -97,11 +98,12 @@ func (s *GormStore) UpdateRuntime(ctx context.Context, id int64, req model.Updat
 	return nil
 }
 
-func (s *GormStore) TouchRuntime(ctx context.Context, id int64, version string, seenAt time.Time) error {
+func (s *GormStore) TouchRuntime(ctx context.Context, id int64, version string, detectedAgents []string, seenAt time.Time) error {
 	res := s.db.WithContext(ctx).Model(&model.Runtime{}).Where("id = ?", id).Updates(map[string]any{
-		"status":       model.RuntimeStatusOnline,
-		"version":      strings.TrimSpace(version),
-		"last_seen_at": seenAt,
+		"status":          model.RuntimeStatusOnline,
+		"version":         strings.TrimSpace(version),
+		"detected_agents": model.StringSlice(detectedAgents),
+		"last_seen_at":    seenAt,
 	})
 	if res.Error != nil {
 		return res.Error
@@ -125,14 +127,16 @@ func (s *GormStore) ResetRuntimeToken(ctx context.Context, id int64) (string, er
 }
 
 func (s *GormStore) DeleteRuntime(ctx context.Context, id int64) error {
-	res := s.db.WithContext(ctx).Delete(&model.Runtime{}, id)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return sql.ErrNoRows
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Delete(&model.Runtime{}, id)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return sql.ErrNoRows
+		}
+		return tx.Where("runtime_id = ?", id).Delete(&model.RuntimeAgentConfig{}).Error
+	})
 }
 
 func newRuntimeToken() string {

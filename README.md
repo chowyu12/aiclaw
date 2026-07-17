@@ -110,45 +110,60 @@ the source of truth for completed runs and after a service restart.
 
 ## Local Agent Runtimes
 
-AiClaw can chat with an agent CLI installed on another machine without exposing
-that machine to inbound network traffic:
+AiClaw is local-first. At startup it creates a built-in **Local** runtime,
+scans the server process `PATH`, and executes detected agent CLIs in the same
+process. No connection command, extra daemon, or token is required.
 
-1. Open **Runtimes** in the web console and create a runtime. Configure an
-   executable and fixed argv arguments, for example `codex` with
-   `["exec", "-"]`.
-2. Copy the generated connection command and run it on the machine that has the
-   CLI installed:
-
-   ```bash
-   aiclaw runtime connect --server https://your-aiclaw.example.com --token rt-...
-   ```
-
-3. Create an Agent with execution mode **Local**, bind it to the runtime, and
-   optionally set a local working directory.
-4. Select that Agent in Chat. The runtime claims the queued turn, supplies the
-   conversation using the selected CLI profile, and streams stdout back into
-   the existing durable run.
+1. Install and authenticate the desired agent CLI on the machine that runs
+   AiClaw.
+2. Start AiClaw and open **Runtimes** to verify the automatically detected
+   CLIs.
+3. Create an Agent with execution mode **Local**. The built-in runtime is
+   selected automatically; choose one detected CLI and an optional working
+   directory.
+4. Select that Agent in Chat. AiClaw runs the CLI directly and streams stdout
+   into the durable agent run.
 
 Runtime commands are executed directly as `command + args`; they are never
-passed through a shell. Runtime tokens are restricted to heartbeat, claim,
-stream, and completion endpoints.
+passed through a shell.
 
-The Runtime form includes these non-interactive CLI presets:
+### Optional remote runtime
 
-| CLI | Baseline command | Prompt delivery |
+To execute an agent CLI on another machine, add a **Remote Runtime** in the
+Runtimes page, then run the generated command on that machine:
+
+```bash
+aiclaw runtime connect --server https://your-aiclaw.example.com --token rt-...
+```
+
+The remote runtime connects outbound, scans its own `PATH`, and becomes
+available alongside the built-in local runtime. This is optional; it is not
+needed for the machine running AiClaw itself.
+
+The built-in runtime currently auto-detects these non-interactive CLI agents:
+
+| CLI | Detected executable | Prompt delivery |
 | --- | --- | --- |
-| OpenAI Codex | `codex exec -` | stdin |
-| Cursor | `cursor-agent -p --output-format text` | final argv argument |
-| Claude Code | `claude -p --output-format text` | final argv argument |
-| Tencent CodeBuddy | `codebuddy -p --output-format text` | final argv argument |
-| OpenClaw | `openclaw agent --local --message` | final argv argument |
-| Hermes Agent | `hermes chat -q` | final argv argument |
-| Custom CLI | user configured | stdin or final argv argument |
+| OpenAI Codex | `codex app-server --listen stdio://` | JSON-RPC |
+| Cursor | `cursor-agent -p --output-format stream-json --yolo` | JSONL events |
+| Claude Code | `claude -p --output-format stream-json --input-format stream-json` | stream-json |
+| Tencent CodeBuddy | `codebuddy -p --output-format stream-json --input-format stream-json` | stream-json |
+| OpenClaw | `openclaw agent --local --json --session-id …` | JSON result |
+| Hermes Agent | `hermes acp` | Agent Communication Protocol (ACP) |
 
-The presets do not change local CLI login, approval, or sandbox behavior. The
+Expand a runtime in the Runtimes page to manage each detected CLI separately.
+You can enable or disable it, and set its default model for future local tasks.
+Codex, Cursor, Claude Code, and CodeBuddy receive the configured model through
+their respective provider protocol. Hermes switches the ACP session model.
+For OpenClaw, the field selects a registered OpenClaw Agent ID; that Agent owns
+the actual model configuration.
+
+AiClaw preserves local CLI login and provider configuration. Headless provider
+protocols auto-approve their task-local tool requests, so only enable them in
+workspaces you trust. The
 similarly named WorkBuddy product does not currently have a documented
 standalone headless CLI; it needs an official API or CLI contract before it can
-be added as a Runtime profile.
+be added to automatic discovery.
 
 ## Harness Runtime
 

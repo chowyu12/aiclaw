@@ -4,18 +4,19 @@ import "time"
 
 // Agent 运行时配置，持久化在数据库 agents 表；支持多 Agent。
 type Agent struct {
-	ID            int64  `json:"id" gorm:"primaryKey;autoIncrement"`
-	UUID          string `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
-	IsDefault     bool   `json:"is_default" gorm:"default:false;index"`
-	Name          string `json:"name" gorm:"size:200;not null"`
-	Description   string `json:"description" gorm:"size:500"`
-	ExecutionMode string `json:"execution_mode" gorm:"size:20;default:managed;index"`
-	RuntimeID     int64  `json:"runtime_id" gorm:"default:0;index"`
-	WorkingDir    string `json:"working_dir" gorm:"size:1000"`
-	SystemPrompt  string `json:"system_prompt" gorm:"type:text"`
-	ProviderID    int64  `json:"provider_id" gorm:"default:0"`
-	ModelName     string `json:"model_name" gorm:"size:200"`
-	FastModelName string `json:"fast_model_name" gorm:"size:200"`
+	ID             int64  `json:"id" gorm:"primaryKey;autoIncrement"`
+	UUID           string `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
+	IsDefault      bool   `json:"is_default" gorm:"default:false;index"`
+	Name           string `json:"name" gorm:"size:200;not null"`
+	Description    string `json:"description" gorm:"size:500"`
+	ExecutionMode  string `json:"execution_mode" gorm:"size:20;default:managed;index"`
+	RuntimeID      int64  `json:"runtime_id" gorm:"default:0;index"`
+	LocalAgentType string `json:"local_agent_type" gorm:"size:30;default:custom"`
+	WorkingDir     string `json:"working_dir" gorm:"size:1000"`
+	SystemPrompt   string `json:"system_prompt" gorm:"type:text"`
+	ProviderID     int64  `json:"provider_id" gorm:"default:0"`
+	ModelName      string `json:"model_name" gorm:"size:200"`
+	FastModelName  string `json:"fast_model_name" gorm:"size:200"`
 	// FallbackModelName is used only for transient primary-model failures.
 	// FastModelName remains dedicated to lightweight sub-agent work.
 	FallbackModelName string  `json:"fallback_model_name" gorm:"size:200"`
@@ -91,11 +92,22 @@ func (a *Agent) EffectiveWebSearchMode() string {
 	}
 }
 
+func (a *Agent) EffectiveLocalAgentType() string {
+	if a == nil {
+		return RuntimeAgentTypeCustom
+	}
+	if agentType, ok := NormalizeRuntimeAgentType(a.LocalAgentType); ok {
+		return agentType
+	}
+	return RuntimeAgentTypeCustom
+}
+
 type UpdateAgentReq struct {
 	Name              *string  `json:"name,omitzero"`
 	Description       *string  `json:"description,omitzero"`
 	ExecutionMode     *string  `json:"execution_mode,omitzero"`
 	RuntimeID         *int64   `json:"runtime_id,omitzero"`
+	LocalAgentType    *string  `json:"local_agent_type,omitzero"`
 	WorkingDir        *string  `json:"working_dir,omitzero"`
 	SystemPrompt      *string  `json:"system_prompt,omitzero"`
 	ProviderID        *int64   `json:"provider_id,omitzero"`
@@ -123,6 +135,7 @@ type CreateAgentReq struct {
 	Description       string  `json:"description"`
 	ExecutionMode     string  `json:"execution_mode"`
 	RuntimeID         int64   `json:"runtime_id"`
+	LocalAgentType    string  `json:"local_agent_type"`
 	WorkingDir        string  `json:"working_dir"`
 	SystemPrompt      string  `json:"system_prompt"`
 	ProviderID        int64   `json:"provider_id"`

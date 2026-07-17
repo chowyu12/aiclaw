@@ -34,6 +34,7 @@ type mockStore struct {
 	execSteps     map[int64][]model.ExecutionStep
 	agentRuns     map[string]*model.AgentRun
 	runtimes      map[int64]*model.Runtime
+	runtimeAgents map[string]*model.RuntimeAgentConfig
 	planRuns      map[int64]*model.PlanRun
 	planItems     map[int64][]model.PlanItem
 	filesByUUID   map[string]*model.File
@@ -56,6 +57,7 @@ func newMockStore() *mockStore {
 		execSteps:     make(map[int64][]model.ExecutionStep),
 		agentRuns:     make(map[string]*model.AgentRun),
 		runtimes:      make(map[int64]*model.Runtime),
+		runtimeAgents: make(map[string]*model.RuntimeAgentConfig),
 		planRuns:      make(map[int64]*model.PlanRun),
 		planItems:     make(map[int64][]model.PlanItem),
 		filesByUUID:   make(map[string]*model.File),
@@ -150,7 +152,7 @@ func (s *mockStore) UpdateRuntime(_ context.Context, id int64, req model.UpdateR
 	return nil
 }
 
-func (s *mockStore) TouchRuntime(_ context.Context, id int64, version string, seenAt time.Time) error {
+func (s *mockStore) TouchRuntime(_ context.Context, id int64, version string, detectedAgents []string, seenAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	runtime := s.runtimes[id]
@@ -159,6 +161,7 @@ func (s *mockStore) TouchRuntime(_ context.Context, id int64, version string, se
 	}
 	runtime.Status = model.RuntimeStatusOnline
 	runtime.Version = version
+	runtime.DetectedAgents = model.StringSlice(detectedAgents)
 	runtime.LastSeenAt = &seenAt
 	return nil
 }
@@ -181,6 +184,70 @@ func (s *mockStore) DeleteRuntime(_ context.Context, id int64) error {
 		return sql.ErrNoRows
 	}
 	delete(s.runtimes, id)
+	for key, config := range s.runtimeAgents {
+		if config.RuntimeID == id {
+			delete(s.runtimeAgents, key)
+		}
+	}
+	return nil
+}
+
+func runtimeAgentKey(runtimeID int64, agentType string) string {
+	return fmt.Sprintf("%d:%s", runtimeID, agentType)
+}
+
+func (s *mockStore) EnsureRuntimeAgentConfigs(_ context.Context, runtimeID int64, agentTypes []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, rawType := range agentTypes {
+		agentType, ok := model.NormalizeRuntimeAgentType(rawType)
+		if !ok || agentType == model.RuntimeAgentTypeCustom {
+			continue
+		}
+		key := runtimeAgentKey(runtimeID, agentType)
+		if s.runtimeAgents[key] == nil {
+			s.runtimeAgents[key] = &model.RuntimeAgentConfig{ID: s.nextID(), RuntimeID: runtimeID, AgentType: agentType, Enabled: true}
+		}
+	}
+	return nil
+}
+
+func (s *mockStore) ListRuntimeAgentConfigs(_ context.Context, runtimeID int64) ([]model.RuntimeAgentConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]model.RuntimeAgentConfig, 0)
+	for _, config := range s.runtimeAgents {
+		if config.RuntimeID == runtimeID {
+			items = append(items, *config)
+		}
+	}
+	return items, nil
+}
+
+func (s *mockStore) GetRuntimeAgentConfig(_ context.Context, runtimeID int64, agentType string) (*model.RuntimeAgentConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	config := s.runtimeAgents[runtimeAgentKey(runtimeID, agentType)]
+	if config == nil {
+		return nil, sql.ErrNoRows
+	}
+	cp := *config
+	return &cp, nil
+}
+
+func (s *mockStore) UpdateRuntimeAgentConfig(_ context.Context, runtimeID int64, agentType string, req model.UpdateRuntimeAgentConfigReq) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	config := s.runtimeAgents[runtimeAgentKey(runtimeID, agentType)]
+	if config == nil {
+		return sql.ErrNoRows
+	}
+	if req.Enabled != nil {
+		config.Enabled = *req.Enabled
+	}
+	if req.ModelName != nil {
+		config.ModelName = strings.TrimSpace(*req.ModelName)
+	}
 	return nil
 }
 
@@ -967,6 +1034,9 @@ func (s *mockStore) UpdateAgent(_ context.Context, id int64, req *model.UpdateAg
 	}
 	if req.RuntimeID != nil {
 		a.RuntimeID = *req.RuntimeID
+	}
+	if req.LocalAgentType != nil {
+		a.LocalAgentType = *req.LocalAgentType
 	}
 	if req.WorkingDir != nil {
 		a.WorkingDir = *req.WorkingDir

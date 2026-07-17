@@ -5,23 +5,42 @@
         <h1 class="aic-title">{{ i18n.t('runtimes.title') }}</h1>
         <p class="aic-sub runtime-sub">{{ i18n.t('runtimes.subtitle') }}</p>
       </div>
-      <el-button type="primary" @click="openCreate">
-        <el-icon><Plus /></el-icon>&nbsp;{{ i18n.t('runtimes.create') }}
-      </el-button>
+      <el-button type="primary" @click="openCreate">{{ i18n.t('runtimes.createRemote') }}</el-button>
     </div>
 
     <div class="aic-page-body">
       <el-table :data="runtimes" v-loading="loading" row-key="id" table-layout="auto">
+        <el-table-column type="expand" width="52">
+          <template #default="{ row }">
+            <div v-if="runtimeAgentConfigs(row).length" class="runtime-agent-list">
+              <div v-for="agent in runtimeAgentConfigs(row)" :key="agent.agent_type" class="runtime-agent-row">
+                <div class="runtime-agent-info">
+                  <span class="runtime-agent-title">{{ agentTypeName(agent.agent_type) }}</span>
+                  <span class="runtime-agent-model">{{ agentModelLabel(agent) }}</span>
+                </div>
+                <div class="runtime-agent-actions">
+                  <el-switch
+                    :model-value="agent.enabled"
+                    :loading="updatingAgentKeys.has(runtimeAgentKey(row.id, agent.agent_type))"
+                    :active-text="i18n.t('runtimes.agentEnabled')"
+                    :inactive-text="i18n.t('runtimes.agentDisabled')"
+                    @change="(enabled: string | number | boolean) => setRuntimeAgentEnabled(row, agent, Boolean(enabled))"
+                  />
+                  <el-button size="small" @click="openRuntimeAgentConfig(row, agent)">{{ i18n.t('runtimes.agentConfig') }}</el-button>
+                </div>
+              </div>
+            </div>
+            <span v-else class="runtime-empty">{{ i18n.t('runtimes.noAgents') }}</span>
+          </template>
+        </el-table-column>
         <el-table-column :label="i18n.t('common.name')" min-width="150">
           <template #default="{ row }">
             <div class="runtime-name">
               <span class="status-dot" :class="row.status" />
               <span>{{ row.name }}</span>
+              <el-tag v-if="row.builtin" size="small" type="success" effect="plain">{{ i18n.t('runtimes.builtin') }}</el-tag>
             </div>
           </template>
-        </el-table-column>
-        <el-table-column :label="i18n.t('runtimes.agentType')" min-width="130">
-          <template #default="{ row }">{{ agentProfileName(row.agent_type) }}</template>
         </el-table-column>
         <el-table-column :label="i18n.t('common.status')" width="100">
           <template #default="{ row }">
@@ -30,15 +49,20 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="i18n.t('runtimes.command')" min-width="260" show-overflow-tooltip>
-          <template #default="{ row }"><code>{{ commandPreview(row) }}</code></template>
+        <el-table-column :label="i18n.t('runtimes.detectedAgents')" min-width="260">
+          <template #default="{ row }">
+            <div v-if="row.detected_agents?.length" class="detected-agents">
+              <el-tag v-for="agentType in row.detected_agents" :key="agentType" size="small" effect="plain">{{ agentTypeName(agentType) }}</el-tag>
+            </div>
+            <span v-else class="runtime-empty">{{ i18n.t('runtimes.noAgents') }}</span>
+          </template>
         </el-table-column>
         <el-table-column :label="i18n.t('runtimes.lastSeen')" min-width="150">
           <template #default="{ row }">{{ row.last_seen_at ? formatTime(row.last_seen_at) : '-' }}</template>
         </el-table-column>
         <el-table-column :label="i18n.t('common.actions')" width="270" fixed="right">
           <template #default="{ row }">
-            <div class="runtime-actions">
+            <div v-if="!row.builtin" class="runtime-actions">
               <el-button size="small" @click="copyConnectCommand(row)">{{ i18n.t('runtimes.copyConnect') }}</el-button>
               <el-button size="small" @click="openEdit(row)">{{ i18n.t('common.edit') }}</el-button>
               <el-dropdown trigger="click">
@@ -56,35 +80,15 @@
       </el-table>
     </div>
 
-    <el-dialog v-model="dialogVisible" :title="editingId ? i18n.t('runtimes.edit') : i18n.t('runtimes.create')" width="600px">
+    <el-dialog v-model="dialogVisible" :title="editingId ? i18n.t('runtimes.edit') : i18n.t('runtimes.createRemote')" width="600px">
       <el-form label-position="top">
         <el-form-item :label="i18n.t('common.name')" required>
-          <el-input v-model="form.name" placeholder="MacBook Codex" />
+          <el-input v-model="form.name" placeholder="Office MacBook" />
         </el-form-item>
         <el-form-item :label="i18n.t('common.description')">
           <el-input v-model="form.description" />
         </el-form-item>
-        <el-form-item :label="i18n.t('runtimes.agentType')">
-          <el-select v-model="form.agentType" style="width:100%" @change="applyAgentProfile">
-            <el-option v-for="profile in agentProfiles" :key="profile.type" :label="profile.name" :value="profile.type" />
-          </el-select>
-          <div class="runtime-hint">{{ i18n.t('runtimes.profileHint') }}</div>
-        </el-form-item>
-        <el-form-item :label="i18n.t('runtimes.executable')" required>
-          <el-input v-model="form.command" placeholder="codex" />
-          <div class="runtime-hint">{{ i18n.t('runtimes.commandHint') }}</div>
-        </el-form-item>
-        <el-form-item :label="i18n.t('runtimes.args')">
-          <el-input v-model="form.argsText" type="textarea" :rows="3" placeholder='["exec", "-"]' />
-          <div class="runtime-hint">{{ i18n.t('runtimes.argsHint') }}</div>
-        </el-form-item>
-        <el-form-item v-if="form.agentType === 'custom'" :label="i18n.t('runtimes.promptMode')">
-          <el-radio-group v-model="form.promptMode">
-            <el-radio-button label="stdin">{{ i18n.t('runtimes.promptStdin') }}</el-radio-button>
-            <el-radio-button label="argument">{{ i18n.t('runtimes.promptArgument') }}</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
-        <div class="runtime-hint runtime-hint--warning">{{ i18n.t('runtimes.profileWarning') }}</div>
+        <div class="runtime-hint runtime-hint--warning">{{ i18n.t('runtimes.remoteHint') }}</div>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">{{ i18n.t('common.cancel') }}</el-button>
@@ -99,13 +103,29 @@
         <el-button size="small" @click="copyText(connectCommand)">{{ i18n.t('chat.copy') }}</el-button>
       </div>
     </el-dialog>
+
+    <el-dialog v-model="agentConfigVisible" :title="`${agentTypeName(agentConfigForm.agentType)} · ${i18n.t('runtimes.agentConfig')}`" width="520px">
+      <el-form label-position="top">
+        <el-form-item :label="i18n.t('runtimes.agentStatus')">
+          <el-switch v-model="agentConfigForm.enabled" :active-text="i18n.t('runtimes.agentEnabled')" :inactive-text="i18n.t('runtimes.agentDisabled')" />
+        </el-form-item>
+        <el-form-item :label="agentConfigModelLabel(agentConfigForm.agentType)">
+          <el-input v-model="agentConfigForm.modelName" :placeholder="agentConfigModelPlaceholder(agentConfigForm.agentType)" clearable />
+          <div class="runtime-hint">{{ agentConfigModelHint(agentConfigForm.agentType) }}</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="agentConfigVisible = false">{{ i18n.t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="agentConfigSaving" @click="saveRuntimeAgentConfig">{{ i18n.t('common.save') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { runtimeApi, type Runtime } from '@/api/runtime'
+import { runtimeApi, type Runtime, type RuntimeAgentConfig } from '@/api/runtime'
 import { useI18nStore } from '@/stores/i18n'
 
 const i18n = useI18nStore()
@@ -116,26 +136,18 @@ const dialogVisible = ref(false)
 const connectVisible = ref(false)
 const connectCommand = ref('')
 const editingId = ref(0)
-type AgentProfile = {
-  type: Runtime['agent_type']
-  name: string
-  command: string
-  args: string[]
-  promptMode: Runtime['prompt_mode']
+const agentConfigVisible = ref(false)
+const agentConfigSaving = ref(false)
+const updatingAgentKeys = ref(new Set<string>())
+const agentTypeNames: Record<string, string> = {
+  codex: 'Codex', cursor: 'Cursor', 'claude-code': 'Claude Code', codebuddy: 'Tencent CodeBuddy', openclaw: 'OpenClaw', hermes: 'Hermes Agent',
 }
-
-const agentProfiles: AgentProfile[] = [
-  { type: 'codex', name: 'Codex', command: 'codex', args: ['exec', '-'], promptMode: 'stdin' },
-  { type: 'cursor', name: 'Cursor', command: 'cursor-agent', args: ['-p', '--output-format', 'text'], promptMode: 'argument' },
-  { type: 'claude-code', name: 'Claude Code', command: 'claude', args: ['-p', '--output-format', 'text'], promptMode: 'argument' },
-  { type: 'codebuddy', name: 'Tencent CodeBuddy', command: 'codebuddy', args: ['-p', '--output-format', 'text'], promptMode: 'argument' },
-  { type: 'openclaw', name: 'OpenClaw', command: 'openclaw', args: ['agent', '--local', '--message'], promptMode: 'argument' },
-  { type: 'hermes', name: 'Hermes Agent', command: 'hermes', args: ['chat', '-q'], promptMode: 'argument' },
-  { type: 'custom', name: 'Custom CLI', command: '', args: [], promptMode: 'stdin' },
-]
-
-const form = reactive({
-  name: '', description: '', agentType: 'codex' as Runtime['agent_type'], command: 'codex', argsText: '["exec", "-"]', promptMode: 'stdin' as Runtime['prompt_mode'],
+const form = reactive({ name: '', description: '' })
+const agentConfigForm = reactive({
+  runtimeId: 0,
+  agentType: 'codex' as RuntimeAgentConfig['agent_type'],
+  enabled: true,
+  modelName: '',
 })
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
@@ -151,78 +163,125 @@ async function loadRuntimes(silent = false) {
   }
 }
 
+function agentTypeName(agentType: string) { return agentTypeNames[agentType] || agentType }
+
+function runtimeAgentKey(runtimeId: number, agentType: string) {
+  return `${runtimeId}:${agentType}`
+}
+
+function runtimeAgentConfigs(runtime: Runtime): RuntimeAgentConfig[] {
+  return runtime.detected_agents.map((agentType) =>
+    runtime.agent_configs?.find((config) => config.agent_type === agentType) || {
+      id: 0,
+      runtime_id: runtime.id,
+      agent_type: agentType,
+      enabled: true,
+      model_name: '',
+      created_at: '',
+      updated_at: '',
+    },
+  )
+}
+
+function agentModelLabel(agent: RuntimeAgentConfig) {
+  if (agent.agent_type === 'openclaw') return agent.model_name || i18n.t('runtimes.agentTargetDefault')
+  return agent.model_name || i18n.t('runtimes.agentModelDefault')
+}
+
+function agentConfigModelLabel(agentType: RuntimeAgentConfig['agent_type']) {
+  return agentType === 'openclaw' ? i18n.t('runtimes.agentTarget') : i18n.t('runtimes.agentModel')
+}
+
+function agentConfigModelPlaceholder(agentType: RuntimeAgentConfig['agent_type']) {
+  return agentType === 'openclaw' ? i18n.t('runtimes.agentTargetPlaceholder') : i18n.t('runtimes.agentModelPlaceholder')
+}
+
+function agentConfigModelHint(agentType: RuntimeAgentConfig['agent_type']) {
+  return agentType === 'openclaw' ? i18n.t('runtimes.agentTargetHint') : i18n.t('runtimes.agentModelHint')
+}
+
+function updateRuntimeAgent(runtime: Runtime, updated: RuntimeAgentConfig) {
+  const index = runtime.agent_configs.findIndex((item) => item.agent_type === updated.agent_type)
+  if (index >= 0) runtime.agent_configs[index] = updated
+  else runtime.agent_configs.push(updated)
+}
+
+async function setRuntimeAgentEnabled(runtime: Runtime, agent: RuntimeAgentConfig, enabled: boolean) {
+  const key = runtimeAgentKey(runtime.id, agent.agent_type)
+  updatingAgentKeys.value.add(key)
+  try {
+    const res: any = await runtimeApi.updateAgent(runtime.id, agent.agent_type, { enabled })
+    updateRuntimeAgent(runtime, res.data as RuntimeAgentConfig)
+    ElMessage.success(i18n.t('common.saveSuccess'))
+  } catch {
+    ElMessage.error(i18n.t('common.operationFailed'))
+  } finally {
+    updatingAgentKeys.value.delete(key)
+    updatingAgentKeys.value = new Set(updatingAgentKeys.value)
+  }
+}
+
+function openRuntimeAgentConfig(runtime: Runtime, agent: RuntimeAgentConfig) {
+  Object.assign(agentConfigForm, {
+    runtimeId: runtime.id,
+    agentType: agent.agent_type,
+    enabled: agent.enabled,
+    modelName: agent.model_name || '',
+  })
+  agentConfigVisible.value = true
+}
+
+async function saveRuntimeAgentConfig() {
+  agentConfigSaving.value = true
+  try {
+    const res: any = await runtimeApi.updateAgent(agentConfigForm.runtimeId, agentConfigForm.agentType, {
+      enabled: agentConfigForm.enabled,
+      model_name: agentConfigForm.modelName.trim(),
+    })
+    const runtime = runtimes.value.find((item) => item.id === agentConfigForm.runtimeId)
+    if (runtime) updateRuntimeAgent(runtime, res.data as RuntimeAgentConfig)
+    agentConfigVisible.value = false
+    ElMessage.success(i18n.t('common.saveSuccess'))
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.message || i18n.t('common.operationFailed'))
+  } finally {
+    agentConfigSaving.value = false
+  }
+}
+
 function openCreate() {
   editingId.value = 0
-  Object.assign(form, { name: '', description: '', agentType: 'codex', command: 'codex', argsText: '["exec", "-"]', promptMode: 'stdin' })
+  Object.assign(form, { name: '', description: '' })
   dialogVisible.value = true
 }
 
 function openEdit(runtime: Runtime) {
   editingId.value = runtime.id
-  Object.assign(form, {
-    name: runtime.name,
-    description: runtime.description || '',
-    agentType: runtime.agent_type || 'custom',
-    command: runtime.command,
-    argsText: JSON.stringify(runtime.args || [], null, 2),
-    promptMode: runtime.prompt_mode || 'stdin',
-  })
+  Object.assign(form, { name: runtime.name, description: runtime.description || '' })
   dialogVisible.value = true
 }
 
-function applyAgentProfile() {
-  const profile = agentProfiles.find((item) => item.type === form.agentType)
-  if (!profile) return
-  form.command = profile.command
-  form.argsText = JSON.stringify(profile.args, null, 2)
-  form.promptMode = profile.promptMode
-}
-
-function agentProfileName(agentType: Runtime['agent_type']) {
-  return agentProfiles.find((item) => item.type === agentType)?.name || 'Custom CLI'
-}
-
-function parseArgs(): string[] | null {
-  try {
-    const args = JSON.parse(form.argsText || '[]')
-    if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string')) throw new Error()
-    return args
-  } catch {
-    ElMessage.warning(i18n.t('runtimes.argsInvalid'))
-    return null
-  }
-}
-
 async function saveRuntime() {
-  if (!form.name.trim() || !form.command.trim()) {
+  if (!form.name.trim()) {
     ElMessage.warning(i18n.t('runtimes.required'))
     return
   }
-  const args = parseArgs()
-  if (!args) return
   saving.value = true
   try {
-    const payload = {
-      name: form.name.trim(), description: form.description.trim(), agent_type: form.agentType,
-      command: form.command.trim(), args, prompt_mode: form.promptMode,
-    }
-    if (editingId.value) {
-      await runtimeApi.update(editingId.value, payload)
-      ElMessage.success(i18n.t('common.saveSuccess'))
-    } else {
-      const res: any = await runtimeApi.create(payload)
+    const payload = { name: form.name.trim(), description: form.description.trim() }
+    const res: any = editingId.value
+      ? await runtimeApi.update(editingId.value, payload)
+      : await runtimeApi.create(payload)
+    dialogVisible.value = false
+    await loadRuntimes()
+    if (editingId.value) ElMessage.success(i18n.t('common.saveSuccess'))
+    else {
       const runtime = res.data as Runtime
       if (runtime) showConnect(runtime)
     }
-    dialogVisible.value = false
-    await loadRuntimes()
   } finally {
     saving.value = false
   }
-}
-
-function commandPreview(runtime: Runtime) {
-  return [runtime.command, ...(runtime.args || [])].join(' ')
 }
 
 function runtimeConnectCommand(runtime: Runtime) {
@@ -283,7 +342,15 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .runtime-name { display: flex; align-items: center; gap: 9px; font-weight: 500; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--el-text-color-placeholder); }
 .status-dot.online { background: var(--el-color-success); box-shadow: 0 0 8px color-mix(in srgb, var(--el-color-success) 50%, transparent); }
-.runtime-actions { display: flex; gap: 6px; align-items: center; }
+.runtime-actions { display: flex; align-items: center; gap: 6px; }
+.detected-agents { display: flex; flex-wrap: wrap; gap: 6px; }
+.runtime-agent-list { display: grid; gap: 8px; padding: 4px 16px 10px 56px; }
+.runtime-agent-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--el-fill-color-lighter); }
+.runtime-agent-info { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.runtime-agent-title { font-weight: 500; }
+.runtime-agent-model { overflow: hidden; color: var(--el-text-color-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-agent-actions { display: flex; flex-shrink: 0; align-items: center; gap: 12px; }
+.runtime-empty { color: var(--el-text-color-secondary); font-size: 13px; }
 .runtime-hint { margin-top: 5px; font-size: 12px; color: var(--el-text-color-secondary); }
 .connect-desc { color: var(--el-text-color-secondary); margin-bottom: 12px; }
 .connect-command { display: flex; align-items: flex-start; gap: 10px; padding: 12px; border-radius: 8px; background: var(--el-fill-color-light); }

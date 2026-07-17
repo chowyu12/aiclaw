@@ -22,6 +22,9 @@ func (e *Executor) startLocalBackgroundRun(ctx context.Context, req model.ChatRe
 	if !runtime.IsOnline(time.Now()) {
 		return nil, fmt.Errorf("runtime %q is offline", runtime.Name)
 	}
+	if _, _, _, err := e.localCLIFor(ctx, ag, runtime); err != nil {
+		return nil, err
+	}
 
 	isNewConversation := req.ConversationID == ""
 	conv, err := e.memory.GetOrCreateConversation(ctx, req.ConversationID, req.UserID, ag.UUID)
@@ -89,6 +92,14 @@ func (e *Executor) ClaimLocalAgentRun(ctx context.Context, runtimeID int64) (*mo
 	if err != nil {
 		return nil, e.failClaimedLocalAgentRun(ctx, run, fmt.Errorf("load runtime: %w", err))
 	}
+	command, args, promptMode, err := e.localCLIFor(ctx, ag, runtime)
+	if err != nil {
+		return nil, e.failClaimedLocalAgentRun(ctx, run, err)
+	}
+	modelName, err := e.localAgentModel(ctx, ag, runtime)
+	if err != nil {
+		return nil, e.failClaimedLocalAgentRun(ctx, run, err)
+	}
 	msgs, err := e.store.ListMessages(ctx, run.ConversationID, ag.HistoryLimit())
 	if err != nil {
 		return nil, e.failClaimedLocalAgentRun(ctx, run, fmt.Errorf("load conversation history: %w", err))
@@ -110,14 +121,62 @@ func (e *Executor) ClaimLocalAgentRun(ctx context.Context, runtimeID int64) (*mo
 		RunID:          run.UUID,
 		ConversationID: run.ConversationUUID,
 		AgentName:      ag.Name,
+		AgentType:      ag.EffectiveLocalAgentType(),
+		ModelName:      modelName,
 		SystemPrompt:   ag.SystemPrompt,
 		Messages:       taskMessages,
-		Command:        runtime.Command,
-		Args:           append([]string(nil), runtime.Args...),
-		PromptMode:     runtime.EffectivePromptMode(),
+		Command:        command,
+		Args:           args,
+		PromptMode:     promptMode,
 		WorkingDir:     ag.WorkingDir,
 		TimeoutSeconds: ag.TimeoutSeconds(),
 	}, nil
+}
+
+func (e *Executor) localAgentModel(ctx context.Context, ag *model.Agent, runtime *model.Runtime) (string, error) {
+	if ag == nil || runtime == nil || ag.EffectiveLocalAgentType() == model.RuntimeAgentTypeCustom {
+		return "", nil
+	}
+	config, err := e.store.GetRuntimeAgentConfig(ctx, runtime.ID, ag.EffectiveLocalAgentType())
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("load local agent configuration: %w", err)
+	}
+	return strings.TrimSpace(config.ModelName), nil
+}
+
+func (e *Executor) localCLIFor(ctx context.Context, ag *model.Agent, runtime *model.Runtime) (string, []string, string, error) {
+	if ag == nil || runtime == nil {
+		return "", nil, "", errors.New("local agent runtime is not configured")
+	}
+	agentType := ag.EffectiveLocalAgentType()
+	if agentType != model.RuntimeAgentTypeCustom {
+		if !runtime.HasDetectedAgent(agentType) {
+			return "", nil, "", fmt.Errorf("local agent CLI %q is not detected on runtime %q", agentType, runtime.Name)
+		}
+		spec, ok := model.LocalCLISpecFor(agentType)
+		if !ok {
+			return "", nil, "", fmt.Errorf("unsupported local agent CLI %q", agentType)
+		}
+		config, err := e.store.GetRuntimeAgentConfig(ctx, runtime.ID, agentType)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return "", nil, "", fmt.Errorf("load local agent configuration: %w", err)
+		}
+		if config != nil && !config.Enabled {
+			return "", nil, "", fmt.Errorf("local agent CLI %q is disabled on runtime %q", agentType, runtime.Name)
+		}
+		modelName := ""
+		if config != nil {
+			modelName = config.ModelName
+		}
+		return spec.Command, spec.ArgsWithModel(modelName), spec.PromptMode, nil
+	}
+	if strings.TrimSpace(runtime.Command) == "" {
+		return "", nil, "", errors.New("select a detected local agent CLI")
+	}
+	return runtime.Command, append([]string(nil), runtime.Args...), runtime.EffectivePromptMode(), nil
 }
 
 func (e *Executor) failClaimedLocalAgentRun(ctx context.Context, run *model.AgentRun, cause error) error {

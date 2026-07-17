@@ -23,7 +23,7 @@
                 <el-input v-model="agentForm.description" placeholder="简要描述用途（可选）" />
               </el-form-item>
               <el-form-item label="执行方式" class="af-cell af-cell--mode">
-                <el-radio-group v-model="agentForm.execution_mode">
+                <el-radio-group v-model="agentForm.execution_mode" @change="selectBuiltinRuntime">
                   <el-radio-button label="managed">内置</el-radio-button>
                   <el-radio-button label="local">本地</el-radio-button>
                 </el-radio-group>
@@ -32,7 +32,7 @@
 
             <div v-if="isLocalAgent" class="af-row-inline">
               <el-form-item label="运行时" required class="af-cell">
-                <el-select v-model="agentForm.runtime_id" filterable style="width:100%" placeholder="选择已连接的运行时">
+                <el-select v-model="agentForm.runtime_id" filterable style="width:100%" placeholder="选择本机运行时" @change="onRuntimeChange">
                   <el-option v-for="runtime in runtimes" :key="runtime.id" :label="runtime.name" :value="runtime.id">
                     <span>{{ runtime.name }}</span>
                     <el-tag size="small" style="margin-left:8px" :type="runtime.status === 'online' ? 'success' : 'info'">
@@ -40,7 +40,15 @@
                     </el-tag>
                   </el-option>
                 </el-select>
-                <div class="af-hint">请先在“运行时”页面创建并连接本地 Runtime。</div>
+                <div class="af-hint">AiClaw 启动时自动创建并扫描本机运行时，无需连接命令。</div>
+              </el-form-item>
+              <el-form-item label="本地智能体" required class="af-cell">
+                <el-select v-model="agentForm.local_agent_type" :disabled="!agentForm.runtime_id" style="width:100%" placeholder="选择运行时自动检测到的 CLI">
+                  <el-option v-for="agentType in runtimeAgentOptions" :key="agentType" :label="agentTypeName(agentType)" :value="agentType" />
+                  <el-option v-if="agentForm.local_agent_type === 'custom'" label="Legacy Custom CLI" value="custom" />
+                </el-select>
+                <div v-if="agentForm.runtime_id && runtimeAgentOptions.length === 0" class="af-hint warn">尚未检测到 CLI；请确认它已安装在 AiClaw 进程的 PATH 中。</div>
+                <div v-else class="af-hint">由本机 Runtime 自动扫描 PATH 中的 CLI。</div>
               </el-form-item>
               <el-form-item label="工作目录" class="af-cell">
                 <el-input v-model="agentForm.working_dir" placeholder="本机绝对路径（可选）" />
@@ -286,6 +294,7 @@ const agentForm = ref({
   description: '',
   execution_mode: 'managed' as 'managed' | 'local',
   runtime_id: 0,
+  local_agent_type: '' as Agent['local_agent_type'] | '',
   working_dir: '',
   system_prompt: '',
   provider_id: null as number | null,
@@ -311,6 +320,31 @@ const agentForm = ref({
 
 const modelCaps = ref<ModelCaps>({ ...defaultModelCaps })
 const isLocalAgent = computed(() => agentForm.value.execution_mode === 'local')
+const selectedRuntime = computed(() => runtimes.value.find((runtime) => runtime.id === agentForm.value.runtime_id))
+const runtimeAgentOptions = computed(() => {
+  const runtime = selectedRuntime.value
+  if (!runtime) return []
+  if (runtime.agent_configs?.length) {
+    return runtime.agent_configs.filter((agent) => agent.enabled).map((agent) => agent.agent_type)
+  }
+  return runtime.detected_agents || []
+})
+const agentTypeNames: Record<string, string> = {
+  codex: 'Codex', cursor: 'Cursor', 'claude-code': 'Claude Code', codebuddy: 'Tencent CodeBuddy', openclaw: 'OpenClaw', hermes: 'Hermes Agent',
+}
+function agentTypeName(agentType: string) { return agentTypeNames[agentType] || agentType }
+function selectBuiltinRuntime() {
+	if (agentForm.value.execution_mode !== 'local' || agentForm.value.runtime_id) return
+  const runtime = runtimes.value.find((item) => item.builtin) || runtimes.value[0]
+  if (!runtime) return
+  agentForm.value.runtime_id = runtime.id
+  onRuntimeChange()
+}
+function onRuntimeChange() {
+  if (!runtimeAgentOptions.value.some((item) => item === agentForm.value.local_agent_type)) {
+    agentForm.value.local_agent_type = runtimeAgentOptions.value[0] || ''
+  }
+}
 
 let capsAbort: AbortController | null = null
 async function fetchModelCaps(model: string) {
@@ -399,6 +433,7 @@ function applyAgentDetail(detail: Agent) {
     description: detail.description || '',
     execution_mode: detail.execution_mode || 'managed',
     runtime_id: detail.runtime_id || 0,
+    local_agent_type: detail.local_agent_type || '',
     working_dir: detail.working_dir || '',
     system_prompt: detail.system_prompt || '',
     provider_id: detail.provider_id,
@@ -436,6 +471,7 @@ async function reloadAgent() {
     allTools.value = (t as any).data?.list || []
     searchEngines.value = (se as any).data?.list || []
     runtimes.value = (rt as any).data?.list || []
+    selectBuiltinRuntime()
     if (isEdit.value) {
       const res = await agentApi.getById(agentId.value)
       const detail = (res as any).data as Agent
@@ -457,6 +493,10 @@ async function saveAgent() {
     ElMessage.warning('请选择运行时')
     return
   }
+  if (isLocalAgent.value && !agentForm.value.local_agent_type) {
+    ElMessage.warning('请选择运行时自动检测到的本地智能体 CLI')
+    return
+  }
   if (!isLocalAgent.value && agentForm.value.enable_web_search && webSearchSwitchDisabled.value) {
     ElMessage.warning('当前模型不支持内置联网搜索')
     return
@@ -467,11 +507,13 @@ async function saveAgent() {
   }
   agentSaving.value = true
   try {
+    const localAgentType = agentForm.value.local_agent_type || 'custom'
     const payload = {
       name: agentForm.value.name,
       description: agentForm.value.description,
       execution_mode: agentForm.value.execution_mode,
       runtime_id: isLocalAgent.value ? agentForm.value.runtime_id : 0,
+      local_agent_type: isLocalAgent.value ? localAgentType : 'custom',
       working_dir: isLocalAgent.value ? agentForm.value.working_dir : '',
       system_prompt: agentForm.value.system_prompt,
       provider_id: isLocalAgent.value ? 0 : (agentForm.value.provider_id ?? undefined),

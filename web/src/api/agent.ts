@@ -8,6 +8,7 @@ export interface Agent {
   description: string
   execution_mode: 'managed' | 'local'
   runtime_id: number
+  local_agent_type: 'custom' | 'codex' | 'cursor' | 'claude-code' | 'codebuddy' | 'openclaw' | 'hermes'
   working_dir: string
   system_prompt: string
   provider_id: number
@@ -39,6 +40,7 @@ export interface UpdateAgentPayload {
   description?: string
   execution_mode?: 'managed' | 'local'
   runtime_id?: number
+  local_agent_type?: Agent['local_agent_type']
   working_dir?: string
   system_prompt?: string
   provider_id?: number
@@ -66,6 +68,7 @@ export interface CreateAgentPayload {
   description?: string
   execution_mode?: 'managed' | 'local'
   runtime_id?: number
+  local_agent_type?: Agent['local_agent_type']
   working_dir?: string
   system_prompt?: string
   provider_id?: number
