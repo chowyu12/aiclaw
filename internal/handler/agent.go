@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
@@ -57,6 +58,9 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	a := &model.Agent{
 		Name:              req.Name,
 		Description:       req.Description,
+		ExecutionMode:     normalizeExecutionMode(req.ExecutionMode),
+		RuntimeID:         req.RuntimeID,
+		WorkingDir:        strings.TrimSpace(req.WorkingDir),
 		SystemPrompt:      req.SystemPrompt,
 		ProviderID:        req.ProviderID,
 		ModelName:         req.ModelName,
@@ -67,6 +71,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Timeout:           req.Timeout,
 		MaxHistory:        req.MaxHistory,
 		MaxIterations:     req.MaxIterations,
+		TokenBudget:       req.TokenBudget,
 		EnableThinking:    req.EnableThinking,
 		ReasoningEffort:   req.ReasoningEffort,
 		EnableWebSearch:   req.EnableWebSearch,
@@ -84,6 +89,13 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.MaxIterations == 0 {
 		a.MaxIterations = model.DefaultAgentMaxIterations
+	}
+	if msg, err := h.validateExecution(ctx, a); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	} else if msg != "" {
+		httputil.BadRequest(w, msg)
+		return
 	}
 	if msg, err := h.validateExternalWebSearch(ctx, a); err != nil {
 		httputil.InternalError(w, err.Error())
@@ -142,6 +154,19 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	candidate := *existing
+	if req.ExecutionMode != nil {
+		mode := normalizeExecutionMode(*req.ExecutionMode)
+		req.ExecutionMode = &mode
+		candidate.ExecutionMode = mode
+	}
+	if req.RuntimeID != nil {
+		candidate.RuntimeID = *req.RuntimeID
+	}
+	if req.WorkingDir != nil {
+		workingDir := strings.TrimSpace(*req.WorkingDir)
+		req.WorkingDir = &workingDir
+		candidate.WorkingDir = workingDir
+	}
 	if req.EnableWebSearch != nil {
 		candidate.EnableWebSearch = *req.EnableWebSearch
 	}
@@ -150,6 +175,13 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SearchEngineID != nil {
 		candidate.SearchEngineID = *req.SearchEngineID
+	}
+	if msg, err := h.validateExecution(ctx, &candidate); err != nil {
+		httputil.InternalError(w, err.Error())
+		return
+	} else if msg != "" {
+		httputil.BadRequest(w, msg)
+		return
 	}
 	if msg, err := h.validateExternalWebSearch(ctx, &candidate); err != nil {
 		httputil.InternalError(w, err.Error())
@@ -176,6 +208,28 @@ func normalizeWebSearchMode(mode string) string {
 	default:
 		return model.WebSearchModeBuiltin
 	}
+}
+
+func normalizeExecutionMode(mode string) string {
+	if strings.TrimSpace(mode) == model.AgentExecutionLocal {
+		return model.AgentExecutionLocal
+	}
+	return model.AgentExecutionManaged
+}
+
+func (h *AgentHandler) validateExecution(ctx context.Context, a *model.Agent) (string, error) {
+	if a == nil || a.ExecutionMode != model.AgentExecutionLocal {
+		return "", nil
+	}
+	if a.RuntimeID <= 0 {
+		return "runtime_id is required for a local agent", nil
+	}
+	if _, err := h.store.GetRuntime(ctx, a.RuntimeID); errors.Is(err, sql.ErrNoRows) {
+		return "selected runtime not found", nil
+	} else if err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 func (h *AgentHandler) validateExternalWebSearch(ctx context.Context, a *model.Agent) (string, error) {

@@ -17,6 +17,15 @@ func (e *Executor) StartBackgroundRun(ctx context.Context, req model.ChatRequest
 	if err := e.checkShutdown(); err != nil {
 		return nil, err
 	}
+	ag, err := e.loadAgent(ctx, req.AgentUUID)
+	if err != nil {
+		e.activeExecs.Done()
+		return nil, err
+	}
+	if ag.ExecutionMode == model.AgentExecutionLocal {
+		defer e.activeExecs.Done()
+		return e.startLocalBackgroundRun(ctx, req, ag)
+	}
 
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	ec, err := e.prepare(runCtx, req)
@@ -186,6 +195,13 @@ func (e *Executor) SubscribeAgentRun(ctx context.Context, runID string) (*model.
 		return nil, nil, nil, false, err
 	}
 	events, unsubscribe, active := e.runHub.subscribe(runID)
+	// Local runs survive a server restart in the database and may still be
+	// queued or executing on the runtime. Recreate their in-memory stream entry
+	// so a reconnecting browser can keep waiting for subsequent callbacks.
+	if !active && run.RuntimeID > 0 && (run.Status == model.AgentRunQueued || run.Status == model.AgentRunRunning) {
+		e.runHub.start(runID, nil)
+		events, unsubscribe, active = e.runHub.subscribe(runID)
+	}
 	return run, events, unsubscribe, active, nil
 }
 
@@ -196,23 +212,31 @@ func (e *Executor) CancelAgentRun(ctx context.Context, runID string) (*model.Age
 	if err != nil {
 		return nil, err
 	}
-	if run.Status != model.AgentRunRunning {
+	if run.Status != model.AgentRunRunning && !(run.RuntimeID > 0 && run.Status == model.AgentRunQueued) {
 		return run, nil
 	}
 	if e.runHub.cancel(runID) {
 		return run, nil
 	}
+	cancelReason := "cancelled after executor restart"
+	if run.RuntimeID > 0 {
+		cancelReason = "cancelled by user"
+	}
 	finishedAt := time.Now()
 	if err := e.store.UpdateAgentRun(ctx, run.ID, map[string]any{
 		"status":      model.AgentRunCancelled,
-		"error":       "cancelled after executor restart",
+		"error":       cancelReason,
 		"finished_at": finishedAt,
 	}); err != nil {
 		return nil, err
 	}
 	run.Status = model.AgentRunCancelled
-	run.Error = "cancelled after executor restart"
+	run.Error = cancelReason
 	run.FinishedAt = &finishedAt
+	e.runHub.publish(runID, model.AgentRunEvent{
+		Type: model.AgentRunEventCancelled, Status: run.Status, Run: cloneAgentRun(run), Error: run.Error, CreatedAt: finishedAt,
+	})
+	e.runHub.complete(runID)
 	return run, nil
 }
 

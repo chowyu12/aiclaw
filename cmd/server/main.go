@@ -7,6 +7,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/bootstrap"
 	"github.com/chowyu12/aiclaw/internal/daemon"
+	"github.com/chowyu12/aiclaw/internal/runtimeclient"
 	"github.com/chowyu12/aiclaw/internal/selfupdate"
 )
 
@@ -14,6 +15,13 @@ var version = "dev"
 
 func main() {
 	if len(os.Args) > 1 {
+		if os.Args[1] == "runtime" {
+			if err := runtimeclient.Run(os.Args[2:], version); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
+		}
 		switch os.Args[1] {
 		case "version":
 			fmt.Printf("aiclaw %s\n", version)

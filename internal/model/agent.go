@@ -9,6 +9,9 @@ type Agent struct {
 	IsDefault     bool   `json:"is_default" gorm:"default:false;index"`
 	Name          string `json:"name" gorm:"size:200;not null"`
 	Description   string `json:"description" gorm:"size:500"`
+	ExecutionMode string `json:"execution_mode" gorm:"size:20;default:managed;index"`
+	RuntimeID     int64  `json:"runtime_id" gorm:"default:0;index"`
+	WorkingDir    string `json:"working_dir" gorm:"size:1000"`
 	SystemPrompt  string `json:"system_prompt" gorm:"type:text"`
 	ProviderID    int64  `json:"provider_id" gorm:"default:0"`
 	ModelName     string `json:"model_name" gorm:"size:200"`
@@ -41,6 +44,9 @@ type Agent struct {
 const (
 	DefaultAgentMaxHistory    = 30
 	DefaultAgentMaxIterations = 50
+
+	AgentExecutionManaged = "managed"
+	AgentExecutionLocal   = "local"
 
 	WebSearchModeBuiltin  = "builtin"
 	WebSearchModeExternal = "external"
@@ -88,6 +94,9 @@ func (a *Agent) EffectiveWebSearchMode() string {
 type UpdateAgentReq struct {
 	Name              *string  `json:"name,omitzero"`
 	Description       *string  `json:"description,omitzero"`
+	ExecutionMode     *string  `json:"execution_mode,omitzero"`
+	RuntimeID         *int64   `json:"runtime_id,omitzero"`
+	WorkingDir        *string  `json:"working_dir,omitzero"`
 	SystemPrompt      *string  `json:"system_prompt,omitzero"`
 	ProviderID        *int64   `json:"provider_id,omitzero"`
 	ModelName         *string  `json:"model_name,omitzero"`
@@ -112,6 +121,9 @@ type UpdateAgentReq struct {
 type CreateAgentReq struct {
 	Name              string  `json:"name"`
 	Description       string  `json:"description"`
+	ExecutionMode     string  `json:"execution_mode"`
+	RuntimeID         int64   `json:"runtime_id"`
+	WorkingDir        string  `json:"working_dir"`
 	SystemPrompt      string  `json:"system_prompt"`
 	ProviderID        int64   `json:"provider_id"`
 	ModelName         string  `json:"model_name"`

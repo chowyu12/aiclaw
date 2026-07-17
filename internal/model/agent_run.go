@@ -6,6 +6,7 @@ import "time"
 type AgentRunStatus string
 
 const (
+	AgentRunQueued    AgentRunStatus = "queued"
 	AgentRunRunning   AgentRunStatus = "running"
 	AgentRunSucceeded AgentRunStatus = "succeeded"
 	AgentRunFailed    AgentRunStatus = "failed"
@@ -20,6 +21,7 @@ type AgentRun struct {
 	UUID             string         `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
 	AgentID          int64          `json:"agent_id" gorm:"index;not null"`
 	AgentUUID        string         `json:"agent_uuid" gorm:"size:36;index;not null"`
+	RuntimeID        int64          `json:"runtime_id,omitzero" gorm:"default:0;index"`
 	ConversationID   int64          `json:"conversation_id" gorm:"index;not null"`
 	ConversationUUID string         `json:"conversation_uuid" gorm:"size:36;index;not null"`
 	MessageID        int64          `json:"message_id,omitzero" gorm:"index;default:0"`
@@ -31,6 +33,7 @@ type AgentRun struct {
 	TokensUsed       int            `json:"tokens_used" gorm:"default:0"`
 	DurationMs       int            `json:"duration_ms" gorm:"default:0"`
 	StartedAt        time.Time      `json:"started_at"`
+	ClaimedAt        *time.Time     `json:"claimed_at,omitzero"`
 	FinishedAt       *time.Time     `json:"finished_at,omitzero"`
 }
 

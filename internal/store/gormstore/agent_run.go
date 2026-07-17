@@ -2,12 +2,17 @@ package gormstore
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 )
+
+var errAgentRunClaimRace = errors.New("agent run claim race")
 
 func (s *GormStore) CreateAgentRun(ctx context.Context, run *model.AgentRun) error {
 	if run.UUID == "" {
@@ -67,4 +72,42 @@ func (s *GormStore) ListAgentRuns(ctx context.Context, q model.AgentRunListQuery
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+func (s *GormStore) ClaimQueuedAgentRun(ctx context.Context, runtimeID int64) (*model.AgentRun, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		var claimed model.AgentRun
+		err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var candidate model.AgentRun
+			if err := tx.Where("runtime_id = ? AND status = ?", runtimeID, model.AgentRunQueued).
+				Order("id ASC").First(&candidate).Error; err != nil {
+				return err
+			}
+			now := time.Now()
+			res := tx.Model(&model.AgentRun{}).
+				Where("id = ? AND status = ?", candidate.ID, model.AgentRunQueued).
+				Updates(map[string]any{"status": model.AgentRunRunning, "claimed_at": now, "started_at": now})
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				return errAgentRunClaimRace
+			}
+			candidate.Status = model.AgentRunRunning
+			candidate.ClaimedAt = &now
+			candidate.StartedAt = now
+			claimed = candidate
+			return nil
+		})
+		if err == nil {
+			return &claimed, nil
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, sql.ErrNoRows
+		}
+		if !errors.Is(err, errAgentRunClaimRace) {
+			return nil, err
+		}
+	}
+	return nil, sql.ErrNoRows
 }

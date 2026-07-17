@@ -21,12 +21,21 @@
             <span class="agent-name">{{ row.name }}</span>
           </template>
         </el-table-column>
-        <el-table-column :label="i18n.t('agents.provider')" min-width="100" show-overflow-tooltip>
+        <el-table-column :label="i18n.t('common.type')" width="90">
           <template #default="{ row }">
-            {{ providerName(row.provider_id) }}
+            <el-tag :type="row.execution_mode === 'local' ? 'success' : 'info'" effect="plain" size="small">
+              {{ row.execution_mode === 'local' ? '本地' : '内置' }}
+            </el-tag>
           </template>
         </el-table-column>
-        <el-table-column :label="i18n.t('agents.model')" prop="model_name" min-width="160" show-overflow-tooltip />
+        <el-table-column :label="i18n.t('agents.provider')" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.execution_mode === 'local' ? runtimeName(row.runtime_id) : providerName(row.provider_id) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="i18n.t('agents.model')" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.execution_mode === 'local' ? 'Local CLI' : row.model_name }}</template>
+        </el-table-column>
         <el-table-column :label="i18n.t('agents.maxIterations')" prop="max_iterations" width="110" align="center" />
         <el-table-column :label="i18n.t('agents.maxHistory')" prop="max_history" width="90" align="center" />
         <el-table-column :label="i18n.t('common.default')" width="70" align="center">
@@ -59,16 +68,22 @@ import { agentApi, type Agent } from '../../api/agent'
 import { providerApi, type Provider } from '../../api/provider'
 import { useAgentStore } from '../../stores/agent'
 import { useI18nStore } from '../../stores/i18n'
+import { runtimeApi, type Runtime } from '@/api/runtime'
 
 const agentStore = useAgentStore()
 const i18n = useI18nStore()
 const agents = ref<Agent[]>([])
 const providers = ref<Provider[]>([])
+const runtimes = ref<Runtime[]>([])
 const loading = ref(false)
 const switchingId = ref<number | null>(null)
 
 function providerName(id: number): string {
   return providers.value.find((p) => p.id === id)?.name ?? '-'
+}
+
+function runtimeName(id: number): string {
+  return runtimes.value.find((runtime) => runtime.id === id)?.name ?? '-'
 }
 
 async function loadAgents() {
@@ -89,6 +104,15 @@ async function loadProviders() {
     providers.value = res.data?.list ?? []
   } catch {
     providers.value = []
+  }
+}
+
+async function loadRuntimes() {
+  try {
+    const res: any = await runtimeApi.list({ page: 1, page_size: 100 })
+    runtimes.value = res.data?.list ?? []
+  } catch {
+    runtimes.value = []
   }
 }
 
@@ -131,6 +155,7 @@ async function handleDelete(row: Agent) {
 onMounted(() => {
   loadAgents()
   loadProviders()
+  loadRuntimes()
 })
 </script>
 

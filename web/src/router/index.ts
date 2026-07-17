@@ -66,6 +66,7 @@ const router = createRouter({
         { path: 'agents', name: 'Agents', component: () => import('../views/agent/Index.vue') },
         { path: 'agents/create', name: 'AgentCreate', component: () => import('../views/agent/Form.vue') },
         { path: 'agents/:id/edit', name: 'AgentEdit', component: () => import('../views/agent/Form.vue') },
+        { path: 'runtimes', name: 'Runtimes', component: () => import('../views/runtime/Index.vue') },
       ],
     },
   ],

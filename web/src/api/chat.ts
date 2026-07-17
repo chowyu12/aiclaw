@@ -127,7 +127,7 @@ export interface StreamChunk {
   harness_event?: HarnessEvent
 }
 
-export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type AgentRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
 export interface AgentRun {
   id: number
