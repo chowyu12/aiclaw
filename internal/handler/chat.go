@@ -36,6 +36,7 @@ func (h *ChatHandler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/chat/completions", h.Complete)
 	mux.HandleFunc("POST /api/v1/chat/stream", h.Stream)
 	mux.HandleFunc("POST /api/v1/chat/retry", h.RetryStream)
+	mux.HandleFunc("POST /api/v1/chat/retry/runs", h.StartRetryRun)
 	mux.HandleFunc("POST /api/v1/chat/runs", h.StartRun)
 	mux.HandleFunc("GET /api/v1/agent-runs", h.ListRuns)
 	mux.HandleFunc("GET /api/v1/agent-runs/{id}", h.GetRun)
@@ -314,69 +315,15 @@ func (h *ChatHandler) Stream(w http.ResponseWriter, r *http.Request) {
 	sseWriter.WriteDone()
 }
 
-// RetryStream 重试指定的 assistant 消息：删除该轮对话数据后重新执行。
+// RetryStream is kept for clients that still expect a request-bound retry SSE.
+// New clients should use StartRetryRun so retries share the durable run flow.
 // 请求体：{ "conversation_id": "uuid", "message_id": 123 }
 // message_id 为要重试的 assistant 消息 ID。
 func (h *ChatHandler) RetryStream(w http.ResponseWriter, r *http.Request) {
-	var req model.RetryRequest
-	if err := httputil.BindJSON(r, &req); err != nil {
-		httputil.BadRequest(w, "invalid request body")
+	chatReq, status, message := h.prepareRetryRequest(r)
+	if status != 0 {
+		httputil.Error(w, status, message)
 		return
-	}
-	if req.ConversationID == "" || req.MessageID == 0 {
-		httputil.BadRequest(w, "conversation_id and message_id are required")
-		return
-	}
-
-	conv, err := h.store.GetConversationByUUID(r.Context(), req.ConversationID)
-	if err != nil {
-		httputil.NotFound(w, "conversation not found")
-		return
-	}
-	if active, err := h.hasActiveConversationRun(r, conv.UUID); err != nil {
-		httputil.InternalError(w, err.Error())
-		return
-	} else if active {
-		httputil.Error(w, http.StatusConflict, "stop the active agent run before retrying")
-		return
-	}
-
-	assistantMsg, err := h.store.GetMessage(r.Context(), req.MessageID)
-	if err != nil || assistantMsg.ConversationID != conv.ID || assistantMsg.Role != "assistant" {
-		httputil.BadRequest(w, "invalid assistant message")
-		return
-	}
-
-	msgs, err := h.store.ListMessages(r.Context(), conv.ID, 500)
-	if err != nil {
-		httputil.InternalError(w, "load messages failed")
-		return
-	}
-	var userMsg *model.Message
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].ID < assistantMsg.ID && msgs[i].Role == "user" {
-			userMsg = &msgs[i]
-			break
-		}
-	}
-	if userMsg == nil {
-		httputil.BadRequest(w, "user message not found for retry")
-		return
-	}
-
-	userText := userMsg.Content
-	if err := h.store.DeleteMessagesFrom(r.Context(), conv.ID, userMsg.ID); err != nil {
-		httputil.InternalError(w, "cleanup old messages failed")
-		return
-	}
-
-	chatReq := model.ChatRequest{
-		ConversationID: req.ConversationID,
-		Message:        userText,
-	}
-	fillIdentity(r, &chatReq)
-	if chatReq.UserID == "" {
-		chatReq.UserID = "anonymous"
 	}
 
 	sseWriter, ok := sse.NewWriter(w)
@@ -388,6 +335,7 @@ func (h *ChatHandler) RetryStream(w http.ResponseWriter, r *http.Request) {
 	stopPing := sseWriter.StartPing(r.Context(), 0)
 	defer stopPing()
 
+	Metrics.IncChat()
 	if err := h.executor.ExecuteStream(r.Context(), chatReq, func(chunk model.StreamChunk) error {
 		return writeStreamChunk(sseWriter, chunk)
 	}); err != nil {
@@ -395,6 +343,88 @@ func (h *ChatHandler) RetryStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sseWriter.WriteDone()
+}
+
+// StartRetryRun clears the retried turn and starts a fresh durable run. This
+// makes retries work consistently for both managed and Local Runtime agents.
+func (h *ChatHandler) StartRetryRun(w http.ResponseWriter, r *http.Request) {
+	chatReq, status, message := h.prepareRetryRequest(r)
+	if status != 0 {
+		httputil.Error(w, status, message)
+		return
+	}
+
+	Metrics.IncChat()
+	run, err := h.executor.StartBackgroundRun(r.Context(), chatReq)
+	if err != nil {
+		Metrics.IncErr()
+		if strings.Contains(err.Error(), "already has a running") {
+			httputil.Error(w, http.StatusConflict, err.Error())
+			return
+		}
+		httputil.InternalError(w, err.Error())
+		return
+	}
+	httputil.OK(w, run)
+}
+
+// prepareRetryRequest validates ownership, removes the user turn being retried
+// and all of its derived records, then returns the fresh run input.
+func (h *ChatHandler) prepareRetryRequest(r *http.Request) (model.ChatRequest, int, string) {
+	var req model.RetryRequest
+	if err := httputil.BindJSON(r, &req); err != nil {
+		return model.ChatRequest{}, http.StatusBadRequest, "invalid request body"
+	}
+	if req.ConversationID == "" || req.MessageID == 0 {
+		return model.ChatRequest{}, http.StatusBadRequest, "conversation_id and message_id are required"
+	}
+
+	conv, err := h.store.GetConversationByUUID(r.Context(), req.ConversationID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return model.ChatRequest{}, http.StatusNotFound, "conversation not found"
+		}
+		return model.ChatRequest{}, http.StatusInternalServerError, "load conversation failed"
+	}
+	chatReq := model.ChatRequest{ConversationID: req.ConversationID, AgentUUID: conv.AgentUUID}
+	fillIdentity(r, &chatReq)
+	if chatReq.UserID == "" {
+		chatReq.UserID = "anonymous"
+	}
+	if conv.UserID != "" && conv.UserID != chatReq.UserID {
+		return model.ChatRequest{}, http.StatusForbidden, "conversation does not belong to this user"
+	}
+	if active, err := h.hasActiveConversationRun(r, conv.UUID); err != nil {
+		return model.ChatRequest{}, http.StatusInternalServerError, "check active agent run failed"
+	} else if active {
+		return model.ChatRequest{}, http.StatusConflict, "stop the active agent run before retrying"
+	}
+
+	assistantMsg, err := h.store.GetMessage(r.Context(), req.MessageID)
+	if err != nil || assistantMsg.ConversationID != conv.ID || assistantMsg.Role != "assistant" {
+		return model.ChatRequest{}, http.StatusBadRequest, "invalid assistant message"
+	}
+
+	msgs, err := h.store.ListMessages(r.Context(), conv.ID, 500)
+	if err != nil {
+		return model.ChatRequest{}, http.StatusInternalServerError, "load messages failed"
+	}
+	var userMsg *model.Message
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].ID < assistantMsg.ID && msgs[i].Role == "user" {
+			userMsg = &msgs[i]
+			break
+		}
+	}
+	if userMsg == nil {
+		return model.ChatRequest{}, http.StatusBadRequest, "user message not found for retry"
+	}
+
+	if err := h.store.DeleteMessagesFrom(r.Context(), conv.ID, userMsg.ID); err != nil {
+		return model.ChatRequest{}, http.StatusInternalServerError, "cleanup old messages failed"
+	}
+	chatReq.Message = userMsg.Content
+	return chatReq, 0, ""
 }
 
 // writeStreamChunk preserves the legacy message event while exposing stable
@@ -555,14 +585,19 @@ func (h *ChatHandler) DeleteConversation(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *ChatHandler) hasActiveConversationRun(r *http.Request, conversationUUID string) (bool, error) {
-	runs, _, err := h.store.ListAgentRuns(r.Context(), model.AgentRunListQuery{
-		ConversationUUID: conversationUUID,
-		Status:           model.AgentRunRunning,
-		Page:             1,
-		PageSize:         1,
-	})
-	if err != nil {
-		return false, err
+	for _, status := range []model.AgentRunStatus{model.AgentRunQueued, model.AgentRunRunning} {
+		runs, _, err := h.store.ListAgentRuns(r.Context(), model.AgentRunListQuery{
+			ConversationUUID: conversationUUID,
+			Status:           status,
+			Page:             1,
+			PageSize:         1,
+		})
+		if err != nil {
+			return false, err
+		}
+		if len(runs) > 0 {
+			return true, nil
+		}
 	}
-	return len(runs) > 0, nil
+	return false, nil
 }

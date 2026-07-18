@@ -145,7 +145,7 @@ const zh: Messages = {
   'runtimes.deleteConfirm': '确定删除该运行时？仍被本地 Agent 使用时无法删除。',
   'runtimes.detectedAgents': '自动检测的智能体',
   'runtimes.noAgents': '尚未检测到本机 CLI',
-  'runtimes.autoDetectHint': 'AiClaw 启动时会自动扫描 PATH 中可用的智能体 CLI；无需手填可执行文件、参数或运行连接命令。',
+  'runtimes.autoDetectHint': 'AiClaw 启动时会恢复当前用户的登录 Shell PATH，并自动扫描可用的智能体 CLI；无需手填可执行文件、参数或运行连接命令。',
 
   'providers.title': '模型供应商',
   'providers.subtitle': '配置 OpenAI、Claude、通义等接入，供 Agent 调用；API Key 仅保存在服务端。',
@@ -418,7 +418,7 @@ const en: Messages = {
   'runtimes.deleteConfirm': 'Delete this runtime? A runtime used by a local Agent cannot be deleted.',
   'runtimes.detectedAgents': 'Detected Agents',
   'runtimes.noAgents': 'No local CLI detected yet',
-  'runtimes.autoDetectHint': 'AiClaw scans agent CLIs available on PATH at startup; no executable, arguments, or connection command is required.',
+  'runtimes.autoDetectHint': 'AiClaw recovers the current user\'s login-shell PATH at startup and scans available agent CLIs; no executable, arguments, or connection command is required.',
 
   'providers.title': 'Model Providers',
   'providers.subtitle': 'Configure OpenAI, Claude, Qwen, and other model providers for Agents. API keys are stored server-side only.',

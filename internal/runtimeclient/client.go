@@ -169,7 +169,10 @@ func (c *client) heartbeat(ctx context.Context) error {
 
 // DetectLocalAgents returns supported agent CLIs available on this machine.
 func DetectLocalAgents() []string {
-	return detectLocalAgents(exec.LookPath)
+	env := localCLIEnvironment()
+	return detectLocalAgents(func(command string) (string, error) {
+		return resolveRuntimeCommand(command, env)
+	})
 }
 
 func detectLocalAgents(lookPath func(string) (string, error)) []string {
@@ -289,7 +292,10 @@ func commandForTask(ctx context.Context, task *model.RuntimeTask) (*exec.Cmd, er
 	if promptMode == model.RuntimePromptArgument {
 		args = append(args, prompt)
 	}
-	cmd := exec.CommandContext(ctx, task.Command, args...)
+	cmd, err := runtimeCommand(ctx, task.Command, args...)
+	if err != nil {
+		return nil, err
+	}
 	cmd.Dir = task.WorkingDir
 	if promptMode == model.RuntimePromptStdin {
 		cmd.Stdin = strings.NewReader(prompt)

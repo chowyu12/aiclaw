@@ -40,15 +40,15 @@
                     </el-tag>
                   </el-option>
                 </el-select>
-                <div class="af-hint">AiClaw 启动时自动创建并扫描本机运行时，无需连接命令。</div>
+                <div class="af-hint">AiClaw 自动恢复当前用户的登录 Shell PATH 并扫描本机运行时，无需连接命令。</div>
               </el-form-item>
               <el-form-item label="本地智能体" required class="af-cell">
                 <el-select v-model="agentForm.local_agent_type" :disabled="!agentForm.runtime_id" style="width:100%" placeholder="选择运行时自动检测到的 CLI">
                   <el-option v-for="agentType in runtimeAgentOptions" :key="agentType" :label="agentTypeName(agentType)" :value="agentType" />
                   <el-option v-if="agentForm.local_agent_type === 'custom'" label="Legacy Custom CLI" value="custom" />
                 </el-select>
-                <div v-if="agentForm.runtime_id && runtimeAgentOptions.length === 0" class="af-hint warn">尚未检测到 CLI；请确认它已安装在 AiClaw 进程的 PATH 中。</div>
-                <div v-else class="af-hint">由本机 Runtime 自动扫描 PATH 中的 CLI。</div>
+                <div v-if="agentForm.runtime_id && runtimeAgentOptions.length === 0" class="af-hint warn">尚未检测到 CLI；请检查当前用户的 CLI 安装与登录态，然后重启 AiClaw。</div>
+                <div v-else class="af-hint">由本机 Runtime 从当前用户的登录 Shell PATH 自动扫描 CLI。</div>
               </el-form-item>
               <el-form-item label="工作目录" class="af-cell">
                 <el-input v-model="agentForm.working_dir" placeholder="本机绝对路径（可选）" />

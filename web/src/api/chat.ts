@@ -338,11 +338,12 @@ export function retryStream(
   return streamRequest('/api/v1/chat/retry', data, onChunk, onDone, onError)
 }
 
-// streamBackgroundChat starts a durable run first, then attaches SSE to that
+// streamBackgroundRun starts a durable run first, then attaches SSE to that
 // run. Aborting the browser stream sends an explicit cancellation request;
 // closing a tab alone does not interrupt the Agent on the server.
-export function streamBackgroundChat(
-  data: ChatRequest,
+function streamBackgroundRun(
+  startPath: string,
+  data: ChatRequest | RetryRequest,
   onChunk: (chunk: StreamChunk) => void,
   onDone: () => void,
   onError: (err: string) => void,
@@ -389,7 +390,7 @@ export function streamBackgroundChat(
     try {
       // Do not bind creation to controller.signal: if Stop is pressed while
       // creation is in flight, wait for the ID and then cancel that exact run.
-      const startResponse = await fetch('/api/v1/chat/runs', {
+      const startResponse = await fetch(startPath, {
         method: 'POST',
         headers,
         body: JSON.stringify(data),
@@ -407,7 +408,7 @@ export function streamBackgroundChat(
       runID = run.uuid
       onRun?.(run)
       if (controller.signal.aborted) {
-		void fetch(`/api/v1/agent-runs/${encodeURIComponent(runID)}`, { method: 'DELETE', headers })
+        void fetch(`/api/v1/agent-runs/${encodeURIComponent(runID)}`, { method: 'DELETE', headers })
         finish()
         return
       }
@@ -490,4 +491,24 @@ export function streamBackgroundChat(
   })()
 
   return controller
+}
+
+export function streamBackgroundChat(
+  data: ChatRequest,
+  onChunk: (chunk: StreamChunk) => void,
+  onDone: () => void,
+  onError: (err: string) => void,
+  onRun?: (run: AgentRun) => void,
+) {
+  return streamBackgroundRun('/api/v1/chat/runs', data, onChunk, onDone, onError, onRun)
+}
+
+export function retryBackgroundChat(
+  data: RetryRequest,
+  onChunk: (chunk: StreamChunk) => void,
+  onDone: () => void,
+  onError: (err: string) => void,
+  onRun?: (run: AgentRun) => void,
+) {
+  return streamBackgroundRun('/api/v1/chat/retry/runs', data, onChunk, onDone, onError, onRun)
 }

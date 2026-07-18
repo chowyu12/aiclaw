@@ -111,8 +111,12 @@ the source of truth for completed runs and after a service restart.
 ## Local Agent Runtimes
 
 AiClaw is local-first. At startup it creates a built-in **Local** runtime,
-scans the server process `PATH`, and executes detected agent CLIs in the same
-process. No connection command, extra daemon, or token is required.
+recovers the current user's login-shell `PATH`, adds standard package-manager
+locations, and executes detected agent CLIs in the same process. No connection
+command, extra daemon, or token is required. The CLI keeps using its existing
+login under that user account; AiClaw neither copies nor manages CLI credentials.
+On macOS, AiClaw prefers the signed Codex CLI bundled with the ChatGPT app when
+it is installed; an explicitly configured absolute CLI path always takes priority.
 
 1. Install and authenticate the desired agent CLI on the machine that runs
    AiClaw.
@@ -136,9 +140,9 @@ Runtimes page, then run the generated command on that machine:
 aiclaw runtime connect --server https://your-aiclaw.example.com --token rt-...
 ```
 
-The remote runtime connects outbound, scans its own `PATH`, and becomes
-available alongside the built-in local runtime. This is optional; it is not
-needed for the machine running AiClaw itself.
+The remote runtime connects outbound, recovers its own login-shell `PATH`, and
+becomes available alongside the built-in local runtime. This is optional; it is
+not needed for the machine running AiClaw itself.
 
 The built-in runtime currently auto-detects these non-interactive CLI agents:
 

@@ -177,6 +177,8 @@ install_launchd() {
     <dict>
         <key>HOME</key>
         <string>${HOME}</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin:/bin:/usr/sbin:/sbin:${HOME}/.local/bin:${HOME}/bin:${HOME}/.cargo/bin:${HOME}/go/bin:${HOME}/.volta/bin:${HOME}/.bun/bin:${HOME}/Library/pnpm</string>
     </dict>
 </dict>
 </plist>

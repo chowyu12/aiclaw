@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -52,11 +51,14 @@ func providerCommand(ctx context.Context, task *model.RuntimeTask, args []string
 	if strings.TrimSpace(task.Command) == "" {
 		return nil, nil, nil, nil, errors.New("runtime task has no command")
 	}
-	cmd := exec.CommandContext(ctx, task.Command, args...)
+	cmd, err := runtimeCommand(ctx, task.Command, args...)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 	cmd.WaitDelay = 5 * time.Second
 	cmd.Dir = task.WorkingDir
 	if task.AgentType == model.RuntimeAgentTypeHermes {
-		cmd.Env = append(os.Environ(), "HERMES_YOLO_MODE=1")
+		cmd.Env = append(cmd.Env, "HERMES_YOLO_MODE=1")
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -502,7 +504,10 @@ func (c *client) executeCursorStream(parent, ctx context.Context, task *model.Ru
 	if task.ModelName != "" {
 		args = append(args, "--model", task.ModelName)
 	}
-	cmd := exec.CommandContext(runCtx, task.Command, args...)
+	cmd, err := runtimeCommand(runCtx, task.Command, args...)
+	if err != nil {
+		return "", err.Error()
+	}
 	cmd.Dir = task.WorkingDir
 	cmd.WaitDelay = 5 * time.Second
 	stdout, err := cmd.StdoutPipe()
@@ -582,7 +587,10 @@ func (c *client) executeOpenClaw(parent, ctx context.Context, task *model.Runtim
 		args = append(args, "--agent", task.ModelName)
 	}
 	args = append(args, "--message", providerPrompt(task, true))
-	cmd := exec.CommandContext(ctx, task.Command, args...)
+	cmd, err := runtimeCommand(ctx, task.Command, args...)
+	if err != nil {
+		return "", err.Error()
+	}
 	cmd.Dir = task.WorkingDir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
