@@ -197,7 +197,7 @@
                   <el-icon :size="14"><CopyDocument /></el-icon>
                   <span>{{ copiedMsgIdx === i ? i18n.t('chat.copied') : i18n.t('chat.copy') }}</span>
                 </button>
-                <button v-if="msg.role === 'assistant' && currentAgent?.execution_mode !== 'local'" class="action-btn" @click="retryMessage(i)" :disabled="streaming" :title="i18n.t('chat.retry')">
+                <button v-if="msg.role === 'assistant'" class="action-btn" @click="retryMessage(i)" :disabled="streaming" :title="i18n.t('chat.retry')">
                   <el-icon :size="14"><RefreshRight /></el-icon>
                   <span>{{ i18n.t('chat.retry') }}</span>
                 </button>
@@ -555,7 +555,7 @@ let _streamController: AbortController | null = null
 import { computed, onMounted, nextTick, reactive } from 'vue'
 import { type Agent } from '../../api/agent'
 import { useAgentStore } from '../../stores/agent'
-import { chatApi, streamBackgroundChat, retryStream, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
+import { chatApi, streamBackgroundChat, retryBackgroundChat, fileApi, type StreamChunk, type ChatFile, type Conversation, type Message } from '../../api/chat'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18nStore } from '../../stores/i18n'
 import { Marked } from 'marked'
@@ -1049,7 +1049,7 @@ function retryMessage(assistantIdx: number) {
       streaming.value = false
     }
 
-    _streamController = retryStream(
+    _streamController = retryBackgroundChat(
       { conversation_id: conversationId.value, message_id: assistantMsg.id },
       (chunk: StreamChunk) => {
         if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
@@ -1060,6 +1060,9 @@ function retryMessage(assistantIdx: number) {
       },
       () => finishRetry(),
       (_err: string) => finishRetry(),
+      (run) => {
+        if (run.conversation_uuid) conversationId.value = run.conversation_uuid
+      },
     )
   } else {
     const userText = userMsg.content

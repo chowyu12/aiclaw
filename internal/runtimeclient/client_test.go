@@ -32,14 +32,18 @@ func TestRenderPrompt(t *testing.T) {
 }
 
 func TestCommandForTaskPromptModes(t *testing.T) {
-	base := &model.RuntimeTask{Command: "agent", Args: []string{"--print"}, Messages: []model.RuntimeTaskMessage{{Role: "user", Content: "hello"}}}
+	command, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &model.RuntimeTask{Command: command, Args: []string{"--print"}, Messages: []model.RuntimeTaskMessage{{Role: "user", Content: "hello"}}}
 	stdinTask := *base
 	stdinTask.PromptMode = model.RuntimePromptStdin
 	stdinCmd, err := commandForTask(context.Background(), &stdinTask)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(stdinCmd.Args, " "); got != "agent --print" {
+	if got := strings.Join(stdinCmd.Args[1:], " "); got != "--print" {
 		t.Fatalf("stdin args = %q", got)
 	}
 	stdin, err := io.ReadAll(stdinCmd.Stdin)

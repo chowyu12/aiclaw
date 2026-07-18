@@ -105,7 +105,8 @@ func (s *GormStore) GetMessage(ctx context.Context, id int64) (*model.Message, e
 	return &m, nil
 }
 
-// DeleteMessagesFrom 删除指定会话中 id >= fromMessageID 的所有消息及其关联的步骤和文件。
+// DeleteMessagesFrom removes messages from a conversation turn onward, along
+// with bound records and abandoned in-flight records that have no message ID.
 func (s *GormStore) DeleteMessagesFrom(ctx context.Context, conversationID, fromMessageID int64) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var planIDs []int64
@@ -117,10 +118,10 @@ func (s *GormStore) DeleteMessagesFrom(ctx context.Context, conversationID, from
 		}
 		tx.Where("conversation_id = ? AND (message_id = 0 OR message_id >= ?)", conversationID, fromMessageID).Delete(&model.PlanRun{})
 		cond := "conversation_id = ? AND id >= ?"
-		msgCond := "conversation_id = ? AND message_id IN (?)"
 		subQuery := tx.Model(&model.Message{}).Select("id").Where(cond, conversationID, fromMessageID)
-		tx.Where(msgCond, conversationID, subQuery).Delete(&model.File{})
-		tx.Where(msgCond, conversationID, subQuery).Delete(&model.ExecutionStep{})
+		artifactCond := "conversation_id = ? AND (message_id = 0 OR message_id IN (?))"
+		tx.Where(artifactCond, conversationID, subQuery).Delete(&model.File{})
+		tx.Where(artifactCond, conversationID, subQuery).Delete(&model.ExecutionStep{})
 		tx.Where("conversation_id = ? AND (message_id = 0 OR message_id >= ?)", conversationID, fromMessageID).Delete(&model.AgentRun{})
 		return tx.Where(cond, conversationID, fromMessageID).Delete(&model.Message{}).Error
 	})
