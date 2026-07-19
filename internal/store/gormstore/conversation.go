@@ -89,6 +89,7 @@ func (s *GormStore) DeleteConversation(ctx context.Context, id int64) error {
 			tx.Where("plan_run_id IN ?", planIDs).Delete(&model.PlanItem{})
 		}
 		tx.Where("conversation_id = ?", id).Delete(&model.PlanRun{})
+		tx.Where("conversation_id = ?", id).Delete(&model.MemoryEvidence{})
 		tx.Where("conversation_id = ?", id).Delete(&model.File{})
 		tx.Where("conversation_id = ?", id).Delete(&model.ExecutionStep{})
 		tx.Where("conversation_id = ?", id).Delete(&model.AgentRun{})
@@ -122,6 +123,7 @@ func (s *GormStore) DeleteMessagesFrom(ctx context.Context, conversationID, from
 		artifactCond := "conversation_id = ? AND (message_id = 0 OR message_id IN (?))"
 		tx.Where(artifactCond, conversationID, subQuery).Delete(&model.File{})
 		tx.Where(artifactCond, conversationID, subQuery).Delete(&model.ExecutionStep{})
+		tx.Where(artifactCond, conversationID, subQuery).Delete(&model.MemoryEvidence{})
 		tx.Where("conversation_id = ? AND (message_id = 0 OR message_id >= ?)", conversationID, fromMessageID).Delete(&model.AgentRun{})
 		return tx.Where(cond, conversationID, fromMessageID).Delete(&model.Message{}).Error
 	})

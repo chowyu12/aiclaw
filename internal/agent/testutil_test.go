@@ -930,6 +930,44 @@ func (s *mockStore) DeleteFile(_ context.Context, fileID int64) error {
 	return nil
 }
 
+func (s *mockStore) UpsertMemory(_ context.Context, item *model.MemoryItem, _ *model.MemoryEvidence, _ string) (*model.MemoryItem, error) {
+	if item.ID == 0 {
+		item.ID = s.nextID()
+	}
+	if item.UUID == "" {
+		item.UUID = fmt.Sprintf("memory-%d", item.ID)
+	}
+	return item, nil
+}
+func (s *mockStore) GetMemoryByUUID(_ context.Context, _, _ string) (*model.MemoryItem, error) {
+	return nil, sql.ErrNoRows
+}
+func (s *mockStore) ListMemories(_ context.Context, _ model.MemoryListQuery) ([]model.MemoryItem, int64, error) {
+	return nil, 0, nil
+}
+func (s *mockStore) RetrieveMemories(_ context.Context, _ model.MemoryRetrieveQuery) ([]model.MemoryItem, error) {
+	return nil, nil
+}
+func (s *mockStore) UpdateMemory(_ context.Context, _ *model.MemoryItem, _ model.MemoryRevisionAction, _ string) error {
+	return nil
+}
+func (s *mockStore) DeleteMemory(_ context.Context, _, _, _ string) error { return nil }
+func (s *mockStore) ListMemoryRevisions(_ context.Context, _ int64) ([]model.MemoryRevision, error) {
+	return nil, nil
+}
+func (s *mockStore) ListMemoryEvidence(_ context.Context, _ int64) ([]model.MemoryEvidence, error) {
+	return nil, nil
+}
+func (s *mockStore) ListMemoryUsageByMessage(_ context.Context, _ int64) ([]model.MemoryItem, error) {
+	return nil, nil
+}
+func (s *mockStore) RecordMemoryUsage(_ context.Context, _ []int64, _, _ int64, _ string) error {
+	return nil
+}
+func (s *mockStore) UpdateMemoryEvidenceMessageIDByRun(_ context.Context, _ string, _ int64) error {
+	return nil
+}
+
 func (s *mockStore) ListMCPServers(_ context.Context) ([]model.MCPServer, error) {
 	return nil, nil
 }

@@ -55,6 +55,7 @@ const router = createRouter({
         { path: 'settings', redirect: '/agents' },
         { path: 'mcp', name: 'Mcp', component: () => import('../views/mcp/Index.vue') },
         { path: 'skill', name: 'Skill', component: () => import('../views/skill/Index.vue') },
+        { path: 'memories', name: 'Memories', component: () => import('../views/memory/Index.vue') },
         { path: 'providers', name: 'Providers', component: () => import('../views/provider/Index.vue') },
         { path: 'tools', name: 'Tools', component: () => import('../views/tool/Index.vue') },
         { path: 'tools/create', name: 'ToolCreate', component: () => import('../views/tool/Form.vue') },

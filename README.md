@@ -203,20 +203,28 @@ Execution modes:
 
 Sub-agents can use the parent agent configuration or a selected agent UUID. They can also request the `fast` model profile when the parent agent has one configured.
 
-## Memory And Context
+## Durable Memory
 
-AiClaw separates memory by lifetime and injection point:
+AiClaw uses a database-backed Memory System, not a shared Markdown file. A memory is a small, reviewable record with an owner, scope, kind, stable key, confidence, importance, status, audit history, and evidence links.
 
-| System | Description |
+| Scope | Visibility |
 | --- | --- |
-| Persistent memory | `MEMORY.md` and `USER.md` style long-lived facts written through the `memory` tool. |
-| Plan State | Runtime task progress stored per assistant response. |
-| Session archive | Long conversation snapshots for continuation workflows. |
-| History loading | Structured truncation keeps recent turns detailed and older turns compact. |
-| Runtime compression | Long middle context can be summarized during execution. |
-| Skill crystallization | Successful multi-tool workflows can be saved as reusable skill candidates. |
+| `user` | Available to every Agent for the same user. |
+| `agent_user` | Available only to one user and one Agent pair. |
 
-SQLite installations can use FTS5-backed session search. Other databases fall back to SQL text search.
+Memory lifecycle:
+
+```text
+candidate -> active -> superseded / dismissed / deleted
+```
+
+- Agent-created `propose` actions are reviewable candidates; the Memory page lets an operator approve, dismiss, edit, pin, or delete them.
+- A run retrieves only the current user's active, unexpired records in the `user` scope and the selected Agent's `agent_user` scope. Candidate, foreign-user, and other-Agent records are excluded.
+- The prompt receives a compact relevant subset plus explicitly pinned records. It labels memory as potentially stale retained context, never as instructions; current user requests and verified tool results have priority.
+- Each creation/update has an immutable revision. Each injected memory is linked to the run and final assistant message that used it, so the chat view and execution logs can show an explainable snapshot.
+The `memory` tool supports `propose`, `upsert`, `forget`, `search`, and `read`; its user and Agent identity always comes from the execution context rather than model-provided arguments.
+
+SQLite installations use FTS5 for memory and session search. Other databases fall back to scoped SQL text search.
 
 ## Built-In Tools
 
@@ -240,7 +248,7 @@ AiClaw includes a broad default toolset:
 | `code_interpreter` | Execute Python, JavaScript, or shell snippets in an interpreter workflow. |
 | `current_time` | Read the current system time. |
 | `sub_agent` | Delegate work to child agents. |
-| `memory` | Add, replace, remove, read, or recall persistent memory. |
+| `memory` | Propose, upsert, forget, search, or read durable memory within the current user/Agent boundary. |
 | `session_search` | Search previous conversations. |
 | `plan` | Internal runtime planning control. |
 | `skill` | List, inspect, promote, or discard generated skill candidates. |

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	memorypkg "github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
 	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 )
@@ -127,6 +128,12 @@ func (e *Executor) beginAgentRun(ctx context.Context, ec *execContext) (*model.A
 		return nil, fmt.Errorf("create agent run: %w", err)
 	}
 	ec.run = run
+	ec.ctx = memorypkg.WithExecutionContext(ec.ctx, memorypkg.ExecutionContext{
+		UserID:         ec.conv.UserID,
+		AgentUUID:      ec.ag.UUID,
+		ConversationID: ec.conv.ID,
+		RunUUID:        run.UUID,
+	})
 	ec.tracker.SetRunUUID(run.UUID)
 	ec.l = ec.l.WithField("run", run.UUID)
 	return run, nil

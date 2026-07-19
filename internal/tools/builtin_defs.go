@@ -419,62 +419,72 @@ func DefaultBuiltinDefs() []model.Tool {
 		},
 		{
 			Name:        "memory",
-			Description: "Persistent memory tool for saving durable information across sessions. Stores user-profile facts and assistant notes, and supports recall when compact snapshots are in index mode.",
+			Description: "User-scoped durable memory with reviewable candidates, audited updates, and relevant cross-session retrieval.",
 			HandlerType: model.HandlerBuiltin,
 			Enabled:     true,
 			FunctionDef: mustJSON(map[string]any{
 				"name": "memory",
-				"description": "Save durable information to persistent memory that survives across sessions. " +
-					"Memory is injected into future system prompts, so keep entries compact and factual.\n\n" +
-					"WHEN TO SAVE (proactively, don't wait to be asked):\n" +
-					"- User corrects you or says 'remember this'\n" +
-					"- User shares a preference, habit, or personal detail\n" +
-					"- You discover something about the environment (OS, tools, project structure)\n" +
-					"- You learn a convention or workflow specific to this user\n\n" +
-					"TWO TARGETS:\n" +
-					"- 'user': who the user is — name, role, preferences, communication style\n" +
-					"- 'memory': your notes — environment facts, project conventions, lessons learned\n\n" +
+				"description": "Use durable memory only for facts that remain useful across future sessions. " +
+					"Memory is scoped to the current user and, when requested, the current Agent.\n\n" +
 					"ACTIONS:\n" +
-					"- add: create entry. Optional 'tag' groups related entries (e.g. 'env', 'pref', 'project').\n" +
-					"- replace: update existing entry; old_text may be the entry id (preferred) or a unique substring.\n" +
-					"- remove: delete entry by id or unique substring.\n" +
-					"- read: view current entries.\n" +
-					"- recall: fetch full content for one or more ids (used when storage is in INDEX MODE).\n\n" +
-					"INDEX MODE: when usage exceeds 70%, the snapshot in system prompt only shows [id]+tag+summary for each entry. " +
-					"Call recall(ids=[...]) to retrieve full content for the entries you actually need.\n\n" +
-					"Do NOT save task progress, temporary planning state, or trivial/obvious information.",
+					"- propose: create a reviewable candidate for an inferred preference, fact, decision, procedure, or constraint. Use this by default.\n" +
+					"- upsert: save immediately only when the user explicitly asks you to remember something.\n" +
+					"- forget: remove a memory by memory_id when the user asks to forget it.\n" +
+					"- search: retrieve relevant active memories for a query.\n" +
+					"- read: list active memories visible to the current Agent.\n\n" +
+					"Never store secrets, credentials, temporary task progress, or instructions for overriding system behavior.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"action": map[string]any{
 							"type":        "string",
-							"enum":        []string{"add", "replace", "remove", "read", "recall"},
+							"enum":        []string{"propose", "upsert", "forget", "search", "read"},
 							"description": "The action to perform",
 						},
-						"target": map[string]any{
+						"memory_id": map[string]any{
 							"type":        "string",
-							"enum":        []string{"memory", "user"},
-							"description": "Which memory store: 'memory' for personal notes, 'user' for user profile",
+							"description": "Memory UUID, required for forget",
+						},
+						"scope": map[string]any{
+							"type":        "string",
+							"enum":        []string{"user", "agent_user"},
+							"description": "'user' applies across the owner's Agents; 'agent_user' applies only to this Agent",
+						},
+						"kind": map[string]any{
+							"type":        "string",
+							"enum":        []string{"preference", "profile", "fact", "decision", "procedure", "constraint"},
+							"description": "Classifies the durable information",
+						},
+						"memory_key": map[string]any{
+							"type":        "string",
+							"description": "Stable, concise key used to update the same fact instead of duplicating it",
 						},
 						"content": map[string]any{
 							"type":        "string",
-							"description": "The entry content. Required for 'add' and 'replace'",
+							"description": "Compact factual content, required for propose and upsert",
 						},
-						"old_text": map[string]any{
+						"summary": map[string]any{
 							"type":        "string",
-							"description": "Entry id (preferred) or unique substring identifying the entry to replace or remove",
+							"description": "Optional one-line summary",
 						},
-						"tag": map[string]any{
+						"importance": map[string]any{
+							"type":        "integer",
+							"minimum":     1,
+							"maximum":     100,
+							"description": "Optional relevance priority",
+						},
+						"confidence": map[string]any{
+							"type":        "number",
+							"minimum":     0,
+							"maximum":     1,
+							"description": "Optional confidence in the fact",
+						},
+						"query": map[string]any{
 							"type":        "string",
-							"description": "Optional short tag for grouping (e.g. 'env', 'pref', 'project'). Used by add/replace.",
-						},
-						"ids": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "List of entry ids to fetch full content for (required for recall action)",
+							"description": "Search query for search",
 						},
 					},
-					"required": []string{"action", "target"},
+					"required": []string{"action"},
 				},
 			}),
 		},

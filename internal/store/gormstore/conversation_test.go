@@ -95,6 +95,17 @@ func TestDeleteMessagesFromDeletesRetryArtifacts(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("create plan item: %v", err)
 	}
+	memoryItem, err := store.UpsertMemory(ctx, &model.MemoryItem{
+		UserID: "user-1", Scope: model.MemoryScopeUser, Kind: model.MemoryKindPreference,
+		MemoryKey: "response-language", Content: "Respond in English", Summary: "English responses",
+		Importance: 50, Confidence: 0.8, Sensitivity: model.MemorySensitivityNormal, Status: model.MemoryStatusActive,
+	}, nil, "test")
+	if err != nil {
+		t.Fatalf("create memory: %v", err)
+	}
+	if err := store.RecordMemoryUsage(ctx, []int64{memoryItem.ID}, conversation.ID, 0, oldRun.UUID); err != nil {
+		t.Fatalf("record memory usage: %v", err)
+	}
 
 	if err := store.DeleteMessagesFrom(ctx, conversation.ID, retryMessage.ID); err != nil {
 		t.Fatalf("delete messages from retry turn: %v", err)
@@ -106,6 +117,8 @@ func TestDeleteMessagesFromDeletesRetryArtifacts(t *testing.T) {
 	assertModelCount(t, store, &model.File{}, 0, "conversation_id = ?", conversation.ID)
 	assertModelCount(t, store, &model.PlanRun{}, 0, "conversation_id = ?", conversation.ID)
 	assertModelCount(t, store, &model.PlanItem{}, 0, "plan_run_id = ?", oldPlan.ID)
+	assertModelCount(t, store, &model.MemoryEvidence{}, 0, "conversation_id = ?", conversation.ID)
+	assertModelCount(t, store, &model.MemoryItem{}, 1, "id = ?", memoryItem.ID)
 
 	remaining, err := store.GetMessage(ctx, previousMessage.ID)
 	if err != nil {

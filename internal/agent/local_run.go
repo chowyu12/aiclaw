@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	memorypkg "github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
 )
 
@@ -114,6 +115,23 @@ func (e *Executor) ClaimLocalAgentRun(ctx context.Context, runtimeID int64) (*mo
 		}
 		taskMessages = append(taskMessages, model.RuntimeTaskMessage{Role: msg.Role, Content: msg.Content})
 	}
+	memoryIdentity := memorypkg.ExecutionContext{
+		UserID:         run.UserID,
+		AgentUUID:      ag.UUID,
+		ConversationID: run.ConversationID,
+		RunUUID:        run.UUID,
+	}
+	memoryContext, memoryErr := e.memories.BuildContext(ctx, memoryIdentity, run.Input)
+	if memoryErr != nil {
+		return nil, e.failClaimedLocalAgentRun(ctx, run, fmt.Errorf("retrieve durable memory: %w", memoryErr))
+	}
+	if err := e.memories.RecordUsage(ctx, memoryContext, memoryIdentity); err != nil {
+		return nil, e.failClaimedLocalAgentRun(ctx, run, fmt.Errorf("record memory usage: %w", err))
+	}
+	systemPrompt := ag.SystemPrompt
+	if memoryContext != nil && memoryContext.Prompt != "" {
+		systemPrompt = strings.TrimSpace(systemPrompt + "\n\n" + memoryContext.Prompt)
+	}
 	e.runHub.publish(run.UUID, model.AgentRunEvent{
 		Type: model.AgentRunEventUpdated, Status: model.AgentRunRunning, Run: cloneAgentRun(run), CreatedAt: time.Now(),
 	})
@@ -123,7 +141,7 @@ func (e *Executor) ClaimLocalAgentRun(ctx context.Context, runtimeID int64) (*mo
 		AgentName:      ag.Name,
 		AgentType:      ag.EffectiveLocalAgentType(),
 		ModelName:      modelName,
-		SystemPrompt:   ag.SystemPrompt,
+		SystemPrompt:   systemPrompt,
 		Messages:       taskMessages,
 		Command:        command,
 		Args:           args,
@@ -256,6 +274,11 @@ func (e *Executor) CompleteLocalAgentRun(ctx context.Context, runtimeID int64, r
 	if err != nil {
 		return nil, fmt.Errorf("save local agent response: %w", err)
 	}
+	_ = e.memories.LinkRunUsage(ctx, run.UUID, messageID)
+	var memoryContext *model.MemoryContext
+	if memories, err := e.store.ListMemoryUsageByMessage(ctx, messageID); err == nil && len(memories) > 0 {
+		memoryContext = &model.MemoryContext{Items: memories, RetrievedAt: time.Now()}
+	}
 	finishedAt := time.Now()
 	if err := e.store.UpdateAgentRun(ctx, run.ID, map[string]any{
 		"message_id":  messageID,
@@ -277,7 +300,7 @@ func (e *Executor) CompleteLocalAgentRun(ctx context.Context, runtimeID int64, r
 	if status == model.AgentRunSucceeded {
 		e.runHub.publish(runID, model.AgentRunEvent{
 			Type: model.AgentRunEventChunk, Status: status,
-			Chunk:     &model.StreamChunk{RunID: runID, ConversationID: run.ConversationUUID, MessageID: messageID, Content: messageContent, DurationMs: durationMs, Done: true},
+			Chunk:     &model.StreamChunk{RunID: runID, ConversationID: run.ConversationUUID, MessageID: messageID, Content: messageContent, DurationMs: durationMs, Done: true, Memory: memoryContext},
 			CreatedAt: finishedAt,
 		})
 	}

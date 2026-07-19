@@ -81,6 +81,9 @@ func autoMigrate(db *gorm.DB) error {
 		&model.ExecutionStep{},
 		&model.PlanRun{},
 		&model.PlanItem{},
+		&model.MemoryItem{},
+		&model.MemoryRevision{},
+		&model.MemoryEvidence{},
 		&model.File{},
 		&model.SearchEngineConfig{},
 	); err != nil {

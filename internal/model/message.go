@@ -27,9 +27,10 @@ type Message struct {
 	ParentStepID int64     `json:"parent_step_id,omitzero" gorm:"default:0"`
 	CreatedAt    time.Time `json:"created_at"`
 
-	Steps []ExecutionStep `json:"steps,omitzero" gorm:"-"`
-	Files []*File         `json:"files,omitzero" gorm:"-"`
-	Plan  *PlanState      `json:"plan,omitzero" gorm:"-"`
+	Steps  []ExecutionStep `json:"steps,omitzero" gorm:"-"`
+	Files  []*File         `json:"files,omitzero" gorm:"-"`
+	Plan   *PlanState      `json:"plan,omitzero" gorm:"-"`
+	Memory *MemoryContext  `json:"memory,omitzero" gorm:"-"`
 }
 
 type StepType string
@@ -168,6 +169,7 @@ type ChatResponse struct {
 	Steps          []ExecutionStep `json:"steps,omitzero"`
 	Files          []*File         `json:"files,omitzero"`
 	Plan           *PlanState      `json:"plan,omitzero"`
+	Memory         *MemoryContext  `json:"memory,omitzero"`
 }
 
 type StreamChunk struct {
@@ -184,6 +186,7 @@ type StreamChunk struct {
 	Steps      []ExecutionStep `json:"steps,omitzero"`
 	Files      []*File         `json:"files,omitzero"`
 	Plan       *PlanState      `json:"plan,omitzero"`
+	Memory     *MemoryContext  `json:"memory,omitzero"`
 	// HarnessEvent carries the stable harness protocol event alongside the
 	// legacy stream payload during the migration period.
 	HarnessEvent any `json:"harness_event,omitzero"`

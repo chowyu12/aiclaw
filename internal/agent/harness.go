@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	memorypkg "github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
 	harnesspkg "github.com/chowyu12/aiclaw/pkg/harness"
 )
@@ -516,7 +517,20 @@ func (c *harnessContextCompilerLayer) bootstrap(ctx context.Context) (*harnessTu
 	}
 
 	toolMap, allToolDefs, tsMode, discovered := c.compileToolCatalog()
-	persistentMem := loadPersistentMemory(c.h.executor.ws)
+	persistentMem := ""
+	if !ec.ephemeral {
+		identity := memorypkg.ExecutionContextFromContext(ec.ctx)
+		memoryContext, memoryErr := c.h.executor.memories.BuildContext(ctx, identity, ec.userMsg)
+		if memoryErr != nil {
+			ec.l.WithError(memoryErr).Warn("[Memory] retrieve durable memory failed")
+		} else {
+			ec.memory = memoryContext
+			persistentMem = memoryContext.Prompt
+			if err := c.h.executor.memories.RecordUsage(ctx, memoryContext, identity); err != nil {
+				ec.l.WithError(err).Warn("[Memory] record memory usage failed")
+			}
+		}
+	}
 	planBlock := ""
 	if ec.plan != nil {
 		planBlock = ec.plan.PromptBlock(ctx)
