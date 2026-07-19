@@ -18,6 +18,7 @@ type Store interface {
 	ConversationStore
 	AgentRunStore
 	PlanStore
+	MemoryStore
 	FileStore
 	MCPServerStore
 	SearchEngineStore
@@ -144,6 +145,21 @@ type PlanStore interface {
 	UpdatePlanItemsMessageID(ctx context.Context, conversationID, messageID int64) error
 	DeletePlansByConversation(ctx context.Context, conversationID int64) error
 	DeletePlansFromMessage(ctx context.Context, conversationID, fromMessageID int64) error
+}
+
+// MemoryStore persists durable, user-scoped memory and its audit trail.
+type MemoryStore interface {
+	UpsertMemory(ctx context.Context, item *model.MemoryItem, evidence *model.MemoryEvidence, actor string) (*model.MemoryItem, error)
+	GetMemoryByUUID(ctx context.Context, userID, uuid string) (*model.MemoryItem, error)
+	ListMemories(ctx context.Context, q model.MemoryListQuery) ([]model.MemoryItem, int64, error)
+	RetrieveMemories(ctx context.Context, q model.MemoryRetrieveQuery) ([]model.MemoryItem, error)
+	UpdateMemory(ctx context.Context, item *model.MemoryItem, action model.MemoryRevisionAction, actor string) error
+	DeleteMemory(ctx context.Context, userID, uuid, actor string) error
+	ListMemoryRevisions(ctx context.Context, memoryID int64) ([]model.MemoryRevision, error)
+	ListMemoryEvidence(ctx context.Context, memoryID int64) ([]model.MemoryEvidence, error)
+	ListMemoryUsageByMessage(ctx context.Context, messageID int64) ([]model.MemoryItem, error)
+	RecordMemoryUsage(ctx context.Context, memoryIDs []int64, conversationID, messageID int64, runUUID string) error
+	UpdateMemoryEvidenceMessageIDByRun(ctx context.Context, runUUID string, messageID int64) error
 }
 
 type FileStore interface {

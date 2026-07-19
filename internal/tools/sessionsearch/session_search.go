@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
 )
@@ -52,7 +53,7 @@ type MessageSearchResult struct {
 
 // MessageSearcher 实现了 FTS5 消息搜索的 store 扩展接口。
 type MessageSearcher interface {
-	SearchMessages(ctx context.Context, query string, limit int) ([]MessageSearchResult, error)
+	SearchMessages(ctx context.Context, userID, query string, limit int) ([]MessageSearchResult, error)
 }
 
 // NewHandler 返回绑定了 store 的 session_search handler。
@@ -70,16 +71,20 @@ func NewHandler(s store.Store) func(ctx context.Context, args string) (string, e
 		}
 
 		query := strings.TrimSpace(p.Query)
-		if query == "" {
-			return listRecent(ctx, s, p.Limit)
+		userID := memory.ExecutionContextFromContext(ctx).UserID
+		if userID == "" {
+			return errResult("Current user identity is unavailable."), nil
 		}
-		return searchMessages(ctx, s, query, p.Limit)
+		if query == "" {
+			return listRecent(ctx, s, userID, p.Limit)
+		}
+		return searchMessages(ctx, s, userID, query, p.Limit)
 	}
 }
 
-func listRecent(ctx context.Context, s store.Store, limit int) (string, error) {
+func listRecent(ctx context.Context, s store.Store, userID string, limit int) (string, error) {
 	q := model.ListQuery{Page: 1, PageSize: limit}
-	convs, _, err := s.ListConversations(ctx, "", q)
+	convs, _, err := s.ListConversations(ctx, userID, q)
 	if err != nil {
 		return errResult("Failed to query conversations: " + err.Error()), nil
 	}
@@ -117,15 +122,15 @@ func listRecent(ctx context.Context, s store.Store, limit int) (string, error) {
 	return string(out), nil
 }
 
-func searchMessages(ctx context.Context, s store.Store, query string, limit int) (string, error) {
+func searchMessages(ctx context.Context, s store.Store, userID, query string, limit int) (string, error) {
 	searcher, ok := s.(MessageSearcher)
 	if !ok {
-		return searchFallback(ctx, s, query, limit)
+		return searchFallback(ctx, s, userID, query, limit)
 	}
 
-	results, err := searcher.SearchMessages(ctx, query, limit)
+	results, err := searcher.SearchMessages(ctx, userID, query, limit)
 	if err != nil {
-		return searchFallback(ctx, s, query, limit)
+		return searchFallback(ctx, s, userID, query, limit)
 	}
 
 	var hits []messageHit
@@ -153,9 +158,9 @@ func searchMessages(ctx context.Context, s store.Store, query string, limit int)
 	return string(out), nil
 }
 
-func searchFallback(ctx context.Context, s store.Store, query string, limit int) (string, error) {
+func searchFallback(ctx context.Context, s store.Store, userID, query string, limit int) (string, error) {
 	q := model.ListQuery{Page: 1, PageSize: 200}
-	convs, _, err := s.ListConversations(ctx, "", q)
+	convs, _, err := s.ListConversations(ctx, userID, q)
 	if err != nil {
 		return errResult("Failed to query conversations: " + err.Error()), nil
 	}

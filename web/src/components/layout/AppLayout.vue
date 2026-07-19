@@ -43,6 +43,10 @@
             <el-icon><Reading /></el-icon>
             <template #title>{{ i18n.t("app.skills") }}</template>
           </el-menu-item>
+          <el-menu-item index="/memories">
+            <el-icon><Collection /></el-icon>
+            <template #title>{{ i18n.t("app.memories") }}</template>
+          </el-menu-item>
           <el-menu-item index="/tools">
             <el-icon><SetUp /></el-icon>
             <template #title>{{ i18n.t("app.tools") }}</template>

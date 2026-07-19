@@ -63,6 +63,13 @@
                     </div>
                   </div>
 
+                  <div v-if="msg.role === 'assistant' && msg.memory?.items?.length" class="memory-section">
+                    <div class="memory-label"><el-icon size="14"><Collection /></el-icon>{{ i18n.t('chat.memoryUsed', { count: msg.memory.items.length }) }}</div>
+                    <div v-for="memory in msg.memory.items" :key="memory.uuid" class="memory-row">
+                      <span>{{ memoryKindLabel(memory.kind) }}</span><span>{{ memory.summary || memory.content }}</span>
+                    </div>
+                  </div>
+
                   <div v-if="msg.steps && msg.steps.length > 0" class="steps-section">
                     <div
                       class="steps-header"
@@ -397,6 +404,10 @@ function planProgress(plan?: Message['plan']): string {
   return `${done}/${items.length}`
 }
 
+function memoryKindLabel(kind: string): string {
+  return i18n.t(`memories.kind.${kind}`)
+}
+
 function groupSteps(steps: ExecutionStep[]): StepNode[] {
   // Phase 1: group children by sub_agent_call_id (order-independent)
   const childrenByCall = new Map<string, ExecutionStep[]>()
@@ -503,6 +514,15 @@ function formatTime(t: string) {
   padding: 10px 14px 12px;
   background: #f8fafc;
 }
+.memory-section {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-left: 2px solid #5eead4;
+  background: #f0fdfa;
+}
+.memory-label { display: flex; align-items: center; gap: 6px; color: #0f766e; font-size: 12px; font-weight: 700; }
+.memory-row { display: flex; gap: 8px; margin-top: 6px; color: #475569; font-size: 12px; line-height: 1.45; }
+.memory-row > span:first-child { flex: 0 0 auto; color: #0f766e; font-weight: 600; }
 .plan-header {
   display: flex;
   align-items: flex-start;

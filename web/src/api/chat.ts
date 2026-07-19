@@ -1,4 +1,5 @@
 import request, { type ListQuery } from './request'
+import type { MemoryContext } from './memory'
 
 export type ChatFileType = 'document' | 'image' | 'audio' | 'video' | 'custom'
 export type TransferMethod = 'remote_url' | 'local_file'
@@ -109,6 +110,7 @@ export interface ChatResponse {
   steps?: ExecutionStep[]
   files?: FileInfo[]
   plan?: PlanState
+  memory?: MemoryContext
 }
 
 export interface StreamChunk {
@@ -124,6 +126,7 @@ export interface StreamChunk {
   steps?: ExecutionStep[]
   files?: FileInfo[]
   plan?: PlanState
+  memory?: MemoryContext
   harness_event?: HarnessEvent
 }
 
@@ -195,6 +198,7 @@ export interface Message {
   steps?: ExecutionStep[]
   files?: FileInfo[]
   plan?: PlanState
+  memory?: MemoryContext
   created_at: string
 }
 

@@ -162,6 +162,21 @@
                 </div>
               </div>
 
+              <div v-if="msg.role === 'assistant' && msg.memory?.items?.length" class="memory-panel">
+                <div class="memory-toggle" @click="msg._showMemory = !msg._showMemory">
+                  <span class="memory-toggle-title"><el-icon :size="14"><Collection /></el-icon>{{ i18n.t('chat.memoryUsed', { count: msg.memory.items.length }) }}</span>
+                  <el-icon class="toggle-icon" :class="{ open: msg._showMemory }"><ArrowDown /></el-icon>
+                </div>
+                <transition name="fold">
+                  <div v-if="msg._showMemory" class="memory-list">
+                    <div v-for="memory in msg.memory.items" :key="memory.uuid" class="memory-row">
+                      <span class="memory-kind">{{ memoryKindLabel(memory.kind) }}</span>
+                      <span class="memory-text">{{ memory.summary || memory.content }}</span>
+                    </div>
+                  </div>
+                </transition>
+              </div>
+
               <!-- 消息气泡（附件 + 文本统一展示） -->
                 <div class="msg-bubble">
                 <div v-if="msg.files && msg.files.length > 0" class="bubble-attachments">
@@ -349,6 +364,21 @@
                 </div>
               </div>
 
+              <div v-if="pendingMemory?.items?.length" class="memory-panel memory-panel--streaming">
+                <div class="memory-toggle" @click="pendingMemoryOpen = !pendingMemoryOpen">
+                  <span class="memory-toggle-title"><el-icon :size="14"><Collection /></el-icon>{{ i18n.t('chat.memoryUsed', { count: pendingMemory.items.length }) }}</span>
+                  <el-icon class="toggle-icon" :class="{ open: pendingMemoryOpen }"><ArrowDown /></el-icon>
+                </div>
+                <transition name="fold">
+                  <div v-if="pendingMemoryOpen" class="memory-list">
+                    <div v-for="memory in pendingMemory.items" :key="memory.uuid" class="memory-row">
+                      <span class="memory-kind">{{ memoryKindLabel(memory.kind) }}</span>
+                      <span class="memory-text">{{ memory.summary || memory.content }}</span>
+                    </div>
+                  </div>
+                </transition>
+              </div>
+
               <!-- 实时步骤时间线 -->
               <div v-if="pendingSteps.length > 0 || !streamingContent" class="wf-timeline">
                 <div v-for="node in groupSteps(pendingSteps as ExecutionStep[])" :key="node.step.step_order" class="wf-node">
@@ -526,6 +556,7 @@
 <script lang="ts">
 import { ref } from 'vue'
 import type { ExecutionStep, FileInfo, PlanState, StepNode } from '../../api/chat'
+import type { MemoryContext } from '../../api/memory'
 
 interface ChatMessage {
   id?: number
@@ -537,7 +568,9 @@ interface ChatMessage {
   steps?: ExecutionStep[]
   files?: FileInfo[]
   plan?: PlanState
+  memory?: MemoryContext
   _showSteps?: boolean
+  _showMemory?: boolean
 }
 
 // Module-level state — survives component unmount / remount on page navigation
@@ -546,6 +579,7 @@ const _streaming = ref(false)
 const _streamingContent = ref('')
 const _pendingSteps = ref<ExecutionStep[]>([])
 const _pendingPlan = ref<PlanState | null>(null)
+const _pendingMemory = ref<MemoryContext | null>(null)
 const _conversationId = ref('')
 const _activeConvId = ref<number>(0)
 let _streamController: AbortController | null = null
@@ -633,6 +667,7 @@ const streaming = _streaming
 const streamingContent = _streamingContent
 const pendingSteps = _pendingSteps
 const pendingPlan = _pendingPlan
+const pendingMemory = _pendingMemory
 const conversationId = _conversationId
 const activeConvId = _activeConvId
 
@@ -648,6 +683,7 @@ const uploading = ref(false)
 const conversations = ref<Conversation[]>([])
 const loadingHistory = ref(false)
 const copiedMsgIdx = ref(-1)
+const pendingMemoryOpen = ref(false)
 
 // 多 Agent 支持
 const agentStore = useAgentStore()
@@ -718,7 +754,9 @@ function parseChatMessages(msgs: Message[]): ChatMessage[] {
       steps: m.steps,
       files: m.files,
       plan: m.plan,
+      memory: m.memory,
       _showSteps: false,
+      _showMemory: false,
     }))
 }
 
@@ -833,6 +871,8 @@ function resetChat() {
   streamingContent.value = ''
   pendingSteps.value = []
   pendingPlan.value = null
+  pendingMemory.value = null
+  pendingMemoryOpen.value = false
   pendingFiles.value = []
   pendingURLs.value = []
   urlInput.value = ''
@@ -950,6 +990,8 @@ function sendMessage() {
   streamingContent.value = ''
   pendingSteps.value = []
   pendingPlan.value = null
+  pendingMemory.value = null
+  pendingMemoryOpen.value = false
   scrollToBottom()
 
   const focusInput = () => nextTick(() => inputRef.value?.focus())
@@ -964,6 +1006,8 @@ function sendMessage() {
       streamingContent.value = ''
       pendingSteps.value = []
       pendingPlan.value = null
+      pendingMemory.value = null
+      pendingMemoryOpen.value = false
       streaming.value = false
       scrollToBottom()
       loadConversations()
@@ -972,6 +1016,8 @@ function sendMessage() {
       streamingContent.value = ''
       pendingSteps.value = []
       pendingPlan.value = null
+      pendingMemory.value = null
+      pendingMemoryOpen.value = false
       streaming.value = false
     }
     focusInput()
@@ -983,6 +1029,7 @@ function sendMessage() {
       if (chunk.conversation_id) conversationId.value = chunk.conversation_id
       if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
       if (chunk.plan) pendingPlan.value = chunk.plan
+      if (chunk.memory) pendingMemory.value = chunk.memory
       if (chunk.steps?.length) { for (const s of chunk.steps) pushOrUpdateStep(pendingSteps.value, s) }
       else if (chunk.step) pushOrUpdateStep(pendingSteps.value, chunk.step)
       if (chunk.done) {
@@ -1001,6 +1048,7 @@ function sendMessage() {
         }
         if (chunk.files?.length) msg.files = chunk.files
         if (chunk.plan) msg.plan = chunk.plan
+        if (chunk.memory) msg.memory = chunk.memory
         finishSend(msg)
       }
     },
@@ -1035,6 +1083,8 @@ function retryMessage(assistantIdx: number) {
     streamingContent.value = ''
     pendingSteps.value = []
     pendingPlan.value = null
+    pendingMemory.value = null
+    pendingMemoryOpen.value = false
     scrollToBottom()
 
     let retryFinished = false
@@ -1046,6 +1096,8 @@ function retryMessage(assistantIdx: number) {
       streamingContent.value = ''
       pendingSteps.value = []
       pendingPlan.value = null
+      pendingMemory.value = null
+      pendingMemoryOpen.value = false
       streaming.value = false
     }
 
@@ -1054,6 +1106,7 @@ function retryMessage(assistantIdx: number) {
       (chunk: StreamChunk) => {
         if (chunk.delta) { streamingContent.value += chunk.delta; scrollToBottom() }
         if (chunk.plan) pendingPlan.value = chunk.plan
+        if (chunk.memory) pendingMemory.value = chunk.memory
         if (chunk.steps?.length) { for (const s of chunk.steps) pushOrUpdateStep(pendingSteps.value, s) }
         else if (chunk.step) pushOrUpdateStep(pendingSteps.value, chunk.step)
         if (chunk.done) finishRetry()
@@ -1126,6 +1179,10 @@ function planProgress(plan?: PlanState | null): string {
   if (!items.length) return ''
   const done = items.filter(i => i.status === 'completed' || i.status === 'skipped').length
   return `${done}/${items.length}`
+}
+
+function memoryKindLabel(kind: string): string {
+  return i18n.t(`memories.kind.${kind}`)
 }
 
 function pushOrUpdateStep(list: ExecutionStep[], step: ExecutionStep) {
@@ -1674,6 +1731,44 @@ function groupSteps(steps: ExecutionStep[]): StepNode[] {
 .plan-panel--streaming {
   margin-bottom: 14px;
 }
+.memory-panel {
+  width: 100%;
+  margin: 0 0 12px;
+}
+.memory-panel--streaming {
+  margin-bottom: 14px;
+}
+.memory-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(14, 116, 144, 0.16);
+  border-radius: 8px;
+  background: #f0fdfa;
+  color: #0f766e;
+  cursor: pointer;
+  font-size: 12px;
+  user-select: none;
+}
+.memory-toggle:hover { background: #ccfbf1; }
+.memory-toggle-title { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.memory-list {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid #99f6e4;
+  color: #475569;
+}
+.memory-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.memory-kind { flex: 0 0 auto; color: #0f766e; font-weight: 600; }
+.memory-text { min-width: 0; }
 .plan-head {
   display: flex;
   align-items: flex-start;

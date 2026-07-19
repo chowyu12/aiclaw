@@ -22,10 +22,11 @@ type ChatHandler struct {
 }
 
 type agentRunDetail struct {
-	Run   *model.AgentRun       `json:"run"`
-	Steps []model.ExecutionStep `json:"steps"`
-	Files []*model.File         `json:"files,omitzero"`
-	Plan  *model.PlanState      `json:"plan,omitzero"`
+	Run    *model.AgentRun       `json:"run"`
+	Steps  []model.ExecutionStep `json:"steps"`
+	Files  []*model.File         `json:"files,omitzero"`
+	Plan   *model.PlanState      `json:"plan,omitzero"`
+	Memory *model.MemoryContext  `json:"memory,omitzero"`
 }
 
 func NewChatHandler(s store.Store, executor *agent.Executor) *ChatHandler {
@@ -89,6 +90,7 @@ func (h *ChatHandler) Complete(w http.ResponseWriter, r *http.Request) {
 		Steps:          result.Steps,
 		Files:          result.ToolFiles,
 		Plan:           result.Plan,
+		Memory:         result.Memory,
 	})
 }
 
@@ -235,6 +237,9 @@ func (h *ChatHandler) loadRunDetail(r *http.Request, runID string) (*agentRunDet
 		detail.Files = files
 	}
 	detail.Plan = h.planForMessage(r, run.MessageID)
+	if memories, err := h.store.ListMemoryUsageByMessage(r.Context(), run.MessageID); err == nil && len(memories) > 0 {
+		detail.Memory = &model.MemoryContext{Items: memories}
+	}
 	return detail, nil
 }
 
@@ -255,6 +260,7 @@ func (h *ChatHandler) writeStoredRunTerminal(sseWriter *sse.Writer, r *http.Requ
 			Steps:          detail.Steps,
 			Files:          detail.Files,
 			Plan:           detail.Plan,
+			Memory:         detail.Memory,
 		})
 	}
 	eventType := model.AgentRunEventCompleted
@@ -498,6 +504,9 @@ func (h *ChatHandler) ListMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		if msg.Role == "assistant" {
 			msgs[i].Plan = h.planForMessage(r, msg.ID)
+			if memories, err := h.store.ListMemoryUsageByMessage(r.Context(), msg.ID); err == nil && len(memories) > 0 {
+				msgs[i].Memory = &model.MemoryContext{Items: memories}
+			}
 		}
 	}
 

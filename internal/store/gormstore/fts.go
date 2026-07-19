@@ -42,6 +42,22 @@ func (s *GormStore) InitFTS5() {
 		`CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
 			INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.id, old.content);
 		END`,
+		`CREATE VIRTUAL TABLE IF NOT EXISTS memory_items_fts USING fts5(
+			summary,
+			content,
+			content=memory_items,
+			content_rowid=id
+		)`,
+		`CREATE TRIGGER IF NOT EXISTS memory_items_fts_insert AFTER INSERT ON memory_items BEGIN
+			INSERT INTO memory_items_fts(rowid, summary, content) VALUES (new.id, new.summary, new.content);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS memory_items_fts_update AFTER UPDATE OF summary, content ON memory_items BEGIN
+			INSERT INTO memory_items_fts(memory_items_fts, rowid, summary, content) VALUES('delete', old.id, old.summary, old.content);
+			INSERT INTO memory_items_fts(rowid, summary, content) VALUES (new.id, new.summary, new.content);
+		END`,
+		`CREATE TRIGGER IF NOT EXISTS memory_items_fts_delete AFTER DELETE ON memory_items BEGIN
+			INSERT INTO memory_items_fts(memory_items_fts, rowid, summary, content) VALUES('delete', old.id, old.summary, old.content);
+		END`,
 	}
 
 	for _, stmt := range stmts {
@@ -70,28 +86,37 @@ func (s *GormStore) InitFTS5() {
 		}
 	}
 
+	var memoryCount int64
+	sqlDB.QueryRow("SELECT COUNT(*) FROM memory_items_fts").Scan(&memoryCount)
+	if memoryCount == 0 {
+		if _, err := sqlDB.Exec(`INSERT INTO memory_items_fts(rowid, summary, content)
+			SELECT id, summary, content FROM memory_items WHERE content IS NOT NULL AND content != ''`); err != nil {
+			log.WithError(err).Warn("[FTS5] memory backfill failed")
+		}
+	}
+
 	log.Info("[FTS5] full-text search initialized")
 }
 
 // SearchMessages 实现 sessionsearch.MessageSearcher 接口。
-func (s *GormStore) SearchMessages(ctx context.Context, query string, limit int) ([]sessionsearch.MessageSearchResult, error) {
+func (s *GormStore) SearchMessages(ctx context.Context, userID, query string, limit int) ([]sessionsearch.MessageSearchResult, error) {
 	sqlDB, err := s.db.DB()
 	if err != nil {
 		return nil, fmt.Errorf("get db: %w", err)
 	}
 
 	// 尝试 FTS5
-	results, err := s.searchFTS5(sqlDB, query, limit)
+	results, err := s.searchFTS5(sqlDB, userID, query, limit)
 	if err == nil {
 		return results, nil
 	}
 
 	// FTS5 不可用时用 LIKE 降级
 	log.WithError(err).Debug("[FTS5] search failed, fallback to LIKE")
-	return s.searchLIKE(sqlDB, query, limit)
+	return s.searchLIKE(sqlDB, userID, query, limit)
 }
 
-func (s *GormStore) searchFTS5(sqlDB *sql.DB, query string, limit int) ([]sessionsearch.MessageSearchResult, error) {
+func (s *GormStore) searchFTS5(sqlDB *sql.DB, userID, query string, limit int) ([]sessionsearch.MessageSearchResult, error) {
 	safeQuery := sanitizeFTS5Query(query)
 
 	rows, err := sqlDB.Query(`
@@ -100,10 +125,10 @@ func (s *GormStore) searchFTS5(sqlDB *sql.DB, query string, limit int) ([]sessio
 		FROM messages_fts
 		JOIN messages m ON m.id = messages_fts.rowid
 		JOIN conversations c ON c.id = m.conversation_id
-		WHERE messages_fts MATCH ?
+		WHERE messages_fts MATCH ? AND c.user_id = ?
 		ORDER BY rank
 		LIMIT ?
-	`, safeQuery, limit)
+	`, safeQuery, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -112,17 +137,17 @@ func (s *GormStore) searchFTS5(sqlDB *sql.DB, query string, limit int) ([]sessio
 	return scanResults(rows)
 }
 
-func (s *GormStore) searchLIKE(sqlDB *sql.DB, query string, limit int) ([]sessionsearch.MessageSearchResult, error) {
+func (s *GormStore) searchLIKE(sqlDB *sql.DB, userID, query string, limit int) ([]sessionsearch.MessageSearchResult, error) {
 	pattern := "%" + query + "%"
 	rows, err := sqlDB.Query(`
 		SELECT m.id, m.conversation_id, m.role, m.content, m.created_at,
 		       c.uuid AS conv_uuid, c.title
 		FROM messages m
 		JOIN conversations c ON c.id = m.conversation_id
-		WHERE m.content LIKE ?
+		WHERE m.content LIKE ? AND c.user_id = ?
 		ORDER BY m.id DESC
 		LIMIT ?
-	`, pattern, limit)
+	`, pattern, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +160,10 @@ func scanResults(rows *sql.Rows) ([]sessionsearch.MessageSearchResult, error) {
 	var results []sessionsearch.MessageSearchResult
 	for rows.Next() {
 		var (
-			id, convID                int64
-			role, content, convUUID   string
-			title                     sql.NullString
-			createdAt                 time.Time
+			id, convID              int64
+			role, content, convUUID string
+			title                   sql.NullString
+			createdAt               time.Time
 		)
 		if err := rows.Scan(&id, &convID, &role, &content, &createdAt, &convUUID, &title); err != nil {
 			continue

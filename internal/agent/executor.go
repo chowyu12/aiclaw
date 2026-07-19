@@ -12,6 +12,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	memorypkg "github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/provider"
 	"github.com/chowyu12/aiclaw/internal/skills"
@@ -34,6 +35,7 @@ type ExecuteResult struct {
 	Steps      []model.ExecutionStep
 	ToolFiles  []*model.File
 	Plan       *model.PlanState
+	Memory     *model.MemoryContext
 }
 
 type ProviderFactory func(p *model.Provider) (provider.LLMProvider, error)
@@ -60,6 +62,7 @@ type Executor struct {
 	store           store.Store
 	registry        *ToolRegistry
 	memory          *MemoryManager
+	memories        *memorypkg.Service
 	providerFactory ProviderFactory
 	hooks           *HookRegistry
 	ws              *workspace.Workspace
@@ -87,6 +90,7 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 		store:           s,
 		registry:        registry,
 		memory:          NewMemoryManager(s),
+		memories:        memorypkg.NewService(s),
 		providerFactory: provider.NewFromProvider,
 		hooks:           NewHookRegistry(),
 		ws:              ws,
@@ -103,6 +107,7 @@ func NewExecutor(s store.Store, registry *ToolRegistry, ws *workspace.Workspace,
 	registry.RegisterBuiltin("sub_agent", e.subAgentHandler)
 	registry.RegisterBuiltin("skill", e.skillHandler)
 	registry.RegisterBuiltin("session_search", sessionsearch.NewHandler(s))
+	registry.RegisterBuiltin("memory", e.memories.ToolHandler)
 	registry.RegisterBuiltin("web_search", websearch.NewHandler(s))
 	registry.RegisterBuiltin(planToolName, e.planHandler)
 	registry.RegisterBuiltin(finishToolName, finishHandler)
@@ -131,6 +136,7 @@ type execContext struct {
 	skills  []model.Skill
 	tracker *StepTracker
 	plan    *PlanManager
+	memory  *model.MemoryContext
 	run     *model.AgentRun
 	// files 包含本轮所有可用文件（新上传 + 会话历史文件），用于 LLM 上下文构建。
 	files []*model.File
@@ -320,6 +326,7 @@ func (e *Executor) runPreparedStream(ctx context.Context, ec *execContext, chunk
 		DurationMs:     res.DurationMs,
 		Steps:          res.Steps,
 		Plan:           res.Plan,
+		Memory:         res.Memory,
 	}
 	if len(ec.toolFiles) > 0 {
 		doneChunk.Files = ec.toolFiles
@@ -350,6 +357,11 @@ func (e *Executor) saveErrorMessage(ec *execContext, execErr error) int64 {
 		}
 	}
 	ec.tracker.SetMessageID(msgID)
+	if ec.run != nil {
+		if linkErr := e.memories.LinkRunUsage(ctx, ec.run.UUID, msgID); linkErr != nil {
+			ec.l.WithError(linkErr).Warn("[Memory] link memory usage to error message failed")
+		}
+	}
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "error": execErr}).Warn("[Execute] << error saved")
 	return msgID
 }
@@ -429,6 +441,11 @@ func (e *Executor) prepare(ctx context.Context, req model.ChatRequest) (*execCon
 	allFiles, uploadedFiles := e.loadRequestFiles(ctx, req.Files, conv.ID)
 	plan := NewPlanManager(e.store, conv.ID)
 	ctx = WithPlanManager(ctx, plan)
+	ctx = memorypkg.WithExecutionContext(ctx, memorypkg.ExecutionContext{
+		UserID:         conv.UserID,
+		AgentUUID:      ag.UUID,
+		ConversationID: conv.ID,
+	})
 
 	return &execContext{
 		ctx:           ctx,
@@ -809,6 +826,11 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *harnessT
 	}
 
 	ec.tracker.SetMessageID(msgID)
+	if ec.run != nil {
+		if err := e.memories.LinkRunUsage(ctx, ec.run.UUID, msgID); err != nil {
+			ec.l.WithError(err).Warn("[Memory] link memory usage to assistant message failed")
+		}
+	}
 
 	ec.l.WithFields(log.Fields{"msg_id": msgID, "duration": duration, "tokens": tokensUsed}).Info("[Execute] << done")
 
@@ -837,6 +859,7 @@ func (e *Executor) saveResult(ctx context.Context, ec *execContext, st *harnessT
 		Steps:          ec.tracker.Steps(),
 		ToolFiles:      append([]*model.File(nil), ec.toolFiles...),
 		Plan:           planState,
+		Memory:         ec.memory,
 	}, nil
 }
 

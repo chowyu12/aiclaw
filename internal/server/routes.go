@@ -35,6 +35,7 @@ func RegisterAPIRoutes(mux *http.ServeMux, p APIParams) {
 	handler.NewSkillsHandler(p.WS).Register(mux)
 	handler.NewMCPHandler(p.Store).Register(mux)
 	handler.NewSearchEngineHandler(p.Store).Register(mux)
+	handler.NewMemoryHandler(p.Store).Register(mux)
 	handler.NewChannelHandler(p.Store, p.ChannelMgr).Register(mux)
 	handler.NewChatHandler(p.Store, p.Executor).Register(mux)
 	handler.NewFileHandler(p.Store, p.Upload).Register(mux)
