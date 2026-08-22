@@ -15,6 +15,7 @@ const (
 type MCPServer struct {
 	ID          int64        `json:"id" gorm:"primaryKey;autoIncrement"`
 	UUID        string       `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
+	PluginUUID  string       `json:"plugin_uuid,omitzero" gorm:"size:36;index"`
 	Name        string       `json:"name" gorm:"size:200;not null"`
 	Description string       `json:"description" gorm:"type:text"`
 	Transport   MCPTransport `json:"transport" gorm:"size:50;not null"`
@@ -50,4 +51,3 @@ func (s *MCPServer) GetHeaders() map[string]string {
 	}
 	return m
 }
-

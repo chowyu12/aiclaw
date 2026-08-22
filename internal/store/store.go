@@ -25,6 +25,19 @@ type Store interface {
 	Close() error
 }
 
+type SkillStore interface {
+	ListSkills(ctx context.Context) ([]model.Skill, error)
+	UpsertSkill(ctx context.Context, skill *model.Skill) error
+	SetSkillEnabled(ctx context.Context, uuid string, enabled bool) error
+}
+
+type PluginStore interface {
+	ListPlugins(ctx context.Context) ([]model.Plugin, error)
+	CreatePlugin(ctx context.Context, plugin *model.Plugin) error
+	SetPluginEnabled(ctx context.Context, uuid string, enabled bool) error
+	DeletePlugin(ctx context.Context, uuid string) error
+}
+
 type AgentRunStore interface {
 	CreateAgentRun(ctx context.Context, run *model.AgentRun) error
 	UpdateAgentRun(ctx context.Context, id int64, updates map[string]any) error

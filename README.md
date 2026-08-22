@@ -1,460 +1,141 @@
-# AiClaw
+# AIClaw
 
-AiClaw is a self-hosted AI agent platform for building, operating, and observing tool-using agents. It combines a Go backend, a Vue 3 admin console, multi-provider LLM support, nested sub-agents, persistent memory, runtime planning, tool execution, and messaging-channel integrations in a single deployable binary.
+AIClaw 是一个 local-first 的原生桌面 AI 应用。它使用 Wails 提供 macOS、Windows 和 Linux 桌面窗口，所有项目、会话、模型设置和插件配置都保存在本机 SQLite 中；应用不启动 HTTP 服务，也不是命令行聊天程序。
 
-It is designed for people who want an agent system that can do real work: read and edit files, run commands, browse the web, call custom tools, coordinate sub-agents, remember useful context, and expose the same agents through web chat, APIs, and external messaging channels.
+## 当前能力
 
-## Highlights
+- 左侧统一管理项目与会话；会话既可归属某个项目，也可保持未归属，并可随时在两种状态间移动。
+- 支持深色与亮色主题一键切换，并持久保存上次使用的主题。
+- 每个对话直接选择 Provider 和模型，不再需要创建或维护 Agent。
+- Provider 可从远程接口同步模型列表、搜索候选模型并添加，也可手动添加或删除模型名称；删除模型配置不会删除历史会话。
+- 对话使用 Provider 的流式接口实时显示增量内容，并支持对最后一次模型输出进行重试。
+- 支持像 Codex 一样在输入框添加或拖入本地文件和图片：发送前可预览、移除，发送后会随会话历史恢复，重试时也会保留原附件。
+- JPEG、PNG、WebP、GIF 以原生多模态图像块发送给模型；PDF、DOCX、XLSX、PPTX、文本、代码与常见配置文件在本机提取内容后加入模型上下文。
+- 内置完全保存在 SQLite 中的本地记忆：支持跨会话检索、明确记忆、候选审核、批准和遗忘，并可分别关闭记忆使用与生成。
+- 联网搜索在新会话中默认开启；搜索服务在“设置 → 联网搜索”中管理。
+- Provider、Computer Use、MCP 和插件统一放在设置中。
+- 内置 `browser` Computer Use 工具，可由支持工具调用的模型直接控制浏览器。
+- 支持本地插件目录的发现、复制安装、启用和停用。
+- 插件可提供 `SKILL.md` 指令、JavaScript/Python 工具和 MCP Server。
+- 会话、消息、项目与配置保存在 `~/.aiclaw/aiclaw.db`。
+- GitHub Actions 在版本标签发布时构建 macOS 通用应用、Windows 应用/安装器和 Linux 应用包，并生成 SHA-256 校验文件。
 
-- Multi-agent management with per-agent prompts, model settings, tools, skills, MCP servers, and token budgets.
-- Runtime Plan State for complex tasks, with live streaming progress and final plan snapshots.
-- Harness runtime validation with contract, evidence, validation gates, correction prompts, and traceable self-check steps.
-- Nested `sub_agent` execution for parallel research, exploration, shell work, and delegated tasks.
-- Built-in tools for files, shell commands, browser automation, web search, web fetching, scheduled jobs, code interpretation, memory, session search, and skills.
-- Two-level web search configuration: model-native search for supported models, or external search engines such as Tavily, SerpAPI, and Aliyun IQS.
-- Persistent conversations, execution steps, generated files, and plan state in SQLite, MySQL, or PostgreSQL.
-- Web console for providers, agents, tools, skills, channels, chat, and execution logs.
-- Local agent runtimes that connect outward, execute user-configured CLI agents, and stream replies into the same chat UI.
-- Messaging-channel integrations for WeCom, WeChat, Feishu, DingTalk, WhatsApp, and Telegram.
-- Single-binary deployment with the frontend embedded into the Go server.
+## 从源码运行桌面应用
 
-## Quick Install
-
-AiClaw publishes prebuilt binaries for Linux and macOS on amd64 and arm64.
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/master/install.sh | bash
-```
-
-The installer downloads the latest GitHub Release, installs the `aiclaw` binary, registers a system service, starts the server, and prints the web access URL with its login token.
-
-Common commands:
+需要 Go、Node.js、Wails v2.11.0，以及对应平台的桌面构建依赖。
 
 ```bash
-aiclaw start
-aiclaw stop
-aiclaw status
-aiclaw update
-aiclaw version
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+make dev
 ```
 
-By default, AiClaw stores configuration and runtime data under `~/.aiclaw/` and uses SQLite for the first run.
+`make dev` 会启动原生 Wails 开发窗口。它不是浏览器页面；Vite 地址只服务于 Wails 的前端热更新。
 
-## What AiClaw Runs
+构建正式应用：
 
-AiClaw has five major runtime layers:
+```bash
+make test
+make build
+```
 
-| Layer | Purpose |
-| --- | --- |
-| Web console | Configure providers, agents, tools, skills, channels, chat, and inspect logs. |
-| Agent executor | Builds prompts, calls LLMs, runs tools, manages Plan State, tracks files, and streams output. |
-| Harness runtime | Turns the user objective into a task contract, records evidence, validates tool/final/save stages, and asks the model to correct incomplete work. |
-| Tool system | Built-in tools, custom HTTP tools, custom command tools, MCP tools, and skill-defined tools. |
-| Persistence | Conversations, messages, execution steps, generated files, memory, schedules, and runtime plans. |
-| Local runtime client | Claims queued local-Agent runs and launches argv commands on the user's machine without a shell. |
+macOS 产物通常位于 `desktop/build/bin/AIClaw.app`。macOS 构建需要完整、较新的 Xcode SDK；仅有过旧的 Command Line Tools 可能无法链接 Wails 所需的系统框架。
 
-The normal execution loop is:
+## 首次使用
 
-1. Load the agent, provider, tools, skills, memory, files, and conversation history.
-2. Inject compact runtime context, including persistent memory and current Plan State.
-3. Call the model with function-calling tools.
-4. Validate requested tools, execute allowed tool calls, track steps, collect generated files, and stream updates.
-5. Link each business-tool step to its active Plan item as evidence; only explicit `plan` updates and final lifecycle closure change item status.
-6. Validate candidate final answers; if a response is empty, progress-only, missing required evidence, or missing promised artifacts, inject a correction prompt and continue.
-7. Validate the final content before saving, then persist the assistant message, files, execution timeline, and plan snapshot.
+1. 打开“设置 → 模型 Provider”，添加 API 地址和密钥；随后同步并搜索选择模型，或手动添加模型名称。点击已添加模型右侧的 `×` 可将其从可用模型中删除。
+2. 如需外部联网搜索，在“设置 → 联网搜索”中添加并启用搜索服务。
+3. 返回对话，在输入框上方点击模型按钮选择 Provider 与模型。
+4. 新建对话时默认不归属项目；可从左侧项目进入后新建归属该项目的对话，已有会话也可调整归属。左侧“未归属”只显示独立会话。
+5. 点击输入框工具栏的“附件”选择文件，或把文件直接拖到输入框。可以只发送附件，也可以同时写明希望 AIClaw 执行的任务。
 
-## Runtime Plan State
+AIClaw 不内置或托管模型凭据。API 密钥保存在本地数据库中。
 
-AiClaw uses Plan State instead of chat-visible TODO blocks. The model proposes plan changes through the internal `plan` control tool, while the agent harness owns validation, persistence, lifecycle transitions, streaming, and failure recovery.
+### 模型删除与历史会话
 
-Plan item states:
+模型列表是 Provider 的“当前可用模型”配置。删除某个模型时，AIClaw 只会把它从该列表移除：已经保存的项目、会话、消息和当时使用的模型名称都会保留。若删除的是当前选中的模型，应用会自动选择同一 Provider 的下一个可用模型；如果没有其他模型，需要先添加模型才能继续发送消息。
+
+### 本地记忆与流式回复
+
+“设置 → 本地记忆”可分别控制新对话是否使用记忆、是否允许对话生成记忆，并可审核或遗忘已有条目。明确输入“请记住……”会直接保存为本地记忆；相关记忆会在后续会话中按需注入。记忆与审核记录只写入 `~/.aiclaw/aiclaw.db`。
+
+Provider 回复通过流式连接逐段显示。最后一条模型回复下方的“重试”会从对应用户消息重新请求，并以同样的流式方式替换原回复。
+
+### 文件与图片
+
+附件会先复制到 AIClaw 的本地私有目录，再与对应会话的 Rollout 记录关联；远端 Provider 不会收到原始本地路径。单次最多添加 10 个附件，单个文件最大 20MB。
+
+- 图片：JPEG、PNG、WebP、GIF。图片理解能力取决于当前选择的模型是否支持视觉输入。
+- 文档：PDF、DOCX、XLSX、PPTX。
+- 文本：Markdown、JSON/JSONL、CSV/TSV、XML/YAML，以及常见代码、脚本和配置文件。
+- 安全降级：文档内容在本机解析并限制注入大小；不支持的二进制文件会在发送前被拒绝，不会作为乱码传给模型。
+
+发送前移除附件会同时删除暂存副本；已发送附件属于会话历史，不能从单条消息中静默删除。未发送且超过 24 小时的暂存附件会在应用启动时自动清理。
+
+## 插件格式
+
+从“设置 → 插件”选择本地目录安装。AIClaw 识别以下内容：
 
 ```text
-pending -> running -> completed
-                  -> failed
-                  -> blocked
-pending -> skipped
+example-plugin/
+  .codex-plugin/plugin.json   # 或根目录 plugin.json
+  skills/
+    research/
+      SKILL.md
+      manifest.json           # 可声明 JS/Python 工具入口
+      main.py                 # 或 JavaScript 入口
+  mcp.json                    # 也支持 .mcp.json
 ```
 
-Plan State behavior:
+插件清单至少应提供名称：
 
-- Complex tasks can start with a structured plan.
-- Only one item can be `running` in a single plan.
-- If no item is running, the harness initializes the first pending item as `running`.
-- Tool outcomes are evidence, not implicit status transitions. The model uses `plan` to complete, block, skip, or revise items.
-- A terminal execution failure marks the active item as `failed`; a validated final response closes any still-running item.
-- The final assistant message is linked to the final plan snapshot.
-- Streaming chat and execution logs show the plan separately from the assistant's answer.
-
-This keeps progress visible without polluting the final response body or ordinary tool-call history.
-
-## Durable Agent Runs
-
-Chat keeps using Server-Sent Events for low-latency updates, but an SSE
-connection is no longer the lifetime of an Agent turn. Every top-level turn is
-stored as an `AgentRun` with a stable run ID, input, status, final message,
-token count, duration, and execution steps. Each execution step also carries
-the run ID, which makes concurrent histories and reconnects unambiguous.
-
-The web chat starts a background run and then subscribes to it:
-
-1. `POST /api/v1/chat/runs` creates the durable run and immediately returns its `uuid`.
-2. `GET /api/v1/agent-runs/{runID}/stream` streams existing `message` and `harness` SSE events, plus lifecycle `run` events and periodic `ping` events.
-3. `GET /api/v1/agent-runs/{runID}` returns the durable final snapshot, including steps, generated files, and Plan State, for page reloads or missed live events.
-4. `DELETE /api/v1/agent-runs/{runID}` requests cancellation without deleting the audit trail.
-
-Disconnecting or refreshing the browser only detaches that subscriber. The run
-continues in the executor until it succeeds, fails, or is explicitly cancelled.
-The live event hub keeps a bounded replay for short reconnects; the database is
-the source of truth for completed runs and after a service restart.
-
-## Local Agent Runtimes
-
-AiClaw is local-first. At startup it creates a built-in **Local** runtime,
-recovers the current user's login-shell `PATH`, adds standard package-manager
-locations, and executes detected agent CLIs in the same process. No connection
-command, extra daemon, or token is required. The CLI keeps using its existing
-login under that user account; AiClaw neither copies nor manages CLI credentials.
-On macOS, AiClaw prefers the signed Codex CLI bundled with the ChatGPT app when
-it is installed; an explicitly configured absolute CLI path always takes priority.
-
-1. Install and authenticate the desired agent CLI on the machine that runs
-   AiClaw.
-2. Start AiClaw and open **Runtimes** to verify the automatically detected
-   CLIs.
-3. Create an Agent with execution mode **Local**. The built-in runtime is
-   selected automatically; choose one detected CLI and an optional working
-   directory.
-4. Select that Agent in Chat. AiClaw runs the CLI directly and streams stdout
-   into the durable agent run.
-
-Runtime commands are executed directly as `command + args`; they are never
-passed through a shell.
-
-### Optional remote runtime
-
-To execute an agent CLI on another machine, add a **Remote Runtime** in the
-Runtimes page, then run the generated command on that machine:
-
-```bash
-aiclaw runtime connect --server https://your-aiclaw.example.com --token rt-...
+```json
+{
+  "name": "Research Kit",
+  "description": "Local research helpers",
+  "version": "1.0.0"
+}
 ```
 
-The remote runtime connects outbound, recovers its own login-shell `PATH`, and
-becomes available alongside the built-in local runtime. This is optional; it is
-not needed for the machine running AiClaw itself.
+MCP 文件使用常见的 `mcpServers` 结构，可配置本地 `command`/`args`/`env`，或远程 `url`/`headers`。停用插件时，其关联的 Skill 和 MCP Server 会同时停用。
 
-The built-in runtime currently auto-detects these non-interactive CLI agents:
-
-| CLI | Detected executable | Prompt delivery |
-| --- | --- | --- |
-| OpenAI Codex | `codex app-server --listen stdio://` | JSON-RPC |
-| Cursor | `cursor-agent -p --output-format stream-json --yolo` | JSONL events |
-| Claude Code | `claude -p --output-format stream-json --input-format stream-json` | stream-json |
-| Tencent CodeBuddy | `codebuddy -p --output-format stream-json --input-format stream-json` | stream-json |
-| OpenClaw | `openclaw agent --local --json --session-id …` | JSON result |
-| Hermes Agent | `hermes acp` | Agent Communication Protocol (ACP) |
-
-Expand a runtime in the Runtimes page to manage each detected CLI separately.
-You can enable or disable it, and set its default model for future local tasks.
-Codex, Cursor, Claude Code, and CodeBuddy receive the configured model through
-their respective provider protocol. Hermes switches the ACP session model.
-For OpenClaw, the field selects a registered OpenClaw Agent ID; that Agent owns
-the actual model configuration.
-
-AiClaw preserves local CLI login and provider configuration. Headless provider
-protocols auto-approve their task-local tool requests, so only enable them in
-workspaces you trust. The
-similarly named WorkBuddy product does not currently have a documented
-standalone headless CLI; it needs an official API or CLI contract before it can
-be added to automatic discovery.
-
-## Harness Runtime
-
-AiClaw exposes a stable `pkg/harness` package for both harness events and execution validation. The executor still owns the main loop: the control plane handles budget, plan lifecycle closure, and persistence, while the verifier layer owns four validation stages:
-
-| Stage | Purpose |
-| --- | --- |
-| `pre_tool` | Enforce tool policy before a tool call is executed. |
-| `post_tool` | Record tool results, failures, and generated files into the evidence ledger. |
-| `pre_final` | Gate candidate final answers before the run can finish. |
-| `pre_save` | Recheck the final content after attachment links are rendered and before the assistant message is stored. |
-
-The runtime is based on `Contract -> Evidence -> Validate -> Correct`:
-
-- `TaskContract` captures the objective, output mode, required evidence, artifact expectations, plan requirements, and correction budget.
-- `EvidenceLedger` records execution tools, tool events, generated file evidence, plan snapshots, validation events, and correction events.
-- Validators reject empty final answers, progress-only final answers, unfinished plans, missing successful evidence after failed tools, missing artifacts, and invalid structured JSON when enabled.
-- Failed validation creates `harness` execution steps and, while attempts remain, appends a correction prompt to the next model round.
-
-This makes the execution trace explicit: the model can propose completion, but the harness decides whether there is enough evidence to finish.
-
-## Sub-Agents
-
-Agents can delegate work to child agents through the `sub_agent` tool. Sub-agents have isolated context and their own execution traces, but their steps are still visible under the parent execution timeline.
-
-Execution modes:
-
-| Mode | Tool profile | Best for |
-| --- | --- | --- |
-| `auto` | Full available toolset, subject to safety limits. | General delegated tasks. |
-| `explore` | Read-only exploration tools. | Codebase inspection, research, planning before edits. |
-| `shell` | Command-oriented tools. | Build, test, diagnostics, and operational checks. |
-
-Sub-agents can use the parent agent configuration or a selected agent UUID. They can also request the `fast` model profile when the parent agent has one configured.
-
-## Durable Memory
-
-AiClaw uses a database-backed Memory System, not a shared Markdown file. A memory is a small, reviewable record with an owner, scope, kind, stable key, confidence, importance, status, audit history, and evidence links.
-
-| Scope | Visibility |
-| --- | --- |
-| `user` | Available to every Agent for the same user. |
-| `agent_user` | Available only to one user and one Agent pair. |
-
-Memory lifecycle:
+## 本地数据
 
 ```text
-candidate -> active -> superseded / dismissed / deleted
+~/.aiclaw/
+  aiclaw.db
+  attachments/
+  plugins/
+  logs/
 ```
 
-- Agent-created `propose` actions are reviewable candidates; the Memory page lets an operator approve, dismiss, edit, pin, or delete them.
-- A run retrieves only the current user's active, unexpired records in the `user` scope and the selected Agent's `agent_user` scope. Candidate, foreign-user, and other-Agent records are excluded.
-- The prompt receives a compact relevant subset plus explicitly pinned records. It labels memory as potentially stale retained context, never as instructions; current user requests and verified tool results have priority.
-- Each creation/update has an immutable revision. Each injected memory is linked to the run and final assistant message that used it, so the chat view and execution logs can show an explainable snapshot.
-The `memory` tool supports `propose`, `upsert`, `forget`, `search`, and `read`; its user and Agent identity always comes from the execution context rather than model-provided arguments.
+删除项目会归档该项目下的会话，不会把对话内容直接从数据库中物理删除。
 
-SQLite installations use FTS5 for memory and session search. Other databases fall back to scoped SQL text search.
+项目归属是可选的会话分组信息，不影响 Provider、模型、消息或本地记忆。会话从项目移动到“未归属”时只会清空其项目 UUID，不会归档或删除会话。
 
-## Built-In Tools
+删除 Provider 仍会在它被会话引用时受到保护；删除 Provider 下的单个模型不受此限制，因为它不会改变历史会话记录。
 
-AiClaw includes a broad default toolset:
+## 发布应用包
 
-| Tool | Purpose |
-| --- | --- |
-| `read` | Read text files and pass images to vision-capable models. |
-| `write` | Create or overwrite files. |
-| `edit` | Precise find-and-replace editing. |
-| `grep` | Regex search over file contents. |
-| `find` | Glob-style file discovery. |
-| `ls` | Directory listing. |
-| `exec` | Run shell commands with working directory and timeout controls. |
-| `process` | Manage long-running background command sessions. |
-| `web_search` | Search the web through an enabled external search engine selected by the agent. |
-| `web_fetch` | Fetch readable content from URLs with browser fallback. |
-| `browser` | Browser automation for navigation, screenshots, snapshots, forms, storage, console, and network inspection. |
-| `canvas` | Render HTML/CSS/JS and capture canvas snapshots. |
-| `cron` | In-process scheduled jobs with persistence and logs. |
-| `code_interpreter` | Execute Python, JavaScript, or shell snippets in an interpreter workflow. |
-| `current_time` | Read the current system time. |
-| `sub_agent` | Delegate work to child agents. |
-| `memory` | Propose, upsert, forget, search, or read durable memory within the current user/Agent boundary. |
-| `session_search` | Search previous conversations. |
-| `plan` | Internal runtime planning control. |
-| `skill` | List, inspect, promote, or discard generated skill candidates. |
+推送 `v*` 标签会触发 `.github/workflows/release.yml`：
 
-You can also add:
+- `AIClaw-macos-universal.zip`
+- `AIClaw-windows-amd64.zip`
+- `AIClaw-linux-amd64.tar.gz`
+- `SHA256SUMS.txt`
 
-- Custom HTTP tools.
-- Custom command tools.
-- MCP server tools.
-- Skill-provided tools.
+工作流先运行 Go、桌面桥接和前端测试，再并行构建三个平台，最后把产物上传到对应的 GitHub Release。手动运行 workflow 只验证并生成 Actions artifacts；只有版本标签运行会创建 Release。
 
-## Web Search
+CI 会把形如 `v1.2.3` 的标签写入各平台应用元数据，并对 macOS 包执行 ad-hoc 签名与完整性校验。面向公开分发时，仍建议在仓库中配置 Apple Developer ID、公证和 Windows 代码签名证书。
 
-Agents can use web search in two modes:
-
-| Mode | Behavior |
-| --- | --- |
-| Built-in | For models whose capability profile supports web search, AiClaw sends `extra_body: {"enable_search": true}` with the model request and records a `web_search` execution step showing the search input and request configuration. |
-| External | AiClaw exposes the `web_search` tool to the agent and routes calls through the selected search engine configuration. Tool input, output, duration, and errors are visible in chat progress and execution logs. |
-
-External search engines are configured from the web console's Search Engine menu. Multiple configurations can be saved, enabled or disabled independently, tested from the list, and tested directly from the create/edit dialog before saving. Supported providers:
-
-| Provider | Notes |
-| --- | --- |
-| Tavily | Uses the Tavily search API. |
-| SerpAPI | Uses SerpAPI organic search results. |
-| Aliyun IQS | Uses Alibaba Cloud IQS `POST https://cloud-iqs.aliyuncs.com/search/unified` with Bearer API key authentication and the `LiteAdvanced` engine. |
-
-When an agent uses external mode, it must select an enabled search engine. Disabled configurations can still be tested from the Search Engine page, but they are not available for live agent execution.
-
-## Skills
-
-Skills are reusable agent instructions and optional executable tool bundles. A skill lives in its own directory under `~/.aiclaw/skills/`.
-
-Example structure:
+## 技术结构
 
 ```text
-~/.aiclaw/skills/
-  brave-web-search/
-    SKILL.md
-    manifest.json
-    index.js
-    README.md
+desktop/                 Wails 原生窗口、Go 绑定与 Vue 前端
+internal/core/           本地会话、模型采样与工具调度
+internal/store/gormstore SQLite 持久化
+internal/tools/          文件、命令、浏览器与联网工具
+internal/skills/         Skill 解析和 JS/Python 执行
+internal/mcp/            MCP 客户端与工具桥接
 ```
 
-`SKILL.md` contains the instructions shown to agents. `manifest.json` can declare callable tools, metadata, and runtime settings. Executable skills can implement tool logic in JavaScript or Python.
-
-AiClaw uses two-stage skill loading: it injects skill names, descriptions, and paths first; the model can then read a skill's full instructions only when needed. This keeps prompts smaller when many skills are installed.
-
-## Messaging Channels
-
-AiClaw can expose agents through external channels:
-
-| Channel | Integration style |
-| --- | --- |
-| WeCom | WebSocket connection. |
-| WeChat | iLink polling. |
-| Feishu | Webhook. |
-| DingTalk | Webhook. |
-| WhatsApp | Webhook. |
-| Telegram | Webhook plus chat action support. |
-
-Channel conversations are stored alongside web conversations, and execution details can be inspected in the admin console.
-
-## Providers
-
-AiClaw supports multiple model providers:
-
-- OpenAI.
-- OpenAI-compatible APIs.
-- Qwen.
-- Kimi / Moonshot.
-- OpenRouter.
-- Anthropic Claude.
-- Google Gemini.
-
-Each provider can define its base URL, API key, and model list. Agents may define a fast model for lightweight sub-agent tasks and a separate fallback model for transient primary-model failures. Fallbacks are used only when their known streaming and tool-calling capabilities are compatible with the active request.
-
-## Configuration
-
-The default config file is created at:
-
-```text
-~/.aiclaw/config.yaml
-```
-
-A typical local configuration uses SQLite:
-
-```yaml
-server:
-  addr: ":8080"
-
-database:
-  driver: sqlite
-  dsn: ~/.aiclaw/aiclaw.db
-
-log:
-  level: info
-  file: ~/.aiclaw/logs/aiclaw.log
-```
-
-For production, configure MySQL or PostgreSQL and run AiClaw behind your preferred reverse proxy.
-
-## Build From Source
-
-Requirements:
-
-- Go 1.25 or newer.
-- Node.js 18 or newer.
-- SQLite, MySQL, or PostgreSQL.
-
-Clone and build:
-
-```bash
-git clone https://github.com/chowyu12/aiclaw.git
-cd aiclaw
-
-npm --prefix web install
-npm --prefix web run build
-
-go build -o aiclaw ./cmd/server
-```
-
-Run locally:
-
-```bash
-./aiclaw start
-```
-
-For development, run backend and frontend tasks separately as needed:
-
-```bash
-go run ./cmd/server
-npm --prefix web run dev
-```
-
-## API Usage
-
-AiClaw supports blocking and streaming chat execution. Agents can also expose token-based API access with `ag-` prefixed tokens.
-
-Blocking request example:
-
-```bash
-curl -X POST http://localhost:8080/api/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <web-token-or-agent-token>" \
-  -d '{
-    "agent_uuid": "<agent-uuid>",
-    "user_id": "default",
-    "message": "Summarize this repository and list the main risks."
-  }'
-```
-
-Streaming responses use SSE and can include:
-
-- `delta`: assistant text.
-- `step`: a single execution step update.
-- `steps`: final or batched execution steps.
-- `plan`: current or final Plan State snapshot.
-- `harness`: a stable `harness.v1` protocol event, sent as its own SSE event type.
-- `files`: files produced during execution.
-- `done`: completion marker.
-
-## Observability
-
-AiClaw records:
-
-- LLM call steps.
-- Tool call steps.
-- Sub-agent child steps.
-- Skill matching.
-- Generated files.
-- Token usage.
-- Step duration.
-- Errors.
-- Built-in and external web search activity as `web_search` steps.
-- Harness validation and correction activity as `harness` steps.
-- Final Plan State snapshots.
-
-The execution log page keeps the assistant response, plan snapshot, and step timeline separate so you can understand both the high-level plan and the low-level tool activity.
-
-## Release Builds
-
-Release tags use semantic versions such as `v1.10.0`. Pushing a `v*` tag triggers the GitHub Actions release workflow, which builds:
-
-- `aiclaw-linux-amd64`
-- `aiclaw-linux-arm64`
-- `aiclaw-darwin-amd64`
-- `aiclaw-darwin-arm64`
-- `aiclaw-windows-amd64.exe`
-
-Linux and Windows binaries are compressed with UPX. macOS binaries are left uncompressed to avoid Mach-O and Gatekeeper issues.
-
-## Project Status
-
-AiClaw is actively evolving. The architecture is intentionally pragmatic: it favors explicit execution traces, durable runtime state, and inspectable behavior over invisible agent magic.
-
-Useful starting points:
-
-- `internal/agent/` for the executor, Plan State, sub-agents, prompts, and tool execution.
-- `pkg/harness/` for the stable harness event protocol and runtime validation primitives.
-- `internal/tools/` for built-in tool implementations.
-- `internal/store/` for persistence interfaces and GORM storage.
-- `internal/handler/` for HTTP handlers.
-- `web/src/` for the Vue admin console.
-
-## License
-
-No repository license file is currently declared. Confirm usage and redistribution terms with the project owner before using AiClaw in production or distributing binaries.
+桌面对话运行链路为：`Wails UI → Go desktop bridge → local core session → Provider/MCP/Skill tools → SQLite rollout`。附件链路为：`原始文件 → 本地私有副本与 SQLite 元数据 → Rollout 附件引用 → Provider 多模态/文本内容块`。运行过程中不依赖网页控制台或本地 HTTP API。

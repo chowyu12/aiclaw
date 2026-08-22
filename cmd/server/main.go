@@ -1,12 +1,9 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 
-	"github.com/chowyu12/aiclaw/internal/bootstrap"
-	"github.com/chowyu12/aiclaw/internal/daemon"
 	"github.com/chowyu12/aiclaw/internal/runtimeclient"
 	"github.com/chowyu12/aiclaw/internal/selfupdate"
 )
@@ -30,21 +27,18 @@ func main() {
 			selfupdate.Run(version)
 			return
 		case "start":
-			daemon.Start()
+			fmt.Fprintln(os.Stderr, "AIClaw is a desktop app; run `make dev` from the repository instead")
 			return
 		case "stop":
-			daemon.Stop()
+			fmt.Fprintln(os.Stderr, "aiclaw is a local app; use /exit to stop it")
 			return
 		case "restart":
-			daemon.Restart()
+			fmt.Fprintln(os.Stderr, "aiclaw is a local app; restart it from your terminal")
 			return
 		case "status":
-			daemon.Status()
+			fmt.Println("AIClaw runs as a Wails desktop application")
 			return
 		}
 	}
-
-	configFile := flag.String("config", "", "config file path (default: ~/.aiclaw/config.yaml)")
-	flag.Parse()
-	bootstrap.Run(bootstrap.Options{ConfigFlag: *configFile, Version: version})
+	fmt.Fprintln(os.Stderr, "AIClaw is a desktop app; run `make dev` from the repository instead")
 }

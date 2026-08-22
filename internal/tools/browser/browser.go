@@ -136,10 +136,10 @@ type browserManager struct {
 }
 
 var defaultBrowser = &browserManager{
-	tabs:            make(map[string]*tabInfo),
-	tabRefs:         make(map[string]map[string]elementInfo),
-	cdpTargetToTab:  make(map[string]string),
-	cdpSessionToTab: make(map[string]string),
+	tabs:                make(map[string]*tabInfo),
+	tabRefs:             make(map[string]map[string]elementInfo),
+	cdpTargetToTab:      make(map[string]string),
+	cdpSessionToTab:     make(map[string]string),
 	targetLifecycleTabs: make(map[string]bool),
 }
 
@@ -244,6 +244,9 @@ func Handler(ctx context.Context, args string) (string, error) {
 	if p.Action == "close" {
 		return bm.closeBrowser()
 	}
+	if !knownAction(p.Action) {
+		return "", fmt.Errorf("unknown action: %s", p.Action)
+	}
 
 	bm.opMu.Lock()
 	defer bm.opMu.Unlock()
@@ -327,6 +330,15 @@ func Handler(ctx context.Context, args string) (string, error) {
 	}
 
 	return result, err
+}
+
+func knownAction(action string) bool {
+	switch action {
+	case "navigate", "screenshot", "snapshot", "get_text", "evaluate", "pdf", "click", "type", "hover", "drag", "select", "fill_form", "scroll", "upload", "wait", "dialog", "tabs", "open_tab", "close_tab", "console", "network", "cookies", "storage", "press", "back", "forward", "reload", "extract_table", "resize", "set_device", "set_media", "highlight":
+		return true
+	default:
+		return false
+	}
 }
 
 func (bm *browserManager) ensureStarted(ctx context.Context) error {
@@ -749,14 +761,14 @@ func (bm *browserManager) getTabCtx(reqCtx context.Context, targetID string) (co
 
 	recoverURL := tab.url
 	fields := log.Fields{
-		"tab":          id,
-		"recover_url":  recoverURL,
-		"ctx_err":      tab.ctx.Err().Error(),
-		"cdp_target_id": tab.cdpTargetID,
+		"tab":            id,
+		"recover_url":    recoverURL,
+		"ctx_err":        tab.ctx.Err().Error(),
+		"cdp_target_id":  tab.cdpTargetID,
 		"cdp_session_id": tab.cdpSessionID,
-		"canceled_by":  tab.canceledBy,
-		"canceled_at":  tab.canceledTime,
-		"started_tabs": len(bm.tabs),
+		"canceled_by":    tab.canceledBy,
+		"canceled_at":    tab.canceledTime,
+		"started_tabs":   len(bm.tabs),
 	}
 	if c := context.Cause(tab.ctx); c != nil {
 		fields["context_cause"] = c.Error()

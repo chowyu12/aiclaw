@@ -1,34 +1,34 @@
-.PHONY: build run test clean deps dev all
+.PHONY: all build run dev test clean deps lint help
 
-APP_NAME := aiclaw
-BUILD_DIR := bin
+WAILS ?= $(shell go env GOPATH)/bin/wails
+DESKTOP_DIR := desktop
+
+all: build
 
 build:
-	go build -o $(BUILD_DIR)/$(APP_NAME) ./cmd/server
-
-all: build-frontend build
+	cd $(DESKTOP_DIR) && $(WAILS) build
 
 run: build
-	./$(BUILD_DIR)/$(APP_NAME) 
+	open $(DESKTOP_DIR)/build/bin/AIClaw.app
 
-dev: build-frontend
-	go run ./cmd/server
+dev:
+	cd $(DESKTOP_DIR) && $(WAILS) dev
 
 test:
-	go test -v -race ./...
+	go test ./...
+	cd $(DESKTOP_DIR) && go test ./...
+	cd $(DESKTOP_DIR)/frontend && npm run build
 
 deps:
 	go mod tidy
+	cd $(DESKTOP_DIR) && go mod tidy
 
 clean:
-	rm -rf $(BUILD_DIR) web/dist
+	rm -rf $(DESKTOP_DIR)/build/bin $(DESKTOP_DIR)/frontend/dist
 
 lint:
 	golangci-lint run ./...
 
-dev-frontend:
-	cd web && npm run dev
-
-# 若 vue-tsc 报 Cannot find module '../index.js'，在 web/ 下执行: rm -rf node_modules package-lock.json && npm install
-build-frontend:
-	cd web && npm run build
+help:
+	@echo "Targets: build, run, dev, test, lint, deps, clean"
+	@echo "AIClaw is a Wails desktop application; all data is local in ~/.aiclaw."

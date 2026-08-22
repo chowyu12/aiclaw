@@ -143,3 +143,37 @@ func TestToolProposalCreatesCandidate(t *testing.T) {
 		t.Fatalf("candidate result = total %d, items %+v", total, items)
 	}
 }
+
+func TestRememberExplicitPersistsAndUpdatesStableFact(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store, err := gormstore.New(config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "explicit.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := memory.NewService(store)
+	identity := memory.ExecutionContext{UserID: "local", AgentUUID: "aiclaw-desktop"}
+
+	first, captured, err := service.RememberExplicit(ctx, identity, "你记住，我的位置是上海")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !captured || first.Status != model.MemoryStatusActive || !first.Pinned {
+		t.Fatalf("explicit memory was not activated and pinned: %+v", first)
+	}
+	second, captured, err := service.RememberExplicit(ctx, identity, "请记住：我的位置是北京")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !captured || second.UUID != first.UUID || second.Content != "我的位置是北京" {
+		t.Fatalf("stable profile fact was duplicated instead of updated: first=%+v second=%+v", first, second)
+	}
+	contextResult, err := service.BuildContext(ctx, identity, "我在哪里")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(contextResult.Prompt, "北京") {
+		t.Fatalf("pinned explicit memory missing from future context: %q", contextResult.Prompt)
+	}
+}
