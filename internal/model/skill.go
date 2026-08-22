@@ -14,6 +14,7 @@ const (
 type Skill struct {
 	ID          int64       `json:"id" gorm:"primaryKey;autoIncrement"`
 	UUID        string      `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
+	PluginUUID  string      `json:"plugin_uuid,omitzero" gorm:"size:36;index"`
 	Name        string      `json:"name" gorm:"size:200;not null"`
 	Description string      `json:"description" gorm:"type:text"`
 	Instruction string      `json:"instruction" gorm:"type:text"`
@@ -22,6 +23,7 @@ type Skill struct {
 	Version     string      `json:"version,omitzero" gorm:"size:50"`
 	Author      string      `json:"author,omitzero" gorm:"size:100"`
 	DirName     string      `json:"dir_name,omitzero" gorm:"size:200;index"`
+	InstallDir  string      `json:"install_dir,omitzero" gorm:"size:1000"`
 	MainFile    string      `json:"main_file,omitzero" gorm:"size:200"`
 	Config      JSON        `json:"config,omitzero" gorm:"type:text"`
 	Permissions JSON        `json:"permissions,omitzero" gorm:"type:text"`
@@ -40,14 +42,14 @@ type SkillManifestTool struct {
 }
 
 type SkillManifest struct {
-	Name        string                       `json:"name"`
-	Version     string                       `json:"version"`
-	Description string                       `json:"description"`
-	Author      string                       `json:"author"`
-	Main        string                       `json:"main,omitzero"`
-	Permissions []string                     `json:"permissions,omitzero"`
-	Config      map[string]SkillConfigField  `json:"config,omitzero"`
-	Tools       []SkillManifestTool          `json:"tools,omitzero"`
+	Name        string                      `json:"name"`
+	Version     string                      `json:"version"`
+	Description string                      `json:"description"`
+	Author      string                      `json:"author"`
+	Main        string                      `json:"main,omitzero"`
+	Permissions []string                    `json:"permissions,omitzero"`
+	Config      map[string]SkillConfigField `json:"config,omitzero"`
+	Tools       []SkillManifestTool         `json:"tools,omitzero"`
 }
 
 type SkillConfigField struct {

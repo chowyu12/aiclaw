@@ -76,6 +76,9 @@ func autoMigrate(db *gorm.DB) error {
 		&model.ChannelThread{},
 		&model.MCPServer{},
 		&model.Conversation{},
+		&model.Project{},
+		&model.Thread{},
+		&model.RolloutItem{},
 		&model.Message{},
 		&model.AgentRun{},
 		&model.ExecutionStep{},
@@ -86,6 +89,9 @@ func autoMigrate(db *gorm.DB) error {
 		&model.MemoryEvidence{},
 		&model.File{},
 		&model.SearchEngineConfig{},
+		&model.Skill{},
+		&model.Plugin{},
+		&model.AppSetting{},
 	); err != nil {
 		return err
 	}

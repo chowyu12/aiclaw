@@ -6,5 +6,9 @@ docs/swagger.yaml
 server
 .gitignore
 server.exe
-main
+/main
 CHANGELOG.md
+.DS_Store
+/desktop/desktop
+/desktop/frontend/wailsjs/go/
+/web/

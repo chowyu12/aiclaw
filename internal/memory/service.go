@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,11 @@ import (
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store"
 )
+
+var explicitMemoryPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`^\s*(?:请|麻烦)?(?:你)?(?:帮我)?记住[：:,，\s]*(.+?)\s*$`),
+	regexp.MustCompile(`(?i)^\s*(?:please\s+)?remember(?:\s+that)?[,:]?\s+(.+?)\s*$`),
+}
 
 const (
 	defaultImportance = 50
@@ -74,6 +80,52 @@ func (s *Service) RecordUsage(ctx context.Context, memoryContext *model.MemoryCo
 
 func (s *Service) LinkRunUsage(ctx context.Context, runUUID string, messageID int64) error {
 	return s.store.UpdateMemoryEvidenceMessageIDByRun(ctx, runUUID, messageID)
+}
+
+// RememberExplicit deterministically captures direct "remember this" requests
+// before sampling. Inferred memories still go through the reviewable memory
+// tool, but an explicit user request must not depend on a model choosing to
+// call that tool.
+func (s *Service) RememberExplicit(ctx context.Context, identity ExecutionContext, input string) (*model.MemoryItem, bool, error) {
+	content := ""
+	for _, pattern := range explicitMemoryPatterns {
+		match := pattern.FindStringSubmatch(input)
+		if len(match) == 2 {
+			content = strings.TrimSpace(match[1])
+			break
+		}
+	}
+	if content == "" {
+		return nil, false, nil
+	}
+	keySeed := explicitMemoryKeySeed(content)
+	digest := sha256.Sum256([]byte(strings.ToLower(keySeed)))
+	kind := model.MemoryKindFact
+	lower := strings.ToLower(content)
+	switch {
+	case strings.Contains(content, "喜欢") || strings.Contains(content, "偏好") || strings.Contains(lower, "prefer"):
+		kind = model.MemoryKindPreference
+	case strings.Contains(content, "不要") || strings.Contains(content, "必须") || strings.Contains(lower, "must"):
+		kind = model.MemoryKindConstraint
+	case strings.Contains(content, "我") || strings.Contains(lower, "my ") || strings.HasPrefix(lower, "i "):
+		kind = model.MemoryKindProfile
+	}
+	item, err := s.Upsert(ctx, identity, model.CreateMemoryRequest{
+		Scope: model.MemoryScopeUser, Kind: kind,
+		MemoryKey: "explicit-" + fmt.Sprintf("%x", digest[:8]),
+		Content:   content, Summary: content,
+		Importance: 90, Confidence: 1, Status: model.MemoryStatusActive, Pinned: true,
+	}, "explicit_user")
+	return item, true, err
+}
+
+func explicitMemoryKeySeed(content string) string {
+	for _, separator := range []string{"是", "=", "：", ":"} {
+		if before, _, found := strings.Cut(content, separator); found && strings.TrimSpace(before) != "" {
+			return strings.TrimSpace(before)
+		}
+	}
+	return summarize(content)
 }
 
 func (s *Service) Upsert(ctx context.Context, identity ExecutionContext, req model.CreateMemoryRequest, actor string) (*model.MemoryItem, error) {

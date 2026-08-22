@@ -1,9 +1,12 @@
 package parser
 
 import (
+	"archive/zip"
 	"bytes"
 	"fmt"
 	"io"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/ledongthuc/pdf"
@@ -20,9 +23,61 @@ func ExtractText(contentType string, r io.Reader) (string, error) {
 		return extractXLSX(r)
 	case strings.Contains(contentType, "wordprocessingml") || strings.Contains(contentType, "msword"):
 		return extractDOCX(r)
+	case strings.Contains(contentType, "presentationml") || strings.Contains(contentType, "powerpoint"):
+		return extractPPTX(r)
 	default:
 		return extractPlainText(r)
 	}
+}
+
+func extractPPTX(r io.Reader) (string, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return "", fmt.Errorf("read pptx: %w", err)
+	}
+	zipReader, err := newZipReader(data)
+	if err != nil {
+		return "", fmt.Errorf("open pptx zip: %w", err)
+	}
+	type slide struct {
+		name   string
+		number int
+		file   *zip.File
+	}
+	var slides []slide
+	for _, file := range zipReader.File {
+		if strings.HasPrefix(file.Name, "ppt/slides/slide") && strings.HasSuffix(file.Name, ".xml") {
+			base := strings.TrimSuffix(strings.TrimPrefix(file.Name, "ppt/slides/slide"), ".xml")
+			number, _ := strconv.Atoi(base)
+			slides = append(slides, slide{name: file.Name, number: number, file: file})
+		}
+	}
+	sort.Slice(slides, func(i, j int) bool {
+		if slides[i].number != slides[j].number {
+			return slides[i].number < slides[j].number
+		}
+		return slides[i].name < slides[j].name
+	})
+	if len(slides) == 0 {
+		return "", fmt.Errorf("slides not found in pptx")
+	}
+	var result strings.Builder
+	for index, item := range slides {
+		rc, openErr := item.file.Open()
+		if openErr != nil {
+			continue
+		}
+		text, textErr := extractXMLText(rc)
+		rc.Close()
+		if textErr != nil {
+			continue
+		}
+		fmt.Fprintf(&result, "=== Slide %d ===\n%s\n", index+1, text)
+		if result.Len() > maxTextLen {
+			break
+		}
+	}
+	return truncate(result.String()), nil
 }
 
 func extractPlainText(r io.Reader) (string, error) {

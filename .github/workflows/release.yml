@@ -1,83 +1,180 @@
-name: Release Go Binary
-
+name: Desktop Release
 on:
   push:
-    tags:
-      - "v*" # 打 v 开头的 tag 时自动运行
-
+    tags: ["v*"]
+  workflow_dispatch:
 permissions:
   contents: write
+env:
+  GO_VERSION: "1.26.x"
+  NODE_VERSION: "22"
+  WAILS_VERSION: "v2.11.0"
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+      - name: Test Go core
+        run: go test ./...
+      - name: Test desktop bridge
+        working-directory: desktop
+        run: go test ./...
+      - name: Generate Wails frontend bindings
+        run: |
+          go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}
+          cd desktop && wails generate module
+      - name: Build desktop frontend
+        working-directory: desktop/frontend
+        run: npm ci && npm run build
+
+  macos:
+    needs: test
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}
+      - name: Set application version
+        working-directory: desktop
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || VERSION="0.0.${GITHUB_RUN_NUMBER}"
+          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("wails.json"));p.info.productVersion=process.argv[1];fs.writeFileSync("wails.json",JSON.stringify(p,null,2)+"\n")' "$VERSION"
+      - name: Build universal macOS app
+        working-directory: desktop
+        run: wails build -clean -trimpath -platform darwin/universal -ldflags "-s -w"
+      - name: Sign and verify macOS app
+        working-directory: desktop
+        run: |
+          codesign --force --deep --sign - build/bin/AIClaw.app
+          codesign --verify --deep --strict build/bin/AIClaw.app
+      - name: Package macOS app
+        working-directory: desktop
+        run: ditto -c -k --sequesterRsrc --keepParent build/bin/AIClaw.app AIClaw-macos-universal.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aiclaw-macos
+          path: desktop/AIClaw-macos-universal.zip
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+      - name: Install Wails
+        shell: bash
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis --no-progress -y
+      - name: Set application version
+        shell: bash
+        working-directory: desktop
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || VERSION="0.0.${GITHUB_RUN_NUMBER}"
+          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("wails.json"));p.info.productVersion=process.argv[1];fs.writeFileSync("wails.json",JSON.stringify(p,null,2)+"\n")' "$VERSION"
+      - name: Build Windows app and installer
+        working-directory: desktop
+        run: wails build -clean -trimpath -platform windows/amd64 -nsis -ldflags "-s -w"
+      - name: Package Windows artifacts
+        shell: pwsh
+        working-directory: desktop
+        run: Compress-Archive -Path build/bin/* -DestinationPath AIClaw-windows-amd64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aiclaw-windows
+          path: desktop/AIClaw-windows-amd64.zip
+
+  linux:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Linux desktop dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}
+      - name: Set application version
+        working-directory: desktop
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || VERSION="0.0.${GITHUB_RUN_NUMBER}"
+          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("wails.json"));p.info.productVersion=process.argv[1];fs.writeFileSync("wails.json",JSON.stringify(p,null,2)+"\n")' "$VERSION"
+      - name: Build Linux desktop app
+        working-directory: desktop
+        run: wails build -clean -trimpath -platform linux/amd64 -tags webkit2_41 -ldflags "-s -w"
+      - name: Package Linux app
+        working-directory: desktop
+        run: tar -C build/bin -czf AIClaw-linux-amd64.tar.gz AIClaw
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aiclaw-linux
+          path: desktop/AIClaw-linux-amd64.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Prepare release notes
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+      - name: Prepare notes and checksums
         run: |
           git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)' > RELEASE_NOTES.md
-          if [ ! -s RELEASE_NOTES.md ]; then
-            echo "Release ${GITHUB_REF_NAME}" > RELEASE_NOTES.md
-          fi
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build Frontend
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-
-      - name: Build
-        run: |
-          VERSION=${GITHUB_REF_NAME}
-          LDFLAGS="-s -w -X main.version=${VERSION}"
-          GOOS=linux  GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o aiclaw-linux-amd64   ./cmd/server
-          GOOS=linux  GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o aiclaw-linux-arm64   ./cmd/server
-          GOOS=windows GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o aiclaw-windows-amd64.exe ./cmd/server
-          GOOS=darwin GOARCH=amd64 go build -ldflags "${LDFLAGS}" -o aiclaw-darwin-amd64  ./cmd/server
-          GOOS=darwin GOARCH=arm64 go build -ldflags "${LDFLAGS}" -o aiclaw-darwin-arm64  ./cmd/server
-          echo "── 压缩前体积 ──"
-          ls -lh aiclaw-*
-
-      # UPX 对 darwin Mach-O（尤其 arm64）支持不稳定，且会破坏 Apple 代码签名 /
-      # Gatekeeper 校验，因此仅压缩 Linux 和 Windows 二进制。
-      - name: Setup UPX
-        uses: crazy-max/ghaction-upx@v3
-        with:
-          install-only: true
-
-      - name: Compress binaries with UPX
-        run: |
-          upx --best --lzma aiclaw-linux-amd64
-          upx --best --lzma aiclaw-linux-arm64
-          upx --best --lzma aiclaw-windows-amd64.exe
-          echo "── 压缩后体积 ──"
-          ls -lh aiclaw-*
-
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
+          test -s RELEASE_NOTES.md || echo "AIClaw ${GITHUB_REF_NAME}" > RELEASE_NOTES.md
+          cd release && sha256sum * > SHA256SUMS.txt
+      - uses: softprops/action-gh-release@v2
         with:
           body_path: RELEASE_NOTES.md
-          files: |
-            aiclaw-linux-amd64
-            aiclaw-linux-arm64
-            aiclaw-windows-amd64.exe
-            aiclaw-darwin-amd64
-            aiclaw-darwin-arm64
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: release/*

@@ -16,8 +16,10 @@ const (
 type File struct {
 	ID             int64     `json:"id" gorm:"primaryKey;autoIncrement"`
 	UUID           string    `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
-	ConversationID int64     `json:"conversation_id" gorm:"index;not null"`
+	ConversationID int64     `json:"conversation_id" gorm:"index;not null;default:0"`
 	MessageID      int64     `json:"message_id" gorm:"index;default:0"`
+	ThreadID       int64     `json:"thread_id" gorm:"index;not null;default:0"`
+	TurnID         string    `json:"turn_id" gorm:"index;size:36;not null;default:''"`
 	Filename       string    `json:"filename" gorm:"size:255;not null"`
 	ContentType    string    `json:"content_type" gorm:"size:100"`
 	FileSize       int64     `json:"file_size" gorm:"default:0"`
