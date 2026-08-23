@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/chowyu12/aiclaw/internal/config"
@@ -16,6 +17,37 @@ type subAgentTestSampler struct{}
 
 func (subAgentTestSampler) Sample(_ context.Context, request SamplingRequest, _ func(string) error) (SamplingResult, error) {
 	return SamplingResult{Text: "sub-agent completed: " + request.Messages[len(request.Messages)-1].Content}, nil
+}
+
+func TestSkillInstructionsLoadProgressively(t *testing.T) {
+	ctx, database, dispatcher, thread := newToolTestRuntime(t)
+	skill := &model.Skill{UUID: "skill-progressive", Name: "Release Audit", Description: "verify release artifacts", Instruction: "SECRET FULL RELEASE INSTRUCTIONS", Source: model.SkillSourceLocal, Enabled: true}
+	if err := database.UpsertSkill(ctx, skill); err != nil {
+		t.Fatal(err)
+	}
+
+	unrelated, err := dispatcher.ContextMessages(ctx, thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unrelated) == 0 || !strings.Contains(unrelated[0].Content, "Release Audit") {
+		t.Fatalf("enabled skill catalog was not exposed: %+v", unrelated)
+	}
+	if strings.Contains(unrelated[0].Content, skill.Instruction) {
+		t.Fatal("full skill instructions were eagerly injected")
+	}
+
+	matchedCtx, err := dispatcher.PrepareTurn(context.Background(), thread, Turn{ID: "turn-skill", Input: "please run a release audit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, err := dispatcher.ContextMessages(matchedCtx, thread)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matched) == 0 || !strings.Contains(matched[0].Content, skill.Instruction) {
+		t.Fatalf("relevant skill instructions were not loaded: %+v", matched)
+	}
 }
 
 func newToolTestRuntime(t *testing.T) (context.Context, *gormstore.GormStore, *LocalToolDispatcher, model.Thread) {
@@ -89,6 +121,11 @@ func TestRestoredCoreToolsExecute(t *testing.T) {
 	}
 	if !foundPlan {
 		t.Fatal("plan update was not persisted to the rollout")
+	}
+	restarted := NewLocalToolDispatcher(database, WithDispatcherRoot(t.TempDir()), WithSubAgentSampler(subAgentTestSampler{}))
+	readPlan, err := restarted.Execute(ctx, thread, ToolCall{ID: "plan-read", Name: "plan", Arguments: `{"action":"read"}`})
+	if err != nil || !strings.Contains(readPlan.Content, `"goal":"ship"`) {
+		t.Fatalf("persisted plan was not restored: result=%+v err=%v", readPlan, err)
 	}
 
 	search, err := dispatcher.Execute(ctx, thread, ToolCall{ID: "search-1", Name: "session_search", Arguments: `{"query":"contract"}`})

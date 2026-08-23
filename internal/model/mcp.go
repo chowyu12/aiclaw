@@ -8,8 +8,9 @@ import (
 type MCPTransport string
 
 const (
-	MCPTransportStdio MCPTransport = "stdio"
-	MCPTransportSSE   MCPTransport = "sse"
+	MCPTransportStdio          MCPTransport = "stdio"
+	MCPTransportSSE            MCPTransport = "sse"
+	MCPTransportStreamableHTTP MCPTransport = "streamable_http"
 )
 
 type MCPServer struct {
@@ -23,7 +24,7 @@ type MCPServer struct {
 	Args        JSON         `json:"args,omitzero" gorm:"type:text"`
 	Env         JSON         `json:"env,omitzero" gorm:"type:text"`
 	Headers     JSON         `json:"headers,omitzero" gorm:"type:text"`
-	Enabled     bool         `json:"enabled" gorm:"not null;default:true"`
+	Enabled     bool         `json:"enabled" gorm:"not null"`
 	CreatedAt   time.Time    `json:"created_at"`
 	UpdatedAt   time.Time    `json:"updated_at"`
 }

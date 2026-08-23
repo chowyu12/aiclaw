@@ -15,10 +15,12 @@ AIClaw is a local-first native desktop AI application. It uses Wails to provide 
 - Send JPEG, PNG, WebP, and GIF files as native multimodal image blocks. Extract PDF, DOCX, XLSX, PPTX, text, source code, and common configuration-file content locally before adding it to model context.
 - Use a fully local memory system stored in SQLite, with cross-conversation retrieval, explicit memories, candidate review, approval, and forgetting. Memory use and memory generation can be disabled independently.
 - Enable web search by default for new conversations and manage search services under **Settings → Web Search**.
-- Manage providers, Computer Use, MCP, and plugins from Settings.
-- Use the built-in `browser` Computer Use tool with models that support tool calling.
-- Discover, copy, install, enable, and disable local plugin directories.
-- Load `SKILL.md` instructions, JavaScript/Python tools, and MCP servers from plugins.
+- Manage providers, local tool permissions, MCP, and plugins from Settings.
+- Use one registry for every model-visible tool; a tool cannot be advertised unless the same registry contains its executor.
+- Use built-in file, command, plan, sub-agent, skill-management, memory, search, and session-search tools. Browser automation is supplied by an installed MCP server or plugin instead of an embedded CDP daemon.
+- Discover, copy, install, enable, disable, and remove local plugin directories. Failed installations are rolled back.
+- Load `SKILL.md` instructions progressively, execute permission-declaring JavaScript/Python tools, and import MCP servers from plugins.
+- Connect MCP servers through stdio, SSE, or Streamable HTTP. MCP tools use collision-safe `mcp__server__tool` names while calls are routed to their original server names.
 - Store conversations, messages, projects, and configuration in `~/.aiclaw/aiclaw.db`.
 - Build universal macOS applications, Windows applications/installers, and Linux packages through GitHub Actions when a version tag is published, including SHA-256 checksum files.
 
@@ -100,6 +102,8 @@ The plugin manifest must provide at least a name:
 
 MCP files use the common `mcpServers` structure. They may configure a local `command`/`args`/`env` combination or a remote `url`/`headers` combination. Disabling a plugin also disables its associated skills and MCP servers.
 
+Executable skills must declare `process.execute` in `manifest.json`. Supported permission declarations are `process.execute`, `filesystem.read`, `filesystem.write`, and `network.access`. AIClaw validates declarations, prevents entry points from escaping the installed skill directory, exposes requested permissions in Settings, and starts skill processes with a reduced environment. Stdio and remote MCP definitions automatically surface `process.execute` and `network.access`, respectively. New plugins are installed disabled; review their permissions before enabling them.
+
 ## Local Data
 
 ```text
@@ -135,9 +139,9 @@ CI writes tags such as `v1.2.3` into application metadata for each platform and 
 desktop/                 Native Wails window, Go bindings, and Vue frontend
 internal/core/           Local conversations, model sampling, and tool dispatch
 internal/store/gormstore SQLite persistence
-internal/tools/          File, command, browser, and web tools
-internal/skills/         Skill parsing and JS/Python execution
-internal/mcp/            MCP client and tool bridge
+internal/tools/          File, command, web, and unified built-in tools
+internal/skills/         Progressive skill loading and permission-aware JS/Python execution
+internal/tools/mcp/      Namespaced MCP client and tool bridge
 ```
 
-The desktop conversation path is `Wails UI → Go desktop bridge → local core session → Provider/MCP/Skill tools → SQLite rollout`. The attachment path is `original file → private local copy and SQLite metadata → rollout attachment reference → provider multimodal/text content block`. Neither path depends on a web console or a local HTTP API at runtime.
+The desktop conversation path is `Wails UI → Go desktop bridge → local core session → unified tool registry → Provider/MCP/Skill execution → SQLite rollout`. The attachment path is `original file → private local copy and SQLite metadata → rollout attachment reference → provider multimodal/text content block`. Neither path depends on a web console, legacy agent runtime, CDP daemon, or local HTTP API at runtime.

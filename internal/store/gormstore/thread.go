@@ -95,6 +95,9 @@ func (s *GormStore) MigrateConversation(ctx context.Context, conversationUUID st
 // is intentionally idempotent and can therefore run on every native App
 // startup until the legacy projection is removed in a later migration.
 func (s *GormStore) MigrateLegacyConversations(ctx context.Context, userID string) error {
+	if !s.db.Migrator().HasTable(&model.Conversation{}) || !s.db.Migrator().HasTable(&model.Agent{}) || !s.db.Migrator().HasTable(&model.Message{}) {
+		return nil
+	}
 	var conversations []model.Conversation
 	db := s.db.WithContext(ctx).Order("id ASC")
 	if userID != "" {

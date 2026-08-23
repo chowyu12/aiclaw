@@ -16,6 +16,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/protocol"
 	providerpkg "github.com/chowyu12/aiclaw/internal/provider"
+	"github.com/chowyu12/aiclaw/internal/skills"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -63,15 +64,19 @@ type ChatDelta struct {
 }
 
 type ChatProgress struct {
-	RequestID string `json:"request_id"`
-	ThreadID  string `json:"thread_id"`
-	TurnID    string `json:"turn_id"`
-	Kind      string `json:"kind"`
-	CallID    string `json:"call_id,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Status    string `json:"status,omitempty"`
-	Message   string `json:"message,omitempty"`
-	Error     string `json:"error,omitempty"`
+	RequestID  string `json:"request_id"`
+	ThreadID   string `json:"thread_id"`
+	TurnID     string `json:"turn_id"`
+	Kind       string `json:"kind"`
+	CallID     string `json:"call_id,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Message    string `json:"message,omitempty"`
+	Input      string `json:"input,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+	StartedAt  int64  `json:"started_at,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
 }
 
 // DesktopProvider and DesktopThread deliberately avoid exposing
@@ -107,10 +112,14 @@ type DesktopMessage struct {
 }
 
 type DesktopExecution struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Message string `json:"message"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Message    string `json:"message"`
+	Input      string `json:"input,omitempty"`
+	Output     string `json:"output,omitempty"`
+	Error      string `json:"error,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
 }
 
 func NewApp() *App { return &App{} }
@@ -140,6 +149,10 @@ func (a *App) startup(ctx context.Context) {
 	}
 	a.store.InitFTS5()
 	if err := a.store.MigrateLegacyConversations(ctx, "local"); err != nil {
+		a.err = err.Error()
+		return
+	}
+	if err := skills.EnsureBuiltins(ctx, a.store, root); err != nil {
 		a.err = err.Error()
 		return
 	}
@@ -239,17 +252,20 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 			_ = json.Unmarshal(item.Payload, &payload)
 			for _, call := range payload.ToolCalls {
 				executionByTurn[item.TurnID] = append(executionByTurn[item.TurnID], DesktopExecution{
-					ID: call.ID, Name: call.Name, Status: string(model.StepPending), Message: "等待执行工具",
+					ID: call.ID, Name: call.Name, Status: string(model.StepPending), Message: "等待执行工具", Input: call.Arguments,
 				})
 			}
 			continue
 		}
 		if item.Kind == model.RolloutToolCompleted {
 			var payload struct {
-				CallID string           `json:"call_id"`
-				Name   string           `json:"name"`
-				Status model.StepStatus `json:"status"`
-				Error  string           `json:"error"`
+				CallID     string           `json:"call_id"`
+				Name       string           `json:"name"`
+				Status     model.StepStatus `json:"status"`
+				Input      string           `json:"input"`
+				Output     string           `json:"output"`
+				Error      string           `json:"error"`
+				DurationMS int64            `json:"duration_ms"`
 			}
 			_ = json.Unmarshal(item.Payload, &payload)
 			status := payload.Status
@@ -265,12 +281,20 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 			for index := range steps {
 				if steps[index].ID == payload.CallID {
 					steps[index].Name, steps[index].Status, steps[index].Message = payload.Name, string(status), message
+					if payload.Input != "" {
+						steps[index].Input = payload.Input
+					}
+					steps[index].Output, steps[index].Error = payload.Output, payload.Error
+					steps[index].DurationMS = payload.DurationMS
 					matched = true
 					break
 				}
 			}
 			if !matched {
-				steps = append(steps, DesktopExecution{ID: payload.CallID, Name: payload.Name, Status: string(status), Message: message})
+				steps = append(steps, DesktopExecution{
+					ID: payload.CallID, Name: payload.Name, Status: string(status), Message: message,
+					Input: payload.Input, Output: payload.Output, Error: payload.Error, DurationMS: payload.DurationMS,
+				})
 			}
 			executionByTurn[item.TurnID] = steps
 			continue
@@ -487,7 +511,8 @@ func (a *App) runChat(profile ChatProfile, threadID, input string, attachmentUUI
 		} else if profile.RequestID != "" {
 			runtime.EventsEmit(a.ctx, "chat:progress", ChatProgress{
 				RequestID: profile.RequestID, ThreadID: threadID, TurnID: e.TurnID, Kind: string(e.Kind),
-				CallID: e.CallID, Name: e.Name, Status: e.Status, Message: e.Message, Error: e.Error,
+				CallID: e.CallID, Name: e.Name, Status: e.Status, Message: e.Message,
+				Input: e.Input, Output: e.Output, Error: e.Error, StartedAt: e.StartedAt, DurationMS: e.DurationMS,
 			})
 		}
 		return nil

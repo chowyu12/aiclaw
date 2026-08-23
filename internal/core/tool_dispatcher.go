@@ -20,7 +20,7 @@ import (
 )
 
 type LocalToolDispatcher struct {
-	store   store.Store
+	store   ToolRuntimeStore
 	mu      sync.Mutex
 	planMu  sync.Mutex
 	mcp     *mcp.Manager
@@ -28,6 +28,16 @@ type LocalToolDispatcher struct {
 	root    string
 	sampler Sampler
 	plans   map[string]*model.PlanState
+}
+
+// ToolRuntimeStore is the complete persistence contract of the new desktop
+// tool runtime. It intentionally excludes legacy Agent, Runtime, Channel,
+// Conversation, daemon, and CDP stores.
+type ToolRuntimeStore interface {
+	ThreadStore
+	store.MemoryStore
+	store.SearchEngineStore
+	ListMCPServers(context.Context) ([]model.MCPServer, error)
 }
 
 type DispatcherOption func(*LocalToolDispatcher)
@@ -40,7 +50,7 @@ func WithSubAgentSampler(sampler Sampler) DispatcherOption {
 	return func(d *LocalToolDispatcher) { d.sampler = sampler }
 }
 
-func NewLocalToolDispatcher(s store.Store, options ...DispatcherOption) *LocalToolDispatcher {
+func NewLocalToolDispatcher(s ToolRuntimeStore, options ...DispatcherOption) *LocalToolDispatcher {
 	home, _ := os.UserHomeDir()
 	d := &LocalToolDispatcher{
 		store: s, memory: memorypkg.NewService(s), root: filepath.Join(home, ".aiclaw"),
@@ -100,16 +110,53 @@ func (d *LocalToolDispatcher) ContextMessages(ctx context.Context, _ model.Threa
 	if err != nil {
 		return nil, err
 	}
+	var catalog strings.Builder
+	catalog.WriteString("\n\nEnabled skill catalog (use the skill tool with action=read_active to load full instructions when needed):")
+	matched := 0
 	for _, item := range items {
 		if !item.Enabled || item.Instruction == "" {
 			continue
 		}
-		content += "\n\n## Enabled skill: " + item.Name + "\n" + item.Instruction
+		catalog.WriteString("\n- ")
+		catalog.WriteString(item.Name)
+		if item.Description != "" {
+			catalog.WriteString(": ")
+			catalog.WriteString(item.Description)
+		}
+		if skillRelevant(identity.Input, item) {
+			matched++
+			content += "\n\n## Selected skill: " + item.Name + "\n" + item.Instruction
+		}
 	}
+	if strings.Contains(catalog.String(), "\n- ") {
+		content += catalog.String()
+	}
+	_ = matched
 	if content == "" {
 		return nil, nil
 	}
 	return []SamplingMessage{{Role: "system", Content: content}}, nil
+}
+
+func skillRelevant(input string, skill model.Skill) bool {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return false
+	}
+	for _, candidate := range []string{skill.Name, skill.Slug, skill.DirName} {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate != "" && strings.Contains(input, candidate) {
+			return true
+		}
+	}
+	for _, token := range strings.FieldsFunc(strings.ToLower(skill.Description), func(r rune) bool {
+		return r < 'a' || r > 'z'
+	}) {
+		if len(token) >= 5 && strings.Contains(input, token) {
+			return true
+		}
+	}
+	return false
 }
 
 // Reload closes cached MCP connections so settings changes take effect on the
@@ -188,6 +235,9 @@ func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread)
 			if !skill.Enabled || len(skill.ToolDefs) == 0 {
 				continue
 			}
+			if _, permissionErr := skillrunner.ValidateExecutable(skill); permissionErr != nil {
+				continue
+			}
 			var definitions []model.SkillManifestTool
 			if json.Unmarshal(skill.ToolDefs, &definitions) != nil {
 				continue
@@ -230,7 +280,11 @@ func (d *LocalToolDispatcher) executeSkillRecord(ctx context.Context, skill mode
 	}
 	var config map[string]any
 	_ = json.Unmarshal(skill.Config, &config)
-	output, runErr := skillrunner.RunTool(ctx, skill.InstallDir, skill.MainFile, call.Name, call.Arguments, config, 30*time.Second)
+	permissions, permissionErr := skillrunner.ValidateExecutable(skill)
+	if permissionErr != nil {
+		return ToolResult{CallID: call.ID, Name: call.Name}, permissionErr
+	}
+	output, runErr := skillrunner.RunTool(ctx, skill.InstallDir, skill.MainFile, call.Name, call.Arguments, config, permissions, 30*time.Second)
 	return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, runErr
 }
 

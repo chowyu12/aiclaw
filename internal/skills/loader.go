@@ -60,6 +60,19 @@ func parseManifestFormat(dirPath string) (*SkillInfo, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("parse manifest.json: %w", err)
 	}
+	permissions, err := NormalizePermissions(manifest.Permissions)
+	if err != nil {
+		return nil, err
+	}
+	if manifest.Main != "" {
+		hasExecute := false
+		for _, permission := range permissions {
+			hasExecute = hasExecute || permission == PermissionProcessExecute
+		}
+		if !hasExecute {
+			return nil, fmt.Errorf("executable skill %q requires %q permission", manifest.Name, PermissionProcessExecute)
+		}
+	}
 
 	info := &SkillInfo{
 		DirName:     filepath.Base(dirPath),
@@ -82,8 +95,8 @@ func parseManifestFormat(dirPath string) (*SkillInfo, error) {
 		}
 	}
 
-	if len(manifest.Permissions) > 0 {
-		data, _ := json.Marshal(manifest.Permissions)
+	if len(permissions) > 0 {
+		data, _ := json.Marshal(permissions)
 		info.Permissions = model.JSON(data)
 	}
 	if len(manifest.Config) > 0 {
@@ -250,7 +263,7 @@ func ScanAll(skillsRoot string) ([]SkillInfo, error) {
 		dirPath := filepath.Join(skillsRoot, entry.Name())
 		info, err := ParseSkillDir(dirPath)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("parse skill %s: %w", entry.Name(), err)
 		}
 		result = append(result, *info)
 	}

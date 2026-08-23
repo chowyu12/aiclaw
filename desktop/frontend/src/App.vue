@@ -13,6 +13,8 @@ import {
   CreateProject,
   DeleteProject,
   DeleteProvider,
+  DeleteMCPServer,
+  DeletePlugin,
   DeleteSearchEngine,
   DiscardAttachment,
   ForgetMemory,
@@ -75,6 +77,11 @@ type ExecutionStep = {
   name: string;
   status: ExecutionStatus;
   message: string;
+  input?: string;
+  output?: string;
+  error?: string;
+  started_at?: number;
+  duration_ms?: number;
 };
 type Message = {
   role: string;
@@ -106,7 +113,11 @@ type ChatProgress = {
   name?: string;
   status?: ExecutionStatus;
   message?: string;
+  input?: string;
+  output?: string;
   error?: string;
+  started_at?: number;
+  duration_ms?: number;
 };
 type Search = {
   id: number;
@@ -133,6 +144,7 @@ type Plugin = {
   enabled: boolean;
   skill_count: number;
   mcp_count: number;
+  permissions: string[];
 };
 type Theme = "dark" | "light";
 
@@ -180,6 +192,7 @@ const projectFormOpen = ref(false),
   deletingProjectID = ref(""),
   providerFormOpen = ref(false),
   modelPickerOpen = ref(false);
+const executionClock = ref(Date.now());
 const providerForm = ref({
   name: "",
   type: "openai-compatible",
@@ -329,7 +342,11 @@ function beginAssistantStream(index?: number) {
 function upsertExecution(message: Message, step: ExecutionStep) {
   message.execution ||= [];
   const current = message.execution.find((item) => item.id === step.id);
-  if (current) Object.assign(current, step);
+  if (current) {
+    for (const [key, value] of Object.entries(step)) {
+      if (value !== undefined) (current as any)[key] = value;
+    }
+  }
   else message.execution.push(step);
 }
 function completeExecution(message: Message, id: string, detail: string) {
@@ -368,9 +385,14 @@ function acceptChatProgress(event: ChatProgress) {
     completeExecution(message, "analysis", "已选择执行路径");
     upsertExecution(message, {
       id: event.call_id || `tool-${message.execution?.length || 0}`,
-      name: event.name ? `调用 ${event.name}` : "调用工具",
+      name: event.name || "工具",
       status: event.status || "running",
       message: event.message || "正在执行",
+      input: event.input,
+      output: event.output,
+      error: event.error,
+      started_at: event.started_at,
+      duration_ms: event.duration_ms,
     });
   } else if (event.kind === "turn.completed") {
     for (const step of message.execution || []) {
@@ -464,10 +486,76 @@ function normalizedExecutionStatus(status: string): ExecutionStatus {
 function executionSummary(item: Message) {
   const steps = item.execution || [];
   const active = steps.find((step) => step.status === "running");
-  if (active) return active.message;
+  if (active) {
+    const command = commandText(active);
+    return command ? `${executionVerb(active)} ${command}` : active.message;
+  }
   const failed = steps.find((step) => step.status === "error");
-  if (failed) return failed.message;
+  if (failed) {
+    const command = commandText(failed);
+    return command ? `${executionVerb(failed)} ${command}` : failed.message;
+  }
   return steps.length ? `${steps.length} 个步骤已完成` : "";
+}
+type ToolInput = Record<string, unknown>;
+function parsedToolInput(step: ExecutionStep): ToolInput {
+  if (!step.input) return {};
+  try {
+    const value = JSON.parse(step.input);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? (value as ToolInput)
+      : {};
+  } catch {
+    return {};
+  }
+}
+function toolName(step: ExecutionStep) {
+  return step.name.replace(/^调用\s+/, "").trim() || "工具";
+}
+function commandText(step: ExecutionStep) {
+  const input = parsedToolInput(step);
+  const command = input.command ?? input.cmd ?? input.script;
+  if (typeof command === "string" && command.trim()) return command.trim();
+  if (toolName(step) === "process" && typeof input.action === "string") {
+    const session =
+      typeof input.session_id === "string" ? ` ${input.session_id}` : "";
+    return `process ${input.action}${session}`;
+  }
+  return "";
+}
+function workingDirectory(step: ExecutionStep) {
+  const input = parsedToolInput(step);
+  const value = input.working_dir ?? input.workdir ?? input.cwd;
+  return typeof value === "string" ? value : "";
+}
+function formattedToolInput(step: ExecutionStep) {
+  if (!step.input) return "";
+  try {
+    return JSON.stringify(JSON.parse(step.input), null, 2);
+  } catch {
+    return step.input;
+  }
+}
+function executionVerb(step: ExecutionStep) {
+  const command = commandText(step);
+  if (step.status === "running") return command ? "正在运行" : "正在执行";
+  if (step.status === "error") return command ? "命令失败" : "执行失败";
+  if (step.status === "success") return command ? "已运行" : "已执行";
+  return "等待执行";
+}
+function executionDuration(step: ExecutionStep) {
+  let milliseconds = step.duration_ms || 0;
+  if (step.status === "running" && step.started_at) {
+    milliseconds = Math.max(0, executionClock.value - step.started_at);
+  }
+  if (!milliseconds) return step.message;
+  const seconds = milliseconds / 1000;
+  const value = seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toString();
+  if (step.status === "running") return `已运行 ${value}s`;
+  return `${value}s 内完成`;
+}
+function hasExecutionDetails(step: ExecutionStep) {
+  return Boolean(step.input || step.output || step.error);
 }
 function selectProvider(item: Provider | undefined) {
   if (!item) return;
@@ -917,6 +1005,14 @@ async function toggleMCP(item: MCP) {
     error.value = String(e);
   }
 }
+async function removeMCP(item: MCP) {
+  try {
+    await DeleteMCPServer(item.uuid);
+    await refresh();
+  } catch (e) {
+    error.value = String(e);
+  }
+}
 async function installPlugin() {
   try {
     await ChoosePluginDirectory();
@@ -933,19 +1029,33 @@ async function togglePlugin(item: Plugin) {
     error.value = String(e);
   }
 }
+async function removePlugin(item: Plugin) {
+  try {
+    await DeletePlugin(item.uuid);
+    await refresh();
+  } catch (e) {
+    error.value = String(e);
+  }
+}
 let stopChatDelta: (() => void) | undefined;
 let stopChatProgress: (() => void) | undefined;
+let executionClockTimer: number | undefined;
 onMounted(() => {
   if ((window as any).runtime) {
     stopChatDelta = EventsOn("chat:delta", acceptChatDelta);
     stopChatProgress = EventsOn("chat:progress", acceptChatProgress);
     OnFileDrop((_x, _y, paths) => void importAttachmentPaths(paths), true);
   }
+  executionClockTimer = window.setInterval(() => {
+    executionClock.value = Date.now();
+  }, 1000);
   void refresh();
 });
 onUnmounted(() => {
   stopChatDelta?.();
   stopChatProgress?.();
+  if (executionClockTimer !== undefined)
+    window.clearInterval(executionClockTimer);
   if ((window as any).runtime) OnFileDropOff();
 });
 </script>
@@ -1104,10 +1214,10 @@ onUnmounted(() => {
           <div v-if="!messages.length" class="welcome">
             <div class="orb">✦</div>
             <h2>今天想完成什么？</h2>
-            <p>Computer Use、浏览器控制、启用的 MCP 与插件技能已准备就绪。</p>
+            <p>本地文件与命令工具已准备就绪；浏览器控制可通过 MCP 或插件接入。</p>
             <div class="capabilities">
               <span>◎ Web Search</span><span>◫ Browser</span
-              ><span>⌘ Computer Use</span><span>◇ MCP</span>
+              ><span>⌘ Local Tools</span><span>◇ MCP</span>
             </div>
           </div>
           <article
@@ -1154,8 +1264,39 @@ onUnmounted(() => {
                   :key="step.id"
                   :class="`trace-${step.status}`"
                 >
-                  <span class="trace-status">{{ executionIcon(step.status) }}</span>
-                  <div><b>{{ step.name }}</b><small>{{ step.message }}</small></div>
+                  <details
+                    class="trace-step"
+                    :class="{ 'no-details': !hasExecutionDetails(step) }"
+                    :open="step.status === 'running'"
+                  >
+                    <summary>
+                      <span class="trace-status">{{ executionIcon(step.status) }}</span>
+                      <span class="trace-action">
+                        <b>{{ executionVerb(step) }}</b>
+                        <code v-if="commandText(step)">{{ commandText(step) }}</code>
+                        <span v-else>{{ toolName(step) }}</span>
+                      </span>
+                      <small>{{ executionDuration(step) }}</small>
+                      <i v-if="hasExecutionDetails(step)"></i>
+                    </summary>
+                    <div v-if="hasExecutionDetails(step)" class="trace-detail">
+                      <section v-if="commandText(step)">
+                        <b>Shell</b><pre>{{ commandText(step) }}</pre>
+                      </section>
+                      <section v-if="workingDirectory(step)">
+                        <b>工作目录</b><code>{{ workingDirectory(step) }}</code>
+                      </section>
+                      <section v-if="formattedToolInput(step)">
+                        <b>调用参数</b><pre>{{ formattedToolInput(step) }}</pre>
+                      </section>
+                      <section v-if="step.output">
+                        <b>输出</b><pre>{{ step.output }}</pre>
+                      </section>
+                      <section v-if="step.error" class="trace-error-output">
+                        <b>错误</b><pre>{{ step.error }}</pre>
+                      </section>
+                    </div>
+                  </details>
                 </li>
               </ol>
             </details>
@@ -1314,7 +1455,7 @@ onUnmounted(() => {
             @keydown.meta.enter.prevent="send"
           ></textarea>
           <div class="composer-footer">
-            <span>⌘ Enter 发送 · Computer Use 默认开启</span
+            <span>⌘ Enter 发送 · 本地工具按权限运行</span
             ><button
               :disabled="
                 busy || (!prompt.trim() && !pendingAttachments.length) || !modelName
@@ -1352,7 +1493,7 @@ onUnmounted(() => {
             :class="{ active: settingsTab === 'computer' }"
             @click="settingsTab = 'computer'"
           >
-            Computer Use</button
+            本地工具</button
           ><button
             :class="{ active: settingsTab === 'mcp' }"
             @click="settingsTab = 'mcp'"
@@ -1637,9 +1778,9 @@ onUnmounted(() => {
         <div v-else-if="settingsTab === 'computer'" class="panel feature-panel">
           <div class="feature-icon">⌘</div>
           <div>
-            <h2>Computer Use 与浏览器控制</h2>
+            <h2>本地工具与浏览器扩展</h2>
             <p>
-              默认对所有聊天启用。模型可使用浏览器导航、页面快照、点击、输入、截图，以及受控的本机文件和命令工具。
+              文件、搜索和命令工具由统一执行器提供。浏览器导航、点击和截图请安装兼容的 MCP Server 或插件。
             </p>
             <div class="status-line"><span></span>运行时已启用</div>
           </div>
@@ -1652,6 +1793,7 @@ onUnmounted(() => {
               >传输<select v-model="mcpForm.transport">
                 <option value="stdio">stdio</option>
                 <option value="sse">SSE</option>
+                <option value="streamable_http">Streamable HTTP</option>
               </select></label
             ><label
               >{{ mcpForm.transport === "stdio" ? "命令" : "URL"
@@ -1681,6 +1823,7 @@ onUnmounted(() => {
               >
                 <i></i>
               </button>
+              <button v-if="!item.plugin_uuid" class="danger" @click="removeMCP(item)">删除</button>
             </article>
             <p v-if="!mcps.length" class="empty-copy">尚未配置 MCP Server。</p>
           </div>
@@ -1711,8 +1854,8 @@ onUnmounted(() => {
             <article class="builtin">
               <div class="plugin-icon">⌘</div>
               <div>
-                <b>Computer Use</b>
-                <p>内置浏览器自动化、本机文件与命令控制。</p>
+                <b>Local Tool Runtime</b>
+                <p>统一注册的本机文件、命令、会话、计划与技能工具。</p>
                 <small>BUILT-IN</small>
               </div>
               <span class="state">已启用</span>
@@ -1726,6 +1869,7 @@ onUnmounted(() => {
                   >{{ item.version || "LOCAL" }} · {{ item.skill_count }} SKILLS
                   · {{ item.mcp_count }} MCP</small
                 >
+                <small v-if="item.permissions?.length" class="permission-list">{{ item.permissions.join(" · ") }}</small>
               </div>
               <button
                 class="switch"
@@ -1734,6 +1878,7 @@ onUnmounted(() => {
               >
                 <i></i>
               </button>
+              <button class="danger" @click="removePlugin(item)">删除</button>
             </article>
             <div v-if="!plugins.length" class="plugin-empty">
               <div class="orb">◌</div>

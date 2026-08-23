@@ -167,7 +167,7 @@ func TestPluginInstallAndToggle(t *testing.T) {
 	mustMkdir(t, filepath.Join(source, ".codex-plugin"))
 	mustWrite(t, filepath.Join(source, ".codex-plugin", "plugin.json"), `{"name":"Research Kit","description":"Local research plugin","version":"1.2.0"}`)
 	mustMkdir(t, filepath.Join(source, "skills", "research"))
-	mustWrite(t, filepath.Join(source, "skills", "research", "manifest.json"), `{"name":"Research","version":"1.0.0","main":"main.py","tools":[{"name":"research_echo","description":"Echo research input","parameters":{"type":"object","properties":{"query":{"type":"string"}}}}]}`)
+	mustWrite(t, filepath.Join(source, "skills", "research", "manifest.json"), `{"name":"Research","version":"1.0.0","main":"main.py","permissions":["process.execute"],"tools":[{"name":"research_echo","description":"Echo research input","parameters":{"type":"object","properties":{"query":{"type":"string"}}}}]}`)
 	mustWrite(t, filepath.Join(source, "skills", "research", "SKILL.md"), "---\nname: Research\ndescription: Research carefully\n---\nAlways cite local evidence.")
 	mustWrite(t, filepath.Join(source, "skills", "research", "main.py"), "import json,sys\ndata=json.load(sys.stdin)\nprint(data['arguments']['query'])\n")
 	mustWrite(t, filepath.Join(source, "mcp.json"), `{"mcpServers":{"echo":{"command":"/bin/echo","args":["ready"]}}}`)
@@ -176,8 +176,11 @@ func TestPluginInstallAndToggle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if plugin.SkillCount != 1 || plugin.MCPCount != 1 || !plugin.Enabled {
+	if plugin.SkillCount != 1 || plugin.MCPCount != 1 || plugin.Enabled {
 		t.Fatalf("unexpected plugin: %+v", plugin)
+	}
+	if err := app.TogglePlugin(plugin.UUID, true); err != nil {
+		t.Fatal(err)
 	}
 	contextMessages, err := app.tools.ContextMessages(app.ctx, model.Thread{})
 	if err != nil {
@@ -191,20 +194,13 @@ func TestPluginInstallAndToggle(t *testing.T) {
 		t.Fatal(err)
 	}
 	foundTool := false
-	foundBrowser := false
 	for _, definition := range definitions {
 		if definition.Name == "research_echo" {
 			foundTool = true
 		}
-		if definition.Name == "browser" {
-			foundBrowser = true
-		}
 	}
 	if !foundTool {
 		t.Fatal("skill tool definition was not loaded")
-	}
-	if !foundBrowser {
-		t.Fatal("built-in browser tool is not enabled by default")
 	}
 	toolResult, err := app.tools.Execute(app.ctx, model.Thread{}, core.ToolCall{Name: "research_echo", Arguments: `{"query":"verified"}`})
 	if err != nil || toolResult.Content != "verified" {
@@ -226,6 +222,77 @@ func TestPluginInstallAndToggle(t *testing.T) {
 	}
 	if len(servers) != 1 || servers[0].Enabled {
 		t.Fatalf("MCP toggle not persisted: %+v", servers)
+	}
+	plugins, err := app.Plugins()
+	if err != nil || len(plugins) != 1 || len(plugins[0].Permissions) != 1 || plugins[0].Permissions[0] != "process.execute" {
+		t.Fatalf("plugin permissions were not exposed: plugins=%+v err=%v", plugins, err)
+	}
+	installed, err := app.store.ListPlugins(app.ctx)
+	if err != nil || len(installed) != 1 {
+		t.Fatalf("installed plugin lookup failed: %+v err=%v", installed, err)
+	}
+	installDir := installed[0].InstallDir
+	if err := app.DeletePlugin(plugin.UUID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(installDir); !os.IsNotExist(err) {
+		t.Fatalf("plugin files still exist after deletion: %v", err)
+	}
+	remainingSkills, _ := app.store.ListSkills(app.ctx)
+	remainingServers, _ := app.store.ListMCPServers(app.ctx)
+	remainingPlugins, _ := app.store.ListPlugins(app.ctx)
+	if len(remainingSkills) != 0 || len(remainingServers) != 0 || len(remainingPlugins) != 0 {
+		t.Fatalf("plugin records survived deletion: skills=%d mcp=%d plugins=%d", len(remainingSkills), len(remainingServers), len(remainingPlugins))
+	}
+}
+
+func TestPluginInstallRollsBackInvalidExecutableSkill(t *testing.T) {
+	app := newTestDesktopApp(t)
+	source := t.TempDir()
+	mustMkdir(t, filepath.Join(source, ".codex-plugin"))
+	mustWrite(t, filepath.Join(source, ".codex-plugin", "plugin.json"), `{"name":"Broken Plugin"}`)
+	mustMkdir(t, filepath.Join(source, "skills", "broken"))
+	mustWrite(t, filepath.Join(source, "skills", "broken", "manifest.json"), `{"name":"Broken","main":"main.py","tools":[{"name":"broken_tool"}]}`)
+	mustWrite(t, filepath.Join(source, "skills", "broken", "main.py"), "print('no permission')")
+	if _, err := app.installPlugin(source); err == nil {
+		t.Fatal("invalid executable skill was installed")
+	}
+	plugins, _ := app.store.ListPlugins(app.ctx)
+	skillItems, _ := app.store.ListSkills(app.ctx)
+	if len(plugins) != 0 || len(skillItems) != 0 {
+		t.Fatalf("failed install left database records: plugins=%d skills=%d", len(plugins), len(skillItems))
+	}
+}
+
+func TestPluginURLMCPUsesStreamableHTTP(t *testing.T) {
+	app := newTestDesktopApp(t)
+	source := t.TempDir()
+	mustWrite(t, filepath.Join(source, "plugin.json"), `{"name":"Remote MCP"}`)
+	mustWrite(t, filepath.Join(source, "mcp.json"), `{"mcpServers":{"remote":{"url":"https://example.invalid/mcp"}}}`)
+	if _, err := app.installPlugin(source); err != nil {
+		t.Fatal(err)
+	}
+	servers, err := app.store.ListMCPServers(app.ctx)
+	if err != nil || len(servers) != 1 || servers[0].Transport != model.MCPTransportStreamableHTTP || servers[0].Enabled {
+		t.Fatalf("URL MCP transport = %+v, err=%v", servers, err)
+	}
+	plugins, err := app.Plugins()
+	if err != nil || len(plugins) != 1 || len(plugins[0].Permissions) != 1 || plugins[0].Permissions[0] != "network.access" {
+		t.Fatalf("remote MCP permission was not inferred: plugins=%+v err=%v", plugins, err)
+	}
+}
+
+func TestAddMCPRejectsInvalidJSONAndTransport(t *testing.T) {
+	app := newTestDesktopApp(t)
+	if _, err := app.AddMCPServer(MCPServerInput{Name: "bad", Transport: "unknown", Endpoint: "x"}); err == nil {
+		t.Fatal("unsupported MCP transport was accepted")
+	}
+	if _, err := app.AddMCPServer(MCPServerInput{Name: "bad", Transport: "stdio", Endpoint: "/bin/echo", Args: "["}); err == nil {
+		t.Fatal("invalid MCP JSON was accepted")
+	}
+	servers, _ := app.store.ListMCPServers(app.ctx)
+	if len(servers) != 0 {
+		t.Fatalf("invalid MCP input was persisted: %+v", servers)
 	}
 }
 
@@ -462,8 +529,8 @@ func TestThreadMessagesRestoresToolExecutionTrace(t *testing.T) {
 	}
 	_, err := app.store.AppendRollout(app.ctx, thread.ID, []model.RolloutItem{
 		{TurnID: "turn-trace", Kind: model.RolloutUserMessage, ModelVisible: true, Payload: encode(map[string]any{"content": "查找资料"})},
-		{TurnID: "turn-trace", Kind: model.RolloutToolRequested, ModelVisible: true, Payload: encode(map[string]any{"tool_calls": []core.ToolCall{{ID: "call-search", Name: "web_search", Arguments: `{}`}}})},
-		{TurnID: "turn-trace", Kind: model.RolloutToolCompleted, ModelVisible: true, Payload: encode(map[string]any{"call_id": "call-search", "name": "web_search", "status": model.StepSuccess, "output": "found"})},
+		{TurnID: "turn-trace", Kind: model.RolloutToolRequested, ModelVisible: true, Payload: encode(map[string]any{"tool_calls": []core.ToolCall{{ID: "call-search", Name: "exec", Arguments: `{"command":"go test ./...","working_dir":"/workspace"}`}}})},
+		{TurnID: "turn-trace", Kind: model.RolloutToolCompleted, ModelVisible: true, Payload: encode(map[string]any{"call_id": "call-search", "name": "exec", "status": model.StepSuccess, "output": "ok", "duration_ms": 1250})},
 		{TurnID: "turn-trace", Kind: model.RolloutAssistantFinal, ModelVisible: true, Payload: encode(map[string]any{"content": "已找到资料"})},
 	})
 	if err != nil {
@@ -477,8 +544,11 @@ func TestThreadMessagesRestoresToolExecutionTrace(t *testing.T) {
 		t.Fatalf("execution history missing: %+v", messages)
 	}
 	step := messages[1].Execution[0]
-	if step.ID != "call-search" || step.Name != "web_search" || step.Status != string(model.StepSuccess) {
+	if step.ID != "call-search" || step.Name != "exec" || step.Status != string(model.StepSuccess) {
 		t.Fatalf("unexpected restored execution step: %+v", step)
+	}
+	if step.Input != `{"command":"go test ./...","working_dir":"/workspace"}` || step.Output != "ok" || step.DurationMS != 1250 {
+		t.Fatalf("execution details were not restored: %+v", step)
 	}
 }
 

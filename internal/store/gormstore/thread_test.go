@@ -2,6 +2,7 @@ package gormstore
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -76,16 +77,19 @@ func TestMigrateConversationIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	agent := &model.Agent{Name: "agent", ModelName: "model", ProviderID: 7}
-	if err := store.CreateAgent(ctx, agent); err != nil {
+	if err := store.db.AutoMigrate(&model.Agent{}, &model.Conversation{}, &model.Message{}); err != nil {
 		t.Fatal(err)
 	}
-	conversation := &model.Conversation{UserID: "local", AgentUUID: agent.UUID, Title: "old chat"}
-	if err := store.CreateConversation(ctx, conversation); err != nil {
+	agent := &model.Agent{UUID: "legacy-agent-1", ModelName: "model", ProviderID: 7}
+	if err := store.db.Create(agent).Error; err != nil {
+		t.Fatal(err)
+	}
+	conversation := &model.Conversation{UUID: "legacy-conversation-1", UserID: "local", AgentUUID: agent.UUID, Title: "old chat"}
+	if err := store.db.Create(conversation).Error; err != nil {
 		t.Fatal(err)
 	}
 	for _, message := range []*model.Message{{ConversationID: conversation.ID, Role: "user", Content: "hello"}, {ConversationID: conversation.ID, Role: "assistant", Content: "hi"}} {
-		if err := store.CreateMessage(ctx, message); err != nil {
+		if err := store.db.Create(message).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -122,13 +126,16 @@ func TestMigrateLegacyConversationsScopesUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	agent := &model.Agent{Name: "agent", ModelName: "model", ProviderID: 1}
-	if err := store.CreateAgent(ctx, agent); err != nil {
+	if err := store.db.AutoMigrate(&model.Agent{}, &model.Conversation{}, &model.Message{}); err != nil {
 		t.Fatal(err)
 	}
-	for _, userID := range []string{"local", "other"} {
-		conversation := &model.Conversation{UserID: userID, AgentUUID: agent.UUID}
-		if err := store.CreateConversation(ctx, conversation); err != nil {
+	agent := &model.Agent{UUID: "legacy-agent-2", ModelName: "model", ProviderID: 1}
+	if err := store.db.Create(agent).Error; err != nil {
+		t.Fatal(err)
+	}
+	for index, userID := range []string{"local", "other"} {
+		conversation := &model.Conversation{UUID: fmt.Sprintf("legacy-conversation-%d", index+2), UserID: userID, AgentUUID: agent.UUID}
+		if err := store.db.Create(conversation).Error; err != nil {
 			t.Fatal(err)
 		}
 	}

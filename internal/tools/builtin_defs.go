@@ -267,7 +267,7 @@ func DefaultBuiltinDefs() []model.Tool {
 			Timeout:     60,
 			FunctionDef: mustJSON(map[string]any{
 				"name":        "web_fetch",
-				"description": "Fetch a URL explicitly supplied by the user and extract readable content. Only call this tool when the user's message contains a concrete http/https URL; do NOT use it for general web research without a user-provided URL (use built-in web search instead). Tries HTTP first, falls back to browser rendering for dynamic pages.",
+				"description": "Fetch a URL explicitly supplied by the user over HTTP. Only call this tool when the user's message contains a concrete http/https URL; do NOT use it for general web research without a user-provided URL (use built-in web search instead). Dynamic browser automation is supplied by installed MCP servers or plugins.",
 				"parameters": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -277,52 +277,6 @@ func DefaultBuiltinDefs() []model.Tool {
 						},
 					},
 					"required": []string{"url"},
-				},
-			}),
-		},
-		{
-			Name:        "browser",
-			Description: "Control a web browser. Supports navigation, screenshots, element snapshots and interaction, form filling, cookie/storage management, console/network monitoring, and device emulation. In multi-tab mode, refs are tab-specific; pass target_id when acting on a non-active tab. Configure browser.cdp_endpoint in config.yaml to attach to a signed-in Chrome profile when needed.",
-			HandlerType: model.HandlerBuiltin,
-			Enabled:     true,
-			Timeout:     120,
-			FunctionDef: mustJSON(browserToolDef()),
-		},
-		{
-			Name:        "canvas",
-			Description: "Display, evaluate, or snapshot a Canvas. Render HTML/CSS/JS, execute JavaScript expressions, and capture visual snapshots.",
-			HandlerType: model.HandlerBuiltin,
-			Enabled:     true,
-			Timeout:     60,
-			FunctionDef: mustJSON(map[string]any{
-				"name":        "canvas",
-				"description": "Display, evaluate, or snapshot a Canvas. Render HTML/CSS/JS, run JS expressions, and capture visual snapshots.",
-				"parameters": map[string]any{
-					"type": "object",
-					"properties": map[string]any{
-						"action": map[string]any{
-							"type":        "string",
-							"enum":        []string{"show", "evaluate", "snapshot"},
-							"description": "show: render HTML to preview; evaluate: run JS expression on rendered page; snapshot: capture screenshot",
-						},
-						"html": map[string]any{
-							"type":        "string",
-							"description": "HTML content to render (required for all actions)",
-						},
-						"expression": map[string]any{
-							"type":        "string",
-							"description": "JavaScript expression to evaluate (required for evaluate action)",
-						},
-						"width": map[string]any{
-							"type":        "integer",
-							"description": "Viewport width for snapshot (default: 1280)",
-						},
-						"height": map[string]any{
-							"type":        "integer",
-							"description": "Viewport height for snapshot (default: 720)",
-						},
-					},
-					"required": []string{"action", "html"},
 				},
 			}),
 		},
@@ -650,7 +604,9 @@ func DefaultBuiltinDefs() []model.Tool {
 					"- read_pending: read the full markdown of a single candidate by file_name\n" +
 					"- promote: turn a candidate into a real skill. Requires file_name + name + description.\n" +
 					"- discard: delete a candidate that isn't worth keeping.\n" +
-					"- list_active: list current active skills under workspace skills/.\n\n" +
+					"- list_active: list installed skills.\n" +
+					"- read_active: load one installed skill's full instructions by name.\n" +
+					"- enable/disable: change whether an installed skill is available.\n\n" +
 					"USE PROACTIVELY when the user says 'remember this workflow', 'next time do it like this', " +
 					"'turn the previous steps into a skill', or after solving a non-trivial multi-step task you'd want to repeat.",
 				"parameters": map[string]any{
@@ -658,7 +614,7 @@ func DefaultBuiltinDefs() []model.Tool {
 					"properties": map[string]any{
 						"action": map[string]any{
 							"type":        "string",
-							"enum":        []string{"list_pending", "read_pending", "promote", "discard", "list_active"},
+							"enum":        []string{"list_pending", "read_pending", "promote", "discard", "list_active", "read_active", "enable", "disable"},
 							"description": "Action to perform",
 						},
 						"file_name": map[string]any{
@@ -667,7 +623,7 @@ func DefaultBuiltinDefs() []model.Tool {
 						},
 						"name": map[string]any{
 							"type":        "string",
-							"description": "Short skill name (required for promote). Used as the directory slug too.",
+							"description": "Skill name or identifier for promote, read_active, enable, and disable.",
 						},
 						"description": map[string]any{
 							"type":        "string",
@@ -712,89 +668,6 @@ func DefaultBuiltinDefs() []model.Tool {
 					"required": []string{},
 				},
 			}),
-		},
-	}
-}
-
-func browserToolDef() map[string]any {
-	allActions := []string{
-		"navigate", "screenshot", "snapshot", "get_text", "evaluate", "pdf",
-		"click", "type", "hover", "drag", "select", "fill_form", "scroll",
-		"upload", "wait", "dialog", "tabs", "open_tab", "close_tab", "close",
-		"console", "network", "cookies", "storage", "press",
-		"back", "forward", "reload",
-		"extract_table", "resize",
-		"set_device", "set_media", "highlight",
-	}
-
-	return map[string]any{
-		"name": "browser",
-		"description": "Browser automation tool. Actions: " +
-			"navigate/back/forward/reload (navigation), " +
-			"snapshot (get interactive elements with refs), " +
-			"click/type/press/hover/drag/select/fill_form/scroll (interaction), " +
-			"screenshot/pdf/get_text/extract_table (data extraction), " +
-			"console/network (monitoring), " +
-			"cookies/storage (state management), " +
-			"resize/set_device/set_media (emulation), " +
-			"highlight (debugging), " +
-			"evaluate (run JS), " +
-			"wait (wait for condition), " +
-			"tabs/open_tab/close_tab/close (tab management), " +
-			"dialog/upload (misc). " +
-			"Multi-tab: refs from snapshot are scoped per tab. If the active tab differs from the page you snapshotted, pass target_id (from tabs or open_tab) on snapshot, click, type, and other ref-using actions. " +
-			"Use snapshot first to see refs like e1, then use those refs on the same target_id.",
-		"parameters": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"action": map[string]any{
-					"type":        "string",
-					"enum":        allActions,
-					"description": "Action to perform",
-				},
-				"url":           map[string]any{"type": "string", "description": "URL for navigate/open_tab"},
-				"ref":           map[string]any{"type": "string", "description": "Element ref from snapshot on this tab (e.g. 'e1'); must match target_id used when snapshot was taken"},
-				"text":          map[string]any{"type": "string", "description": "Text to type"},
-				"expression":    map[string]any{"type": "string", "description": "JavaScript expression for evaluate"},
-				"selector":      map[string]any{"type": "string", "description": "CSS selector (alternative to ref)"},
-				"full_page":     map[string]any{"type": "boolean", "description": "Full page screenshot"},
-				"submit":        map[string]any{"type": "boolean", "description": "Press Enter after typing"},
-				"slowly":        map[string]any{"type": "boolean", "description": "Type character by character"},
-				"button":        map[string]any{"type": "string", "enum": []string{"left", "right", "middle"}, "description": "Mouse button for click"},
-				"double_click":  map[string]any{"type": "boolean", "description": "Double-click"},
-				"start_ref":     map[string]any{"type": "string", "description": "Drag start element ref"},
-				"end_ref":       map[string]any{"type": "string", "description": "Drag end element ref"},
-				"values":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Select option values"},
-				"fields":        map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"ref": map[string]any{"type": "string"}, "value": map[string]any{"type": "string"}, "type": map[string]any{"type": "string"}}}, "description": "Form fields [{ref,value,type}]"},
-				"target_id":     map[string]any{"type": "string", "description": "Tab ID from tabs or open_tab; omit for active tab. With multiple tabs, pass the same tab you used for snapshot so refs stay valid"},
-				"wait_time":     map[string]any{"type": "integer", "description": "Wait milliseconds"},
-				"wait_text":     map[string]any{"type": "string", "description": "Wait for text to appear on page"},
-				"wait_selector": map[string]any{"type": "string", "description": "Wait for CSS selector to become visible"},
-				"wait_url":      map[string]any{"type": "string", "description": "Wait for URL to contain string"},
-				"wait_fn":       map[string]any{"type": "string", "description": "JS expression to poll until truthy"},
-				"wait_load":     map[string]any{"type": "string", "enum": []string{"networkidle", "domcontentloaded", "load"}, "description": "Wait for page load state"},
-				"accept":        map[string]any{"type": "boolean", "description": "Accept (true) or dismiss (false) dialog"},
-				"prompt_text":   map[string]any{"type": "string", "description": "Prompt dialog input text"},
-				"paths":         map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "File paths for upload"},
-				"scroll_y":      map[string]any{"type": "integer", "description": "Scroll to Y offset (pixels, 0=bottom)"},
-				"level":         map[string]any{"type": "string", "enum": []string{"error", "warn", "info", "log"}, "description": "Console log level filter"},
-				"filter":        map[string]any{"type": "string", "description": "URL keyword filter for network requests"},
-				"clear":         map[string]any{"type": "boolean", "description": "Clear buffer after reading (console/network)"},
-				"operation":     map[string]any{"type": "string", "enum": []string{"get", "set", "clear"}, "description": "Operation for cookies/storage"},
-				"cookie_name":   map[string]any{"type": "string", "description": "Cookie name for set"},
-				"cookie_value":  map[string]any{"type": "string", "description": "Cookie value for set"},
-				"cookie_url":    map[string]any{"type": "string", "description": "Cookie URL scope for set"},
-				"cookie_domain": map[string]any{"type": "string", "description": "Cookie domain for set"},
-				"storage_type":  map[string]any{"type": "string", "enum": []string{"local", "session"}, "description": "Storage type"},
-				"key":           map[string]any{"type": "string", "description": "Storage key for get/set"},
-				"value":         map[string]any{"type": "string", "description": "Storage value for set"},
-				"key_name":      map[string]any{"type": "string", "description": "Key name for press (Enter/Tab/Escape/etc)"},
-				"width":         map[string]any{"type": "integer", "description": "Viewport width for resize"},
-				"height":        map[string]any{"type": "integer", "description": "Viewport height for resize"},
-				"device":        map[string]any{"type": "string", "description": "Device name for set_device"},
-				"color_scheme":  map[string]any{"type": "string", "enum": []string{"dark", "light", "no-preference"}, "description": "Color scheme for set_media"},
-			},
-			"required": []string{"action"},
 		},
 	}
 }

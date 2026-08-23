@@ -66,24 +66,12 @@ func New(cfg config.DatabaseConfig) (*GormStore, error) {
 }
 
 func autoMigrate(db *gorm.DB) error {
-	if err := db.AutoMigrate(
-		&model.Runtime{},
-		&model.RuntimeAgentConfig{},
-		&model.Agent{},
+	return db.AutoMigrate(
 		&model.Provider{},
-		&model.Tool{},
-		&model.Channel{},
-		&model.ChannelThread{},
 		&model.MCPServer{},
-		&model.Conversation{},
 		&model.Project{},
 		&model.Thread{},
 		&model.RolloutItem{},
-		&model.Message{},
-		&model.AgentRun{},
-		&model.ExecutionStep{},
-		&model.PlanRun{},
-		&model.PlanItem{},
 		&model.MemoryItem{},
 		&model.MemoryRevision{},
 		&model.MemoryEvidence{},
@@ -92,39 +80,7 @@ func autoMigrate(db *gorm.DB) error {
 		&model.Skill{},
 		&model.Plugin{},
 		&model.AppSetting{},
-	); err != nil {
-		return err
-	}
-	return dropDeprecatedColumns(db)
-}
-
-// dropDeprecatedColumns 清理历史遗留列（AutoMigrate 默认不会 drop 已删除字段对应的列）。
-// 注意：SQLite 驱动的 DropColumn 通过「新建表 → 迁移数据 → 重命名」实现，必须传入完整的
-// model 实例以便反射出新 schema；传字符串表名会触发 nil schema 的 panic。因此 deprecated
-// 的 key 必须是 *model.XXX{} 实例。
-func dropDeprecatedColumns(db *gorm.DB) error {
-	deprecated := []struct {
-		dst  any
-		cols []string
-	}{
-		{&model.Agent{}, []string{"memos_enabled", "memos_config"}},
-	}
-	m := db.Migrator()
-	for _, item := range deprecated {
-		for _, col := range item.cols {
-			if !m.HasColumn(item.dst, col) {
-				continue
-			}
-			if err := m.DropColumn(item.dst, col); err != nil {
-				log.WithFields(log.Fields{"model": fmt.Sprintf("%T", item.dst), "column": col, "error": err}).
-					Warn("drop deprecated column failed")
-			} else {
-				log.WithFields(log.Fields{"model": fmt.Sprintf("%T", item.dst), "column": col}).
-					Info("dropped deprecated column")
-			}
-		}
-	}
-	return nil
+	)
 }
 
 func TestConnection(cfg config.DatabaseConfig) error {

@@ -154,6 +154,15 @@ func TestRunTurnPersistsToolRoundAndResumesContext(t *testing.T) {
 			t.Fatalf("tool lifecycle identity lost: %#v", event)
 		}
 	}
+	if lifecycle[0].Input != `{"q":"codex"}` || lifecycle[1].Input != `{"q":"codex"}` {
+		t.Fatalf("tool input missing before execution: %#v", lifecycle)
+	}
+	if lifecycle[1].StartedAt <= 0 {
+		t.Fatalf("running event has no start timestamp: %#v", lifecycle[1])
+	}
+	if lifecycle[2].Input != `{"q":"codex"}` || lifecycle[2].Output != "found" || lifecycle[2].DurationMS <= 0 {
+		t.Fatalf("completed event has no execution detail: %#v", lifecycle[2])
+	}
 	second := sampler.requests[1].Messages
 	if len(second) != 3 {
 		t.Fatalf("second model request has %d messages, want user + assistant tool call + tool result: %#v", len(second), second)
