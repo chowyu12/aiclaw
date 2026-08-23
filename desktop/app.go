@@ -143,9 +143,10 @@ func (a *App) startup(ctx context.Context) {
 		a.err = err.Error()
 		return
 	}
-	a.tools = core.NewLocalToolDispatcher(a.store)
+	sampler := core.ProviderSampler{Resolver: a.store}
+	a.tools = core.NewLocalToolDispatcher(a.store, core.WithDispatcherRoot(root), core.WithSubAgentSampler(sampler))
 	a.memory = memorypkg.NewService(a.store)
-	a.server = appserver.New(a.store, core.ProviderSampler{Resolver: a.store}, a.tools)
+	a.server = appserver.New(a.store, sampler, a.tools)
 	a.cleanupPendingAttachments()
 }
 func (a *App) shutdown(context.Context) {
