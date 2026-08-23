@@ -1,6 +1,3 @@
-server:
-    host: 0.0.0.0
-    port: 8080
 database:
     driver: sqlite
     dsn: ~/.aiclaw/aiclaw.db
@@ -8,12 +5,3 @@ database:
     max_idle_conns: 10
 log:
     level: info
-auth:
-    web_token: change-me
-upload:
-    dir: ~/.aiclaw/uploads
-    max_size: 20971520
-browser:
-    visible: true
-    cdp_endpoint: http://127.0.0.1:9222
-

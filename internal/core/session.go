@@ -213,9 +213,11 @@ func (s *Session) RunTurnWithAttachments(ctx context.Context, input string, atta
 			return err
 		}
 		for _, call := range result.ToolCalls {
+			started := time.Now()
 			s.emitEvent(protocol.Event{
 				Kind: protocol.EventToolLifecycle, ThreadID: s.thread.UUID, TurnID: turn.ID,
 				CallID: call.ID, Name: call.Name, Status: string(model.StepRunning), Message: "正在执行工具",
+				Input: call.Arguments, StartedAt: started.UnixMilli(),
 			})
 			toolResult, callErr := dispatcher.Execute(ctx, *s.thread, call)
 			if toolResult.CallID == "" {
@@ -231,7 +233,10 @@ func (s *Session) RunTurnWithAttachments(ctx context.Context, input string, atta
 			if toolResult.Error != "" {
 				status = model.StepError
 			}
-			if err := s.AppendToolResult(ctx, turn.ID, toolResult.CallID, model.ExecutionStep{Name: toolResult.Name, Input: call.Arguments, Output: toolResult.Content, Error: toolResult.Error, Status: status}); err != nil {
+			if err := s.AppendToolResult(ctx, turn.ID, toolResult.CallID, model.ExecutionStep{
+				Name: toolResult.Name, Input: call.Arguments, Output: toolResult.Content,
+				Error: toolResult.Error, Status: status, DurationMS: max(time.Since(started).Milliseconds(), int64(1)),
+			}); err != nil {
 				_ = s.FailTurn(ctx, turn.ID, err)
 				return err
 			}
@@ -294,6 +299,7 @@ func (s *Session) AppendToolRequests(ctx context.Context, turnID, content string
 			s.emitEvent(protocol.Event{
 				Kind: protocol.EventToolLifecycle, ThreadID: s.thread.UUID, TurnID: turnID, Item: item,
 				CallID: call.ID, Name: call.Name, Status: string(model.StepPending), Message: "等待执行工具",
+				Input: call.Arguments,
 			})
 		}
 	}
@@ -322,7 +328,7 @@ func (s *Session) AppendAssistantDelta(ctx context.Context, turnID, delta string
 func (s *Session) AppendToolResult(ctx context.Context, turnID, callID string, step model.ExecutionStep) error {
 	item, err := s.append(ctx, turnID, model.RolloutToolCompleted, true, map[string]any{
 		"call_id": callID, "name": step.Name, "status": step.Status, "input": step.Input,
-		"output": step.Output, "error": step.Error,
+		"output": step.Output, "error": step.Error, "duration_ms": step.DurationMS,
 	})
 	if err == nil {
 		message := "工具执行完成"
@@ -331,7 +337,8 @@ func (s *Session) AppendToolResult(ctx context.Context, turnID, callID string, s
 		}
 		s.emitEvent(protocol.Event{
 			Kind: protocol.EventToolLifecycle, ThreadID: s.thread.UUID, TurnID: turnID, Item: item,
-			CallID: callID, Name: step.Name, Status: string(step.Status), Message: message, Error: step.Error,
+			CallID: callID, Name: step.Name, Status: string(step.Status), Message: message,
+			Input: step.Input, Output: step.Output, Error: step.Error, DurationMS: step.DurationMS,
 		})
 	}
 	return err

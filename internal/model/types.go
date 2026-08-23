@@ -52,6 +52,12 @@ func (j *JSON) UnmarshalJSON(data []byte) error {
 
 func (JSON) GormDataType() string { return "text" }
 
+type ListQuery struct {
+	Page     int    `json:"page"`
+	PageSize int    `json:"page_size"`
+	Keyword  string `json:"keyword,omitzero"`
+}
+
 // Int64Slice 是支持 GORM 存储的 int64 切片（JSON 格式存入数据库）。
 type Int64Slice []int64
 

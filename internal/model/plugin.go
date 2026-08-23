@@ -13,7 +13,7 @@ type Plugin struct {
 	Version     string    `json:"version" gorm:"size:50"`
 	InstallDir  string    `json:"install_dir" gorm:"size:1000;not null"`
 	Manifest    JSON      `json:"manifest" gorm:"type:text"`
-	Enabled     bool      `json:"enabled" gorm:"not null;default:true"`
+	Enabled     bool      `json:"enabled" gorm:"not null"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

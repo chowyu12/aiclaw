@@ -2,45 +2,26 @@ package model
 
 import "time"
 
+// Conversation and Message are read-only compatibility models used solely by
+// the one-time migration into Thread/Rollout. Fresh databases do not create
+// these tables and the desktop runtime never writes them.
 type Conversation struct {
-	ID        int64     `json:"id" gorm:"primaryKey;autoIncrement"`
-	UUID      string    `json:"uuid" gorm:"uniqueIndex;size:36;not null"`
-	UserID    string    `json:"user_id" gorm:"size:100;index;not null"`
-	AgentUUID string    `json:"agent_uuid" gorm:"size:36;index;default:''"`
-	Title     string    `json:"title" gorm:"size:500"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID        int64  `gorm:"primaryKey;autoIncrement"`
+	UUID      string `gorm:"size:36;index"`
+	UserID    string `gorm:"size:100;index"`
+	AgentUUID string `gorm:"size:36;index"`
+	Title     string `gorm:"size:500"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type Message struct {
-	ID             int64  `json:"id" gorm:"primaryKey;autoIncrement"`
-	ConversationID int64  `json:"conversation_id" gorm:"index;not null"`
-	Role           string `json:"role" gorm:"size:50;not null"`
-	Content        string `json:"content" gorm:"type:text"`
-	ToolCalls      JSON   `json:"tool_calls,omitzero" gorm:"type:text"`
-	ToolCallID     string `json:"tool_call_id,omitzero" gorm:"size:100"`
-	Name           string `json:"name,omitzero" gorm:"size:100"`
-	TokensUsed     int    `json:"tokens_used" gorm:"default:0"`
-	// DurationMs 仅对 assistant 消息有意义：本轮对话的总耗时（user 提交 → assistant 回复完成）。
-	// 配合 CreatedAt（结束时间）即可推算 StartedAt = CreatedAt - DurationMs。
-	DurationMs   int       `json:"duration_ms" gorm:"default:0"`
-	ParentStepID int64     `json:"parent_step_id,omitzero" gorm:"default:0"`
-	CreatedAt    time.Time `json:"created_at"`
-
-	Steps  []ExecutionStep `json:"steps,omitzero" gorm:"-"`
-	Files  []*File         `json:"files,omitzero" gorm:"-"`
-	Plan   *PlanState      `json:"plan,omitzero" gorm:"-"`
-	Memory *MemoryContext  `json:"memory,omitzero" gorm:"-"`
+	ID             int64  `gorm:"primaryKey;autoIncrement"`
+	ConversationID int64  `gorm:"index"`
+	Role           string `gorm:"size:50"`
+	Content        string `gorm:"type:text"`
+	CreatedAt      time.Time
 }
-
-type StepType string
-
-const (
-	StepLLMCall    StepType = "llm_call"
-	StepToolCall   StepType = "tool_call"
-	StepSkillMatch StepType = "skill_match"
-	StepHarness    StepType = "harness"
-)
 
 type StepStatus string
 
@@ -48,153 +29,16 @@ const (
 	StepSuccess StepStatus = "success"
 	StepError   StepStatus = "error"
 	StepPending StepStatus = "pending"
-	// StepRunning 表示步骤已开始但尚未完成（如 LLM 流式调用进行中、长耗时工具未返回）。
-	// 用于在前端实时展示「运行中」状态，调用结束后会被 FinalizeStep 更新为 success/error。
 	StepRunning StepStatus = "running"
 )
 
+// ExecutionStep is an in-memory transport shape. Tool lifecycle state is
+// persisted as Rollout items, not in the former execution_steps table.
 type ExecutionStep struct {
-	ID             int64      `json:"id" gorm:"primaryKey;autoIncrement"`
-	RunUUID        string     `json:"run_uuid,omitzero" gorm:"size:36;index"`
-	MessageID      int64      `json:"message_id" gorm:"index;default:0"`
-	ConversationID int64      `json:"conversation_id" gorm:"index;not null"`
-	StepOrder      int        `json:"step_order" gorm:"not null"`
-	StepType       StepType   `json:"step_type" gorm:"size:50;not null"`
-	Name           string     `json:"name" gorm:"size:200"`
-	Input          string     `json:"input" gorm:"type:text"`
-	Output         string     `json:"output" gorm:"type:text"`
-	Status         StepStatus `json:"status" gorm:"size:50;not null;default:pending"`
-	Error          string     `json:"error,omitzero" gorm:"type:text"`
-	DurationMs     int        `json:"duration_ms" gorm:"default:0"`
-	TokensUsed     int        `json:"tokens_used" gorm:"default:0"`
-	Metadata       JSON       `json:"metadata,omitzero" gorm:"type:text"`
-	SubAgentCallID string     `json:"sub_agent_call_id,omitzero" gorm:"size:100;index"`
-	SubAgentDepth  int        `json:"sub_agent_depth,omitzero" gorm:"default:0"`
-	CreatedAt      time.Time  `json:"created_at"`
-}
-
-type StepMetadata struct {
-	Provider    string           `json:"provider,omitzero"`
-	Model       string           `json:"model,omitzero"`
-	Temperature float64          `json:"temperature,omitzero"`
-	ToolName    string           `json:"tool_name,omitzero"`
-	SkillName   string           `json:"skill_name,omitzero"`
-	SkillTools  []string         `json:"skill_tools,omitzero"`
-	PlanItemID  string           `json:"plan_item_id,omitzero"`
-	Harness     *StepHarnessMeta `json:"harness,omitzero"`
-	// 以下字段由渠道 Bridge 注入，写入执行步骤 metadata，便于控制台「执行日志」追溯来源。
-	ChannelID        int64  `json:"channel_id,omitzero"`
-	ChannelUUID      string `json:"channel_uuid,omitzero"`
-	ChannelType      string `json:"channel_type,omitzero"`
-	ChannelThreadKey string `json:"channel_thread_key,omitzero"`
-	ChannelSenderID  string `json:"channel_sender_id,omitzero"`
-}
-
-type StepHarnessMeta struct {
-	Stage           string                  `json:"stage,omitzero"`
-	Allowed         bool                    `json:"allowed"`
-	ViolationCodes  []string                `json:"violation_codes,omitzero"`
-	RequiredActions []string                `json:"required_actions,omitzero"`
-	Correction      *StepHarnessCorrection  `json:"correction,omitzero"`
-	Evidence        StepHarnessEvidenceMeta `json:"evidence,omitzero"`
-}
-
-type StepHarnessCorrection struct {
-	Attempt     int    `json:"attempt,omitzero"`
-	MaxAttempts int    `json:"max_attempts,omitzero"`
-	Outcome     string `json:"outcome,omitzero"`
-}
-
-type StepHarnessEvidenceMeta struct {
-	ExecutionTools []string `json:"execution_tools,omitzero"`
-	ToolEventCount int      `json:"tool_event_count,omitzero"`
-	ArtifactCount  int      `json:"artifact_count,omitzero"`
-	PlanTerminal   bool     `json:"plan_terminal"`
-}
-
-// ChannelExecTrace 标记请求来自第三方渠道（仅服务端内存传递，不参与 ChatRequest 的 JSON）。
-type ChannelExecTrace struct {
-	ID        int64
-	UUID      string
-	Type      string
-	ThreadKey string
-	SenderID  string
-}
-
-type ChatFileType string
-
-const (
-	ChatFileDocument ChatFileType = "document"
-	ChatFileImage    ChatFileType = "image"
-	ChatFileAudio    ChatFileType = "audio"
-	ChatFileVideo    ChatFileType = "video"
-	ChatFileCustom   ChatFileType = "custom"
-)
-
-type TransferMethod string
-
-const (
-	TransferRemoteURL TransferMethod = "remote_url"
-	TransferLocalFile TransferMethod = "local_file"
-)
-
-type ChatFile struct {
-	Type           ChatFileType   `json:"type"`
-	TransferMethod TransferMethod `json:"transfer_method"`
-	URL            string         `json:"url,omitzero"`
-	UploadFileID   string         `json:"upload_file_id,omitzero"`
-}
-
-type ChatRequest struct {
-	AgentUUID      string     `json:"agent_uuid,omitzero"`
-	ConversationID string     `json:"conversation_id,omitzero"`
-	UserID         string     `json:"user_id"`
-	Message        string     `json:"message"`
-	Stream         bool       `json:"stream"`
-	Files          []ChatFile `json:"files,omitzero"`
-	// ExecChannel 由渠道 Bridge 设置；HTTP API 解码时忽略，避免客户端伪造。
-	ExecChannel *ChannelExecTrace `json:"-"`
-}
-
-type RetryRequest struct {
-	ConversationID string `json:"conversation_id"`
-	MessageID      int64  `json:"message_id"`
-}
-
-type ChatResponse struct {
-	RunID          string          `json:"run_id,omitzero"`
-	ConversationID string          `json:"conversation_id"`
-	Message        string          `json:"message"`
-	TokensUsed     int             `json:"tokens_used"`
-	Steps          []ExecutionStep `json:"steps,omitzero"`
-	Files          []*File         `json:"files,omitzero"`
-	Plan           *PlanState      `json:"plan,omitzero"`
-	Memory         *MemoryContext  `json:"memory,omitzero"`
-}
-
-type StreamChunk struct {
-	RunID          string `json:"run_id,omitzero"`
-	ConversationID string `json:"conversation_id,omitzero"`
-	MessageID      int64  `json:"message_id,omitzero"`
-	Delta          string `json:"delta,omitzero"`
-	Content        string `json:"content,omitzero"`
-	TokensUsed     int    `json:"tokens_used,omitzero"`
-	// DurationMs 仅在 Done=true 的最终 chunk 中有意义，标识本轮对话总耗时（毫秒）。
-	DurationMs int             `json:"duration_ms,omitzero"`
-	Done       bool            `json:"done"`
-	Step       *ExecutionStep  `json:"step,omitzero"`
-	Steps      []ExecutionStep `json:"steps,omitzero"`
-	Files      []*File         `json:"files,omitzero"`
-	Plan       *PlanState      `json:"plan,omitzero"`
-	Memory     *MemoryContext  `json:"memory,omitzero"`
-	// HarnessEvent carries the stable harness protocol event alongside the
-	// legacy stream payload during the migration period.
-	HarnessEvent any `json:"harness_event,omitzero"`
-}
-
-type ListQuery struct {
-	Page      int    `json:"page"`
-	PageSize  int    `json:"page_size"`
-	Keyword   string `json:"keyword,omitzero"`
-	AgentUUID string `json:"agent_uuid,omitzero"`
+	Name       string     `json:"name"`
+	Input      string     `json:"input,omitzero"`
+	Output     string     `json:"output,omitzero"`
+	Status     StepStatus `json:"status"`
+	Error      string     `json:"error,omitzero"`
+	DurationMS int64      `json:"duration_ms,omitzero"`
 }

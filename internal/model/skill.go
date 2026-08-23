@@ -28,7 +28,7 @@ type Skill struct {
 	Config      JSON        `json:"config,omitzero" gorm:"type:text"`
 	Permissions JSON        `json:"permissions,omitzero" gorm:"type:text"`
 	ToolDefs    JSON        `json:"tool_defs,omitzero" gorm:"type:text"`
-	Enabled     bool        `json:"enabled" gorm:"not null;default:true"`
+	Enabled     bool        `json:"enabled" gorm:"not null"`
 	CreatedAt   time.Time   `json:"created_at"`
 	UpdatedAt   time.Time   `json:"updated_at"`
 

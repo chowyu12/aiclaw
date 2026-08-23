@@ -30,10 +30,10 @@ const (
 // Service is the application layer for durable memory. The store owns data
 // integrity while this layer owns policy, prompt compilation, and tool input.
 type Service struct {
-	store store.Store
+	store store.MemoryStore
 }
 
-func NewService(s store.Store) *Service {
+func NewService(s store.MemoryStore) *Service {
 	return &Service{store: s}
 }
 

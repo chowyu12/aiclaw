@@ -5,19 +5,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/html/charset"
 
-	"github.com/chowyu12/aiclaw/internal/tools/browser"
 	"github.com/chowyu12/aiclaw/internal/tools/result"
 )
 
 const (
 	httpFetchTimeout = 15 * time.Second
-	renderTimeout    = 30 * time.Second
 	maxBodyBytes     = 10_000
 )
 
@@ -36,28 +33,11 @@ func Handler(ctx context.Context, args string) (string, error) {
 	if targetURL == "" {
 		return "", fmt.Errorf("url is required")
 	}
-
-	content, httpErr := fetchURL(ctx, targetURL)
-	if httpErr == nil {
-		if !looksLikeHTML(content) {
-			return content, nil
-		}
-		text, err := renderPage(ctx, targetURL)
-		if err == nil && text != "" {
-			return text, nil
-		}
-		if err != nil {
-			log.WithFields(log.Fields{"url": targetURL, "error": err}).Warn("[url_reader] browser render failed, using raw HTTP content")
-		}
-		return content, nil
+	parsed, err := url.Parse(targetURL)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return "", fmt.Errorf("url must be an absolute http(s) URL")
 	}
-
-	log.WithFields(log.Fields{"url": targetURL, "http_error": httpErr}).Info("[url_reader] HTTP failed, trying browser render")
-	text, err := renderPage(ctx, targetURL)
-	if err != nil {
-		return "", fmt.Errorf("http: %v; render: %w", httpErr, err)
-	}
-	return text, nil
+	return fetchURL(ctx, targetURL)
 }
 
 func fetchURL(ctx context.Context, targetURL string) (string, error) {
@@ -93,24 +73,4 @@ func fetchURL(ctx context.Context, targetURL string) (string, error) {
 		return "", err
 	}
 	return string(body), nil
-}
-
-// renderPage 走共享浏览器，避免每次请求都启动新 Chrome 实例。
-func renderPage(ctx context.Context, targetURL string) (string, error) {
-	text, err := browser.RenderPageText(ctx, targetURL, renderTimeout, maxBodyBytes)
-	if err != nil {
-		return "", err
-	}
-	if len(text) > maxBodyBytes {
-		text = text[:maxBodyBytes] + "\n... (content truncated)"
-	}
-	return text, nil
-}
-
-func looksLikeHTML(content string) bool {
-	if content == "" {
-		return false
-	}
-	head := strings.ToLower(content[:min(len(content), 500)])
-	return strings.Contains(head, "<!doctype html") || strings.Contains(head, "<html")
 }

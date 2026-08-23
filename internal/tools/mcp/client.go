@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
+	"unicode"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/client/transport"
@@ -16,11 +18,12 @@ import (
 )
 
 type ToolInfo struct {
-	Name        string
-	Description string
-	Parameters  map[string]any
-	ServerUUID  string
-	ServerName  string
+	Name         string
+	OriginalName string
+	Description  string
+	Parameters   map[string]any
+	ServerUUID   string
+	ServerName   string
 }
 
 type conn struct {
@@ -32,14 +35,19 @@ type conn struct {
 type Manager struct {
 	mu    sync.Mutex
 	conns map[string]*conn
-	// toolIndex maps tool name -> server UUID for dispatch
-	toolIndex map[string]string
+	// toolIndex maps the public, namespaced tool name to its MCP route.
+	toolIndex map[string]toolRoute
+}
+
+type toolRoute struct {
+	serverUUID string
+	toolName   string
 }
 
 func NewManager() *Manager {
 	return &Manager{
 		conns:     make(map[string]*conn),
-		toolIndex: make(map[string]string),
+		toolIndex: make(map[string]toolRoute),
 	}
 }
 
@@ -83,8 +91,13 @@ func (m *Manager) Connect(ctx context.Context, servers []model.MCPServer) error 
 		}
 		m.conns[srv.UUID] = cn
 
+		namespace := m.uniqueServerNamespace(srv)
 		for _, t := range toolsResult.Tools {
-			m.toolIndex[t.Name] = srv.UUID
+			publicName := qualifyToolName(namespace, t.Name)
+			if _, exists := m.toolIndex[publicName]; exists {
+				publicName += "_" + shortStableSuffix(t.Name)
+			}
+			m.toolIndex[publicName] = toolRoute{serverUUID: srv.UUID, toolName: t.Name}
 		}
 		log.WithFields(log.Fields{"server": srv.Name, "tools": len(toolsResult.Tools)}).Info("[MCP] connected")
 	}
@@ -102,6 +115,16 @@ func (m *Manager) dial(_ context.Context, srv model.MCPServer) (*mcpclient.Clien
 			opts = append(opts, transport.WithHeaders(h))
 		}
 		return mcpclient.NewSSEMCPClient(srv.Endpoint, opts...)
+	case model.MCPTransportStreamableHTTP:
+		opts := []transport.StreamableHTTPCOption{transport.WithContinuousListening()}
+		if h := srv.GetHeaders(); len(h) > 0 {
+			opts = append(opts, transport.WithHTTPHeaders(h))
+		}
+		httpTransport, err := transport.NewStreamableHTTP(srv.Endpoint, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return mcpclient.NewClient(httpTransport), nil
 	default:
 		return nil, fmt.Errorf("unsupported transport: %s", srv.Transport)
 	}
@@ -111,9 +134,19 @@ func (m *Manager) Tools() []ToolInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var result []ToolInfo
+	result := make([]ToolInfo, 0, len(m.toolIndex))
 	for _, cn := range m.conns {
 		for _, t := range cn.tools {
+			publicName := ""
+			for exposed, route := range m.toolIndex {
+				if route.serverUUID == cn.server.UUID && route.toolName == t.Name {
+					publicName = exposed
+					break
+				}
+			}
+			if publicName == "" {
+				continue
+			}
 			params := map[string]any{
 				"type":       t.InputSchema.Type,
 				"properties": t.InputSchema.Properties,
@@ -128,25 +161,27 @@ func (m *Manager) Tools() []ToolInfo {
 				params["properties"] = map[string]any{}
 			}
 			result = append(result, ToolInfo{
-				Name:        t.Name,
-				Description: t.Description,
-				Parameters:  params,
-				ServerUUID:  cn.server.UUID,
-				ServerName:  cn.server.Name,
+				Name:         publicName,
+				OriginalName: t.Name,
+				Description:  t.Description,
+				Parameters:   params,
+				ServerUUID:   cn.server.UUID,
+				ServerName:   cn.server.Name,
 			})
 		}
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
 }
 
 func (m *Manager) CallTool(ctx context.Context, name, argsJSON string) (string, error) {
 	m.mu.Lock()
-	serverUUID, ok := m.toolIndex[name]
+	route, ok := m.toolIndex[name]
 	if !ok {
 		m.mu.Unlock()
 		return "", fmt.Errorf("mcp tool %q not found", name)
 	}
-	cn, ok := m.conns[serverUUID]
+	cn, ok := m.conns[route.serverUUID]
 	m.mu.Unlock()
 	if !ok {
 		return "", fmt.Errorf("mcp server for tool %q not connected", name)
@@ -160,7 +195,7 @@ func (m *Manager) CallTool(ctx context.Context, name, argsJSON string) (string, 
 	}
 
 	req := mcpgo.CallToolRequest{}
-	req.Params.Name = name
+	req.Params.Name = route.toolName
 	req.Params.Arguments = args
 
 	result, err := cn.client.CallTool(ctx, req)
@@ -180,7 +215,57 @@ func (m *Manager) Close() {
 		}
 		delete(m.conns, uuid)
 	}
-	m.toolIndex = make(map[string]string)
+	m.toolIndex = make(map[string]toolRoute)
+}
+
+func (m *Manager) uniqueServerNamespace(server model.MCPServer) string {
+	base := sanitizeToolSegment(server.Name)
+	if base == "" {
+		base = "server"
+	}
+	occupied := false
+	prefix := "mcp__" + base + "__"
+	for exposed := range m.toolIndex {
+		if strings.HasPrefix(exposed, prefix) {
+			occupied = true
+			break
+		}
+	}
+	if occupied {
+		return base + "_" + shortStableSuffix(server.UUID)
+	}
+	return base
+}
+
+func qualifyToolName(serverNamespace, toolName string) string {
+	return "mcp__" + sanitizeToolSegment(serverNamespace) + "__" + sanitizeToolSegment(toolName)
+}
+
+func sanitizeToolSegment(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore && b.Len() > 0 {
+			b.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+func shortStableSuffix(value string) string {
+	var hash uint32 = 2166136261
+	for _, b := range []byte(value) {
+		hash ^= uint32(b)
+		hash *= 16777619
+	}
+	return fmt.Sprintf("%08x", hash)
 }
 
 func (m *Manager) HasTools() bool {

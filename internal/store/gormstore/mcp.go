@@ -2,6 +2,7 @@ package gormstore
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -54,6 +55,17 @@ func (s *GormStore) UpsertMCPServer(ctx context.Context, server *model.MCPServer
 
 func (s *GormStore) SetMCPServerEnabled(ctx context.Context, serverUUID string, enabled bool) error {
 	return s.db.WithContext(ctx).Model(&model.MCPServer{}).Where("uuid = ?", serverUUID).Update("enabled", enabled).Error
+}
+
+func (s *GormStore) DeleteMCPServer(ctx context.Context, serverUUID string) error {
+	result := s.db.WithContext(ctx).Where("uuid = ? AND plugin_uuid = ''", serverUUID).Delete(&model.MCPServer{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (s *GormStore) SetPluginMCPEnabled(ctx context.Context, pluginUUID string, enabled bool) error {

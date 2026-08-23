@@ -202,6 +202,9 @@ func (d *LocalToolDispatcher) executePlan(ctx context.Context, thread model.Thre
 	defer d.planMu.Unlock()
 	current := clonePlan(d.plans[thread.UUID])
 	if current == nil {
+		current = d.loadLatestPlan(ctx, thread)
+	}
+	if current == nil {
 		current = &model.PlanState{UUID: uuid.NewString(), ConversationID: thread.ID, Source: model.PlanSourceModel, Status: model.PlanStatusActive}
 	}
 	switch input.Action {
@@ -273,6 +276,27 @@ func (d *LocalToolDispatcher) executePlan(ctx context.Context, thread model.Thre
 		return ToolResult{CallID: call.ID, Name: call.Name}, err
 	}
 	return planResult(call, current), nil
+}
+
+func (d *LocalToolDispatcher) loadLatestPlan(ctx context.Context, thread model.Thread) *model.PlanState {
+	rollouts, ok := d.store.(ThreadStore)
+	if !ok || thread.ID == 0 {
+		return nil
+	}
+	items, err := rollouts.LoadRollout(ctx, thread.ID)
+	if err != nil {
+		return nil
+	}
+	for index := len(items) - 1; index >= 0; index-- {
+		if items[index].Kind != model.RolloutPlanUpdated {
+			continue
+		}
+		var plan model.PlanState
+		if json.Unmarshal(items[index].Payload, &plan) == nil {
+			return &plan
+		}
+	}
+	return nil
 }
 
 func validatePlan(plan *model.PlanState) error {
@@ -350,6 +374,41 @@ func (d *LocalToolDispatcher) executeSkillManager(ctx context.Context, _ model.T
 			return ToolResult{CallID: call.ID, Name: call.Name}, err
 		}
 		result = items
+	case "read_active":
+		items, err := skillStore.ListSkills(ctx)
+		if err != nil {
+			return ToolResult{CallID: call.ID, Name: call.Name}, err
+		}
+		var selected *model.Skill
+		for index := range items {
+			if items[index].UUID == input.Name || strings.EqualFold(items[index].Name, input.Name) || strings.EqualFold(items[index].Slug, input.Name) || strings.EqualFold(items[index].DirName, input.Name) {
+				selected = &items[index]
+				break
+			}
+		}
+		if selected == nil {
+			return ToolResult{CallID: call.ID, Name: call.Name}, fmt.Errorf("active skill %q was not found", input.Name)
+		}
+		result = selected
+	case "enable", "disable":
+		items, err := skillStore.ListSkills(ctx)
+		if err != nil {
+			return ToolResult{CallID: call.ID, Name: call.Name}, err
+		}
+		selectedUUID := ""
+		for _, item := range items {
+			if item.UUID == input.Name || strings.EqualFold(item.Name, input.Name) || strings.EqualFold(item.Slug, input.Name) || strings.EqualFold(item.DirName, input.Name) {
+				selectedUUID = item.UUID
+				break
+			}
+		}
+		if selectedUUID == "" {
+			return ToolResult{CallID: call.ID, Name: call.Name}, fmt.Errorf("skill %q was not found", input.Name)
+		}
+		if err := skillStore.SetSkillEnabled(ctx, selectedUUID, input.Action == "enable"); err != nil {
+			return ToolResult{CallID: call.ID, Name: call.Name}, err
+		}
+		result = input.Action + "d"
 	case "list_pending":
 		items, err := skills.ListPending(d.root, input.Limit)
 		if err != nil {

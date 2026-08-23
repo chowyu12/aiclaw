@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,7 @@ type RunInput struct {
 	Config    map[string]any  `json:"config,omitzero"`
 }
 
-func RunTool(ctx context.Context, skillDir, mainFile, toolName string, argsJSON string, config map[string]any, timeout time.Duration) (string, error) {
+func RunTool(ctx context.Context, skillDir, mainFile, toolName string, argsJSON string, config map[string]any, permissions []string, timeout time.Duration) (string, error) {
 	if timeout == 0 {
 		timeout = 30 * time.Second
 	}
@@ -46,10 +47,35 @@ func RunTool(ctx context.Context, skillDir, mainFile, toolName string, argsJSON 
 		return "", fmt.Errorf("marshal input: %w", err)
 	}
 
-	mainPath := filepath.Join(skillDir, mainFile)
+	root, err := filepath.Abs(skillDir)
+	if err != nil {
+		return "", err
+	}
+	mainPath, err := filepath.Abs(filepath.Join(root, mainFile))
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(root, mainPath)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("skill entry point escapes its install directory")
+	}
+	hasExecute := false
+	for _, permission := range permissions {
+		hasExecute = hasExecute || permission == PermissionProcessExecute
+	}
+	if !hasExecute {
+		return "", fmt.Errorf("skill execution requires %q permission", PermissionProcessExecute)
+	}
 	cmd := exec.CommandContext(ctx, cmdName, mainPath)
-	cmd.Dir = skillDir
+	cmd.Dir = root
 	cmd.Stdin = bytes.NewReader(inputJSON)
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"LANG=" + os.Getenv("LANG"),
+		"LC_ALL=" + os.Getenv("LC_ALL"),
+		"AICLAW_SKILL_DIR=" + root,
+		"AICLAW_SKILL_PERMISSIONS=" + strings.Join(permissions, ","),
+	}
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

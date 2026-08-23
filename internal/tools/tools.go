@@ -4,9 +4,7 @@ import (
 	"context"
 
 	"github.com/chowyu12/aiclaw/internal/scheduler"
-	"github.com/chowyu12/aiclaw/internal/tools/browser"
 	"github.com/chowyu12/aiclaw/internal/tools/builtin"
-	"github.com/chowyu12/aiclaw/internal/tools/canvas"
 	"github.com/chowyu12/aiclaw/internal/tools/codeinterp"
 	"github.com/chowyu12/aiclaw/internal/tools/editfile"
 	"github.com/chowyu12/aiclaw/internal/tools/findfile"
@@ -35,8 +33,6 @@ func DefaultBuiltins() map[string]func(context.Context, string) (string, error) 
 	m["exec"] = shellexec.Handler
 	m["process"] = process.Handler
 	m["web_fetch"] = urlreader.Handler
-	m["browser"] = browser.Handler
-	m["canvas"] = canvas.Handler
 	m["code_interpreter"] = codeinterp.Handler
 	m["cron"] = scheduler.ToolHandler
 	return m

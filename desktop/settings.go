@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,13 +36,14 @@ type DesktopMCPServer struct {
 	PluginUUID  string `json:"plugin_uuid"`
 }
 type DesktopPlugin struct {
-	UUID        string `json:"uuid"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Version     string `json:"version"`
-	Enabled     bool   `json:"enabled"`
-	SkillCount  int    `json:"skill_count"`
-	MCPCount    int    `json:"mcp_count"`
+	UUID        string   `json:"uuid"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Version     string   `json:"version"`
+	Enabled     bool     `json:"enabled"`
+	SkillCount  int      `json:"skill_count"`
+	MCPCount    int      `json:"mcp_count"`
+	Permissions []string `json:"permissions"`
 }
 
 type DesktopMemorySettings struct {
@@ -220,12 +222,39 @@ func (a *App) AddMCPServer(input MCPServerInput) (DesktopMCPServer, error) {
 	if input.Transport == "" {
 		input.Transport = string(model.MCPTransportStdio)
 	}
-	srv := &model.MCPServer{Name: input.Name, Description: input.Description, Transport: model.MCPTransport(input.Transport), Endpoint: input.Endpoint, Args: normalizedJSON(input.Args, `[]`), Env: normalizedJSON(input.Env, `{}`), Headers: normalizedJSON(input.Headers, `{}`), Enabled: true}
+	switch model.MCPTransport(input.Transport) {
+	case model.MCPTransportStdio, model.MCPTransportSSE, model.MCPTransportStreamableHTTP:
+	default:
+		return DesktopMCPServer{}, fmt.Errorf("unsupported MCP transport %q", input.Transport)
+	}
+	args, err := validatedJSON(input.Args, `[]`, "args")
+	if err != nil {
+		return DesktopMCPServer{}, err
+	}
+	env, err := validatedJSON(input.Env, `{}`, "env")
+	if err != nil {
+		return DesktopMCPServer{}, err
+	}
+	headers, err := validatedJSON(input.Headers, `{}`, "headers")
+	if err != nil {
+		return DesktopMCPServer{}, err
+	}
+	srv := &model.MCPServer{Name: input.Name, Description: input.Description, Transport: model.MCPTransport(input.Transport), Endpoint: input.Endpoint, Args: args, Env: env, Headers: headers, Enabled: true}
 	if err := a.store.UpsertMCPServer(a.ctx, srv); err != nil {
 		return DesktopMCPServer{}, err
 	}
 	a.tools.Reload()
 	return DesktopMCPServer{UUID: srv.UUID, Name: srv.Name, Description: srv.Description, Transport: string(srv.Transport), Endpoint: srv.Endpoint, Enabled: true}, nil
+}
+func (a *App) DeleteMCPServer(serverUUID string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	if err := a.store.DeleteMCPServer(a.ctx, strings.TrimSpace(serverUUID)); err != nil {
+		return err
+	}
+	a.tools.Reload()
+	return nil
 }
 func (a *App) ToggleMCPServer(serverUUID string, enabled bool) error {
 	if err := a.ready(); err != nil {
@@ -251,19 +280,72 @@ func (a *App) Plugins() ([]DesktopPlugin, error) {
 	result := make([]DesktopPlugin, 0, len(plugins))
 	for _, plugin := range plugins {
 		item := DesktopPlugin{UUID: plugin.UUID, Name: plugin.Name, Description: plugin.Description, Version: plugin.Version, Enabled: plugin.Enabled}
+		permissionSet := make(map[string]struct{})
 		for _, sk := range skillItems {
 			if sk.PluginUUID == plugin.UUID {
 				item.SkillCount++
+				if permissions, permissionErr := skills.StoredPermissions(sk.Permissions); permissionErr == nil {
+					for _, permission := range permissions {
+						permissionSet[permission] = struct{}{}
+					}
+				}
 			}
 		}
 		for _, srv := range mcpItems {
 			if srv.PluginUUID == plugin.UUID {
 				item.MCPCount++
+				if srv.Transport == model.MCPTransportStdio {
+					permissionSet[skills.PermissionProcessExecute] = struct{}{}
+				} else {
+					permissionSet[skills.PermissionNetworkAccess] = struct{}{}
+				}
 			}
 		}
+		for permission := range permissionSet {
+			item.Permissions = append(item.Permissions, permission)
+		}
+		sort.Strings(item.Permissions)
 		result = append(result, item)
 	}
 	return result, nil
+}
+func (a *App) DeletePlugin(pluginUUID string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	pluginUUID = strings.TrimSpace(pluginUUID)
+	plugins, err := a.store.ListPlugins(a.ctx)
+	if err != nil {
+		return err
+	}
+	var installDir string
+	for _, plugin := range plugins {
+		if plugin.UUID == pluginUUID {
+			installDir = plugin.InstallDir
+			break
+		}
+	}
+	if installDir == "" {
+		return fmt.Errorf("plugin %q not found", pluginUUID)
+	}
+	if err := a.store.DeletePluginSkills(a.ctx, pluginUUID); err != nil {
+		return err
+	}
+	if err := a.store.DeletePluginMCP(a.ctx, pluginUUID); err != nil {
+		return err
+	}
+	if err := a.store.DeletePlugin(a.ctx, pluginUUID); err != nil {
+		return err
+	}
+	pluginsRoot := filepath.Clean(filepath.Join(a.root, "plugins"))
+	cleanDir := filepath.Clean(installDir)
+	if rel, relErr := filepath.Rel(pluginsRoot, cleanDir); relErr == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+		if err := os.RemoveAll(cleanDir); err != nil {
+			return fmt.Errorf("remove plugin files: %w", err)
+		}
+	}
+	a.tools.Reload()
+	return nil
 }
 func (a *App) TogglePlugin(pluginUUID string, enabled bool) error {
 	if err := a.ready(); err != nil {
@@ -292,7 +374,9 @@ func (a *App) installPlugin(source string) (DesktopPlugin, error) {
 	for _, candidate := range []string{filepath.Join(source, ".codex-plugin", "plugin.json"), filepath.Join(source, "plugin.json")} {
 		if data, readErr := os.ReadFile(candidate); readErr == nil {
 			manifestBytes = data
-			_ = json.Unmarshal(data, &manifest)
+			if err := json.Unmarshal(data, &manifest); err != nil {
+				return DesktopPlugin{}, fmt.Errorf("parse plugin manifest: %w", err)
+			}
 			break
 		}
 	}
@@ -304,34 +388,66 @@ func (a *App) installPlugin(source string) (DesktopPlugin, error) {
 	if err := copyPluginDir(source, dest); err != nil {
 		return DesktopPlugin{}, err
 	}
-	plugin := &model.Plugin{UUID: pluginUUID, Name: manifest.Name, Description: manifest.Description, Version: manifest.Version, InstallDir: dest, Manifest: model.JSON(manifestBytes), Enabled: true}
+	cleanupFiles := true
+	defer func() {
+		if cleanupFiles {
+			_ = os.RemoveAll(dest)
+		}
+	}()
+	plugin := &model.Plugin{UUID: pluginUUID, Name: manifest.Name, Description: manifest.Description, Version: manifest.Version, InstallDir: dest, Manifest: model.JSON(manifestBytes), Enabled: false}
 	if err := a.store.CreatePlugin(a.ctx, plugin); err != nil {
 		return DesktopPlugin{}, err
 	}
 	skillCount, err := a.installPluginSkills(plugin)
 	if err != nil {
+		a.cleanupPluginRecords(plugin.UUID)
 		return DesktopPlugin{}, err
 	}
 	mcpCount, err := a.installPluginMCP(plugin)
 	if err != nil {
+		a.cleanupPluginRecords(plugin.UUID)
 		return DesktopPlugin{}, err
 	}
+	cleanupFiles = false
 	a.tools.Reload()
-	return DesktopPlugin{UUID: plugin.UUID, Name: plugin.Name, Description: plugin.Description, Version: plugin.Version, Enabled: true, SkillCount: skillCount, MCPCount: mcpCount}, nil
+	return DesktopPlugin{UUID: plugin.UUID, Name: plugin.Name, Description: plugin.Description, Version: plugin.Version, Enabled: false, SkillCount: skillCount, MCPCount: mcpCount}, nil
+}
+
+func (a *App) cleanupPluginRecords(pluginUUID string) {
+	_ = a.store.DeletePluginSkills(a.ctx, pluginUUID)
+	_ = a.store.DeletePluginMCP(a.ctx, pluginUUID)
+	_ = a.store.DeletePlugin(a.ctx, pluginUUID)
 }
 
 func (a *App) installPluginSkills(plugin *model.Plugin) (int, error) {
 	var infos []skills.SkillInfo
-	if info, err := skills.ParseSkillDir(plugin.InstallDir); err == nil {
+	rootSkill := false
+	for _, name := range []string{"manifest.json", "_meta.json", "SKILL.md"} {
+		if _, err := os.Stat(filepath.Join(plugin.InstallDir, name)); err == nil {
+			rootSkill = true
+			break
+		}
+	}
+	if rootSkill {
+		info, err := skills.ParseSkillDir(plugin.InstallDir)
+		if err != nil {
+			return 0, err
+		}
 		infos = append(infos, *info)
 	}
-	if found, err := skills.ScanAll(filepath.Join(plugin.InstallDir, "skills")); err == nil {
+	skillsRoot := filepath.Join(plugin.InstallDir, "skills")
+	if _, statErr := os.Stat(skillsRoot); statErr == nil {
+		found, err := skills.ScanAll(skillsRoot)
+		if err != nil {
+			return 0, err
+		}
 		infos = append(infos, found...)
 	}
 	for _, info := range infos {
 		skill := skills.InfoToSkill(info, model.SkillSourceLocal, info.Slug)
 		skill.UUID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(plugin.UUID+"/"+info.DirName)).String()
 		skill.PluginUUID = plugin.UUID
+		skill.Enabled = false
 		skill.InstallDir = filepath.Join(plugin.InstallDir, "skills", info.DirName)
 		if _, err := os.Stat(skill.InstallDir); err != nil {
 			skill.InstallDir = plugin.InstallDir
@@ -369,12 +485,12 @@ func (a *App) installPluginMCP(plugin *model.Plugin) (int, error) {
 	for name, cfg := range raw.MCPServers {
 		transport, endpoint := model.MCPTransportStdio, cfg.Command
 		if cfg.URL != "" {
-			transport, endpoint = model.MCPTransportSSE, cfg.URL
+			transport, endpoint = model.MCPTransportStreamableHTTP, cfg.URL
 		}
 		args, _ := json.Marshal(cfg.Args)
 		env, _ := json.Marshal(cfg.Env)
 		headers, _ := json.Marshal(cfg.Headers)
-		srv := &model.MCPServer{UUID: uuid.NewSHA1(uuid.NameSpaceURL, []byte(plugin.UUID+"/mcp/"+name)).String(), PluginUUID: plugin.UUID, Name: name, Transport: transport, Endpoint: endpoint, Args: model.JSON(args), Env: model.JSON(env), Headers: model.JSON(headers), Enabled: true}
+		srv := &model.MCPServer{UUID: uuid.NewSHA1(uuid.NameSpaceURL, []byte(plugin.UUID+"/mcp/"+name)).String(), PluginUUID: plugin.UUID, Name: name, Transport: transport, Endpoint: endpoint, Args: model.JSON(args), Env: model.JSON(env), Headers: model.JSON(headers), Enabled: false}
 		if endpoint == "" {
 			continue
 		}
@@ -386,15 +502,15 @@ func (a *App) installPluginMCP(plugin *model.Plugin) (int, error) {
 	return count, nil
 }
 
-func normalizedJSON(value, fallback string) model.JSON {
+func validatedJSON(value, fallback, field string) (model.JSON, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		value = fallback
 	}
 	if !json.Valid([]byte(value)) {
-		value = fallback
+		return nil, fmt.Errorf("MCP %s must be valid JSON", field)
 	}
-	return model.JSON(value)
+	return model.JSON(value), nil
 }
 func safeName(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))

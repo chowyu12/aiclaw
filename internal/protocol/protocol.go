@@ -40,14 +40,18 @@ const (
 )
 
 type Event struct {
-	Kind     EventKind          `json:"kind"`
-	ThreadID string             `json:"thread_id"`
-	TurnID   string             `json:"turn_id,omitzero"`
-	Item     *model.RolloutItem `json:"item,omitzero"`
-	CallID   string             `json:"call_id,omitzero"`
-	Name     string             `json:"name,omitzero"`
-	Status   string             `json:"status,omitzero"`
-	Message  string             `json:"message,omitzero"`
-	Delta    string             `json:"delta,omitzero"`
-	Error    string             `json:"error,omitzero"`
+	Kind       EventKind          `json:"kind"`
+	ThreadID   string             `json:"thread_id"`
+	TurnID     string             `json:"turn_id,omitzero"`
+	Item       *model.RolloutItem `json:"item,omitzero"`
+	CallID     string             `json:"call_id,omitzero"`
+	Name       string             `json:"name,omitzero"`
+	Status     string             `json:"status,omitzero"`
+	Message    string             `json:"message,omitzero"`
+	Input      string             `json:"input,omitzero"`
+	Output     string             `json:"output,omitzero"`
+	Delta      string             `json:"delta,omitzero"`
+	Error      string             `json:"error,omitzero"`
+	StartedAt  int64              `json:"started_at,omitzero"`
+	DurationMS int64              `json:"duration_ms,omitzero"`
 }

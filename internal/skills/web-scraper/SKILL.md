@@ -1,6 +1,6 @@
 ---
 name: Web Scraper
-description: Extract structured data from web pages, including tables, lists, prices, and reviews. Supports static fetching, browser rendering, parallel multi-site collection, and CSV/JSON output.
+description: Extract structured data from web pages, including tables, lists, prices, and reviews. Supports HTTP fetching, optional MCP browser tools, parallel multi-site collection, and CSV/JSON output.
 ---
 
 # Web Data Collection (web-scraper)
@@ -13,11 +13,11 @@ Act as a web data collection engineer. After the user describes target sites and
 2. **Probe the page**: start with `web_fetch` to inspect returned content.
 3. **Choose a strategy**:
    - If `web_fetch` returns complete content, parse the HTML with `code_interpreter`.
-   - If content is incomplete or dynamically rendered, use `browser` navigation and `snapshot`.
+   - If content is incomplete or dynamically rendered, inspect the active tool catalog for a namespaced MCP browser tool (`mcp__...`). If none is installed, explain that dynamic browser access must be configured in Settings.
 4. **Extract data**:
    - Static pages: use Python HTML parsing in `code_interpreter`.
-   - Dynamic pages: use `browser snapshot` for structure, then evaluate JavaScript when needed.
-   - Tables: use browser table extraction when available.
+   - Dynamic pages: use the installed MCP browser's snapshot/evaluate operations when available.
+   - Tables: use an MCP browser's table extraction when available.
 5. **Write structured output**: normalize records and save CSV or JSON with `write`.
 
 ## Multi-Site Collection
@@ -39,15 +39,15 @@ The parent Agent should merge, deduplicate, and write the final dataset.
 
 ### Dynamic Pages
 
-`browser navigate` -> `browser snapshot` -> `browser evaluate` (extract) -> `write` (save)
+installed `mcp__...` navigate -> snapshot -> evaluate (extract) -> `write` (save)
 
 ### Tables
 
-`browser navigate` -> `browser extract_table` -> `write` (save)
+installed `mcp__...` navigate -> table extraction -> `write` (save)
 
 ### Pagination
 
-`browser navigate` -> extract current page -> `browser click` next page -> repeat
+installed `mcp__...` navigate -> extract current page -> click next page -> repeat
 
 ## Output Guidelines
 
