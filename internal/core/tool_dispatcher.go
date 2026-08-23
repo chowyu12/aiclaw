@@ -20,13 +20,14 @@ import (
 )
 
 type LocalToolDispatcher struct {
-	store  store.Store
-	mu     sync.Mutex
-	mcp    *mcp.Manager
-	memory *memorypkg.Service
-	root   string
+	store   store.Store
+	mu      sync.Mutex
+	planMu  sync.Mutex
+	mcp     *mcp.Manager
+	memory  *memorypkg.Service
+	root    string
 	sampler Sampler
-	plans  map[string]*model.PlanState
+	plans   map[string]*model.PlanState
 }
 
 type DispatcherOption func(*LocalToolDispatcher)
@@ -155,7 +156,7 @@ func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread)
 		}
 		if err := registry.Register(RegisteredTool{
 			Definition: ToolDefinition{Name: tool.Name, Description: tool.Description, Schema: schemaFromFunctionDef(tool.FunctionDef)},
-			Handler: execute, Source: "builtin",
+			Handler:    execute, Source: "builtin",
 		}); err != nil {
 			return nil, err
 		}
@@ -169,7 +170,7 @@ func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread)
 		name := tool.Name
 		if err := registry.Register(RegisteredTool{
 			Definition: ToolDefinition{Name: name, Description: tool.Description, Schema: model.JSON(schema)},
-			Source: "mcp:" + tool.ServerName,
+			Source:     "mcp:" + tool.ServerName,
 			Handler: func(ctx context.Context, _ model.Thread, call ToolCall) (ToolResult, error) {
 				output, callErr := manager.CallTool(ctx, name, call.Arguments)
 				return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, callErr
@@ -196,7 +197,7 @@ func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread)
 				skillCopy, definitionCopy := skill, definition
 				if err := registry.Register(RegisteredTool{
 					Definition: ToolDefinition{Name: definitionCopy.Name, Description: definitionCopy.Description, Schema: model.JSON(schema)},
-					Source: "skill:" + skillCopy.Name,
+					Source:     "skill:" + skillCopy.Name,
 					Handler: func(ctx context.Context, _ model.Thread, call ToolCall) (ToolResult, error) {
 						return d.executeSkillRecord(ctx, skillCopy, definitionCopy, call)
 					},
