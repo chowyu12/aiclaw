@@ -62,6 +62,18 @@ type ChatDelta struct {
 	Delta     string `json:"delta"`
 }
 
+type ChatProgress struct {
+	RequestID string `json:"request_id"`
+	ThreadID  string `json:"thread_id"`
+	TurnID    string `json:"turn_id"`
+	Kind      string `json:"kind"`
+	CallID    string `json:"call_id,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
 // DesktopProvider and DesktopThread deliberately avoid exposing
 // database models to the Wails binding generator. In particular, time.Time is
 // not a frontend binding type in older Wails releases used for SDK compatibility.
@@ -91,6 +103,14 @@ type DesktopMessage struct {
 	Role        string              `json:"role"`
 	Content     string              `json:"content"`
 	Attachments []DesktopAttachment `json:"attachments,omitempty"`
+	Execution   []DesktopExecution  `json:"execution,omitempty"`
+}
+
+type DesktopExecution struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
 }
 
 func NewApp() *App { return &App{} }
@@ -209,7 +229,51 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 		return nil, err
 	}
 	result := make([]DesktopMessage, 0)
+	executionByTurn := make(map[string][]DesktopExecution)
 	for _, item := range items {
+		if item.Kind == model.RolloutToolRequested {
+			var payload struct {
+				ToolCalls []core.ToolCall `json:"tool_calls"`
+			}
+			_ = json.Unmarshal(item.Payload, &payload)
+			for _, call := range payload.ToolCalls {
+				executionByTurn[item.TurnID] = append(executionByTurn[item.TurnID], DesktopExecution{
+					ID: call.ID, Name: call.Name, Status: string(model.StepPending), Message: "等待执行工具",
+				})
+			}
+			continue
+		}
+		if item.Kind == model.RolloutToolCompleted {
+			var payload struct {
+				CallID string           `json:"call_id"`
+				Name   string           `json:"name"`
+				Status model.StepStatus `json:"status"`
+				Error  string           `json:"error"`
+			}
+			_ = json.Unmarshal(item.Payload, &payload)
+			status := payload.Status
+			if status == "" {
+				status = model.StepSuccess
+			}
+			message := "工具执行完成"
+			if status == model.StepError || payload.Error != "" {
+				status, message = model.StepError, "工具执行失败"
+			}
+			steps := executionByTurn[item.TurnID]
+			matched := false
+			for index := range steps {
+				if steps[index].ID == payload.CallID {
+					steps[index].Name, steps[index].Status, steps[index].Message = payload.Name, string(status), message
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				steps = append(steps, DesktopExecution{ID: payload.CallID, Name: payload.Name, Status: string(status), Message: message})
+			}
+			executionByTurn[item.TurnID] = steps
+			continue
+		}
 		if item.Kind != model.RolloutUserMessage && item.Kind != model.RolloutAssistantFinal {
 			continue
 		}
@@ -225,7 +289,10 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 		if item.Kind == model.RolloutUserMessage {
 			role = "你"
 		}
-		result = append(result, DesktopMessage{Role: role, Content: payload.Content, Attachments: a.attachmentsByUUIDs(payload.Attachments)})
+		result = append(result, DesktopMessage{
+			Role: role, Content: payload.Content, Attachments: a.attachmentsByUUIDs(payload.Attachments),
+			Execution: append([]DesktopExecution(nil), executionByTurn[item.TurnID]...),
+		})
 	}
 	return result, nil
 }
@@ -416,6 +483,11 @@ func (a *App) runChat(profile ChatProfile, threadID, input string, attachmentUUI
 			if profile.RequestID != "" {
 				runtime.EventsEmit(a.ctx, "chat:delta", ChatDelta{RequestID: profile.RequestID, ThreadID: threadID, Delta: e.Delta})
 			}
+		} else if profile.RequestID != "" {
+			runtime.EventsEmit(a.ctx, "chat:progress", ChatProgress{
+				RequestID: profile.RequestID, ThreadID: threadID, TurnID: e.TurnID, Kind: string(e.Kind),
+				CallID: e.CallID, Name: e.Name, Status: e.Status, Message: e.Message, Error: e.Error,
+			})
 		}
 		return nil
 	})
@@ -482,7 +554,17 @@ func (a *App) DeleteProject(projectUUID string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	return a.store.DeleteProject(a.ctx, projectUUID)
+	projectUUID = strings.TrimSpace(projectUUID)
+	if projectUUID == "" {
+		return fmt.Errorf("project ID is required")
+	}
+	if err := a.validateProject(projectUUID); err != nil {
+		return err
+	}
+	if err := a.store.DeleteProject(a.ctx, projectUUID); err != nil {
+		return fmt.Errorf("delete project: %w", err)
+	}
+	return nil
 }
 
 func (a *App) ChoosePluginDirectory() (DesktopPlugin, error) {

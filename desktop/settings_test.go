@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -268,6 +269,37 @@ func TestProjectLifecycleArchivesThreads(t *testing.T) {
 	if archived.Status != model.ThreadStatusArchived {
 		t.Fatalf("thread was not archived: %+v", archived)
 	}
+	if archived.ProjectUUID != "" {
+		t.Fatalf("archived thread still references deleted project: %+v", archived)
+	}
+}
+
+func TestDeleteEmptyProject(t *testing.T) {
+	app := newTestDesktopApp(t)
+	project, err := app.CreateProject("Disposable workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := app.DeleteProject(project.UUID); err != nil {
+		t.Fatalf("delete empty project: %v", err)
+	}
+	projects, err := app.Projects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Fatalf("empty project still present: %+v", projects)
+	}
+}
+
+func TestDeleteProjectRejectsMissingID(t *testing.T) {
+	app := newTestDesktopApp(t)
+	if err := app.DeleteProject("  "); err == nil {
+		t.Fatal("expected empty project ID to be rejected")
+	}
+	if err := app.DeleteProject("missing-project"); err == nil {
+		t.Fatal("expected missing project to be rejected")
+	}
 }
 
 func TestConversationCanMoveInAndOutOfProject(t *testing.T) {
@@ -412,6 +444,41 @@ func TestDesktopMemorySettingsAndReview(t *testing.T) {
 	items, err = app.Memories()
 	if err != nil || len(items) != 0 {
 		t.Fatalf("forgotten memory is still visible: items=%+v err=%v", items, err)
+	}
+}
+
+func TestThreadMessagesRestoresToolExecutionTrace(t *testing.T) {
+	app := newTestDesktopApp(t)
+	thread := &model.Thread{UserID: "local", ProviderID: 1, ModelName: "test", Title: "trace"}
+	if err := app.store.CreateThread(app.ctx, thread); err != nil {
+		t.Fatal(err)
+	}
+	encode := func(value any) model.JSON {
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return model.JSON(data)
+	}
+	_, err := app.store.AppendRollout(app.ctx, thread.ID, []model.RolloutItem{
+		{TurnID: "turn-trace", Kind: model.RolloutUserMessage, ModelVisible: true, Payload: encode(map[string]any{"content": "查找资料"})},
+		{TurnID: "turn-trace", Kind: model.RolloutToolRequested, ModelVisible: true, Payload: encode(map[string]any{"tool_calls": []core.ToolCall{{ID: "call-search", Name: "web_search", Arguments: `{}`}}})},
+		{TurnID: "turn-trace", Kind: model.RolloutToolCompleted, ModelVisible: true, Payload: encode(map[string]any{"call_id": "call-search", "name": "web_search", "status": model.StepSuccess, "output": "found"})},
+		{TurnID: "turn-trace", Kind: model.RolloutAssistantFinal, ModelVisible: true, Payload: encode(map[string]any{"content": "已找到资料"})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := app.ThreadMessages(thread.UUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || len(messages[1].Execution) != 1 {
+		t.Fatalf("execution history missing: %+v", messages)
+	}
+	step := messages[1].Execution[0]
+	if step.ID != "call-search" || step.Name != "web_search" || step.Status != string(model.StepSuccess) {
+		t.Fatalf("unexpected restored execution step: %+v", step)
 	}
 }
 

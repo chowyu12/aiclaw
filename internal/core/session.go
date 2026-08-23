@@ -213,11 +213,25 @@ func (s *Session) RunTurnWithAttachments(ctx context.Context, input string, atta
 			return err
 		}
 		for _, call := range result.ToolCalls {
+			s.emitEvent(protocol.Event{
+				Kind: protocol.EventToolLifecycle, ThreadID: s.thread.UUID, TurnID: turn.ID,
+				CallID: call.ID, Name: call.Name, Status: string(model.StepRunning), Message: "正在执行工具",
+			})
 			toolResult, callErr := dispatcher.Execute(ctx, *s.thread, call)
+			if toolResult.CallID == "" {
+				toolResult.CallID = call.ID
+			}
+			if toolResult.Name == "" {
+				toolResult.Name = call.Name
+			}
 			if callErr != nil {
 				toolResult.Error = callErr.Error()
 			}
-			if err := s.AppendToolResult(ctx, turn.ID, toolResult.CallID, model.ExecutionStep{Name: toolResult.Name, Input: call.Arguments, Output: toolResult.Content, Error: toolResult.Error}); err != nil {
+			status := model.StepSuccess
+			if toolResult.Error != "" {
+				status = model.StepError
+			}
+			if err := s.AppendToolResult(ctx, turn.ID, toolResult.CallID, model.ExecutionStep{Name: toolResult.Name, Input: call.Arguments, Output: toolResult.Content, Error: toolResult.Error, Status: status}); err != nil {
 				_ = s.FailTurn(ctx, turn.ID, err)
 				return err
 			}
@@ -272,9 +286,17 @@ func (s *Session) resolveAttachments(ctx context.Context, ids []string) ([]*mode
 // executes. The following tool results can therefore be reconstructed with
 // their call IDs into a provider-valid conversation after a restart.
 func (s *Session) AppendToolRequests(ctx context.Context, turnID, content string, calls []ToolCall) error {
-	_, err := s.append(ctx, turnID, model.RolloutToolRequested, true, map[string]any{
+	item, err := s.append(ctx, turnID, model.RolloutToolRequested, true, map[string]any{
 		"content": content, "tool_calls": calls,
 	})
+	if err == nil {
+		for _, call := range calls {
+			s.emitEvent(protocol.Event{
+				Kind: protocol.EventToolLifecycle, ThreadID: s.thread.UUID, TurnID: turnID, Item: item,
+				CallID: call.ID, Name: call.Name, Status: string(model.StepPending), Message: "等待执行工具",
+			})
+		}
+	}
 	return err
 }
 
@@ -298,10 +320,20 @@ func (s *Session) AppendAssistantDelta(ctx context.Context, turnID, delta string
 // AppendToolResult persists tool lifecycle output as a model-visible rollout
 // item. MCP and search are both represented through this same tool boundary.
 func (s *Session) AppendToolResult(ctx context.Context, turnID, callID string, step model.ExecutionStep) error {
-	_, err := s.append(ctx, turnID, model.RolloutToolCompleted, true, map[string]any{
+	item, err := s.append(ctx, turnID, model.RolloutToolCompleted, true, map[string]any{
 		"call_id": callID, "name": step.Name, "status": step.Status, "input": step.Input,
 		"output": step.Output, "error": step.Error,
 	})
+	if err == nil {
+		message := "工具执行完成"
+		if step.Status == model.StepError {
+			message = "工具执行失败"
+		}
+		s.emitEvent(protocol.Event{
+			Kind: protocol.EventToolLifecycle, ThreadID: s.thread.UUID, TurnID: turnID, Item: item,
+			CallID: callID, Name: step.Name, Status: string(step.Status), Message: message, Error: step.Error,
+		})
+	}
 	return err
 }
 

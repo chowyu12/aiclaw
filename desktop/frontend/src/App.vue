@@ -37,10 +37,12 @@ import {
   ToggleSearchEngine,
 } from "../wailsjs/go/main/App";
 import {
+  BrowserOpenURL,
   EventsOn,
   OnFileDrop,
   OnFileDropOff,
 } from "../wailsjs/runtime/runtime";
+import { renderMarkdown } from "./markdown";
 
 type Provider = {
   id: number;
@@ -67,10 +69,18 @@ type Attachment = {
   preview_url?: string;
   available: boolean;
 };
+type ExecutionStatus = "pending" | "running" | "success" | "error";
+type ExecutionStep = {
+  id: string;
+  name: string;
+  status: ExecutionStatus;
+  message: string;
+};
 type Message = {
   role: string;
   content: string;
   attachments?: Attachment[];
+  execution?: ExecutionStep[];
   retryable?: boolean;
   streaming?: boolean;
 };
@@ -87,6 +97,17 @@ type MemoryItem = {
   updated_at: string;
 };
 type ChatDelta = { request_id: string; thread_id: string; delta: string };
+type ChatProgress = {
+  request_id: string;
+  thread_id: string;
+  turn_id: string;
+  kind: string;
+  call_id?: string;
+  name?: string;
+  status?: ExecutionStatus;
+  message?: string;
+  error?: string;
+};
 type Search = {
   id: number;
   provider: string;
@@ -156,6 +177,7 @@ const prompt = ref(""),
   messagePane = ref<HTMLElement>(),
   projectInput = ref<HTMLInputElement>();
 const projectFormOpen = ref(false),
+  deletingProjectID = ref(""),
   providerFormOpen = ref(false),
   modelPickerOpen = ref(false);
 const providerForm = ref({
@@ -283,6 +305,14 @@ function beginAssistantStream(index?: number) {
   const message: Message = {
     role: modelName.value,
     content: "",
+    execution: [
+      {
+        id: "analysis",
+        name: "分析请求",
+        status: "running",
+        message: "正在整理上下文与可用能力",
+      },
+    ],
     retryable: false,
     streaming: true,
   };
@@ -296,17 +326,89 @@ function beginAssistantStream(index?: number) {
   activeRequestID.value = id;
   return id;
 }
+function upsertExecution(message: Message, step: ExecutionStep) {
+  message.execution ||= [];
+  const current = message.execution.find((item) => item.id === step.id);
+  if (current) Object.assign(current, step);
+  else message.execution.push(step);
+}
+function completeExecution(message: Message, id: string, detail: string) {
+  const step = message.execution?.find((item) => item.id === id);
+  if (step && (step.status === "pending" || step.status === "running")) {
+    step.status = "success";
+    step.message = detail;
+  }
+}
 function acceptChatDelta(event: ChatDelta) {
   if (event.request_id !== activeRequestID.value) return;
   const message = messages.value[activeStreamIndex.value];
   if (!message) return;
+  completeExecution(message, "analysis", "上下文分析完成");
+  upsertExecution(message, {
+    id: "response",
+    name: "生成回复",
+    status: "running",
+    message: "正在流式生成答案",
+  });
   message.content += event.delta;
+  void scrollBottom();
+}
+function acceptChatProgress(event: ChatProgress) {
+  if (event.request_id !== activeRequestID.value) return;
+  const message = messages.value[activeStreamIndex.value];
+  if (!message) return;
+  if (event.kind === "turn.started") {
+    upsertExecution(message, {
+      id: "analysis",
+      name: "分析请求",
+      status: "running",
+      message: "正在整理上下文与可用能力",
+    });
+  } else if (event.kind === "tool.lifecycle") {
+    completeExecution(message, "analysis", "已选择执行路径");
+    upsertExecution(message, {
+      id: event.call_id || `tool-${message.execution?.length || 0}`,
+      name: event.name ? `调用 ${event.name}` : "调用工具",
+      status: event.status || "running",
+      message: event.message || "正在执行",
+    });
+  } else if (event.kind === "turn.completed") {
+    for (const step of message.execution || []) {
+      if (step.status === "pending" || step.status === "running") {
+        step.status = "success";
+        step.message = step.id === "response" ? "回复生成完成" : "执行完成";
+      }
+    }
+  } else if (event.kind === "turn.failed") {
+    const step = [...(message.execution || [])]
+      .reverse()
+      .find((item) => item.status === "pending" || item.status === "running");
+    if (step) {
+      step.status = "error";
+      step.message = event.error || "执行失败";
+    }
+  }
   void scrollBottom();
 }
 function finishAssistantStream(fallback: string) {
   const message = messages.value[activeStreamIndex.value];
   if (message) {
     if (!message.content) message.content = fallback || "模型没有返回文本。";
+    completeExecution(message, "analysis", "上下文分析完成");
+    if (message.content) {
+      upsertExecution(message, {
+        id: "response",
+        name: "生成回复",
+        status: "success",
+        message: "回复生成完成",
+      });
+    }
+    for (const step of message.execution || []) {
+      if (step.status === "pending" || step.status === "running") {
+        step.status = "success";
+        step.message = "执行完成";
+      }
+    }
     message.streaming = false;
     message.retryable = true;
   }
@@ -319,6 +421,13 @@ function failAssistantStream(message: string, prefix: string) {
   if (assistant) {
     assistant.role = "系统";
     assistant.content = assistant.content || `${prefix}：${message}`;
+    const step = [...(assistant.execution || [])]
+      .reverse()
+      .find((item) => item.status === "pending" || item.status === "running");
+    if (step) {
+      step.status = "error";
+      step.message = message;
+    }
   }
   finishAssistantStream("");
 }
@@ -330,6 +439,35 @@ function toggleTheme() {
   } catch {
     // Theme switching still works when persistent storage is unavailable.
   }
+}
+function openRenderedLink(event: MouseEvent) {
+  const target = event.target;
+  if (!(target instanceof Element)) return;
+  const anchor = target.closest<HTMLAnchorElement>("a[href]");
+  const href = anchor?.getAttribute("href")?.trim();
+  if (!href || href.startsWith("#")) return;
+  event.preventDefault();
+  if (/^(https?:|mailto:)/i.test(href)) BrowserOpenURL(href);
+}
+function executionIcon(status: ExecutionStatus) {
+  if (status === "success") return "✓";
+  if (status === "error") return "!";
+  if (status === "running") return "";
+  return "·";
+}
+function normalizedExecutionStatus(status: string): ExecutionStatus {
+  if (status === "running" || status === "success" || status === "error") {
+    return status;
+  }
+  return "pending";
+}
+function executionSummary(item: Message) {
+  const steps = item.execution || [];
+  const active = steps.find((step) => step.status === "running");
+  if (active) return active.message;
+  const failed = steps.find((step) => step.status === "error");
+  if (failed) return failed.message;
+  return steps.length ? `${steps.length} 个步骤已完成` : "";
 }
 function selectProvider(item: Provider | undefined) {
   if (!item) return;
@@ -471,7 +609,10 @@ async function toggleProjectForm() {
   }
 }
 async function removeProject(item: Project) {
+  if (deletingProjectID.value) return;
   if (!confirm(`删除项目“${item.name}”并归档其中会话？`)) return;
+  error.value = "";
+  deletingProjectID.value = item.uuid;
   try {
     await DeleteProject(item.uuid);
     const activeWasInProject =
@@ -483,6 +624,8 @@ async function removeProject(item: Project) {
     await refresh();
   } catch (e) {
     error.value = String(e);
+  } finally {
+    deletingProjectID.value = "";
   }
 }
 async function openThread(item: Thread) {
@@ -493,6 +636,10 @@ async function openThread(item: Thread) {
     modelName.value = item.model_name;
     messages.value = (await ThreadMessages(item.uuid)).map((message) => ({
       ...message,
+      execution: message.execution?.map((step) => ({
+        ...step,
+        status: normalizedExecutionStatus(step.status),
+      })),
       retryable: message.role !== "你",
     }));
     view.value = "chat";
@@ -787,15 +934,18 @@ async function togglePlugin(item: Plugin) {
   }
 }
 let stopChatDelta: (() => void) | undefined;
+let stopChatProgress: (() => void) | undefined;
 onMounted(() => {
   if ((window as any).runtime) {
     stopChatDelta = EventsOn("chat:delta", acceptChatDelta);
+    stopChatProgress = EventsOn("chat:progress", acceptChatProgress);
     OnFileDrop((_x, _y, paths) => void importAttachmentPaths(paths), true);
   }
   void refresh();
 });
 onUnmounted(() => {
   stopChatDelta?.();
+  stopChatProgress?.();
   if ((window as any).runtime) OnFileDropOff();
 });
 </script>
@@ -870,10 +1020,11 @@ onUnmounted(() => {
             </button>
             <button
               class="row-action"
-              title="删除项目"
-              @click="removeProject(item)"
+              :title="deletingProjectID === item.uuid ? '正在删除项目' : '删除项目'"
+              :disabled="Boolean(deletingProjectID)"
+              @click.stop="removeProject(item)"
             >
-              ×
+              {{ deletingProjectID === item.uuid ? "…" : "×" }}
             </button>
           </div>
         </nav>
@@ -986,10 +1137,42 @@ onUnmounted(() => {
                 </div>
               </div>
             </div>
-            <p>
-              {{ item.content
-              }}<i v-if="item.streaming" class="stream-cursor"></i>
-            </p>
+            <details
+              v-if="item.role !== '你' && item.execution?.length"
+              class="execution-trace"
+              :open="item.streaming"
+            >
+              <summary>
+                <span class="trace-glyph">⌁</span>
+                <b>执行过程</b>
+                <small>{{ executionSummary(item) }}</small>
+                <i></i>
+              </summary>
+              <ol>
+                <li
+                  v-for="step in item.execution"
+                  :key="step.id"
+                  :class="`trace-${step.status}`"
+                >
+                  <span class="trace-status">{{ executionIcon(step.status) }}</span>
+                  <div><b>{{ step.name }}</b><small>{{ step.message }}</small></div>
+                </li>
+              </ol>
+            </details>
+            <div
+              class="message-body"
+              :class="{ streaming: item.streaming }"
+            >
+              <div v-if="item.role === '你'" class="message-plain">
+                {{ item.content }}
+              </div>
+              <div
+                v-else
+                class="message-markdown"
+                v-html="renderMarkdown(item.content)"
+                @click="openRenderedLink"
+              ></div>
+            </div>
             <button
               v-if="item.retryable && index === lastRetryableIndex"
               class="retry-answer"
