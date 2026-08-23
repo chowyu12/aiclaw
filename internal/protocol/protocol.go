@@ -44,6 +44,10 @@ type Event struct {
 	ThreadID string             `json:"thread_id"`
 	TurnID   string             `json:"turn_id,omitzero"`
 	Item     *model.RolloutItem `json:"item,omitzero"`
+	CallID   string             `json:"call_id,omitzero"`
+	Name     string             `json:"name,omitzero"`
+	Status   string             `json:"status,omitzero"`
+	Message  string             `json:"message,omitzero"`
 	Delta    string             `json:"delta,omitzero"`
 	Error    string             `json:"error,omitzero"`
 }

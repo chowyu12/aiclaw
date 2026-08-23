@@ -32,6 +32,7 @@ func (s *scriptedSampler) Sample(_ context.Context, request SamplingRequest, emi
 }
 
 type scriptedDispatcher struct{}
+type failingDispatcher struct{ scriptedDispatcher }
 
 func (scriptedDispatcher) Definitions(context.Context, model.Thread) ([]ToolDefinition, error) {
 	return []ToolDefinition{{Name: "lookup"}}, nil
@@ -53,6 +54,9 @@ func (scriptedDispatcher) Execute(_ context.Context, _ model.Thread, call ToolCa
 		return ToolResult{}, fmt.Errorf("unexpected tool")
 	}
 	return ToolResult{CallID: call.ID, Name: call.Name, Content: "found"}, nil
+}
+func (failingDispatcher) Execute(context.Context, model.Thread, ToolCall) (ToolResult, error) {
+	return ToolResult{}, fmt.Errorf("tool unavailable")
 }
 
 func TestSessionPersistsTurnBeforeAndAfterOutput(t *testing.T) {
@@ -121,7 +125,11 @@ func TestRunTurnPersistsToolRoundAndResumesContext(t *testing.T) {
 	if err := store.CreateThread(ctx, thread); err != nil {
 		t.Fatal(err)
 	}
-	session, err := Resume(ctx, store, thread.UUID, nil)
+	var events []protocol.Event
+	session, err := Resume(ctx, store, thread.UUID, func(event protocol.Event) error {
+		events = append(events, event)
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,6 +139,20 @@ func TestRunTurnPersistsToolRoundAndResumesContext(t *testing.T) {
 	}
 	if sampler.calls != 2 {
 		t.Fatalf("sampler calls = %d, want 2", sampler.calls)
+	}
+	var lifecycle []protocol.Event
+	for _, event := range events {
+		if event.Kind == protocol.EventToolLifecycle {
+			lifecycle = append(lifecycle, event)
+		}
+	}
+	if len(lifecycle) != 3 || lifecycle[0].Status != string(model.StepPending) || lifecycle[1].Status != string(model.StepRunning) || lifecycle[2].Status != string(model.StepSuccess) {
+		t.Fatalf("tool lifecycle events = %#v", lifecycle)
+	}
+	for _, event := range lifecycle {
+		if event.CallID != "call-1" || event.Name != "lookup" {
+			t.Fatalf("tool lifecycle identity lost: %#v", event)
+		}
 	}
 	second := sampler.requests[1].Messages
 	if len(second) != 3 {
@@ -160,6 +182,39 @@ func TestRunTurnPersistsToolRoundAndResumesContext(t *testing.T) {
 	}
 	if !foundToolRequest || !foundTool || !foundFinal {
 		t.Fatalf("recovered model context misses tool/final: %#v", contextItems)
+	}
+}
+
+func TestToolFailureKeepsLifecycleIdentity(t *testing.T) {
+	ctx := context.Background()
+	store, err := gormstore.New(config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(t.TempDir(), "failed-tool.db")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	thread := &model.Thread{UserID: "local", ProviderID: 1, ModelName: "model"}
+	if err := store.CreateThread(ctx, thread); err != nil {
+		t.Fatal(err)
+	}
+	var events []protocol.Event
+	session, err := Resume(ctx, store, thread.UUID, func(event protocol.Event) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.RunTurn(ctx, "use a failing tool", &scriptedSampler{}, failingDispatcher{}); err != nil {
+		t.Fatal(err)
+	}
+	var failed *protocol.Event
+	for index := range events {
+		if events[index].Kind == protocol.EventToolLifecycle && events[index].Status == string(model.StepError) {
+			failed = &events[index]
+		}
+	}
+	if failed == nil || failed.CallID != "call-1" || failed.Name != "lookup" || failed.Error != "tool unavailable" {
+		t.Fatalf("failed lifecycle identity missing: %#v", failed)
 	}
 }
 

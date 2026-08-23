@@ -17,6 +17,7 @@ dev:
 test:
 	go test ./...
 	cd $(DESKTOP_DIR) && go test ./...
+	cd $(DESKTOP_DIR)/frontend && npm test
 	cd $(DESKTOP_DIR)/frontend && npm run build
 
 deps:

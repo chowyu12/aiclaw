@@ -37,7 +37,7 @@ jobs:
           cd desktop && wails generate module
       - name: Build desktop frontend
         working-directory: desktop/frontend
-        run: npm ci && npm run build
+        run: npm ci && npm test && npm run build
 
   macos:
     needs: test

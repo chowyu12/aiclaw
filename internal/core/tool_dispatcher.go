@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,13 +24,37 @@ type LocalToolDispatcher struct {
 	mu     sync.Mutex
 	mcp    *mcp.Manager
 	memory *memorypkg.Service
+	root   string
+	sampler Sampler
+	plans  map[string]*model.PlanState
 }
 
-func NewLocalToolDispatcher(s store.Store) *LocalToolDispatcher {
-	return &LocalToolDispatcher{store: s, memory: memorypkg.NewService(s)}
+type DispatcherOption func(*LocalToolDispatcher)
+
+func WithDispatcherRoot(root string) DispatcherOption {
+	return func(d *LocalToolDispatcher) { d.root = strings.TrimSpace(root) }
 }
+
+func WithSubAgentSampler(sampler Sampler) DispatcherOption {
+	return func(d *LocalToolDispatcher) { d.sampler = sampler }
+}
+
+func NewLocalToolDispatcher(s store.Store, options ...DispatcherOption) *LocalToolDispatcher {
+	home, _ := os.UserHomeDir()
+	d := &LocalToolDispatcher{
+		store: s, memory: memorypkg.NewService(s), root: filepath.Join(home, ".aiclaw"),
+		plans: make(map[string]*model.PlanState),
+	}
+	for _, option := range options {
+		option(d)
+	}
+	return d
+}
+
+func (d *LocalToolDispatcher) SetSampler(sampler Sampler) { d.sampler = sampler }
 
 func (d *LocalToolDispatcher) PrepareTurn(ctx context.Context, thread model.Thread, turn Turn) (context.Context, error) {
+	ctx = withToolTurn(ctx, thread, turn)
 	identity := memorypkg.ExecutionContext{
 		UserID: thread.UserID, AgentUUID: "aiclaw-desktop", ConversationID: thread.ID,
 		RunUUID: turn.ID, Input: turn.Input,
@@ -95,16 +122,43 @@ func (d *LocalToolDispatcher) Reload() {
 	}
 }
 func (d *LocalToolDispatcher) Definitions(ctx context.Context, thread model.Thread) ([]ToolDefinition, error) {
-	defs := make([]ToolDefinition, 0)
+	registry, err := d.registry(ctx, thread)
+	if err != nil {
+		return nil, err
+	}
+	return registry.Definitions(), nil
+}
+
+func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread) (*ToolRegistry, error) {
+	registry := NewToolRegistry()
 	policy := memorypkg.TurnPolicyFromContext(ctx)
+	handlers := tools.DefaultBuiltins()
 	for _, tool := range tools.DefaultBuiltinDefs() {
 		if tool.Name == "memory" && !policy.GenerateMemories {
 			continue
 		}
-		defs = append(defs, ToolDefinition{Name: tool.Name, Description: tool.Description, Schema: schemaFromFunctionDef(tool.FunctionDef)})
-	}
-	if thread.SearchEngineID > 0 {
-		defs = append(defs, ToolDefinition{Name: "web_search", Description: "Search the web through the configured local search engine", Schema: model.JSON(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}`)})
+		if tool.Name == "web_search" && thread.SearchEngineID == 0 {
+			continue
+		}
+		handler, ok := handlers[tool.Name]
+		var execute ToolHandler
+		if ok {
+			execute = func(ctx context.Context, _ model.Thread, call ToolCall) (ToolResult, error) {
+				output, runErr := handler(ctx, call.Arguments)
+				return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, runErr
+			}
+		} else {
+			execute = d.coreHandler(tool.Name)
+		}
+		if execute == nil {
+			return nil, fmt.Errorf("builtin tool %q is advertised without an executor", tool.Name)
+		}
+		if err := registry.Register(RegisteredTool{
+			Definition: ToolDefinition{Name: tool.Name, Description: tool.Description, Schema: schemaFromFunctionDef(tool.FunctionDef)},
+			Handler: execute, Source: "builtin",
+		}); err != nil {
+			return nil, err
+		}
 	}
 	manager, err := d.mcpManager(ctx)
 	if err != nil {
@@ -112,7 +166,17 @@ func (d *LocalToolDispatcher) Definitions(ctx context.Context, thread model.Thre
 	}
 	for _, tool := range manager.Tools() {
 		schema, _ := json.Marshal(tool.Parameters)
-		defs = append(defs, ToolDefinition{Name: tool.Name, Description: tool.Description, Schema: model.JSON(schema)})
+		name := tool.Name
+		if err := registry.Register(RegisteredTool{
+			Definition: ToolDefinition{Name: name, Description: tool.Description, Schema: model.JSON(schema)},
+			Source: "mcp:" + tool.ServerName,
+			Handler: func(ctx context.Context, _ model.Thread, call ToolCall) (ToolResult, error) {
+				output, callErr := manager.CallTool(ctx, name, call.Arguments)
+				return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, callErr
+			},
+		}); err != nil {
+			return nil, err
+		}
 	}
 	if skillStore, ok := d.store.(store.SkillStore); ok {
 		skills, skillErr := skillStore.ListSkills(ctx)
@@ -129,70 +193,72 @@ func (d *LocalToolDispatcher) Definitions(ctx context.Context, thread model.Thre
 			}
 			for _, definition := range definitions {
 				schema, _ := json.Marshal(definition.Parameters)
-				defs = append(defs, ToolDefinition{Name: definition.Name, Description: definition.Description, Schema: model.JSON(schema)})
+				skillCopy, definitionCopy := skill, definition
+				if err := registry.Register(RegisteredTool{
+					Definition: ToolDefinition{Name: definitionCopy.Name, Description: definitionCopy.Description, Schema: model.JSON(schema)},
+					Source: "skill:" + skillCopy.Name,
+					Handler: func(ctx context.Context, _ model.Thread, call ToolCall) (ToolResult, error) {
+						return d.executeSkillRecord(ctx, skillCopy, definitionCopy, call)
+					},
+				}); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
-	return defs, nil
+	if err := registry.Validate(); err != nil {
+		return nil, err
+	}
+	return registry, nil
 }
 func (d *LocalToolDispatcher) Execute(ctx context.Context, thread model.Thread, call ToolCall) (ToolResult, error) {
-	if call.Name == "memory" {
-		if !memorypkg.TurnPolicyFromContext(ctx).GenerateMemories {
-			return ToolResult{CallID: call.ID, Name: call.Name, Content: `{"ok":false,"error":"memory generation is disabled"}`}, nil
-		}
-		output, err := d.memory.ToolHandler(ctx, call.Arguments)
-		return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, err
-	}
-	if call.Name == "web_search" {
-		output, err := websearch.NewHandler(d.store)(websearch.WithSearchEngineID(ctx, thread.SearchEngineID), call.Arguments)
-		return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, err
-	}
-	if handler, ok := tools.DefaultBuiltins()[call.Name]; ok {
-		output, err := handler(ctx, call.Arguments)
-		return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, err
-	}
-	if result, found, err := d.executeSkill(ctx, call); found {
-		return result, err
-	}
-	manager, err := d.mcpManager(ctx)
+	registry, err := d.registry(ctx, thread)
 	if err != nil {
 		return ToolResult{CallID: call.ID, Name: call.Name}, err
 	}
-	output, err := manager.CallTool(ctx, call.Name, call.Arguments)
-	return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, err
+	tool, ok := registry.Lookup(call.Name)
+	if !ok {
+		return ToolResult{CallID: call.ID, Name: call.Name}, fmt.Errorf("tool %q is not registered", call.Name)
+	}
+	return tool.Handler(ctx, thread, call)
 }
 
-func (d *LocalToolDispatcher) executeSkill(ctx context.Context, call ToolCall) (ToolResult, bool, error) {
-	skillStore, ok := d.store.(store.SkillStore)
-	if !ok {
-		return ToolResult{}, false, nil
+func (d *LocalToolDispatcher) executeSkillRecord(ctx context.Context, skill model.Skill, _ model.SkillManifestTool, call ToolCall) (ToolResult, error) {
+	if skill.MainFile == "" || skill.InstallDir == "" {
+		return ToolResult{CallID: call.ID, Name: call.Name, Content: "Follow enabled skill instructions: " + skill.Instruction}, nil
 	}
-	items, err := skillStore.ListSkills(ctx)
-	if err != nil {
-		return ToolResult{}, true, err
-	}
-	for _, skill := range items {
-		if !skill.Enabled || len(skill.ToolDefs) == 0 {
-			continue
-		}
-		var definitions []model.SkillManifestTool
-		if json.Unmarshal(skill.ToolDefs, &definitions) != nil {
-			continue
-		}
-		for _, definition := range definitions {
-			if definition.Name != call.Name {
-				continue
+	var config map[string]any
+	_ = json.Unmarshal(skill.Config, &config)
+	output, runErr := skillrunner.RunTool(ctx, skill.InstallDir, skill.MainFile, call.Name, call.Arguments, config, 30*time.Second)
+	return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, runErr
+}
+
+func (d *LocalToolDispatcher) coreHandler(name string) ToolHandler {
+	switch name {
+	case "memory":
+		return func(ctx context.Context, _ model.Thread, call ToolCall) (ToolResult, error) {
+			if !memorypkg.TurnPolicyFromContext(ctx).GenerateMemories {
+				return ToolResult{CallID: call.ID, Name: call.Name, Content: `{"ok":false,"error":"memory generation is disabled"}`}, nil
 			}
-			if skill.MainFile == "" || skill.InstallDir == "" {
-				return ToolResult{CallID: call.ID, Name: call.Name, Content: "Follow enabled skill instructions: " + skill.Instruction}, true, nil
-			}
-			var config map[string]any
-			_ = json.Unmarshal(skill.Config, &config)
-			output, runErr := skillrunner.RunTool(ctx, skill.InstallDir, skill.MainFile, call.Name, call.Arguments, config, 30*time.Second)
-			return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, true, runErr
+			output, err := d.memory.ToolHandler(ctx, call.Arguments)
+			return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, err
 		}
+	case "web_search":
+		return func(ctx context.Context, thread model.Thread, call ToolCall) (ToolResult, error) {
+			output, err := websearch.NewHandler(d.store)(websearch.WithSearchEngineID(ctx, thread.SearchEngineID), call.Arguments)
+			return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, err
+		}
+	case "sub_agent":
+		return d.executeSubAgent
+	case "plan":
+		return d.executePlan
+	case "skill":
+		return d.executeSkillManager
+	case "session_search":
+		return d.executeSessionSearch
+	default:
+		return nil
 	}
-	return ToolResult{}, false, nil
 }
 func (d *LocalToolDispatcher) mcpManager(ctx context.Context) (*mcp.Manager, error) {
 	d.mu.Lock()

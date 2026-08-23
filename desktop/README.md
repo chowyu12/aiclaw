@@ -1,29 +1,31 @@
 # AIClaw Desktop
 
-这是 AIClaw 的 Wails 原生桌面应用模块。
+This directory contains AIClaw's native Wails desktop application.
 
 ```bash
-# 仓库根目录
+# Run from the repository root
 make dev
 make test
 make build
 ```
 
-开发模式会启动原生桌面窗口，并用 Vite 提供前端热更新。生产构建输出到 `desktop/build/bin/`；应用业务方法通过 Wails 绑定直接调用 Go，不启动 HTTP API。
+Development mode starts a native desktop window and uses Vite for frontend hot reload. Production builds are written to `desktop/build/bin/`. Application methods call Go directly through Wails bindings; the desktop application does not start an HTTP API.
 
-桌面端当前支持项目/会话管理、Provider 模型同步与增删、流式对话及重试、文件与图片附件、联网搜索、Computer Use、MCP、插件、本地记忆管理和亮暗主题。会话可以归属项目或保持未归属；左侧提供“全部会话”“未归属”和各项目三个层级的筛选。删除 Provider 下的模型只更新当前可用模型列表，不会删除或改写引用该模型的历史会话；删除当前选中模型后，界面会自动选择下一个可用模型。
+The desktop application currently supports project and conversation management, provider model synchronization and editing, streaming chat and retries, Markdown and sanitized HTML response rendering, file and image attachments, web search, Computer Use, MCP, plugins, local memory management, and dark/light themes. Conversations may belong to a project or remain unassigned. The sidebar provides three levels of filtering: **All Conversations**, **Unassigned**, and individual projects. Removing a model from a provider updates only the current available-model list; it does not delete or rewrite historical conversations that reference that model. When the selected model is removed, the UI automatically selects the next available model.
 
-输入框工具栏的“附件”支持原生多选和拖放。图片以多模态内容块发送；PDF、DOCX、XLSX、PPTX、文本和代码文件在本机解析后加入上下文。附件副本保存在 `~/.aiclaw/attachments/`，引用保存在 SQLite Rollout 中，因此重开会话和重试都能恢复。单次最多 10 个、单个最大 20MB。
+The **Execution** panel above model responses shows safe, verifiable stage information, including analysis, response generation, and each tool's lifecycle. Tool requests and results come from the SQLite rollout and remain traceable after reopening a historical conversation. The UI does not expose the model's private, token-by-token chain of thought.
 
-本地验收可运行：
+The composer toolbar supports native multi-file selection and drag-and-drop attachments. Images are sent as multimodal content blocks. PDF, DOCX, XLSX, PPTX, text, and source-code files are parsed locally before being added to context. Attachment copies are stored under `~/.aiclaw/attachments/`, and their references are stored in the SQLite rollout so they can be restored when reopening or retrying a conversation. Each request supports up to 10 attachments, with a maximum size of 20 MB per file.
+
+Run the following commands for local acceptance testing:
 
 ```bash
 make test
 make dev
 ```
 
-在“设置 → 模型 Provider”展开“管理模型”，点击模型标签右侧的 `×` 验证删除；随后新建对话确认模型选择器已更新。可再输入“请记住，我的位置是上海”，新建另一会话询问位置，以验证本地记忆；Provider 输出应逐段显示而不是等待完整响应。
+Under **Settings → Model Providers**, expand **Manage Models** and click the `×` next to a model chip to verify removal. Then create a conversation and confirm that the model picker has been updated. To test local memory, enter “Remember that my location is Shanghai,” create another conversation, and ask for your location. Provider output should appear incrementally instead of waiting for the complete response.
 
-附件验收建议同时选择一张 PNG/JPEG 和一个 Markdown/PDF，在发送前检查缩略图与文件卡片，发送后重开会话确认附件仍显示，再点击“重试”确认模型请求仍包含原附件。也可把文件直接拖到输入框，拖入时输入框应显示高亮边框。
+For attachment testing, select a PNG/JPEG image together with a Markdown/PDF document. Verify the thumbnail and file card before sending, reopen the conversation after sending to confirm that the attachments are restored, and click **Retry** to confirm that the original attachments are included again. You can also drag files directly into the composer; its border should highlight while files are being dragged over it.
 
-平台依赖请参考 Wails v2 的安装要求。macOS 需要较新的完整 Xcode SDK，Windows 安装器需要 NSIS，Linux 需要 GTK3 与 WebKitGTK。
+See the Wails v2 installation requirements for platform dependencies. macOS requires a recent full Xcode SDK, Windows installers require NSIS, and Linux requires GTK3 and WebKitGTK.

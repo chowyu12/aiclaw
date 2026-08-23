@@ -28,6 +28,20 @@ func (s *GormStore) ListProjects(ctx context.Context, userID string) ([]model.Pr
 
 func (s *GormStore) DeleteProject(ctx context.Context, projectUUID string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Detach and archive conversations before deleting their project. Besides
+		// avoiding dangling project UUIDs, this order remains valid when an
+		// existing database enables foreign-key enforcement.
+		now := time.Now()
+		if err := tx.Model(&model.Thread{}).
+			Where("project_uuid = ?", projectUUID).
+			Updates(map[string]any{
+				"project_uuid": "",
+				"status":       model.ThreadStatusArchived,
+				"archived_at":  now,
+			}).Error; err != nil {
+			return err
+		}
+
 		result := tx.Where("uuid = ?", projectUUID).Delete(&model.Project{})
 		if result.Error != nil {
 			return result.Error
@@ -35,6 +49,6 @@ func (s *GormStore) DeleteProject(ctx context.Context, projectUUID string) error
 		if result.RowsAffected == 0 {
 			return sql.ErrNoRows
 		}
-		return tx.Model(&model.Thread{}).Where("project_uuid = ?", projectUUID).Updates(map[string]any{"status": model.ThreadStatusArchived, "archived_at": time.Now()}).Error
+		return nil
 	})
 }
