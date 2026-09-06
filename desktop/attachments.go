@@ -8,15 +8,18 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/parser"
+	toolresult "github.com/chowyu12/aiclaw/internal/tools/result"
 )
 
 const (
@@ -31,6 +34,20 @@ type DesktopAttachment struct {
 	FileSize    int64  `json:"file_size"`
 	FileType    string `json:"file_type"`
 	PreviewURL  string `json:"preview_url,omitempty"`
+	Available   bool   `json:"available"`
+}
+
+// DesktopOutputFile is a local file produced or referenced by an assistant
+// turn. Unlike an attachment it remains at its original path and can be
+// opened or revealed directly from the conversation.
+type DesktopOutputFile struct {
+	Path        string `json:"path"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	FileSize    int64  `json:"file_size"`
+	FileType    string `json:"file_type"`
+	PreviewURL  string `json:"preview_url,omitempty"`
+	Description string `json:"description,omitempty"`
 	Available   bool   `json:"available"`
 }
 
@@ -60,9 +77,9 @@ func (a *App) ChooseAttachments() ([]DesktopAttachment, error) {
 	if err := a.ready(); err != nil {
 		return nil, err
 	}
-	paths, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
+	paths, err := wailsruntime.OpenMultipleFilesDialog(a.ctx, wailsruntime.OpenDialogOptions{
 		Title: "选择文件或图片",
-		Filters: []runtime.FileFilter{
+		Filters: []wailsruntime.FileFilter{
 			{DisplayName: "支持的文件", Pattern: "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.pdf;*.docx;*.xlsx;*.pptx;*.txt;*.md;*.markdown;*.json;*.jsonl;*.csv;*.tsv;*.xml;*.yaml;*.yml;*.go;*.py;*.js;*.ts;*.tsx;*.jsx;*.vue;*.html;*.css;*.scss;*.sql;*.sh;*.zsh;*.toml;*.ini;*.conf;*.log"},
 			{DisplayName: "全部文件", Pattern: "*"},
 		},
@@ -71,6 +88,142 @@ func (a *App) ChooseAttachments() ([]DesktopAttachment, error) {
 		return nil, err
 	}
 	return a.ImportAttachments(paths)
+}
+
+func (a *App) OpenAttachment(fileUUID string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	file, err := a.store.GetFileByUUID(a.ctx, strings.TrimSpace(fileUUID))
+	if err != nil {
+		return err
+	}
+	return launchDesktopFile(file.StoragePath, false)
+}
+
+func (a *App) RevealAttachment(fileUUID string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	file, err := a.store.GetFileByUUID(a.ctx, strings.TrimSpace(fileUUID))
+	if err != nil {
+		return err
+	}
+	return launchDesktopFile(file.StoragePath, true)
+}
+
+func (a *App) OpenOutputFile(path string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return launchDesktopFile(path, false)
+}
+
+func (a *App) RevealOutputFile(path string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	return launchDesktopFile(path, true)
+}
+
+func launchDesktopFile(rawPath string, reveal bool) error {
+	path, err := existingDesktopFile(rawPath)
+	if err != nil {
+		return err
+	}
+	var command *exec.Cmd
+	switch goruntime.GOOS {
+	case "darwin":
+		args := []string{path}
+		if reveal {
+			args = []string{"-R", path}
+		}
+		command = exec.Command("open", args...)
+	case "windows":
+		if reveal {
+			command = exec.Command("explorer.exe", "/select,"+path)
+		} else {
+			command = exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", path)
+		}
+	default:
+		target := path
+		if reveal {
+			target = filepath.Dir(path)
+		}
+		command = exec.Command("xdg-open", target)
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		message := strings.TrimSpace(string(output))
+		if message != "" {
+			return fmt.Errorf("打开本地文件: %s: %w", message, err)
+		}
+		return fmt.Errorf("打开本地文件: %w", err)
+	}
+	return nil
+}
+
+func existingDesktopFile(rawPath string) (string, error) {
+	path := strings.TrimSpace(strings.TrimPrefix(rawPath, "file://"))
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, path[2:])
+	}
+	if path == "" || !filepath.IsAbs(path) {
+		return "", fmt.Errorf("文件路径必须是绝对路径")
+	}
+	path = filepath.Clean(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("文件不可用: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("路径不是普通文件")
+	}
+	return path, nil
+}
+
+func desktopOutputFiles(text string) []DesktopOutputFile {
+	parsed := toolresult.ParseFileResults(text)
+	items := make([]DesktopOutputFile, 0, len(parsed))
+	for _, file := range parsed {
+		items = appendOutputFile(items, desktopOutputFile(file))
+	}
+	return items
+}
+
+func appendOutputFile(items []DesktopOutputFile, item DesktopOutputFile) []DesktopOutputFile {
+	for _, existing := range items {
+		if existing.Path == item.Path {
+			return items
+		}
+	}
+	return append(items, item)
+}
+
+func desktopOutputFile(file toolresult.FileResult) DesktopOutputFile {
+	item := DesktopOutputFile{
+		Path: filepath.Clean(file.Path), Filename: filepath.Base(file.Path),
+		ContentType: file.MimeType, Description: file.Description,
+	}
+	if item.ContentType == "" {
+		item.ContentType = toolresult.MimeFromExt(filepath.Ext(item.Path))
+	}
+	item.FileType = string(model.ClassifyFileType(item.ContentType, item.Filename))
+	info, err := os.Stat(item.Path)
+	if err != nil || !info.Mode().IsRegular() {
+		return item
+	}
+	item.Available = true
+	item.FileSize = info.Size()
+	if desktopImageMIMEs[item.ContentType] && info.Size() <= maxDesktopAttachmentBytes {
+		if data, readErr := os.ReadFile(item.Path); readErr == nil {
+			item.PreviewURL = "data:" + item.ContentType + ";base64," + base64.StdEncoding.EncodeToString(data)
+		}
+	}
+	return item
 }
 
 // ImportAttachments is also used by native drag and drop. Every selected file

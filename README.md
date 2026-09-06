@@ -12,7 +12,9 @@ AIClaw is a local-first native desktop AI application. It uses Wails to provide 
 - Render model responses as GFM Markdown and sanitized HTML, including headings, lists, tables, blockquotes, code blocks, links, and images. HTML is sanitized against an allowlist before display.
 - Show a collapsible execution panel above each response with context analysis, response generation, and tool pending/running/success/failure states. Tool steps are stored in the rollout and restored with conversation history. The UI does not display or fabricate the model's private, token-by-token chain of thought.
 - Add or drag local files and images into the composer, similar to Codex. Attachments can be previewed and removed before sending, restored from conversation history afterward, and retained when retrying.
+- Render conversation inputs and generated outputs as structured file cards. Input copies and generated files can be opened directly or revealed in Finder, Explorer, or the Linux file manager; missing historical outputs remain visible with an unavailable state.
 - Send JPEG, PNG, WebP, and GIF files as native multimodal image blocks. Extract PDF, DOCX, XLSX, PPTX, text, source code, and common configuration-file content locally before adding it to model context.
+- Adapt the native window from compact `680×540` layouts through large desktop screens. Conversation height, sidebar width, composer controls, settings panels, and file grids reflow without horizontal clipping.
 - Use a fully local memory system stored in SQLite, with cross-conversation retrieval, explicit memories, candidate review, approval, and forgetting. Memory use and memory generation can be disabled independently.
 - Enable web search by default for new conversations and manage search services under **Settings → Web Search**.
 - Manage providers, local tool permissions, MCP, and plugins from Settings.
@@ -74,6 +76,8 @@ Attachments are copied into AIClaw's private local directory before being associ
 - **Safe fallback:** Document content is parsed locally and capped before being injected. Unsupported binary files are rejected before sending instead of being passed to the model as unreadable text.
 
 Removing an attachment before sending also deletes its staged copy. Sent attachments belong to conversation history and cannot be silently removed from an individual message. Unsent staged attachments older than 24 hours are cleaned automatically when the application starts.
+
+Generated files returned by built-in tools are detected from structured tool results. AIClaw also recognizes existing absolute file paths in command output and assistant Markdown. These references are deduplicated and displayed below the corresponding response. **Open** launches the file with the operating system's default application; **Reveal** selects it in Finder or Explorer, or opens its containing folder on Linux. Generated output files remain at their original paths and are not copied into AIClaw's private attachment directory.
 
 ## Plugin Format
 

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
+	toolresult "github.com/chowyu12/aiclaw/internal/tools/result"
 )
 
 type retryOnceSampler struct {
@@ -25,6 +27,25 @@ type retryOnceSampler struct {
 
 type attachmentCaptureSampler struct {
 	requests []core.SamplingRequest
+}
+
+type blockingSampler struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingSampler) Sample(ctx context.Context, _ core.SamplingRequest, emit func(string) error) (core.SamplingResult, error) {
+	s.once.Do(func() { close(s.started) })
+	select {
+	case <-s.release:
+	case <-ctx.Done():
+		return core.SamplingResult{}, ctx.Err()
+	}
+	if err := emit("background response"); err != nil {
+		return core.SamplingResult{}, err
+	}
+	return core.SamplingResult{Text: "background response"}, nil
 }
 
 func (s *attachmentCaptureSampler) Sample(_ context.Context, request core.SamplingRequest, emit func(string) error) (core.SamplingResult, error) {
@@ -77,6 +98,54 @@ func TestFailedFirstChatKeepsThreadIDAndCanRetry(t *testing.T) {
 	}
 	if retried.Error != "" || retried.ThreadID != failed.ThreadID || retried.Content != "recovered response" {
 		t.Fatalf("unexpected retry result: %+v", retried)
+	}
+}
+
+func TestBackgroundChatSurvivesConversationSwitch(t *testing.T) {
+	app := newTestDesktopApp(t)
+	sampler := &blockingSampler{started: make(chan struct{}), release: make(chan struct{})}
+	app.server = appserver.New(app.store, sampler, app.tools)
+	profile := ChatProfile{ProviderID: 1, ModelName: "background-model", RequestID: "request-background"}
+
+	started, err := app.StartChat(profile, "", "keep running", nil)
+	if err != nil || started.ThreadID == "" || started.RequestID != profile.RequestID {
+		t.Fatalf("start background chat: result=%+v err=%v", started, err)
+	}
+	select {
+	case <-sampler.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background sampler did not start")
+	}
+
+	other := &model.Thread{UserID: "local", ProviderID: 1, ModelName: "other-model", Title: "other"}
+	if err := app.store.CreateThread(app.ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.ThreadMessages(other.UUID); err != nil {
+		t.Fatalf("switching to another conversation failed: %v", err)
+	}
+	active := app.BackgroundChats()
+	if len(active) != 1 || active[0].ThreadID != started.ThreadID {
+		t.Fatalf("background task disappeared after switch: %+v", active)
+	}
+	if _, err := app.StartChat(profile, started.ThreadID, "overlap", nil); err == nil {
+		t.Fatal("same conversation accepted an overlapping background task")
+	}
+	if err := app.ArchiveThread(started.ThreadID); err == nil {
+		t.Fatal("running conversation was archived")
+	}
+
+	close(sampler.release)
+	deadline := time.Now().Add(3 * time.Second)
+	for len(app.BackgroundChats()) != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(app.BackgroundChats()) != 0 {
+		t.Fatal("background task did not finish")
+	}
+	messages, err := app.ThreadMessages(started.ThreadID)
+	if err != nil || len(messages) != 2 || messages[1].Content != "background response" {
+		t.Fatalf("background result was not persisted: messages=%+v err=%v", messages, err)
 	}
 }
 
@@ -359,6 +428,35 @@ func TestDeleteEmptyProject(t *testing.T) {
 	}
 }
 
+func TestDeleteProjectWithAlreadyArchivedThreads(t *testing.T) {
+	app := newTestDesktopApp(t)
+	project, err := app.CreateProject("Archived workspace")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := &model.Thread{
+		UserID:      "local",
+		ProjectUUID: project.UUID,
+		ProviderID:  1,
+		ModelName:   "model-a",
+		Title:       "Archived conversation",
+		Status:      model.ThreadStatusArchived,
+	}
+	if err := app.store.CreateThread(app.ctx, thread); err != nil {
+		t.Fatal(err)
+	}
+	if err := app.DeleteProject(project.UUID); err != nil {
+		t.Fatalf("delete project with archived conversation: %v", err)
+	}
+	archived, err := app.store.GetThreadByUUID(app.ctx, thread.UUID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archived.ProjectUUID != "" || archived.Status != model.ThreadStatusArchived {
+		t.Fatalf("archived conversation was not detached: %+v", archived)
+	}
+}
+
 func TestDeleteProjectRejectsMissingID(t *testing.T) {
 	app := newTestDesktopApp(t)
 	if err := app.DeleteProject("  "); err == nil {
@@ -516,6 +614,8 @@ func TestDesktopMemorySettingsAndReview(t *testing.T) {
 
 func TestThreadMessagesRestoresToolExecutionTrace(t *testing.T) {
 	app := newTestDesktopApp(t)
+	generated := filepath.Join(t.TempDir(), "report.xlsx")
+	mustWrite(t, generated, "generated workbook")
 	thread := &model.Thread{UserID: "local", ProviderID: 1, ModelName: "test", Title: "trace"}
 	if err := app.store.CreateThread(app.ctx, thread); err != nil {
 		t.Fatal(err)
@@ -530,8 +630,8 @@ func TestThreadMessagesRestoresToolExecutionTrace(t *testing.T) {
 	_, err := app.store.AppendRollout(app.ctx, thread.ID, []model.RolloutItem{
 		{TurnID: "turn-trace", Kind: model.RolloutUserMessage, ModelVisible: true, Payload: encode(map[string]any{"content": "查找资料"})},
 		{TurnID: "turn-trace", Kind: model.RolloutToolRequested, ModelVisible: true, Payload: encode(map[string]any{"tool_calls": []core.ToolCall{{ID: "call-search", Name: "exec", Arguments: `{"command":"go test ./...","working_dir":"/workspace"}`}}})},
-		{TurnID: "turn-trace", Kind: model.RolloutToolCompleted, ModelVisible: true, Payload: encode(map[string]any{"call_id": "call-search", "name": "exec", "status": model.StepSuccess, "output": "ok", "duration_ms": 1250})},
-		{TurnID: "turn-trace", Kind: model.RolloutAssistantFinal, ModelVisible: true, Payload: encode(map[string]any{"content": "已找到资料"})},
+		{TurnID: "turn-trace", Kind: model.RolloutToolCompleted, ModelVisible: true, Payload: encode(map[string]any{"call_id": "call-search", "name": "exec", "status": model.StepSuccess, "output": toolresult.NewFileResult(generated, toolresult.MimeFromExt(filepath.Ext(generated)), "Generated workbook"), "duration_ms": 1250})},
+		{TurnID: "turn-trace", Kind: model.RolloutAssistantFinal, ModelVisible: true, Payload: encode(map[string]any{"content": "文件已生成：`" + generated + "`"})},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -547,8 +647,17 @@ func TestThreadMessagesRestoresToolExecutionTrace(t *testing.T) {
 	if step.ID != "call-search" || step.Name != "exec" || step.Status != string(model.StepSuccess) {
 		t.Fatalf("unexpected restored execution step: %+v", step)
 	}
-	if step.Input != `{"command":"go test ./...","working_dir":"/workspace"}` || step.Output != "ok" || step.DurationMS != 1250 {
+	if step.Input != `{"command":"go test ./...","working_dir":"/workspace"}` || step.DurationMS != 1250 {
 		t.Fatalf("execution details were not restored: %+v", step)
+	}
+	if len(messages[1].Files) != 1 || messages[1].Files[0].Path != generated || !messages[1].Files[0].Available {
+		t.Fatalf("generated file was not restored or deduplicated: %+v", messages[1].Files)
+	}
+	if messages[1].Files[0].ContentType != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+		t.Fatalf("generated file MIME = %q", messages[1].Files[0].ContentType)
+	}
+	if err := app.OpenOutputFile(filepath.Join(t.TempDir(), "missing.txt")); err == nil {
+		t.Fatal("missing generated file was opened")
 	}
 }
 

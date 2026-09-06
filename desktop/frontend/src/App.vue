@@ -6,8 +6,8 @@ import {
   AddProviderModel,
   AddSearchEngine,
   ArchiveThread,
+  BackgroundChats,
   ApproveMemory,
-  Chat,
   ChooseAttachments,
   ChoosePluginDirectory,
   CreateProject,
@@ -23,13 +23,18 @@ import {
   MemorySettings,
   ImportAttachments,
   MoveThreadToProject,
+  OpenAttachment,
+  OpenOutputFile,
   Plugins,
   Projects,
   Providers,
+  RevealAttachment,
+  RevealOutputFile,
   RemoveProviderModel,
-  Retry,
   SearchEngines,
   SetMemorySettings,
+  StartChat,
+  StartRetry,
   Status,
   SyncProviderModels,
   ThreadMessages,
@@ -71,6 +76,16 @@ type Attachment = {
   preview_url?: string;
   available: boolean;
 };
+type OutputFile = {
+  path: string;
+  filename: string;
+  content_type: string;
+  file_size: number;
+  file_type: string;
+  preview_url?: string;
+  description?: string;
+  available: boolean;
+};
 type ExecutionStatus = "pending" | "running" | "success" | "error";
 type ExecutionStep = {
   id: string;
@@ -87,9 +102,27 @@ type Message = {
   role: string;
   content: string;
   attachments?: Attachment[];
+  files?: OutputFile[];
   execution?: ExecutionStep[];
   retryable?: boolean;
   streaming?: boolean;
+  live_request_id?: string;
+};
+type LiveRun = {
+  requestID: string;
+  threadID: string;
+  message: Message;
+};
+type BackgroundChat = {
+  request_id: string;
+  thread_id: string;
+  started_at: string;
+};
+type ChatFinished = {
+  request_id: string;
+  thread_id: string;
+  content?: string;
+  error?: string;
 };
 type MemoryItem = {
   uuid: string;
@@ -147,6 +180,12 @@ type Plugin = {
   permissions: string[];
 };
 type Theme = "dark" | "light";
+type ConfirmationRequest = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  resolve: (confirmed: boolean) => void;
+};
 
 function savedTheme(): Theme {
   try {
@@ -181,18 +220,18 @@ const projectID = ref(""),
   memoryUse = ref(true),
   memoryGenerate = ref(true);
 const prompt = ref(""),
-  busy = ref(false),
+  launching = ref(false),
   error = ref(""),
   projectName = ref(""),
-  activeRequestID = ref(""),
-  activeStreamIndex = ref(-1),
   messagePane = ref<HTMLElement>(),
   projectInput = ref<HTMLInputElement>();
 const projectFormOpen = ref(false),
   deletingProjectID = ref(""),
   providerFormOpen = ref(false),
   modelPickerOpen = ref(false);
+const confirmation = ref<ConfirmationRequest>();
 const executionClock = ref(Date.now());
+const liveRuns = ref<Record<string, LiveRun>>({});
 const providerForm = ref({
   name: "",
   type: "openai-compatible",
@@ -259,6 +298,17 @@ const lastRetryableIndex = computed(() => {
   }
   return -1;
 });
+const busy = computed(
+  () =>
+    launching.value ||
+    Object.values(liveRuns.value).some(
+      (run) =>
+        (Boolean(run.threadID) && run.threadID === threadID.value) ||
+        messages.value.some(
+          (message) => message.live_request_id === run.requestID,
+        ),
+    ),
+);
 
 async function refresh() {
   try {
@@ -313,8 +363,7 @@ function chatProfile(id: string) {
     MemoryGenerateEnabled: memoryGenerate.value,
   };
 }
-function beginAssistantStream(index?: number) {
-  const id = requestID();
+function beginAssistantStream(id: string, index?: number) {
   const message: Message = {
     role: modelName.value,
     content: "",
@@ -328,16 +377,14 @@ function beginAssistantStream(index?: number) {
     ],
     retryable: false,
     streaming: true,
+    live_request_id: id,
   };
   if (index === undefined) {
     messages.value.push(message);
-    activeStreamIndex.value = messages.value.length - 1;
   } else {
     messages.value.splice(index, 1, message);
-    activeStreamIndex.value = index;
   }
-  activeRequestID.value = id;
-  return id;
+  return message;
 }
 function upsertExecution(message: Message, step: ExecutionStep) {
   message.execution ||= [];
@@ -357,9 +404,9 @@ function completeExecution(message: Message, id: string, detail: string) {
   }
 }
 function acceptChatDelta(event: ChatDelta) {
-  if (event.request_id !== activeRequestID.value) return;
-  const message = messages.value[activeStreamIndex.value];
-  if (!message) return;
+  const run = liveRunForEvent(event.request_id, event.thread_id);
+  if (!run) return;
+  const message = run.message;
   completeExecution(message, "analysis", "上下文分析完成");
   upsertExecution(message, {
     id: "response",
@@ -368,12 +415,12 @@ function acceptChatDelta(event: ChatDelta) {
     message: "正在流式生成答案",
   });
   message.content += event.delta;
-  void scrollBottom();
+  if (runIsVisible(run)) void scrollBottom();
 }
 function acceptChatProgress(event: ChatProgress) {
-  if (event.request_id !== activeRequestID.value) return;
-  const message = messages.value[activeStreamIndex.value];
-  if (!message) return;
+  const run = liveRunForEvent(event.request_id, event.thread_id);
+  if (!run) return;
+  const message = run.message;
   if (event.kind === "turn.started") {
     upsertExecution(message, {
       id: "analysis",
@@ -410,48 +457,91 @@ function acceptChatProgress(event: ChatProgress) {
       step.message = event.error || "执行失败";
     }
   }
-  void scrollBottom();
+  if (runIsVisible(run)) void scrollBottom();
 }
-function finishAssistantStream(fallback: string) {
-  const message = messages.value[activeStreamIndex.value];
-  if (message) {
-    if (!message.content) message.content = fallback || "模型没有返回文本。";
-    completeExecution(message, "analysis", "上下文分析完成");
-    if (message.content) {
-      upsertExecution(message, {
-        id: "response",
-        name: "生成回复",
-        status: "success",
-        message: "回复生成完成",
-      });
-    }
-    for (const step of message.execution || []) {
-      if (step.status === "pending" || step.status === "running") {
-        step.status = "success";
-        step.message = "执行完成";
-      }
-    }
-    message.streaming = false;
-    message.retryable = true;
+function finishAssistantStream(message: Message, fallback: string) {
+  if (!message.content) message.content = fallback || "模型没有返回文本。";
+  completeExecution(message, "analysis", "上下文分析完成");
+  if (message.content) {
+    upsertExecution(message, {
+      id: "response",
+      name: "生成回复",
+      status: "success",
+      message: "回复生成完成",
+    });
   }
-  activeRequestID.value = "";
-  activeStreamIndex.value = -1;
-}
-function failAssistantStream(message: string, prefix: string) {
-  error.value = message;
-  const assistant = messages.value[activeStreamIndex.value];
-  if (assistant) {
-    assistant.role = "系统";
-    assistant.content = assistant.content || `${prefix}：${message}`;
-    const step = [...(assistant.execution || [])]
-      .reverse()
-      .find((item) => item.status === "pending" || item.status === "running");
-    if (step) {
-      step.status = "error";
-      step.message = message;
+  for (const step of message.execution || []) {
+    if (step.status === "pending" || step.status === "running") {
+      step.status = "success";
+      step.message = "执行完成";
     }
   }
-  finishAssistantStream("");
+  message.streaming = false;
+  message.retryable = true;
+}
+function failAssistantStream(
+  assistant: Message,
+  message: string,
+  prefix: string,
+  visible: boolean,
+) {
+  if (visible) error.value = message;
+  assistant.role = "系统";
+  assistant.content = assistant.content || `${prefix}：${message}`;
+  const step = [...(assistant.execution || [])]
+    .reverse()
+    .find((item) => item.status === "pending" || item.status === "running");
+  if (step) {
+    step.status = "error";
+    step.message = message;
+  }
+  assistant.streaming = false;
+  assistant.retryable = true;
+}
+function liveRunForEvent(request: string, eventThreadID: string) {
+  const run = liveRuns.value[request];
+  if (!run) return undefined;
+  if (eventThreadID && !run.threadID) run.threadID = eventThreadID;
+  if (
+    eventThreadID &&
+    !threadID.value &&
+    messages.value.some((item) => item.live_request_id === request)
+  ) {
+    threadID.value = eventThreadID;
+  }
+  return run;
+}
+function runIsVisible(run: LiveRun) {
+  return (
+    (Boolean(run.threadID) && run.threadID === threadID.value) ||
+    messages.value.some((item) => item.live_request_id === run.requestID)
+  );
+}
+function removeLiveRun(request: string) {
+  const next = { ...liveRuns.value };
+  delete next[request];
+  liveRuns.value = next;
+}
+async function acceptChatFinished(event: ChatFinished) {
+  const run = liveRunForEvent(event.request_id, event.thread_id);
+  if (!run) {
+    await refresh();
+    return;
+  }
+  const visible = runIsVisible(run);
+  if (event.error)
+    failAssistantStream(run.message, event.error, "生成失败", visible);
+  else finishAssistantStream(run.message, event.content || "");
+  removeLiveRun(event.request_id);
+  await refresh();
+  if (visible && event.thread_id === threadID.value) {
+    try {
+      messages.value = await loadThreadMessages(event.thread_id);
+    } catch (e) {
+      error.value = String(e);
+    }
+    await scrollBottom();
+  }
 }
 function toggleTheme() {
   theme.value = theme.value === "dark" ? "light" : "dark";
@@ -591,13 +681,31 @@ function newChat() {
       : "";
   view.value = "chat";
 }
-function attachmentIcon(item: Attachment) {
+function fileIcon(item: { file_type: string; content_type: string }) {
   if (item.file_type === "image") return "▧";
   if (item.content_type.includes("pdf")) return "PDF";
   if (item.content_type.includes("spreadsheet")) return "XLS";
   if (item.content_type.includes("presentation")) return "PPT";
   if (item.content_type.includes("wordprocessing")) return "DOC";
   return "TXT";
+}
+async function openAttachmentFile(item: Attachment, reveal = false) {
+  try {
+    error.value = "";
+    if (reveal) await RevealAttachment(item.uuid);
+    else await OpenAttachment(item.uuid);
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+async function openOutputFile(item: OutputFile, reveal = false) {
+  try {
+    error.value = "";
+    if (reveal) await RevealOutputFile(item.path);
+    else await OpenOutputFile(item.path);
+  } catch (e) {
+    error.value = String(e);
+  }
 }
 function attachmentSize(size: number) {
   if (size < 1024) return `${size} B`;
@@ -696,9 +804,31 @@ async function toggleProjectForm() {
     projectName.value = "";
   }
 }
+function askConfirmation(
+  title: string,
+  message: string,
+  confirmLabel = "删除",
+) {
+  return new Promise<boolean>((resolve) => {
+    confirmation.value = { title, message, confirmLabel, resolve };
+  });
+}
+function resolveConfirmation(confirmed: boolean) {
+  const pending = confirmation.value;
+  if (!pending) return;
+  confirmation.value = undefined;
+  pending.resolve(confirmed);
+}
 async function removeProject(item: Project) {
   if (deletingProjectID.value) return;
-  if (!confirm(`删除项目“${item.name}”并归档其中会话？`)) return;
+  if (
+    !(await askConfirmation(
+      "删除项目？",
+      `项目“${item.name}”会被删除，其中的会话将移入归档。`,
+      "删除项目",
+    ))
+  )
+    return;
   error.value = "";
   deletingProjectID.value = item.uuid;
   try {
@@ -722,19 +852,27 @@ async function openThread(item: Thread) {
     projectID.value = item.project_uuid;
     providerID.value = item.provider_id;
     modelName.value = item.model_name;
-    messages.value = (await ThreadMessages(item.uuid)).map((message) => ({
-      ...message,
-      execution: message.execution?.map((step) => ({
-        ...step,
-        status: normalizedExecutionStatus(step.status),
-      })),
-      retryable: message.role !== "你",
-    }));
+    const history = await loadThreadMessages(item.uuid);
+    const active = Object.values(liveRuns.value).find(
+      (run) => run.threadID === item.uuid,
+    );
+    if (active) history.push(active.message);
+    messages.value = history;
     view.value = "chat";
     await scrollBottom();
   } catch (e) {
     error.value = String(e);
   }
+}
+async function loadThreadMessages(id: string): Promise<Message[]> {
+  return (await ThreadMessages(id)).map((message) => ({
+    ...message,
+    execution: message.execution?.map((step) => ({
+      ...step,
+      status: normalizedExecutionStatus(step.status),
+    })),
+    retryable: message.role !== "你",
+  }));
 }
 async function changeThreadProject(value: string) {
   const previous = projectID.value;
@@ -775,57 +913,100 @@ async function send() {
     content: input || "请分析这些附件。",
     attachments,
   });
-  const streamRequestID = beginAssistantStream();
+  const streamRequestID = requestID();
+  const assistant = beginAssistantStream(streamRequestID);
+  const run: LiveRun = {
+    requestID: streamRequestID,
+    threadID: threadID.value,
+    message: assistant,
+  };
+  liveRuns.value = { ...liveRuns.value, [streamRequestID]: run };
   prompt.value = "";
   pendingAttachments.value = [];
-  busy.value = true;
+  launching.value = true;
   error.value = "";
   await scrollBottom();
   try {
-    const result = await Chat(
+    const result = await StartChat(
       chatProfile(streamRequestID),
       threadID.value,
       input,
       attachments.map((item) => item.uuid),
     );
-    threadID.value = result.threadId;
-    if (result.error) {
-      failAssistantStream(result.error, "生成失败");
-      await refresh();
-      await scrollBottom();
-      return;
+    run.threadID = result.thread_id;
+    if (
+      messages.value.some(
+        (message) => message.live_request_id === streamRequestID,
+      )
+    ) {
+      threadID.value = result.thread_id;
     }
-    finishAssistantStream(result.content);
     await refresh();
     await scrollBottom();
   } catch (e) {
-    failAssistantStream(String(e), "生成失败");
+    failAssistantStream(assistant, String(e), "生成失败", runIsVisible(run));
+    removeLiveRun(streamRequestID);
   } finally {
-    busy.value = false;
+    launching.value = false;
   }
 }
 async function retryLastAnswer() {
   if (!threadID.value || busy.value || lastRetryableIndex.value < 0) return;
   const index = lastRetryableIndex.value;
-  const streamRequestID = beginAssistantStream(index);
-  busy.value = true;
+  const streamRequestID = requestID();
+  const targetThreadID = threadID.value;
+  const assistant = beginAssistantStream(streamRequestID, index);
+  const run: LiveRun = {
+    requestID: streamRequestID,
+    threadID: targetThreadID,
+    message: assistant,
+  };
+  liveRuns.value = { ...liveRuns.value, [streamRequestID]: run };
+  launching.value = true;
   error.value = "";
   try {
-    const result = await Retry(chatProfile(streamRequestID), threadID.value);
-    threadID.value = result.threadId;
-    if (result.error) {
-      failAssistantStream(result.error, "重试失败");
-      await refresh();
-      return;
-    }
-    finishAssistantStream(result.content);
+    await StartRetry(chatProfile(streamRequestID), targetThreadID);
     await refresh();
   } catch (e) {
-    failAssistantStream(String(e), "重试失败");
+    failAssistantStream(assistant, String(e), "重试失败", runIsVisible(run));
+    removeLiveRun(streamRequestID);
   } finally {
-    busy.value = false;
+    launching.value = false;
     await scrollBottom();
   }
+}
+
+function isThreadRunning(id: string) {
+  return Object.values(liveRuns.value).some((run) => run.threadID === id);
+}
+
+async function restoreBackgroundChats() {
+  const active = (await BackgroundChats()) as BackgroundChat[];
+  const next = { ...liveRuns.value };
+  for (const item of active) {
+    if (next[item.request_id]) continue;
+    const thread = threads.value.find((entry) => entry.uuid === item.thread_id);
+    next[item.request_id] = {
+      requestID: item.request_id,
+      threadID: item.thread_id,
+      message: {
+        role: thread?.model_name || "AIClaw",
+        content: "",
+        execution: [
+          {
+            id: "analysis",
+            name: "后台执行",
+            status: "running",
+            message: "会话正在后台继续运行",
+          },
+        ],
+        streaming: true,
+        retryable: false,
+        live_request_id: item.request_id,
+      },
+    };
+  }
+  liveRuns.value = next;
 }
 async function saveMemorySettings() {
   try {
@@ -844,7 +1025,14 @@ async function approveMemory(item: MemoryItem) {
   }
 }
 async function forgetMemory(item: MemoryItem) {
-  if (!confirm(`忘记“${item.content}”？`)) return;
+  if (
+    !(await askConfirmation(
+      "忘记这条记忆？",
+      `“${item.content}”将从本地记忆中永久删除。`,
+      "忘记",
+    ))
+  )
+    return;
   try {
     await ForgetMemory(item.uuid);
     await refresh();
@@ -900,7 +1088,14 @@ async function removeModel(item: Provider, name: string) {
   }
 }
 async function removeProvider(item: Provider) {
-  if (!confirm(`删除 Provider“${item.name}”？`)) return;
+  if (
+    !(await askConfirmation(
+      "删除 Provider？",
+      `Provider“${item.name}”及其本地配置将被删除。`,
+      "删除 Provider",
+    ))
+  )
+    return;
   try {
     await DeleteProvider(item.id);
     if (providerID.value === item.id) {
@@ -1039,21 +1234,27 @@ async function removePlugin(item: Plugin) {
 }
 let stopChatDelta: (() => void) | undefined;
 let stopChatProgress: (() => void) | undefined;
+let stopChatFinished: (() => void) | undefined;
 let executionClockTimer: number | undefined;
 onMounted(() => {
   if ((window as any).runtime) {
     stopChatDelta = EventsOn("chat:delta", acceptChatDelta);
     stopChatProgress = EventsOn("chat:progress", acceptChatProgress);
+    stopChatFinished = EventsOn("chat:finished", acceptChatFinished);
     OnFileDrop((_x, _y, paths) => void importAttachmentPaths(paths), true);
   }
   executionClockTimer = window.setInterval(() => {
     executionClock.value = Date.now();
   }, 1000);
-  void refresh();
+  void (async () => {
+    await refresh();
+    await restoreBackgroundChats();
+  })();
 });
 onUnmounted(() => {
   stopChatDelta?.();
   stopChatProgress?.();
+  stopChatFinished?.();
   if (executionClockTimer !== undefined)
     window.clearInterval(executionClockTimer);
   if ((window as any).runtime) OnFileDropOff();
@@ -1149,10 +1350,21 @@ onUnmounted(() => {
             :class="{ active: threadID === item.uuid }"
             @click="openThread(item)"
           >
-            <span class="status-dot"></span
-            ><span>{{ item.title || "新对话" }}</span>
+            <span
+              class="status-dot"
+              :class="{ running: isThreadRunning(item.uuid) }"
+            ></span
+            ><span>{{ item.title || "新对话" }}</span
+            ><small v-if="isThreadRunning(item.uuid)" class="background-label"
+              >后台</small
+            >
           </button>
-          <button class="row-action" title="归档会话" @click="archive(item)">
+          <button
+            class="row-action"
+            :title="isThreadRunning(item.uuid) ? '后台任务运行中' : '归档会话'"
+            :disabled="isThreadRunning(item.uuid)"
+            @click="archive(item)"
+          >
             ⌁
           </button>
         </div>
@@ -1227,7 +1439,7 @@ onUnmounted(() => {
           >
             <div class="message-role">{{ item.role }}</div>
             <div v-if="item.attachments?.length" class="message-attachments">
-              <div
+              <article
                 v-for="attachment in item.attachments"
                 :key="attachment.uuid"
                 :class="['message-attachment', attachment.file_type]"
@@ -1237,15 +1449,31 @@ onUnmounted(() => {
                   :src="attachment.preview_url"
                   :alt="attachment.filename"
                 />
-                <span v-else>{{ attachmentIcon(attachment) }}</span>
-                <div>
+                <span v-else>{{ fileIcon(attachment) }}</span>
+                <div class="file-card-copy">
                   <b>{{ attachment.filename }}</b>
                   <small
                     >{{ attachmentSize(attachment.file_size) }} ·
                     {{ attachment.available ? "本地附件" : "文件缺失" }}</small
                   >
                 </div>
-              </div>
+                <div class="file-card-actions">
+                  <button
+                    type="button"
+                    :disabled="!attachment.available"
+                    @click="openAttachmentFile(attachment)"
+                  >
+                    打开
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="!attachment.available"
+                    @click="openAttachmentFile(attachment, true)"
+                  >
+                    定位
+                  </button>
+                </div>
+              </article>
             </div>
             <details
               v-if="item.role !== '你' && item.execution?.length"
@@ -1314,6 +1542,49 @@ onUnmounted(() => {
                 @click="openRenderedLink"
               ></div>
             </div>
+            <section v-if="item.files?.length" class="output-files">
+              <header>
+                <span>↗</span>
+                <div><b>生成文件</b><small>{{ item.files.length }} 个本地文件</small></div>
+              </header>
+              <div class="output-file-grid">
+                <article
+                  v-for="file in item.files"
+                  :key="file.path"
+                  :class="['output-file', file.file_type, { missing: !file.available }]"
+                >
+                  <img
+                    v-if="file.preview_url"
+                    :src="file.preview_url"
+                    :alt="file.filename"
+                  />
+                  <span v-else>{{ fileIcon(file) }}</span>
+                  <div class="file-card-copy">
+                    <b>{{ file.filename }}</b>
+                    <small :title="file.path">{{ file.path }}</small>
+                    <em
+                      >{{ file.available ? attachmentSize(file.file_size) : "文件已移动或删除" }}</em
+                    >
+                  </div>
+                  <div class="file-card-actions">
+                    <button
+                      type="button"
+                      :disabled="!file.available"
+                      @click="openOutputFile(file)"
+                    >
+                      打开
+                    </button>
+                    <button
+                      type="button"
+                      :disabled="!file.available"
+                      @click="openOutputFile(file, true)"
+                    >
+                      定位
+                    </button>
+                  </div>
+                </article>
+              </div>
+            </section>
             <button
               v-if="item.retryable && index === lastRetryableIndex"
               class="retry-answer"
@@ -1430,7 +1701,7 @@ onUnmounted(() => {
                 :src="item.preview_url"
                 :alt="item.filename"
               />
-              <span v-else>{{ attachmentIcon(item) }}</span>
+              <span v-else>{{ fileIcon(item) }}</span>
               <div>
                 <b>{{ item.filename }}</b
                 ><small>{{ attachmentSize(item.file_size) }}</small>
@@ -1897,5 +2168,38 @@ onUnmounted(() => {
         </div>
       </section>
     </section>
+    <div
+      v-if="confirmation"
+      class="confirmation-backdrop"
+      role="presentation"
+      @click.self="resolveConfirmation(false)"
+    >
+      <section
+        class="confirmation-dialog"
+        role="alertdialog"
+        aria-modal="true"
+        :aria-labelledby="'confirmation-title'"
+        @keydown.esc.prevent="resolveConfirmation(false)"
+      >
+        <div class="confirmation-icon">!</div>
+        <div class="confirmation-copy">
+          <h2 id="confirmation-title">{{ confirmation.title }}</h2>
+          <p>{{ confirmation.message }}</p>
+        </div>
+        <div class="confirmation-actions">
+          <button type="button" @click="resolveConfirmation(false)">
+            取消
+          </button>
+          <button
+            type="button"
+            class="confirmation-danger"
+            autofocus
+            @click="resolveConfirmation(true)"
+          >
+            {{ confirmation.confirmLabel }}
+          </button>
+        </div>
+      </section>
+    </div>
   </main>
 </template>

@@ -7,11 +7,13 @@ npm ci
 npm run build
 ```
 
-Attachment controls live in the conversation composer and support native multi-file selection, Wails file drag-and-drop, image thumbnails, document cards, removal before sending, and restoration from conversation history. The frontend stores only attachment UUIDs. File copying, format detection, size limits, text extraction, and SQLite associations are handled by the Go bridge.
+Attachment controls live in the conversation composer and support native multi-file selection, Wails file drag-and-drop, image thumbnails, document cards, removal before sending, and restoration from conversation history. Assistant-generated files are displayed in a separate output grid with availability, size, path, image preview, open, and reveal controls. The frontend stores attachment UUIDs and output paths; file copying, path validation, format detection, size limits, text extraction, SQLite associations, and operating-system file-manager commands are handled by the Go bridge.
 
 Assistant responses are parsed as GFM Markdown by `marked` and sanitized by `DOMPurify` before rendering. Common formatting HTML is allowed, while scripts, event attributes, forms, iframes, inline styles, and dangerous URLs are removed. External links are opened in the system browser.
 
-Streaming responses also subscribe to `chat:progress`. Analysis, response generation, and `tool.lifecycle` events are displayed as collapsible execution steps. Completed tool steps are restored from the backend rollout. The frontend does not expose raw tool inputs and outputs or the model's private chain of thought.
+Streaming responses also subscribe to `chat:progress`. Analysis, response generation, and `tool.lifecycle` events are displayed as collapsible execution steps. Completed tool steps and file results are restored from the backend rollout. The frontend shows user-verifiable command details and tool results but does not expose or fabricate the model's private chain of thought.
+
+The application shell uses a height-aware flex conversation layout and responsive width breakpoints. The Wails window enforces a minimum usable size of `680×540`; below `900px`, sidebar, workspace, composer, settings, and generated-file grids progressively compact or wrap.
 
 After changing a Go binding method or return type, run the following command from `desktop/`:
 
