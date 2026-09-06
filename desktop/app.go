@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/appserver"
@@ -29,6 +31,18 @@ type App struct {
 	memory *memorypkg.Service
 	root   string
 	err    string
+
+	runMu     sync.Mutex
+	runs      map[string]*backgroundChatState
+	runWG     sync.WaitGroup
+	bgContext context.Context
+	bgCancel  context.CancelFunc
+	emit      func(string, ...any)
+}
+
+type backgroundChatState struct {
+	BackgroundChat
+	cancel context.CancelFunc
 }
 
 // ProviderInput is the configuration collected by the desktop settings screen.
@@ -45,6 +59,24 @@ type ChatResult struct {
 	ThreadID string `json:"threadId"`
 	Content  string `json:"content"`
 	Error    string `json:"error,omitempty"`
+}
+
+type ChatStartResult struct {
+	RequestID string `json:"request_id"`
+	ThreadID  string `json:"thread_id"`
+}
+
+type BackgroundChat struct {
+	RequestID string `json:"request_id"`
+	ThreadID  string `json:"thread_id"`
+	StartedAt string `json:"started_at"`
+}
+
+type ChatFinished struct {
+	RequestID string `json:"request_id"`
+	ThreadID  string `json:"thread_id"`
+	Content   string `json:"content,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 type ChatProfile struct {
@@ -108,6 +140,7 @@ type DesktopMessage struct {
 	Role        string              `json:"role"`
 	Content     string              `json:"content"`
 	Attachments []DesktopAttachment `json:"attachments,omitempty"`
+	Files       []DesktopOutputFile `json:"files,omitempty"`
 	Execution   []DesktopExecution  `json:"execution,omitempty"`
 }
 
@@ -125,6 +158,9 @@ type DesktopExecution struct {
 func NewApp() *App { return &App{} }
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.bgContext, a.bgCancel = context.WithCancel(ctx)
+	a.runs = make(map[string]*backgroundChatState)
+	a.emit = func(name string, data ...any) { runtime.EventsEmit(ctx, name, data...) }
 	home, err := os.UserHomeDir()
 	if err != nil {
 		a.err = err.Error()
@@ -163,6 +199,15 @@ func (a *App) startup(ctx context.Context) {
 	a.cleanupPendingAttachments()
 }
 func (a *App) shutdown(context.Context) {
+	if a.bgCancel != nil {
+		a.bgCancel()
+	}
+	a.runMu.Lock()
+	for _, run := range a.runs {
+		run.cancel()
+	}
+	a.runMu.Unlock()
+	a.runWG.Wait()
 	if a.store != nil {
 		_ = a.store.Close()
 	}
@@ -244,6 +289,7 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 	}
 	result := make([]DesktopMessage, 0)
 	executionByTurn := make(map[string][]DesktopExecution)
+	filesByTurn := make(map[string][]DesktopOutputFile)
 	for _, item := range items {
 		if item.Kind == model.RolloutToolRequested {
 			var payload struct {
@@ -297,6 +343,25 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 				})
 			}
 			executionByTurn[item.TurnID] = steps
+			for _, file := range desktopOutputFiles(payload.Output) {
+				filesByTurn[item.TurnID] = appendOutputFile(filesByTurn[item.TurnID], file)
+			}
+			continue
+		}
+		if item.Kind == model.RolloutTurnFailed {
+			var payload struct {
+				Error string `json:"error"`
+			}
+			_ = json.Unmarshal(item.Payload, &payload)
+			message := strings.TrimSpace(payload.Error)
+			if message == "" {
+				message = "会话执行失败"
+			}
+			result = append(result, DesktopMessage{
+				Role: "系统", Content: "生成失败：" + message,
+				Files:     append([]DesktopOutputFile(nil), filesByTurn[item.TurnID]...),
+				Execution: append([]DesktopExecution(nil), executionByTurn[item.TurnID]...),
+			})
 			continue
 		}
 		if item.Kind != model.RolloutUserMessage && item.Kind != model.RolloutAssistantFinal {
@@ -314,8 +379,15 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 		if item.Kind == model.RolloutUserMessage {
 			role = "你"
 		}
+		files := append([]DesktopOutputFile(nil), filesByTurn[item.TurnID]...)
+		if item.Kind == model.RolloutAssistantFinal {
+			for _, file := range desktopOutputFiles(payload.Content) {
+				files = appendOutputFile(files, file)
+			}
+		}
 		result = append(result, DesktopMessage{
 			Role: role, Content: payload.Content, Attachments: a.attachmentsByUUIDs(payload.Attachments),
+			Files:     files,
 			Execution: append([]DesktopExecution(nil), executionByTurn[item.TurnID]...),
 		})
 	}
@@ -438,6 +510,110 @@ func (a *App) Chat(profile ChatProfile, threadID, input string, attachmentUUIDs 
 	return a.runChat(profile, threadID, input, attachmentUUIDs)
 }
 
+// StartChat creates or updates the conversation synchronously, then runs the
+// turn independently of the currently selected desktop view. Switching
+// conversations or opening settings therefore cannot cancel or misroute it.
+func (a *App) StartChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatStartResult, error) {
+	return a.startBackgroundChat(profile, threadID, input, attachmentUUIDs)
+}
+
+func (a *App) StartRetry(profile ChatProfile, threadID string) (ChatStartResult, error) {
+	if err := a.ready(); err != nil {
+		return ChatStartResult{}, err
+	}
+	if a.threadRunning(threadID) {
+		return ChatStartResult{}, fmt.Errorf("conversation already has a background task")
+	}
+	thread, err := a.store.GetThreadByUUID(a.ctx, threadID, false)
+	if err != nil {
+		return ChatStartResult{}, err
+	}
+	input, attachments, err := a.store.RewindLastTurnWithAttachments(a.ctx, thread.ID)
+	if err != nil {
+		return ChatStartResult{}, err
+	}
+	return a.startBackgroundChat(profile, threadID, input, attachments)
+}
+
+func (a *App) BackgroundChats() []BackgroundChat {
+	a.runMu.Lock()
+	defer a.runMu.Unlock()
+	items := make([]BackgroundChat, 0, len(a.runs))
+	for _, run := range a.runs {
+		items = append(items, run.BackgroundChat)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].StartedAt < items[j].StartedAt })
+	return items
+}
+
+func (a *App) threadRunning(threadID string) bool {
+	a.runMu.Lock()
+	defer a.runMu.Unlock()
+	for _, run := range a.runs {
+		if run.ThreadID == threadID {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) startBackgroundChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatStartResult, error) {
+	if err := a.ready(); err != nil {
+		return ChatStartResult{}, err
+	}
+	if threadID != "" && a.threadRunning(threadID) {
+		return ChatStartResult{}, fmt.Errorf("conversation already has a background task")
+	}
+	preparedThreadID, preparedInput, preparedAttachments, err := a.prepareChat(profile, threadID, input, attachmentUUIDs)
+	if err != nil {
+		return ChatStartResult{}, err
+	}
+	requestID := strings.TrimSpace(profile.RequestID)
+	if requestID == "" {
+		requestID = fmt.Sprintf("chat-%d", time.Now().UnixNano())
+		profile.RequestID = requestID
+	}
+	runContext := a.bgContext
+	if runContext == nil {
+		runContext = a.ctx
+	}
+	runContext, cancel := context.WithCancel(runContext)
+	state := &backgroundChatState{
+		BackgroundChat: BackgroundChat{RequestID: requestID, ThreadID: preparedThreadID, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)},
+		cancel:         cancel,
+	}
+	a.runMu.Lock()
+	if a.runs == nil {
+		a.runs = make(map[string]*backgroundChatState)
+	}
+	for _, active := range a.runs {
+		if active.ThreadID == preparedThreadID {
+			a.runMu.Unlock()
+			cancel()
+			return ChatStartResult{}, fmt.Errorf("conversation already has a background task")
+		}
+	}
+	a.runs[requestID] = state
+	a.runWG.Add(1)
+	a.runMu.Unlock()
+
+	go func() {
+		defer a.runWG.Done()
+		content, runErr := a.executeChat(runContext, profile, preparedThreadID, preparedInput, preparedAttachments)
+		finished := ChatFinished{RequestID: requestID, ThreadID: preparedThreadID, Content: content}
+		if runErr != nil {
+			finished.Error = runErr.Error()
+		}
+		a.emitDesktopEvent("chat:finished", finished)
+		a.runMu.Lock()
+		delete(a.runs, requestID)
+		a.runMu.Unlock()
+		cancel()
+	}()
+
+	return ChatStartResult{RequestID: requestID, ThreadID: preparedThreadID}, nil
+}
+
 func (a *App) Retry(profile ChatProfile, threadID string) (ChatResult, error) {
 	if err := a.ready(); err != nil {
 		return ChatResult{}, err
@@ -457,59 +633,77 @@ func (a *App) Retry(profile ChatProfile, threadID string) (ChatResult, error) {
 }
 
 func (a *App) runChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatResult, error) {
+	preparedThreadID, preparedInput, preparedAttachments, err := a.prepareChat(profile, threadID, input, attachmentUUIDs)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	content, runErr := a.executeChat(a.ctx, profile, preparedThreadID, preparedInput, preparedAttachments)
+	result := ChatResult{ThreadID: preparedThreadID, Content: content}
+	if runErr != nil {
+		result.Error = runErr.Error()
+		return result, nil
+	}
+	return result, nil
+}
+
+func (a *App) prepareChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (string, string, []string, error) {
 	input = strings.TrimSpace(input)
 	attachmentUUIDs = normalizeAttachmentIDs(attachmentUUIDs)
 	if len(attachmentUUIDs) > maxDesktopAttachments {
-		return ChatResult{}, fmt.Errorf("一次最多添加 %d 个附件", maxDesktopAttachments)
+		return "", "", nil, fmt.Errorf("一次最多添加 %d 个附件", maxDesktopAttachments)
 	}
 	if input == "" && len(attachmentUUIDs) == 0 {
-		return ChatResult{}, fmt.Errorf("message cannot be empty")
+		return "", "", nil, fmt.Errorf("message cannot be empty")
 	}
 	if input == "" {
 		input = "请分析这些附件。"
 	}
 	if profile.ProviderID == 0 || strings.TrimSpace(profile.ModelName) == "" {
-		return ChatResult{}, fmt.Errorf("choose a provider and model")
+		return "", "", nil, fmt.Errorf("choose a provider and model")
 	}
 	searchID, err := a.selectedSearchEngine(profile.SearchEnabled)
 	if err != nil {
-		return ChatResult{}, err
+		return "", "", nil, err
 	}
 	var thread *model.Thread
 	if threadID == "" {
 		projectUUID := strings.TrimSpace(profile.ProjectUUID)
 		if err := a.validateProject(projectUUID); err != nil {
-			return ChatResult{}, err
+			return "", "", nil, err
 		}
 		thread = &model.Thread{UserID: "local", ProjectUUID: projectUUID, ProviderID: profile.ProviderID, ModelName: strings.TrimSpace(profile.ModelName), SearchEngineID: searchID, Title: input}
 		if err := a.store.CreateThread(a.ctx, thread); err != nil {
-			return ChatResult{}, err
+			return "", "", nil, err
 		}
 		threadID = thread.UUID
 	} else {
 		if err := a.store.UpdateThreadProfile(a.ctx, threadID, profile.ProviderID, strings.TrimSpace(profile.ModelName), searchID); err != nil {
-			return ChatResult{}, err
+			return "", "", nil, err
 		}
 		thread, err = a.store.GetThreadByUUID(a.ctx, threadID, false)
 		if err != nil {
-			return ChatResult{}, err
+			return "", "", nil, err
 		}
 	}
 	if err := a.store.LinkFilesToThread(a.ctx, thread.ID, attachmentUUIDs); err != nil {
-		return ChatResult{}, err
+		return "", "", nil, err
 	}
+	return threadID, input, attachmentUUIDs, nil
+}
+
+func (a *App) executeChat(ctx context.Context, profile ChatProfile, threadID, input string, attachmentUUIDs []string) (string, error) {
 	var answer strings.Builder
-	runCtx := memorypkg.WithTurnPolicy(a.ctx, memorypkg.TurnPolicy{
+	runCtx := memorypkg.WithTurnPolicy(ctx, memorypkg.TurnPolicy{
 		UseMemories: profile.MemoryUseEnabled, GenerateMemories: profile.MemoryGenerateEnabled,
 	})
-	err = a.server.Handle(runCtx, protocol.Command{Kind: protocol.CommandStartTurn, ThreadID: threadID, Input: input, Attachments: attachmentUUIDs}, func(e protocol.Event) error {
+	err := a.server.Handle(runCtx, protocol.Command{Kind: protocol.CommandStartTurn, ThreadID: threadID, Input: input, Attachments: attachmentUUIDs}, func(e protocol.Event) error {
 		if e.Kind == protocol.EventAssistantDelta {
 			answer.WriteString(e.Delta)
 			if profile.RequestID != "" {
-				runtime.EventsEmit(a.ctx, "chat:delta", ChatDelta{RequestID: profile.RequestID, ThreadID: threadID, Delta: e.Delta})
+				a.emitDesktopEvent("chat:delta", ChatDelta{RequestID: profile.RequestID, ThreadID: threadID, Delta: e.Delta})
 			}
 		} else if profile.RequestID != "" {
-			runtime.EventsEmit(a.ctx, "chat:progress", ChatProgress{
+			a.emitDesktopEvent("chat:progress", ChatProgress{
 				RequestID: profile.RequestID, ThreadID: threadID, TurnID: e.TurnID, Kind: string(e.Kind),
 				CallID: e.CallID, Name: e.Name, Status: e.Status, Message: e.Message,
 				Input: e.Input, Output: e.Output, Error: e.Error, StartedAt: e.StartedAt, DurationMS: e.DurationMS,
@@ -517,21 +711,24 @@ func (a *App) runChat(profile ChatProfile, threadID, input string, attachmentUUI
 		}
 		return nil
 	})
-	result := ChatResult{ThreadID: threadID, Content: answer.String()}
 	if err != nil {
-		// Wails rejects a Promise when a bound Go method returns an error and
-		// discards every other return value. Preserve the newly-created thread ID
-		// so the frontend can retry a failed first turn instead of rendering a
-		// retry button whose click is ignored because it has no conversation ID.
-		result.Error = err.Error()
-		return result, nil
+		return answer.String(), err
 	}
-	return result, nil
+	return answer.String(), nil
+}
+
+func (a *App) emitDesktopEvent(name string, data any) {
+	if a.emit != nil {
+		a.emit(name, data)
+	}
 }
 
 func (a *App) ArchiveThread(threadUUID string) error {
 	if err := a.ready(); err != nil {
 		return err
+	}
+	if a.threadRunning(threadUUID) {
+		return fmt.Errorf("cannot archive a conversation while its background task is running")
 	}
 	thread, err := a.store.GetThreadByUUID(a.ctx, threadUUID, false)
 	if err != nil {
@@ -586,6 +783,15 @@ func (a *App) DeleteProject(projectUUID string) error {
 	}
 	if err := a.validateProject(projectUUID); err != nil {
 		return err
+	}
+	threads, _, err := a.store.ListThreads(a.ctx, "local", false, 1, 1000)
+	if err != nil {
+		return err
+	}
+	for _, thread := range threads {
+		if thread.ProjectUUID == projectUUID && a.threadRunning(thread.UUID) {
+			return fmt.Errorf("cannot delete a project while one of its conversations is running")
+		}
 	}
 	if err := a.store.DeleteProject(a.ctx, projectUUID); err != nil {
 		return fmt.Errorf("delete project: %w", err)
