@@ -21,6 +21,7 @@ import {
   MCPServers,
   Memories,
   MemorySettings,
+  LastModelSelection,
   ImportAttachments,
   MoveThreadToProject,
   OpenAttachment,
@@ -32,6 +33,7 @@ import {
   RevealOutputFile,
   RemoveProviderModel,
   SearchEngines,
+  SetLastModelSelection,
   SetMemorySettings,
   StartChat,
   StartRetry,
@@ -50,6 +52,10 @@ import {
   OnFileDropOff,
 } from "../wailsjs/runtime/runtime";
 import { renderMarkdown } from "./markdown";
+import {
+  resolveModelSelection,
+  type ModelSelection,
+} from "./model-selection";
 
 type Provider = {
   id: number;
@@ -310,9 +316,13 @@ const busy = computed(
     ),
 );
 
-async function refresh() {
+async function refresh(restoreLastModel = false) {
   try {
     error.value = await Status();
+    const modelSelectionPromise: Promise<ModelSelection | undefined> =
+      restoreLastModel
+        ? LastModelSelection()
+        : Promise.resolve(undefined);
     const [
       providerItems,
       projectItems,
@@ -322,6 +332,7 @@ async function refresh() {
       pluginItems,
       memoryItems,
       memorySettings,
+      savedModel,
     ] = await Promise.all([
       Providers(),
       Projects(),
@@ -331,6 +342,7 @@ async function refresh() {
       Plugins(),
       Memories(),
       MemorySettings(),
+      modelSelectionPromise,
     ]);
     providers.value = providerItems;
     projects.value = projectItems;
@@ -341,10 +353,29 @@ async function refresh() {
     memories.value = memoryItems;
     memoryUse.value = memorySettings.use_memories;
     memoryGenerate.value = memorySettings.generate_memories;
-    const active = providers.value.find((item) => item.id === providerID.value);
-    if (!active && providers.value[0]) selectProvider(providers.value[0]);
-    else if (active && !active.models.includes(modelName.value))
-      modelName.value = active.models[0] || "";
+    const selected = resolveModelSelection(
+      providers.value,
+      { provider_id: providerID.value, model_name: modelName.value },
+      savedModel,
+    );
+    const changed =
+      selected.provider_id !== providerID.value ||
+      selected.model_name !== modelName.value;
+    providerID.value = selected.provider_id;
+    modelName.value = selected.model_name;
+    if (changed) {
+      void rememberModelSelection();
+    }
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+async function rememberModelSelection() {
+  if (!providerID.value || !modelName.value) return;
+  const active = providers.value.find((item) => item.id === providerID.value);
+  if (!active?.models.includes(modelName.value)) return;
+  try {
+    await SetLastModelSelection(providerID.value, modelName.value);
   } catch (e) {
     error.value = String(e);
   }
@@ -647,11 +678,6 @@ function executionDuration(step: ExecutionStep) {
 function hasExecutionDetails(step: ExecutionStep) {
   return Boolean(step.input || step.output || step.error);
 }
-function selectProvider(item: Provider | undefined) {
-  if (!item) return;
-  providerID.value = item.id;
-  modelName.value = item.models?.[0] || "";
-}
 function pickerModels(item: Provider) {
   const query = modelPickerSearch.value.trim().toLowerCase();
   if (!query) return item.models;
@@ -666,6 +692,7 @@ function chooseModel(item: Provider, name: string) {
   modelName.value = name;
   modelPickerOpen.value = false;
   modelPickerSearch.value = "";
+  void rememberModelSelection();
 }
 function toggleModelPicker() {
   modelPickerOpen.value = !modelPickerOpen.value;
@@ -852,6 +879,7 @@ async function openThread(item: Thread) {
     projectID.value = item.project_uuid;
     providerID.value = item.provider_id;
     modelName.value = item.model_name;
+    void rememberModelSelection();
     const history = await loadThreadMessages(item.uuid);
     const active = Object.values(liveRuns.value).find(
       (run) => run.threadID === item.uuid,
@@ -925,6 +953,7 @@ async function send() {
   pendingAttachments.value = [];
   launching.value = true;
   error.value = "";
+  void rememberModelSelection();
   await scrollBottom();
   try {
     const result = await StartChat(
@@ -1080,6 +1109,7 @@ async function removeModel(item: Provider, name: string) {
     );
     if (providerID.value === item.id && modelName.value === name)
       modelName.value = updated.models[0] || "";
+    void rememberModelSelection();
     await refresh();
   } catch (e) {
     error.value = String(e);
@@ -1133,6 +1163,7 @@ async function addModel(item: Provider, name: string) {
     if (providerID.value === item.id && !modelName.value)
       modelName.value = name;
     await refresh();
+    void rememberModelSelection();
   } catch (e) {
     error.value = String(e);
   }
@@ -1247,7 +1278,7 @@ onMounted(() => {
     executionClock.value = Date.now();
   }, 1000);
   void (async () => {
-    await refresh();
+    await refresh(true);
     await restoreBackgroundChats();
   })();
 });

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -51,6 +53,11 @@ type DesktopMemorySettings struct {
 	GenerateMemories bool `json:"generate_memories"`
 }
 
+type DesktopModelSelection struct {
+	ProviderID int64  `json:"provider_id"`
+	ModelName  string `json:"model_name"`
+}
+
 type DesktopMemory struct {
 	UUID        string  `json:"uuid"`
 	Kind        string  `json:"kind"`
@@ -62,6 +69,70 @@ type DesktopMemory struct {
 	Sensitivity string  `json:"sensitivity"`
 	Pinned      bool    `json:"pinned"`
 	UpdatedAt   string  `json:"updated_at"`
+}
+
+const lastModelSelectionSettingKey = "chat.last_model"
+
+func (a *App) LastModelSelection() (DesktopModelSelection, error) {
+	if err := a.ready(); err != nil {
+		return DesktopModelSelection{}, err
+	}
+	value, err := a.store.GetAppSetting(a.ctx, lastModelSelectionSettingKey, "")
+	if err != nil || value == "" {
+		return DesktopModelSelection{}, err
+	}
+	var selection DesktopModelSelection
+	if json.Unmarshal([]byte(value), &selection) != nil || selection.ProviderID <= 0 || strings.TrimSpace(selection.ModelName) == "" {
+		return DesktopModelSelection{}, nil
+	}
+	provider, err := a.store.GetProvider(a.ctx, selection.ProviderID)
+	if err != nil {
+		// A deleted Provider makes the preference stale, not the application
+		// unusable. The frontend will select and persist the next available model.
+		if errors.Is(err, sql.ErrNoRows) {
+			return DesktopModelSelection{}, nil
+		}
+		return DesktopModelSelection{}, err
+	}
+	var names []string
+	if json.Unmarshal(provider.Models, &names) != nil {
+		return DesktopModelSelection{}, nil
+	}
+	for _, name := range names {
+		if name == selection.ModelName {
+			return selection, nil
+		}
+	}
+	return DesktopModelSelection{}, nil
+}
+
+func (a *App) SetLastModelSelection(providerID int64, modelName string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	modelName = strings.TrimSpace(modelName)
+	if providerID <= 0 || modelName == "" {
+		return fmt.Errorf("provider and model are required")
+	}
+	provider, err := a.store.GetProvider(a.ctx, providerID)
+	if err != nil {
+		return err
+	}
+	var names []string
+	if err := json.Unmarshal(provider.Models, &names); err != nil {
+		return fmt.Errorf("decode Provider models: %w", err)
+	}
+	for _, name := range names {
+		if name != modelName {
+			continue
+		}
+		value, err := json.Marshal(DesktopModelSelection{ProviderID: providerID, ModelName: modelName})
+		if err != nil {
+			return err
+		}
+		return a.store.SetAppSetting(a.ctx, lastModelSelectionSettingKey, string(value))
+	}
+	return fmt.Errorf("model %q is not configured for Provider %d", modelName, providerID)
 }
 
 func (a *App) MemorySettings() (DesktopMemorySettings, error) {
