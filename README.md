@@ -7,6 +7,7 @@ AIClaw is a local-first native desktop AI application. It uses Wails to provide 
 - Manage projects and conversations from a unified sidebar. A conversation may belong to a project or remain unassigned, and it can be moved between those states at any time.
 - Switch between dark and light themes with one click, with the last selected theme persisted locally.
 - Select a provider and model directly in each conversation without creating or maintaining agents.
+- Restore the last valid provider and model automatically when the desktop application starts.
 - Synchronize model lists from provider APIs, search and add candidate models, or add and remove model names manually. Removing a model configuration does not delete historical conversations.
 - Stream incremental provider responses in real time and retry the most recent model response.
 - Render model responses as GFM Markdown and sanitized HTML, including headings, lists, tables, blockquotes, code blocks, links, and images. HTML is sanitized against an allowlist before display.

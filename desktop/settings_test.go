@@ -612,6 +612,38 @@ func TestDesktopMemorySettingsAndReview(t *testing.T) {
 	}
 }
 
+func TestLastModelSelectionPersistsAndRejectsStaleModels(t *testing.T) {
+	app := newTestDesktopApp(t)
+	provider, err := app.AddProvider(ProviderInput{
+		Name: "Local", Type: string(model.ProviderOpenAICompat), BaseURL: "http://localhost/v1", Model: "model-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	selection, err := app.LastModelSelection()
+	if err != nil || selection.ProviderID != 0 || selection.ModelName != "" {
+		t.Fatalf("unexpected empty selection: selection=%+v err=%v", selection, err)
+	}
+	if err := app.SetLastModelSelection(provider.ID, "model-a"); err != nil {
+		t.Fatal(err)
+	}
+	selection, err = app.LastModelSelection()
+	if err != nil || selection.ProviderID != provider.ID || selection.ModelName != "model-a" {
+		t.Fatalf("selection was not restored: selection=%+v err=%v", selection, err)
+	}
+	if err := app.SetLastModelSelection(provider.ID, "missing-model"); err == nil {
+		t.Fatal("unconfigured model was accepted as the last selection")
+	}
+	if _, err := app.RemoveProviderModel(provider.ID, "model-a"); err != nil {
+		t.Fatal(err)
+	}
+	selection, err = app.LastModelSelection()
+	if err != nil || selection.ProviderID != 0 || selection.ModelName != "" {
+		t.Fatalf("stale model selection was not ignored: selection=%+v err=%v", selection, err)
+	}
+}
+
 func TestThreadMessagesRestoresToolExecutionTrace(t *testing.T) {
 	app := newTestDesktopApp(t)
 	generated := filepath.Join(t.TempDir(), "report.xlsx")
