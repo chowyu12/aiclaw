@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "id": "aiclaw.computer-use",
+  "name": "Computer Use",
+  "version": "0.1.0",
+  "description": "截屏观察当前屏幕，并合成点击与键盘输入。启用后模型可以操作本机图形界面。",
+  "author": "aiclaw",
+  "runtime": { "os": ["darwin"] },
+  "permissions": ["computer.control", "filesystem.write"],
+  "contributes": {
+    "tools": [{ "provider": "builtin:computer_use", "names": ["computer"] }]
+  }
+}

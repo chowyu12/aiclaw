@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +19,9 @@ import (
 	"github.com/chowyu12/aiclaw/internal/core"
 	"github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
+	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
+	"github.com/chowyu12/aiclaw/internal/plugins/bundled"
+	"github.com/chowyu12/aiclaw/internal/plugins/computeruse"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	toolresult "github.com/chowyu12/aiclaw/internal/tools/result"
 )
@@ -75,7 +80,17 @@ func newTestDesktopApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	return &App{ctx: context.Background(), store: store, tools: core.NewLocalToolDispatcher(store), memory: memory.NewService(store), root: root}
+	pluginRuntime, err := pluginpkg.NewRuntime(map[string]pluginpkg.ToolProvider{
+		computeruse.ProviderName: computeruse.New(root),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &App{
+		ctx: context.Background(), store: store,
+		tools:  core.NewLocalToolDispatcher(store, core.WithPluginRuntime(pluginRuntime)),
+		memory: memory.NewService(store), installer: pluginpkg.NewInstaller(store, root), root: root,
+	}
 }
 
 func TestFailedFirstChatKeepsThreadIDAndCanRetry(t *testing.T) {
@@ -703,5 +718,161 @@ func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The bundled computer-use plugin must be visible but inert until the user
+// enables it, and enabling it must be what makes the tool reachable.
+func TestBundledComputerUsePluginIsShippedDisabled(t *testing.T) {
+	app := newTestDesktopApp(t)
+	if err := app.installer.EnsureBuiltins(app.ctx, bundled.FS()); err != nil {
+		t.Fatal(err)
+	}
+	plugins, err := app.Plugins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var computerUse *DesktopPlugin
+	for index := range plugins {
+		if plugins[index].Name == "Computer Use" {
+			computerUse = &plugins[index]
+		}
+	}
+	if runtime.GOOS != "darwin" {
+		if computerUse != nil {
+			t.Fatal("a darwin-only bundle was recorded on another host")
+		}
+		return
+	}
+	if computerUse == nil {
+		t.Fatalf("the bundled computer-use plugin is missing: %+v", plugins)
+	}
+	if computerUse.Enabled || computerUse.Source != string(model.PluginSourceBuiltin) {
+		t.Fatalf("bundled plugin = %+v", *computerUse)
+	}
+	if computerUse.ToolCount != 1 {
+		t.Fatalf("tool count = %d", computerUse.ToolCount)
+	}
+	// The UI needs the permission list to ask for consent before enabling.
+	if strings.Join(computerUse.Permissions, ",") != "computer.control,filesystem.write" {
+		t.Fatalf("permissions = %v", computerUse.Permissions)
+	}
+	if err := app.DeletePlugin(computerUse.UUID); err == nil {
+		t.Fatal("a bundled plugin was deletable")
+	}
+
+	if hasComputerTool(t, app) {
+		t.Fatal("the computer tool was reachable while its plugin was disabled")
+	}
+	if err := app.TogglePlugin(computerUse.UUID, true); err != nil {
+		t.Fatal(err)
+	}
+	if !hasComputerTool(t, app) {
+		t.Fatal("enabling the plugin did not expose the computer tool")
+	}
+}
+
+func hasComputerTool(t *testing.T, app *App) bool {
+	t.Helper()
+	definitions, err := app.tools.Definitions(app.ctx, model.Thread{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, definition := range definitions {
+		if definition.Name == computeruse.ToolName {
+			return true
+		}
+	}
+	return false
+}
+
+const configuredPluginManifest = `{"schema_version":1,"id":"acme.connector","name":"Connector",
+	"permissions":["network.access","channel.receive","channel.send","secrets.read","filesystem.write"],
+	"config":{
+		"bot_id":{"type":"string","required":true,"description":"机器人 ID"},
+		"bot_secret":{"type":"string","required":true,"secret":true},
+		"greeting":{"type":"string"}
+	},
+	"contributes":{"channels":[{"id":"acme","provider":"builtin:wecom"}]}}`
+
+// The whole configuration path over the real database: the composite unique
+// key, the secret never leaving the process, and the enable gate.
+func TestPluginConfigRoundTripAndEnableGate(t *testing.T) {
+	app := newTestDesktopApp(t)
+	source := t.TempDir()
+	mustMkdir(t, filepath.Join(source, ".aiclaw-plugin"))
+	mustWrite(t, filepath.Join(source, ".aiclaw-plugin", "plugin.json"), configuredPluginManifest)
+	installed, err := app.installPlugin(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plugins, err := app.Plugins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(plugins[0].MissingConfig, ",") != "bot_id,bot_secret" {
+		t.Fatalf("missing config = %v", plugins[0].MissingConfig)
+	}
+	if err := app.TogglePlugin(installed.UUID, true); err == nil {
+		t.Fatal("a plugin missing required configuration was enabled")
+	}
+
+	for key, value := range map[string]string{"bot_id": "bot-1", "bot_secret": "s3cr3t", "greeting": "hi"} {
+		if err := app.SetPluginConfig(installed.UUID, key, value); err != nil {
+			t.Fatalf("set %s: %v", key, err)
+		}
+	}
+	// Re-writing a key must update it rather than fail on the unique index.
+	if err := app.SetPluginConfig(installed.UUID, "bot_secret", "rotated"); err != nil {
+		t.Fatal(err)
+	}
+
+	fields, err := app.PluginConfigFields(installed.UUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 3 {
+		t.Fatalf("fields = %+v", fields)
+	}
+	for _, field := range fields {
+		if field.Secret && field.Value != "" {
+			t.Fatalf("a secret reached the UI surface: %+v", field)
+		}
+		if field.Key == "bot_secret" && !field.IsSet {
+			t.Fatalf("a stored secret is not reported as set: %+v", field)
+		}
+	}
+	// The rotation must have replaced the value, not stored a second row.
+	stored, err := app.store.ListPluginConfig(app.ctx, installed.UUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 3 {
+		t.Fatalf("stored rows = %d, want 3", len(stored))
+	}
+	for _, item := range stored {
+		if item.Key == "bot_secret" && item.Value != "rotated" {
+			t.Fatalf("secret was not rotated: %+v", item)
+		}
+	}
+
+	if err := app.TogglePlugin(installed.UUID, true); err != nil {
+		t.Fatalf("a fully configured plugin was refused: %v", err)
+	}
+	// While enabled, a required key cannot be cleared out from under it.
+	if err := app.SetPluginConfig(installed.UUID, "bot_id", ""); err == nil {
+		t.Fatal("a required key was cleared while the plugin was enabled")
+	}
+
+	if err := app.DeletePlugin(installed.UUID); err != nil {
+		t.Fatal(err)
+	}
+	remaining, err := app.store.ListPluginConfig(app.ctx, installed.UUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("secrets survived uninstall: %+v", remaining)
 	}
 }

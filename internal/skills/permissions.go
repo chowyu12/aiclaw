@@ -13,18 +13,30 @@ const (
 	PermissionFilesystemRead  = "filesystem.read"
 	PermissionFilesystemWrite = "filesystem.write"
 	PermissionNetworkAccess   = "network.access"
+
+	// These permissions are only meaningful for plugin bundles, but the
+	// enumeration is shared so a plugin and the skills it contributes are
+	// normalized and displayed through one code path.
+	PermissionComputerControl = "computer.control"
+	PermissionChannelReceive  = "channel.receive"
+	PermissionChannelSend     = "channel.send"
+	PermissionSecretsRead     = "secrets.read"
 )
 
 var supportedPermissions = map[string]bool{
 	PermissionProcessExecute: true, PermissionFilesystemRead: true,
 	PermissionFilesystemWrite: true, PermissionNetworkAccess: true,
+	PermissionComputerControl: true, PermissionChannelReceive: true,
+	PermissionChannelSend: true, PermissionSecretsRead: true,
 }
 
 func NormalizePermissions(values []string) ([]string, error) {
 	aliases := map[string]string{
 		"process": PermissionProcessExecute, "exec": PermissionProcessExecute,
 		"filesystem:read": PermissionFilesystemRead, "filesystem:write": PermissionFilesystemWrite,
-		"network": PermissionNetworkAccess,
+		"network": PermissionNetworkAccess, "computer": PermissionComputerControl,
+		"channel:receive": PermissionChannelReceive, "channel:send": PermissionChannelSend,
+		"secrets": PermissionSecretsRead,
 	}
 	result := make([]string, 0, len(values))
 	seen := make(map[string]bool, len(values))

@@ -12,6 +12,7 @@ import (
 
 	memorypkg "github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
+	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 	skillrunner "github.com/chowyu12/aiclaw/internal/skills"
 	"github.com/chowyu12/aiclaw/internal/store"
 	"github.com/chowyu12/aiclaw/internal/tools"
@@ -27,6 +28,7 @@ type LocalToolDispatcher struct {
 	memory  *memorypkg.Service
 	root    string
 	sampler Sampler
+	plugins *pluginpkg.Runtime
 	plans   map[string]*model.PlanState
 }
 
@@ -38,6 +40,7 @@ type ToolRuntimeStore interface {
 	store.MemoryStore
 	store.SearchEngineStore
 	ListMCPServers(context.Context) ([]model.MCPServer, error)
+	ListPlugins(context.Context) ([]model.Plugin, error)
 }
 
 type DispatcherOption func(*LocalToolDispatcher)
@@ -48,6 +51,13 @@ func WithDispatcherRoot(root string) DispatcherOption {
 
 func WithSubAgentSampler(sampler Sampler) DispatcherOption {
 	return func(d *LocalToolDispatcher) { d.sampler = sampler }
+}
+
+// WithPluginRuntime supplies the native tool providers this build carries.
+// Without it no plugin can contribute native tools, which is the correct
+// behaviour for a build that bundles none.
+func WithPluginRuntime(runtime *pluginpkg.Runtime) DispatcherOption {
+	return func(d *LocalToolDispatcher) { d.plugins = runtime }
 }
 
 func NewLocalToolDispatcher(s ToolRuntimeStore, options ...DispatcherOption) *LocalToolDispatcher {
@@ -81,7 +91,7 @@ func (d *LocalToolDispatcher) PrepareTurn(ctx context.Context, thread model.Thre
 func (d *LocalToolDispatcher) ContextMessages(ctx context.Context, _ model.Thread) ([]SamplingMessage, error) {
 	identity := memorypkg.ExecutionContextFromContext(ctx)
 	policy := memorypkg.TurnPolicyFromContext(ctx)
-	content := ""
+	content := ToolPolicyFromContext(ctx).Notice()
 	if policy.UseMemories {
 		memoryContext, err := d.memory.BuildContext(ctx, identity, identity.Input)
 		if err != nil {
@@ -110,11 +120,18 @@ func (d *LocalToolDispatcher) ContextMessages(ctx context.Context, _ model.Threa
 	if err != nil {
 		return nil, err
 	}
+	enabledPlugins, err := d.enabledPlugins(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var catalog strings.Builder
 	catalog.WriteString("\n\nEnabled skill catalog (use the skill tool with action=read_active to load full instructions when needed):")
 	matched := 0
 	for _, item := range items {
 		if !item.Enabled || item.Instruction == "" {
+			continue
+		}
+		if !pluginpkg.OwnerActive(enabledPlugins, item.PluginUUID) {
 			continue
 		}
 		catalog.WriteString("\n- ")
@@ -180,12 +197,16 @@ func (d *LocalToolDispatcher) Definitions(ctx context.Context, thread model.Thre
 func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread) (*ToolRegistry, error) {
 	registry := NewToolRegistry()
 	policy := memorypkg.TurnPolicyFromContext(ctx)
+	toolPolicy := ToolPolicyFromContext(ctx)
 	handlers := tools.DefaultBuiltins()
 	for _, tool := range tools.DefaultBuiltinDefs() {
 		if tool.Name == "memory" && !policy.GenerateMemories {
 			continue
 		}
 		if tool.Name == "web_search" && thread.SearchEngineID == 0 {
+			continue
+		}
+		if !toolPolicy.Permits(tool.Name) {
 			continue
 		}
 		handler, ok := handlers[tool.Name]
@@ -208,13 +229,24 @@ func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread)
 			return nil, err
 		}
 	}
-	manager, err := d.mcpManager(ctx)
+	plugins, err := d.store.ListPlugins(ctx)
+	if err != nil {
+		return nil, err
+	}
+	enabledPlugins := pluginpkg.EnabledSet(plugins)
+	if err := d.registerPluginTools(registry, plugins, toolPolicy); err != nil {
+		return nil, err
+	}
+	manager, err := d.mcpManager(ctx, enabledPlugins)
 	if err != nil {
 		return nil, err
 	}
 	for _, tool := range manager.Tools() {
 		schema, _ := json.Marshal(tool.Parameters)
 		name := tool.Name
+		if !toolPolicy.Permits(name) {
+			continue
+		}
 		if err := registry.Register(RegisteredTool{
 			Definition: ToolDefinition{Name: name, Description: tool.Description, Schema: model.JSON(schema)},
 			Source:     "mcp:" + tool.ServerName,
@@ -235,6 +267,9 @@ func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread)
 			if !skill.Enabled || len(skill.ToolDefs) == 0 {
 				continue
 			}
+			if !pluginpkg.OwnerActive(enabledPlugins, skill.PluginUUID) {
+				continue
+			}
 			if _, permissionErr := skillrunner.ValidateExecutable(skill); permissionErr != nil {
 				continue
 			}
@@ -243,6 +278,9 @@ func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread)
 				continue
 			}
 			for _, definition := range definitions {
+				if !toolPolicy.Permits(definition.Name) {
+					continue
+				}
 				schema, _ := json.Marshal(definition.Parameters)
 				skillCopy, definitionCopy := skill, definition
 				if err := registry.Register(RegisteredTool{
@@ -263,6 +301,12 @@ func (d *LocalToolDispatcher) registry(ctx context.Context, thread model.Thread)
 	return registry, nil
 }
 func (d *LocalToolDispatcher) Execute(ctx context.Context, thread model.Thread, call ToolCall) (ToolResult, error) {
+	// Filtering the advertised set is not enough: a model can call a name it
+	// saw in an earlier turn, so the gate has to hold at execution too.
+	if toolPolicy := ToolPolicyFromContext(ctx); !toolPolicy.Permits(call.Name) {
+		return ToolResult{CallID: call.ID, Name: call.Name},
+			fmt.Errorf("tool %q is not available to a turn started from %s", call.Name, toolPolicy.Source)
+	}
 	registry, err := d.registry(ctx, thread)
 	if err != nil {
 		return ToolResult{CallID: call.ID, Name: call.Name}, err
@@ -315,15 +359,66 @@ func (d *LocalToolDispatcher) coreHandler(name string) ToolHandler {
 		return nil
 	}
 }
-func (d *LocalToolDispatcher) mcpManager(ctx context.Context) (*mcp.Manager, error) {
+
+// enabledPlugins reports which installed plugins are switched on. Skill and
+// MCP records carry their owning plugin, and disabling a plugin must disable
+// everything it contributed even when a single record was left enabled.
+func (d *LocalToolDispatcher) enabledPlugins(ctx context.Context) (map[string]bool, error) {
+	plugins, err := d.store.ListPlugins(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return pluginpkg.EnabledSet(plugins), nil
+}
+
+// registerPluginTools advertises the native tools contributed by enabled
+// plugins. Nothing is registered when this build carries no providers.
+func (d *LocalToolDispatcher) registerPluginTools(registry *ToolRegistry, plugins []model.Plugin, toolPolicy ToolPolicy) error {
+	if d.plugins == nil {
+		return nil
+	}
+	active, err := d.plugins.ActiveTools(plugins)
+	if err != nil {
+		return err
+	}
+	for _, tool := range active {
+		spec, provider := tool.Spec, tool.Provider
+		if !toolPolicy.Permits(spec.Name) {
+			continue
+		}
+		schema := spec.Schema
+		if len(schema) == 0 {
+			schema = model.JSON(`{"type":"object","properties":{}}`)
+		}
+		if err := registry.Register(RegisteredTool{
+			Definition: ToolDefinition{Name: spec.Name, Description: spec.Description, Schema: schema},
+			Source:     "plugin:" + tool.Owner,
+			Handler: func(ctx context.Context, _ model.Thread, call ToolCall) (ToolResult, error) {
+				output, runErr := provider.Execute(ctx, spec.Name, call.Arguments)
+				return ToolResult{CallID: call.ID, Name: call.Name, Content: output}, runErr
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *LocalToolDispatcher) mcpManager(ctx context.Context, enabledPlugins map[string]bool) (*mcp.Manager, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.mcp != nil {
 		return d.mcp, nil
 	}
-	servers, err := d.store.ListMCPServers(ctx)
+	all, err := d.store.ListMCPServers(ctx)
 	if err != nil {
 		return nil, err
+	}
+	servers := make([]model.MCPServer, 0, len(all))
+	for _, server := range all {
+		if pluginpkg.OwnerActive(enabledPlugins, server.PluginUUID) {
+			servers = append(servers, server)
+		}
 	}
 	manager := mcp.NewManager()
 	if err := manager.Connect(ctx, servers); err != nil {

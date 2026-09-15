@@ -5,17 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/chowyu12/aiclaw/internal/model"
-	"github.com/chowyu12/aiclaw/internal/skills"
+	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 )
 
 type SearchEngineInput struct{ Provider, Name, BaseURL, APIKey string }
@@ -38,14 +32,22 @@ type DesktopMCPServer struct {
 	PluginUUID  string `json:"plugin_uuid"`
 }
 type DesktopPlugin struct {
-	UUID        string   `json:"uuid"`
-	Name        string   `json:"name"`
-	Description string   `json:"description"`
-	Version     string   `json:"version"`
-	Enabled     bool     `json:"enabled"`
-	SkillCount  int      `json:"skill_count"`
-	MCPCount    int      `json:"mcp_count"`
-	Permissions []string `json:"permissions"`
+	UUID        string `json:"uuid"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Version     string `json:"version"`
+	// Source is "builtin" for plugins that ship with the application. Those
+	// can be disabled but not removed, so the UI must not offer a delete.
+	Source       string   `json:"source"`
+	Enabled      bool     `json:"enabled"`
+	SkillCount   int      `json:"skill_count"`
+	MCPCount     int      `json:"mcp_count"`
+	ToolCount    int      `json:"tool_count"`
+	ChannelCount int      `json:"channel_count"`
+	Permissions  []string `json:"permissions"`
+	// MissingConfig lists declared required keys that are still unset. A
+	// plugin with any of these can be installed but not enabled.
+	MissingConfig []string `json:"missing_config,omitzero"`
 }
 
 type DesktopMemorySettings struct {
@@ -349,34 +351,37 @@ func (a *App) Plugins() ([]DesktopPlugin, error) {
 	skillItems, _ := a.store.ListSkills(a.ctx)
 	mcpItems, _ := a.store.ListMCPServers(a.ctx)
 	result := make([]DesktopPlugin, 0, len(plugins))
-	for _, plugin := range plugins {
-		item := DesktopPlugin{UUID: plugin.UUID, Name: plugin.Name, Description: plugin.Description, Version: plugin.Version, Enabled: plugin.Enabled}
-		permissionSet := make(map[string]struct{})
+	for _, item := range plugins {
+		entry := DesktopPlugin{
+			UUID: item.UUID, Name: item.Name, Description: item.Description,
+			Version: item.Version, Source: string(item.Source), Enabled: item.Enabled,
+		}
+		toolCount, channelCount, contributionErr := pluginpkg.NativeContributions(item)
+		if contributionErr != nil {
+			return nil, contributionErr
+		}
+		entry.ToolCount, entry.ChannelCount = toolCount, channelCount
 		for _, sk := range skillItems {
-			if sk.PluginUUID == plugin.UUID {
-				item.SkillCount++
-				if permissions, permissionErr := skills.StoredPermissions(sk.Permissions); permissionErr == nil {
-					for _, permission := range permissions {
-						permissionSet[permission] = struct{}{}
-					}
-				}
+			if sk.PluginUUID == item.UUID {
+				entry.SkillCount++
 			}
 		}
 		for _, srv := range mcpItems {
-			if srv.PluginUUID == plugin.UUID {
-				item.MCPCount++
-				if srv.Transport == model.MCPTransportStdio {
-					permissionSet[skills.PermissionProcessExecute] = struct{}{}
-				} else {
-					permissionSet[skills.PermissionNetworkAccess] = struct{}{}
-				}
+			if srv.PluginUUID == item.UUID {
+				entry.MCPCount++
 			}
 		}
-		for permission := range permissionSet {
-			item.Permissions = append(item.Permissions, permission)
+		permissions, permissionErr := pluginpkg.InstalledPermissions(item, skillItems, mcpItems)
+		if permissionErr != nil {
+			return nil, permissionErr
 		}
-		sort.Strings(item.Permissions)
-		result = append(result, item)
+		entry.Permissions = permissions
+		missing, missingErr := a.pluginConfig().MissingRequired(a.ctx, item)
+		if missingErr != nil {
+			return nil, missingErr
+		}
+		entry.MissingConfig = missing
+		result = append(result, entry)
 	}
 	return result, nil
 }
@@ -384,36 +389,12 @@ func (a *App) DeletePlugin(pluginUUID string) error {
 	if err := a.ready(); err != nil {
 		return err
 	}
-	pluginUUID = strings.TrimSpace(pluginUUID)
-	plugins, err := a.store.ListPlugins(a.ctx)
+	plugin, err := a.findPlugin(pluginUUID)
 	if err != nil {
 		return err
 	}
-	var installDir string
-	for _, plugin := range plugins {
-		if plugin.UUID == pluginUUID {
-			installDir = plugin.InstallDir
-			break
-		}
-	}
-	if installDir == "" {
-		return fmt.Errorf("plugin %q not found", pluginUUID)
-	}
-	if err := a.store.DeletePluginSkills(a.ctx, pluginUUID); err != nil {
+	if err := a.installer.Uninstall(a.ctx, plugin); err != nil {
 		return err
-	}
-	if err := a.store.DeletePluginMCP(a.ctx, pluginUUID); err != nil {
-		return err
-	}
-	if err := a.store.DeletePlugin(a.ctx, pluginUUID); err != nil {
-		return err
-	}
-	pluginsRoot := filepath.Clean(filepath.Join(a.root, "plugins"))
-	cleanDir := filepath.Clean(installDir)
-	if rel, relErr := filepath.Rel(pluginsRoot, cleanDir); relErr == nil && rel != "." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-		if err := os.RemoveAll(cleanDir); err != nil {
-			return fmt.Errorf("remove plugin files: %w", err)
-		}
 	}
 	a.tools.Reload()
 	return nil
@@ -421,6 +402,17 @@ func (a *App) DeletePlugin(pluginUUID string) error {
 func (a *App) TogglePlugin(pluginUUID string, enabled bool) error {
 	if err := a.ready(); err != nil {
 		return err
+	}
+	if enabled {
+		plugin, err := a.findPlugin(pluginUUID)
+		if err != nil {
+			return err
+		}
+		// Enabling is what grants a plugin its declared permissions, so it is
+		// also where the declared configuration has to be complete.
+		if err := a.pluginConfig().ValidateEnable(a.ctx, plugin); err != nil {
+			return err
+		}
 	}
 	if err := a.store.SetPluginEnabled(a.ctx, pluginUUID, enabled); err != nil {
 		return err
@@ -432,145 +424,158 @@ func (a *App) TogglePlugin(pluginUUID string, enabled bool) error {
 		return err
 	}
 	a.tools.Reload()
-	return nil
+	// Tools are rebuilt every turn, but a channel holds a connection: it has
+	// to be started or stopped now.
+	return a.syncChannels()
+}
+
+// DesktopChannelBinding is one external conversation known to a connector.
+type DesktopChannelBinding struct {
+	PluginUUID  string `json:"plugin_uuid"`
+	ChannelID   string `json:"channel_id"`
+	ExternalKey string `json:"external_key"`
+	DisplayName string `json:"display_name"`
+	ThreadUUID  string `json:"thread_uuid,omitzero"`
+	ProviderID  int64  `json:"provider_id,omitzero"`
+	ModelName   string `json:"model_name,omitzero"`
+	Allowed     bool   `json:"allowed"`
+	// AllowedTools are the acting tools this conversation may use beyond the
+	// read-only default set.
+	AllowedTools []string `json:"allowed_tools,omitzero"`
+	LastMessage  string   `json:"last_message,omitzero"`
+}
+
+// ChannelBindings lists every external conversation a connector has seen,
+// including the ones waiting for authorization.
+func (a *App) ChannelBindings() ([]DesktopChannelBinding, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	items, err := a.store.ListChannelBindings(a.ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]DesktopChannelBinding, 0, len(items))
+	for _, item := range items {
+		entry := DesktopChannelBinding{
+			PluginUUID: item.PluginUUID, ChannelID: item.ChannelID, ExternalKey: item.ExternalKey,
+			DisplayName: item.DisplayName, ThreadUUID: item.ThreadUUID,
+			ProviderID: item.ProviderID, ModelName: item.ModelName, Allowed: item.Allowed,
+		}
+		if len(item.AllowedTools) > 0 {
+			_ = json.Unmarshal(item.AllowedTools, &entry.AllowedTools)
+		}
+		if !item.LastMessage.IsZero() {
+			entry.LastMessage = item.LastMessage.Format(time.RFC3339)
+		}
+		result = append(result, entry)
+	}
+	return result, nil
+}
+
+// AuthorizeChannelBinding lets one external conversation reach the agent.
+//
+// This is the consent step for inbound messages: until it happens, a message
+// from that conversation is recorded and refused. The model and the acting
+// tools it may use are chosen here rather than inherited from the desktop
+// session, because the sender is not the local user.
+func (a *App) AuthorizeChannelBinding(pluginUUID, channelID, externalKey string, providerID int64, modelName string, allowedTools []string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	binding, err := a.store.GetChannelBinding(a.ctx, pluginUUID, channelID, externalKey)
+	if err != nil {
+		return err
+	}
+	if binding == nil {
+		return fmt.Errorf("conversation %q is not known to this connector", externalKey)
+	}
+	if providerID == 0 || strings.TrimSpace(modelName) == "" {
+		return fmt.Errorf("a provider and model are required to authorize a conversation")
+	}
+	tools, err := json.Marshal(allowedTools)
+	if err != nil {
+		return err
+	}
+	binding.Allowed, binding.ProviderID, binding.ModelName = true, providerID, strings.TrimSpace(modelName)
+	binding.AllowedTools = model.JSON(tools)
+	return a.store.SaveChannelBinding(a.ctx, binding)
+}
+
+// RevokeChannelBinding stops an external conversation from reaching the agent.
+// The binding and its thread are kept so the history stays readable.
+func (a *App) RevokeChannelBinding(pluginUUID, channelID, externalKey string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	binding, err := a.store.GetChannelBinding(a.ctx, pluginUUID, channelID, externalKey)
+	if err != nil {
+		return err
+	}
+	if binding == nil {
+		return fmt.Errorf("conversation %q is not known to this connector", externalKey)
+	}
+	binding.Allowed = false
+	return a.store.SaveChannelBinding(a.ctx, binding)
+}
+
+// PluginConfigFields returns a plugin's declared configuration for the
+// settings form. A secret that is already stored is reported as set and its
+// value is never returned.
+func (a *App) PluginConfigFields(pluginUUID string) ([]pluginpkg.Field, error) {
+	if err := a.ready(); err != nil {
+		return nil, err
+	}
+	plugin, err := a.findPlugin(pluginUUID)
+	if err != nil {
+		return nil, err
+	}
+	return a.pluginConfig().Fields(a.ctx, plugin)
+}
+
+// SetPluginConfig stores one declared configuration value. An empty value
+// clears the key.
+func (a *App) SetPluginConfig(pluginUUID, key, value string) error {
+	if err := a.ready(); err != nil {
+		return err
+	}
+	plugin, err := a.findPlugin(pluginUUID)
+	if err != nil {
+		return err
+	}
+	return a.pluginConfig().Set(a.ctx, plugin, key, value)
+}
+
+func (a *App) pluginConfig() *pluginpkg.ConfigService {
+	return pluginpkg.NewConfigService(a.store)
+}
+
+func (a *App) findPlugin(pluginUUID string) (model.Plugin, error) {
+	pluginUUID = strings.TrimSpace(pluginUUID)
+	plugins, err := a.store.ListPlugins(a.ctx)
+	if err != nil {
+		return model.Plugin{}, err
+	}
+	for _, plugin := range plugins {
+		if plugin.UUID == pluginUUID {
+			return plugin, nil
+		}
+	}
+	return model.Plugin{}, fmt.Errorf("plugin %q not found", pluginUUID)
 }
 
 func (a *App) installPlugin(source string) (DesktopPlugin, error) {
-	info, err := os.Stat(source)
-	if err != nil || !info.IsDir() {
-		return DesktopPlugin{}, fmt.Errorf("invalid plugin directory")
-	}
-	manifest := struct{ Name, Description, Version string }{Name: filepath.Base(source)}
-	manifestBytes := []byte(`{}`)
-	for _, candidate := range []string{filepath.Join(source, ".codex-plugin", "plugin.json"), filepath.Join(source, "plugin.json")} {
-		if data, readErr := os.ReadFile(candidate); readErr == nil {
-			manifestBytes = data
-			if err := json.Unmarshal(data, &manifest); err != nil {
-				return DesktopPlugin{}, fmt.Errorf("parse plugin manifest: %w", err)
-			}
-			break
-		}
-	}
-	if strings.TrimSpace(manifest.Name) == "" {
-		manifest.Name = filepath.Base(source)
-	}
-	pluginUUID := uuid.NewString()
-	dest := filepath.Join(a.root, "plugins", safeName(manifest.Name)+"-"+pluginUUID[:8])
-	if err := copyPluginDir(source, dest); err != nil {
-		return DesktopPlugin{}, err
-	}
-	cleanupFiles := true
-	defer func() {
-		if cleanupFiles {
-			_ = os.RemoveAll(dest)
-		}
-	}()
-	plugin := &model.Plugin{UUID: pluginUUID, Name: manifest.Name, Description: manifest.Description, Version: manifest.Version, InstallDir: dest, Manifest: model.JSON(manifestBytes), Enabled: false}
-	if err := a.store.CreatePlugin(a.ctx, plugin); err != nil {
-		return DesktopPlugin{}, err
-	}
-	skillCount, err := a.installPluginSkills(plugin)
+	plugin, counts, err := a.installer.Install(a.ctx, source)
 	if err != nil {
-		a.cleanupPluginRecords(plugin.UUID)
 		return DesktopPlugin{}, err
 	}
-	mcpCount, err := a.installPluginMCP(plugin)
-	if err != nil {
-		a.cleanupPluginRecords(plugin.UUID)
-		return DesktopPlugin{}, err
-	}
-	cleanupFiles = false
 	a.tools.Reload()
-	return DesktopPlugin{UUID: plugin.UUID, Name: plugin.Name, Description: plugin.Description, Version: plugin.Version, Enabled: false, SkillCount: skillCount, MCPCount: mcpCount}, nil
-}
-
-func (a *App) cleanupPluginRecords(pluginUUID string) {
-	_ = a.store.DeletePluginSkills(a.ctx, pluginUUID)
-	_ = a.store.DeletePluginMCP(a.ctx, pluginUUID)
-	_ = a.store.DeletePlugin(a.ctx, pluginUUID)
-}
-
-func (a *App) installPluginSkills(plugin *model.Plugin) (int, error) {
-	var infos []skills.SkillInfo
-	rootSkill := false
-	for _, name := range []string{"manifest.json", "_meta.json", "SKILL.md"} {
-		if _, err := os.Stat(filepath.Join(plugin.InstallDir, name)); err == nil {
-			rootSkill = true
-			break
-		}
-	}
-	if rootSkill {
-		info, err := skills.ParseSkillDir(plugin.InstallDir)
-		if err != nil {
-			return 0, err
-		}
-		infos = append(infos, *info)
-	}
-	skillsRoot := filepath.Join(plugin.InstallDir, "skills")
-	if _, statErr := os.Stat(skillsRoot); statErr == nil {
-		found, err := skills.ScanAll(skillsRoot)
-		if err != nil {
-			return 0, err
-		}
-		infos = append(infos, found...)
-	}
-	for _, info := range infos {
-		skill := skills.InfoToSkill(info, model.SkillSourceLocal, info.Slug)
-		skill.UUID = uuid.NewSHA1(uuid.NameSpaceURL, []byte(plugin.UUID+"/"+info.DirName)).String()
-		skill.PluginUUID = plugin.UUID
-		skill.Enabled = false
-		skill.InstallDir = filepath.Join(plugin.InstallDir, "skills", info.DirName)
-		if _, err := os.Stat(skill.InstallDir); err != nil {
-			skill.InstallDir = plugin.InstallDir
-		}
-		if err := a.store.UpsertSkill(a.ctx, skill); err != nil {
-			return 0, err
-		}
-	}
-	return len(infos), nil
-}
-func (a *App) installPluginMCP(plugin *model.Plugin) (int, error) {
-	var raw struct {
-		MCPServers map[string]struct {
-			Command, URL string
-			Args         []string
-			Env          map[string]string
-			Headers      map[string]string
-		} `json:"mcpServers"`
-	}
-	found := false
-	for _, name := range []string{".mcp.json", "mcp.json", filepath.Join(".codex-plugin", "mcp.json")} {
-		data, err := os.ReadFile(filepath.Join(plugin.InstallDir, name))
-		if err == nil {
-			if err := json.Unmarshal(data, &raw); err != nil {
-				return 0, fmt.Errorf("parse %s: %w", name, err)
-			}
-			found = true
-			break
-		}
-	}
-	if !found {
-		return 0, nil
-	}
-	count := 0
-	for name, cfg := range raw.MCPServers {
-		transport, endpoint := model.MCPTransportStdio, cfg.Command
-		if cfg.URL != "" {
-			transport, endpoint = model.MCPTransportStreamableHTTP, cfg.URL
-		}
-		args, _ := json.Marshal(cfg.Args)
-		env, _ := json.Marshal(cfg.Env)
-		headers, _ := json.Marshal(cfg.Headers)
-		srv := &model.MCPServer{UUID: uuid.NewSHA1(uuid.NameSpaceURL, []byte(plugin.UUID+"/mcp/"+name)).String(), PluginUUID: plugin.UUID, Name: name, Transport: transport, Endpoint: endpoint, Args: model.JSON(args), Env: model.JSON(env), Headers: model.JSON(headers), Enabled: false}
-		if endpoint == "" {
-			continue
-		}
-		if err := a.store.UpsertMCPServer(a.ctx, srv); err != nil {
-			return count, err
-		}
-		count++
-	}
-	return count, nil
+	return DesktopPlugin{
+		UUID: plugin.UUID, Name: plugin.Name, Description: plugin.Description,
+		Version: plugin.Version, Source: string(plugin.Source), Enabled: plugin.Enabled,
+		SkillCount: counts.Skills, MCPCount: counts.MCP,
+		ToolCount: counts.Tools, ChannelCount: counts.Channels,
+	}, nil
 }
 
 func validatedJSON(value, fallback, field string) (model.JSON, error) {
@@ -582,62 +587,4 @@ func validatedJSON(value, fallback, field string) (model.JSON, error) {
 		return nil, fmt.Errorf("MCP %s must be valid JSON", field)
 	}
 	return model.JSON(value), nil
-}
-func safeName(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	var b strings.Builder
-	for _, r := range value {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_' {
-			b.WriteRune(r)
-		} else if b.Len() > 0 {
-			b.WriteByte('-')
-		}
-	}
-	if b.Len() == 0 {
-		return "plugin"
-	}
-	return strings.Trim(b.String(), "-")
-}
-func copyPluginDir(source, dest string) error {
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
-	}
-	return filepath.Walk(source, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(source, path)
-		if err != nil {
-			return err
-		}
-		target := filepath.Join(dest, rel)
-		if info.Mode()&os.ModeSymlink != 0 {
-			return nil
-		}
-		if info.IsDir() {
-			return os.MkdirAll(target, info.Mode().Perm())
-		}
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-		in, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
-		if err != nil {
-			_ = in.Close()
-			return err
-		}
-		_, copyErr := io.Copy(out, in)
-		inCloseErr := in.Close()
-		outCloseErr := out.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if inCloseErr != nil {
-			return inCloseErr
-		}
-		return outCloseErr
-	})
 }

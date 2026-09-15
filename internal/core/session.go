@@ -147,6 +147,9 @@ func (s *Session) RunTurnWithAttachments(ctx context.Context, input string, atta
 			return err
 		}
 		messages := make([]SamplingMessage, 0, len(contextItems))
+		// Indices of replayed tool-image messages, so only the most recent
+		// captures keep their pixels once the loop has taken several.
+		var toolImageMessages []int
 		if provider, ok := dispatcher.(ContextProvider); ok {
 			pluginContext, contextErr := provider.ContextMessages(ctx, *s.thread)
 			if contextErr != nil {
@@ -193,8 +196,20 @@ func (s *Session) RunTurnWithAttachments(ctx context.Context, input string, atta
 				} else {
 					messages = append(messages, SamplingMessage{Role: "tool", Content: content, Name: payload.Name, ToolCallID: payload.CallID})
 				}
+				if len(payload.Attachments) > 0 {
+					files, resolveErr := s.resolveAttachments(ctx, payload.Attachments)
+					if resolveErr != nil {
+						_ = s.FailTurn(ctx, turn.ID, resolveErr)
+						return resolveErr
+					}
+					if images := imageAttachments(files); len(images) > 0 {
+						toolImageMessages = append(toolImageMessages, len(messages))
+						messages = append(messages, toolImageMessage(payload.Name, payload.CallID, images))
+					}
+				}
 			}
 		}
+		pruneToolImages(messages, toolImageMessages)
 		definitions, err := dispatcher.Definitions(ctx, *s.thread)
 		if err != nil {
 			_ = s.FailTurn(ctx, turn.ID, err)
@@ -233,10 +248,15 @@ func (s *Session) RunTurnWithAttachments(ctx context.Context, input string, atta
 			if toolResult.Error != "" {
 				status = model.StepError
 			}
+			artifacts, artifactErr := s.registerToolImages(ctx, turn.ID, toolResult.Content)
+			if artifactErr != nil {
+				_ = s.FailTurn(ctx, turn.ID, artifactErr)
+				return artifactErr
+			}
 			if err := s.AppendToolResult(ctx, turn.ID, toolResult.CallID, model.ExecutionStep{
 				Name: toolResult.Name, Input: call.Arguments, Output: toolResult.Content,
 				Error: toolResult.Error, Status: status, DurationMS: max(time.Since(started).Milliseconds(), int64(1)),
-			}); err != nil {
+			}, artifacts); err != nil {
 				_ = s.FailTurn(ctx, turn.ID, err)
 				return err
 			}
@@ -325,11 +345,17 @@ func (s *Session) AppendAssistantDelta(ctx context.Context, turnID, delta string
 
 // AppendToolResult persists tool lifecycle output as a model-visible rollout
 // item. MCP and search are both represented through this same tool boundary.
-func (s *Session) AppendToolResult(ctx context.Context, turnID, callID string, step model.ExecutionStep) error {
-	item, err := s.append(ctx, turnID, model.RolloutToolCompleted, true, map[string]any{
+// attachments are the UUIDs of images the tool produced; they are recorded so
+// a resumed thread replays the same visual context.
+func (s *Session) AppendToolResult(ctx context.Context, turnID, callID string, step model.ExecutionStep, attachments []string) error {
+	payload := map[string]any{
 		"call_id": callID, "name": step.Name, "status": step.Status, "input": step.Input,
 		"output": step.Output, "error": step.Error, "duration_ms": step.DurationMS,
-	})
+	}
+	if len(attachments) > 0 {
+		payload["attachments"] = attachments
+	}
+	item, err := s.append(ctx, turnID, model.RolloutToolCompleted, true, payload)
 	if err == nil {
 		message := "工具执行完成"
 		if step.Status == model.StepError {

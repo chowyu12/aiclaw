@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "aiclaw.wecom",
+  "name": "企业微信",
+  "version": "0.1.0",
+  "description": "接入企业微信智能机器人：群聊或单聊里的消息会触发一次助手回答，回复以流式返回。",
+  "author": "aiclaw",
+  "permissions": [
+    "network.access",
+    "channel.receive",
+    "channel.send",
+    "secrets.read",
+    "filesystem.write"
+  ],
+  "config": {
+    "bot_id": {
+      "type": "string",
+      "required": true,
+      "description": "企业微信智能机器人的 bot_id"
+    },
+    "bot_secret": {
+      "type": "string",
+      "required": true,
+      "secret": true,
+      "description": "机器人密钥，仅保存在本机数据库"
+    }
+  },
+  "contributes": {
+    "channels": [
+      { "id": "wecom", "provider": "builtin:wecom", "display_name": "企业微信" }
+    ]
+  }
+}

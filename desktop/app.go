@@ -11,11 +11,18 @@ import (
 	"sync"
 	"time"
 
+	"log"
+
 	"github.com/chowyu12/aiclaw/internal/appserver"
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/core"
 	memorypkg "github.com/chowyu12/aiclaw/internal/memory"
 	"github.com/chowyu12/aiclaw/internal/model"
+	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
+	"github.com/chowyu12/aiclaw/internal/plugins/bundled"
+	"github.com/chowyu12/aiclaw/internal/plugins/computeruse"
+	"github.com/chowyu12/aiclaw/internal/plugins/wechat"
+	"github.com/chowyu12/aiclaw/internal/plugins/wecom"
 	"github.com/chowyu12/aiclaw/internal/protocol"
 	providerpkg "github.com/chowyu12/aiclaw/internal/provider"
 	"github.com/chowyu12/aiclaw/internal/skills"
@@ -29,8 +36,12 @@ type App struct {
 	server *appserver.Service
 	tools  *core.LocalToolDispatcher
 	memory *memorypkg.Service
-	root   string
-	err    string
+	// installer owns plugin bundle installation, validation and removal.
+	installer *pluginpkg.Installer
+	// host supervises the long-running channels enabled plugins contribute.
+	host *pluginpkg.Host
+	root string
+	err  string
 
 	runMu     sync.Mutex
 	runs      map[string]*backgroundChatState
@@ -193,12 +204,67 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	sampler := core.ProviderSampler{Resolver: a.store}
-	a.tools = core.NewLocalToolDispatcher(a.store, core.WithDispatcherRoot(root), core.WithSubAgentSampler(sampler))
+	a.installer = pluginpkg.NewInstaller(a.store, root)
+	if err := a.installer.EnsureBuiltins(ctx, bundled.FS()); err != nil {
+		a.err = err.Error()
+		return
+	}
+	pluginRuntime, err := pluginpkg.NewRuntime(map[string]pluginpkg.ToolProvider{
+		computeruse.ProviderName: computeruse.New(root),
+	})
+	if err != nil {
+		a.err = err.Error()
+		return
+	}
+	a.tools = core.NewLocalToolDispatcher(a.store,
+		core.WithDispatcherRoot(root), core.WithSubAgentSampler(sampler),
+		core.WithPluginRuntime(pluginRuntime))
 	a.memory = memorypkg.NewService(a.store)
 	a.server = appserver.New(a.store, sampler, a.tools)
+	gateway := appserver.NewChannelGateway(a.server, a.store)
+	a.host, err = pluginpkg.NewHost(gateway, pluginpkg.NewConfigService(a.store),
+		map[string]pluginpkg.ChannelFactory{
+			wecom.ProviderName:  wecom.New,
+			wechat.ProviderName: wechat.New,
+		},
+		pluginpkg.WithHostLogger(func(format string, args ...any) {
+			log.Printf("[plugin] "+format, args...)
+		}))
+	if err != nil {
+		a.err = err.Error()
+		return
+	}
+	if err := a.syncChannels(); err != nil {
+		a.err = err.Error()
+		return
+	}
 	a.cleanupPendingAttachments()
 }
+
+// syncChannels brings the running channels in line with the enabled plugins.
+func (a *App) syncChannels() error {
+	if a.host == nil {
+		return nil
+	}
+	plugins, err := a.store.ListPlugins(a.ctx)
+	if err != nil {
+		return err
+	}
+	return a.host.Sync(a.bgContext, plugins)
+}
+
+// ChannelStatus reports each supervised channel for the settings page.
+func (a *App) ChannelStatus() []pluginpkg.ChannelStatus {
+	if a.host == nil {
+		return nil
+	}
+	return a.host.Status()
+}
+
 func (a *App) shutdown(context.Context) {
+	if a.host != nil {
+		a.host.Stop()
+	}
 	if a.bgCancel != nil {
 		a.bgCancel()
 	}

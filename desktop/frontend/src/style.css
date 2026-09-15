@@ -2908,3 +2908,306 @@ textarea {
     height: 50px;
   }
 }
+
+/* ── 插件配置、连接器状态与入站授权 ───────────────────────── */
+
+.plugin-list article .badge {
+  margin-left: 6px;
+  padding: 2px 6px;
+  border: 1px solid #33416a;
+  border-radius: 5px;
+  color: #8fa3dd;
+  background: #16203a;
+  font-size: 9px;
+  font-style: normal;
+  letter-spacing: 0.08em;
+  vertical-align: middle;
+}
+.plugin-list article .config-warning {
+  display: block;
+  margin-top: 5px;
+  color: #e3b341;
+  letter-spacing: 0.03em;
+}
+.plugin-list article .channel-state {
+  display: block;
+  margin-top: 4px;
+  color: #7f8da8;
+  letter-spacing: 0.03em;
+}
+.plugin-list article .channel-state.running {
+  color: #6ad3a2;
+}
+.plugin-list article .channel-state.retrying {
+  color: #e3b341;
+}
+.plugin-list article .channel-state.failed {
+  color: #f08a9b;
+}
+.plugin-list article > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.plugin-list article .switch:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pending-bindings {
+  margin-bottom: 18px;
+  padding: 16px;
+  border: 1px solid #5c4a2a;
+  border-radius: 12px;
+  background: #1d1a12;
+}
+.pending-bindings h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+.pending-bindings h2 small {
+  margin-left: 6px;
+  color: #e3b341;
+}
+.pending-bindings > p {
+  margin: 0 0 12px;
+  color: #a39377;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pending-bindings article {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid #3a3422;
+}
+.pending-bindings article > div:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+.pending-bindings article p {
+  margin: 4px 0 0;
+  color: #8b7f68;
+  font-size: 11px;
+}
+.binding-panel {
+  margin-top: 18px;
+}
+
+.plugin-dialog {
+  display: grid;
+  gap: 14px;
+  width: min(520px, calc(100vw - 48px));
+  max-height: calc(100vh - 80px);
+  padding: 22px;
+  overflow-y: auto;
+  border: 1px solid #36415b;
+  border-radius: 16px;
+  background: linear-gradient(145deg, #192237, #111827);
+  box-shadow:
+    inset 0 1px #ffffff0d,
+    0 28px 90px #000b;
+}
+.plugin-dialog header h2 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+.plugin-dialog header p {
+  margin: 0;
+  color: #9aa7bf;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.plugin-dialog form {
+  display: grid;
+  gap: 12px;
+}
+.plugin-dialog label {
+  display: grid;
+  gap: 5px;
+  font-size: 12px;
+}
+.plugin-dialog label > span {
+  color: #9aa7bf;
+}
+.plugin-dialog label .required {
+  margin-left: 6px;
+  color: #e3b341;
+  font-size: 10px;
+  font-style: normal;
+}
+.plugin-dialog label small {
+  color: #626f89;
+  font-size: 10px;
+}
+.dialog-error {
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid #8f4055;
+  border-radius: 9px;
+  color: #ffb1c1;
+  background: #2a1620;
+  font-size: 12px;
+}
+.dialog-notice {
+  padding: 9px 11px;
+  border: 1px solid #5c4a2a;
+  border-radius: 9px;
+  color: #e3b341;
+  background: #1d1a12;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.dialog-permissions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.dialog-permissions b {
+  margin-right: 4px;
+  color: #9aa7bf;
+  font-weight: 600;
+}
+.dialog-permissions span {
+  padding: 3px 7px;
+  border: 1px solid #33416a;
+  border-radius: 5px;
+  color: #8fa3dd;
+  background: #16203a;
+}
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.dialog-actions .empty-copy {
+  margin: 0 auto 0 0;
+}
+.grant-list {
+  display: grid;
+  gap: 7px;
+  padding: 12px;
+  border: 1px solid #273451;
+  border-radius: 10px;
+  background: #101725;
+}
+.grant-list > b {
+  color: #9aa7bf;
+  font-size: 11px;
+  font-weight: 600;
+}
+.grant-list .grant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.grant-list .grant input {
+  width: auto;
+  margin: 0;
+}
+.grant-list .grant span {
+  color: #c6d0e6;
+  font-size: 12px;
+}
+.grant-list .grant code {
+  margin-left: 6px;
+  color: #626f89;
+  font-size: 10px;
+}
+.wechat-login {
+  display: grid;
+  gap: 8px;
+  place-items: center;
+  padding: 14px;
+  border: 1px solid #273451;
+  border-radius: 10px;
+  background: #101725;
+}
+.wechat-login img {
+  width: 180px;
+  height: 180px;
+  border-radius: 8px;
+  background: #fff;
+}
+.wechat-login p {
+  margin: 0;
+  color: #9aa7bf;
+  font-size: 12px;
+}
+
+:root[data-theme="light"] .plugin-list article .badge {
+  border-color: #cfd8e8;
+  color: #4a5a86;
+  background: #eef2fa;
+}
+:root[data-theme="light"] .plugin-list article .config-warning {
+  color: #9a6b12;
+}
+:root[data-theme="light"] .plugin-list article .channel-state {
+  color: #647089;
+}
+:root[data-theme="light"] .plugin-list article .channel-state.running {
+  color: #1d7a52;
+}
+:root[data-theme="light"] .plugin-list article .channel-state.retrying {
+  color: #9a6b12;
+}
+:root[data-theme="light"] .plugin-list article .channel-state.failed {
+  color: #b23a52;
+}
+:root[data-theme="light"] .pending-bindings {
+  border-color: #e6d2a8;
+  background: #fdf8ec;
+}
+:root[data-theme="light"] .pending-bindings > p {
+  color: #7a6a4a;
+}
+:root[data-theme="light"] .pending-bindings article {
+  border-top-color: #eee1c6;
+}
+:root[data-theme="light"] .pending-bindings article p {
+  color: #8a7c62;
+}
+:root[data-theme="light"] .plugin-dialog {
+  border-color: #d8dfeb;
+  color: #1c2840;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(64, 81, 116, 0.18);
+}
+:root[data-theme="light"] .plugin-dialog header p,
+:root[data-theme="light"] .plugin-dialog label > span,
+:root[data-theme="light"] .wechat-login p,
+:root[data-theme="light"] .grant-list > b,
+:root[data-theme="light"] .dialog-permissions b {
+  color: #5a6a86;
+}
+:root[data-theme="light"] .plugin-dialog label small,
+:root[data-theme="light"] .grant-list .grant code {
+  color: #7a86a0;
+}
+:root[data-theme="light"] .grant-list,
+:root[data-theme="light"] .wechat-login {
+  border-color: #dde4ee;
+  background: #f7f9fc;
+}
+:root[data-theme="light"] .grant-list .grant span {
+  color: #24314f;
+}
+:root[data-theme="light"] .dialog-error {
+  border-color: #e2b6c2;
+  color: #a03050;
+  background: #fdf1f4;
+}
+:root[data-theme="light"] .dialog-notice {
+  border-color: #e6d2a8;
+  color: #8a6210;
+  background: #fdf8ec;
+}
+:root[data-theme="light"] .dialog-permissions span {
+  border-color: #cfd8e8;
+  color: #4a5a86;
+  background: #eef2fa;
+}

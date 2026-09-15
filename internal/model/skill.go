@@ -56,4 +56,7 @@ type SkillConfigField struct {
 	Type        string `json:"type"`
 	Required    bool   `json:"required,omitzero"`
 	Description string `json:"description,omitzero"`
+	// Secret marks a value that must be stored encrypted and never returned
+	// to the UI, logs or model context.
+	Secret bool `json:"secret,omitzero"`
 }
