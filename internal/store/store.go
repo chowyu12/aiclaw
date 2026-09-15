@@ -19,8 +19,23 @@ type SkillStore interface {
 type PluginStore interface {
 	ListPlugins(ctx context.Context) ([]model.Plugin, error)
 	CreatePlugin(ctx context.Context, plugin *model.Plugin) error
+	UpsertPlugin(ctx context.Context, plugin *model.Plugin) error
 	SetPluginEnabled(ctx context.Context, uuid string, enabled bool) error
 	DeletePlugin(ctx context.Context, uuid string) error
+	ListPluginConfig(ctx context.Context, pluginUUID string) ([]model.PluginConfig, error)
+	SetPluginConfig(ctx context.Context, item *model.PluginConfig) error
+	DeletePluginConfig(ctx context.Context, pluginUUID, key string) error
+	DeletePluginConfigs(ctx context.Context, pluginUUID string) error
+}
+
+// ChannelBindingStore owns the mapping between external conversations and
+// local threads, including whether an external conversation is allowed to
+// reach the agent at all.
+type ChannelBindingStore interface {
+	ListChannelBindings(ctx context.Context) ([]model.ChannelBinding, error)
+	GetChannelBinding(ctx context.Context, pluginUUID, channelID, externalKey string) (*model.ChannelBinding, error)
+	SaveChannelBinding(ctx context.Context, item *model.ChannelBinding) error
+	DeleteChannelBindings(ctx context.Context, pluginUUID string) error
 }
 
 type MCPServerStore interface {

@@ -9,6 +9,9 @@ import {
   BackgroundChats,
   ApproveMemory,
   ChooseAttachments,
+  AuthorizeChannelBinding,
+  ChannelBindings,
+  ChannelStatus,
   ChoosePluginDirectory,
   CreateProject,
   DeleteProject,
@@ -26,16 +29,21 @@ import {
   MoveThreadToProject,
   OpenAttachment,
   OpenOutputFile,
+  PluginConfigFields,
   Plugins,
+  PollWeChatLogin,
   Projects,
   Providers,
   RevealAttachment,
   RevealOutputFile,
+  RevokeChannelBinding,
   RemoveProviderModel,
   SearchEngines,
   SetLastModelSelection,
   SetMemorySettings,
+  SetPluginConfig,
   StartChat,
+  StartWeChatLogin,
   StartRetry,
   Status,
   SyncProviderModels,
@@ -180,10 +188,44 @@ type Plugin = {
   name: string;
   description: string;
   version: string;
+  source: string;
   enabled: boolean;
   skill_count: number;
   mcp_count: number;
+  tool_count: number;
+  channel_count: number;
   permissions: string[];
+  missing_config?: string[];
+};
+type PluginConfigField = {
+  key: string;
+  type: string;
+  description?: string;
+  required: boolean;
+  secret: boolean;
+  is_set: boolean;
+  value?: string;
+};
+type ChannelBinding = {
+  plugin_uuid: string;
+  channel_id: string;
+  external_key: string;
+  display_name: string;
+  thread_uuid?: string;
+  provider_id?: number;
+  model_name?: string;
+  allowed: boolean;
+  allowed_tools?: string[];
+  last_message?: string;
+};
+type ChannelRuntimeStatus = {
+  plugin_uuid: string;
+  plugin_name: string;
+  channel_id: string;
+  display_name?: string;
+  state: string;
+  attempts?: number;
+  last_error?: string;
 };
 type Theme = "dark" | "light";
 type ConfirmationRequest = {
@@ -210,6 +252,8 @@ const providers = ref<Provider[]>([]),
 const searches = ref<Search[]>([]),
   mcps = ref<MCP[]>([]),
   plugins = ref<Plugin[]>([]),
+  bindings = ref<ChannelBinding[]>([]),
+  channelStates = ref<ChannelRuntimeStatus[]>([]),
   memories = ref<MemoryItem[]>([]),
   messages = ref<Message[]>([]),
   pendingAttachments = ref<Attachment[]>([]);
@@ -225,6 +269,34 @@ const projectID = ref(""),
   online = ref(true),
   memoryUse = ref(true),
   memoryGenerate = ref(true);
+// Plugin configuration is edited in a dialog: the fields a plugin declares
+// are specific to it, and a secret is never prefilled.
+const configPlugin = ref<Plugin | null>(null),
+  configFields = ref<PluginConfigField[]>([]),
+  configDrafts = ref<Record<string, string>>({}),
+  configSaving = ref(false),
+  configError = ref("");
+// Authorizing an inbound conversation picks its model and acting tools rather
+// than inheriting the desktop session's reach.
+const authorizeTarget = ref<ChannelBinding | null>(null),
+  // authorizeSelection carries "<provider id>:<model>" so one select picks both.
+  authorizeSelection = ref(""),
+  authorizeTools = ref<string[]>([]),
+  authorizeError = ref("");
+// Tools an inbound conversation can be granted. Everything outside this list
+// is read-only and always available; these act on the machine.
+const grantableTools = [
+  { name: "write", label: "写文件" },
+  { name: "edit", label: "改文件" },
+  { name: "exec", label: "执行命令" },
+  { name: "process", label: "管理进程" },
+  { name: "code_interpreter", label: "运行代码" },
+  { name: "computer", label: "控制屏幕" },
+  { name: "cron", label: "定时任务" },
+];
+const wechatQR = ref(""),
+  wechatStatus = ref(""),
+  wechatPolling = ref(false);
 const prompt = ref(""),
   launching = ref(false),
   error = ref(""),
@@ -330,6 +402,8 @@ async function refresh(restoreLastModel = false) {
       searchItems,
       mcpItems,
       pluginItems,
+      bindingItems,
+      channelItems,
       memoryItems,
       memorySettings,
       savedModel,
@@ -340,6 +414,8 @@ async function refresh(restoreLastModel = false) {
       SearchEngines(),
       MCPServers(),
       Plugins(),
+      ChannelBindings(),
+      ChannelStatus(),
       Memories(),
       MemorySettings(),
       modelSelectionPromise,
@@ -350,6 +426,8 @@ async function refresh(restoreLastModel = false) {
     searches.value = searchItems;
     mcps.value = mcpItems;
     plugins.value = pluginItems;
+    bindings.value = bindingItems ?? [];
+    channelStates.value = channelItems ?? [];
     memories.value = memoryItems;
     memoryUse.value = memorySettings.use_memories;
     memoryGenerate.value = memorySettings.generate_memories;
@@ -1263,6 +1341,200 @@ async function removePlugin(item: Plugin) {
     error.value = String(e);
   }
 }
+async function openPluginConfig(item: Plugin) {
+  configPlugin.value = item;
+  configError.value = "";
+  configDrafts.value = {};
+  wechatQR.value = "";
+  wechatStatus.value = "";
+  try {
+    configFields.value = (await PluginConfigFields(item.uuid)) ?? [];
+  } catch (e) {
+    configFields.value = [];
+    configError.value = String(e);
+  }
+}
+function closePluginConfig() {
+  configPlugin.value = null;
+  configFields.value = [];
+  configDrafts.value = {};
+  wechatPolling.value = false;
+}
+// Only edited fields are written. A secret keeps its stored value unless the
+// user typed a replacement, and an emptied field clears the key.
+async function savePluginConfig() {
+  const target = configPlugin.value;
+  if (!target) return;
+  configSaving.value = true;
+  configError.value = "";
+  try {
+    for (const field of configFields.value) {
+      const draft = configDrafts.value[field.key];
+      if (draft === undefined) continue;
+      await SetPluginConfig(target.uuid, field.key, draft);
+    }
+    await refresh();
+    const updated = plugins.value.find((item) => item.uuid === target.uuid);
+    if (updated) configPlugin.value = updated;
+    configFields.value = (await PluginConfigFields(target.uuid)) ?? [];
+    configDrafts.value = {};
+  } catch (e) {
+    configError.value = String(e);
+  } finally {
+    configSaving.value = false;
+  }
+}
+function pluginChannelStates(item: Plugin) {
+  return channelStates.value.filter((state) => state.plugin_uuid === item.uuid);
+}
+function pluginBindings(item: Plugin) {
+  return bindings.value.filter((binding) => binding.plugin_uuid === item.uuid);
+}
+const pendingBindings = computed(() =>
+  bindings.value.filter((binding) => !binding.allowed),
+);
+const modelOptions = computed(() =>
+  providers.value.flatMap((provider) =>
+    (provider.models ?? []).map((name) => ({
+      key: `${provider.id}:${name}`,
+      label: `${provider.name} · ${name}`,
+    })),
+  ),
+);
+// Bindings carry RFC3339 timestamps; a raw one is unreadable in a list.
+function formatBindingTime(value?: string) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+function channelStateLabel(state: string) {
+  return (
+    {
+      starting: "连接中",
+      running: "已连接",
+      retrying: "重连中",
+      failed: "已停止",
+      stopped: "未运行",
+    }[state] ?? state
+  );
+}
+function openAuthorize(binding: ChannelBinding) {
+  authorizeTarget.value = binding;
+  authorizeError.value = "";
+  const provider = binding.provider_id || providerID.value;
+  const model = binding.model_name || modelName.value;
+  authorizeSelection.value = provider && model ? `${provider}:${model}` : "";
+  authorizeTools.value = [...(binding.allowed_tools ?? [])];
+}
+function closeAuthorize() {
+  authorizeTarget.value = null;
+  authorizeError.value = "";
+}
+function toggleGrant(name: string) {
+  const current = authorizeTools.value;
+  authorizeTools.value = current.includes(name)
+    ? current.filter((item) => item !== name)
+    : [...current, name];
+}
+async function confirmAuthorize() {
+  const target = authorizeTarget.value;
+  if (!target) return;
+  authorizeError.value = "";
+  const [rawProvider, ...rest] = authorizeSelection.value.split(":");
+  const provider = Number(rawProvider);
+  const model = rest.join(":");
+  if (!provider || !model) {
+    authorizeError.value = "请先选择这个会话使用的模型。";
+    return;
+  }
+  try {
+    await AuthorizeChannelBinding(
+      target.plugin_uuid,
+      target.channel_id,
+      target.external_key,
+      provider,
+      model,
+      authorizeTools.value,
+    );
+    await refresh();
+    closeAuthorize();
+  } catch (e) {
+    authorizeError.value = String(e);
+  }
+}
+async function revokeBinding(binding: ChannelBinding) {
+  const confirmed = await askConfirmation(
+    "取消授权？",
+    `「${binding.display_name || binding.external_key}」之后发来的消息将不再触发助手，历史会话保留。`,
+    "取消授权",
+  );
+  if (!confirmed) return;
+  try {
+    await RevokeChannelBinding(
+      binding.plugin_uuid,
+      binding.channel_id,
+      binding.external_key,
+    );
+    await refresh();
+  } catch (e) {
+    error.value = String(e);
+  }
+}
+// The WeChat connector signs in by QR scan; the credentials it returns go
+// straight into the plugin's configuration and never reach this view.
+async function startWeChatLogin() {
+  const target = configPlugin.value;
+  if (!target) return;
+  configError.value = "";
+  wechatStatus.value = "";
+  try {
+    const qr = await StartWeChatLogin();
+    wechatQR.value = qr.qrcode_url || qr.qrcode;
+    wechatPolling.value = true;
+    void pollWeChatLogin(target.uuid, qr.qrcode);
+  } catch (e) {
+    configError.value = String(e);
+  }
+}
+async function pollWeChatLogin(pluginUUID: string, qrcode: string) {
+  while (wechatPolling.value) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    if (!wechatPolling.value) return;
+    try {
+      const status = await PollWeChatLogin(pluginUUID, qrcode);
+      wechatStatus.value =
+        {
+          wait: "等待扫码…",
+          scaned: "已扫码，请在手机上确认",
+          confirmed: "已确认",
+          expired: "二维码已过期，请重新获取",
+        }[status.status] ?? status.status;
+      if (status.status === "expired") {
+        wechatPolling.value = false;
+        wechatQR.value = "";
+        return;
+      }
+      if (status.saved) {
+        wechatPolling.value = false;
+        wechatQR.value = "";
+        wechatStatus.value = "登录成功，凭据已保存在本机";
+        await refresh();
+        configFields.value = (await PluginConfigFields(pluginUUID)) ?? [];
+        return;
+      }
+    } catch (e) {
+      wechatPolling.value = false;
+      configError.value = String(e);
+      return;
+    }
+  }
+}
 let stopChatDelta: (() => void) | undefined;
 let stopChatProgress: (() => void) | undefined;
 let stopChatFinished: (() => void) | undefined;
@@ -1283,6 +1555,7 @@ onMounted(() => {
   })();
 });
 onUnmounted(() => {
+  wechatPolling.value = false;
   stopChatDelta?.();
   stopChatProgress?.();
   stopChatFinished?.();
@@ -2150,7 +2423,40 @@ onUnmounted(() => {
             ><span
               ><b>{{ plugins.reduce((n, p) => n + p.mcp_count, 0) }}</b>
               MCP</span
+            ><span
+              ><b>{{ plugins.reduce((n, p) => n + p.tool_count, 0) }}</b>
+              工具</span
+            ><span
+              ><b>{{ plugins.reduce((n, p) => n + p.channel_count, 0) }}</b>
+              连接器</span
             >
+          </div>
+          <div v-if="pendingBindings.length" class="pending-bindings">
+            <h2>等待授权的会话 <small>{{ pendingBindings.length }}</small></h2>
+            <p>
+              这些外部会话给助手发过消息，但还没有被放行。收到消息本身不会触发助手——
+              放行后你才决定它用哪个模型、能用哪些工具。
+            </p>
+            <article
+              v-for="binding in pendingBindings"
+              :key="binding.plugin_uuid + binding.channel_id + binding.external_key"
+            >
+              <div class="item-icon">◔</div>
+              <div>
+                <b>{{ binding.display_name || binding.external_key }}</b>
+                <p>
+                  {{ binding.channel_id }} ·
+                  {{
+                    binding.last_message
+                      ? "最近 " + formatBindingTime(binding.last_message)
+                      : "尚无消息"
+                  }}
+                </p>
+              </div>
+              <button class="primary" @click="openAuthorize(binding)">
+                放行…
+              </button>
+            </article>
           </div>
           <div class="plugin-list">
             <article class="builtin">
@@ -2163,24 +2469,55 @@ onUnmounted(() => {
               <span class="state">已启用</span>
             </article>
             <article v-for="item in plugins" :key="item.uuid">
-              <div class="plugin-icon">✦</div>
+              <div class="plugin-icon">{{ item.source === "builtin" ? "◈" : "✦" }}</div>
               <div>
-                <b>{{ item.name }}</b>
+                <b
+                  >{{ item.name }}
+                  <em v-if="item.source === 'builtin'" class="badge">内置</em></b
+                >
                 <p>{{ item.description || "本地 AIClaw 插件" }}</p>
                 <small
-                  >{{ item.version || "LOCAL" }} · {{ item.skill_count }} SKILLS
-                  · {{ item.mcp_count }} MCP</small
-                >
+                  >{{ item.version || "LOCAL" }}
+                  <template v-if="item.skill_count">· {{ item.skill_count }} SKILLS</template>
+                  <template v-if="item.mcp_count">· {{ item.mcp_count }} MCP</template>
+                  <template v-if="item.tool_count">· {{ item.tool_count }} TOOLS</template>
+                  <template v-if="item.channel_count">· {{ item.channel_count }} CHANNELS</template>
+                </small>
                 <small v-if="item.permissions?.length" class="permission-list">{{ item.permissions.join(" · ") }}</small>
+                <small v-if="item.missing_config?.length" class="config-warning"
+                  >待配置：{{ item.missing_config.join("、") }}</small
+                >
+                <small
+                  v-for="state in pluginChannelStates(item)"
+                  :key="state.channel_id"
+                  class="channel-state"
+                  :class="state.state"
+                  >{{ state.display_name || state.channel_id }}:
+                  {{ channelStateLabel(state.state) }}
+                  <template v-if="state.last_error">— {{ state.last_error }}</template>
+                </small>
               </div>
+              <button @click="openPluginConfig(item)">配置</button>
               <button
                 class="switch"
                 :class="{ on: item.enabled }"
+                :disabled="!item.enabled && !!item.missing_config?.length"
+                :title="
+                  !item.enabled && item.missing_config?.length
+                    ? '需要先完成配置才能启用'
+                    : ''
+                "
                 @click="togglePlugin(item)"
               >
                 <i></i>
               </button>
-              <button class="danger" @click="removePlugin(item)">删除</button>
+              <button
+                v-if="item.source !== 'builtin'"
+                class="danger"
+                @click="removePlugin(item)"
+              >
+                删除
+              </button>
             </article>
             <div v-if="!plugins.length" class="plugin-empty">
               <div class="orb">◌</div>
@@ -2196,9 +2533,163 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
+          <div
+            v-if="bindings.some((binding) => binding.allowed)"
+            class="panel list-panel binding-panel"
+          >
+            <h2>
+              已授权的外部会话
+              <small>{{ bindings.filter((binding) => binding.allowed).length }}</small>
+            </h2>
+            <article
+              v-for="binding in bindings.filter((item) => item.allowed)"
+              :key="binding.plugin_uuid + binding.channel_id + binding.external_key"
+            >
+              <div class="item-icon">◕</div>
+              <div>
+                <b>{{ binding.display_name || binding.external_key }}</b>
+                <p>
+                  {{ binding.channel_id }} · {{ binding.model_name || "未选模型" }}
+                </p>
+                <small>
+                  可用工具：{{
+                    binding.allowed_tools?.length
+                      ? binding.allowed_tools.join(" · ")
+                      : "仅只读"
+                  }}
+                </small>
+              </div>
+              <button @click="openAuthorize(binding)">调整…</button>
+              <button class="danger" @click="revokeBinding(binding)">
+                取消授权
+              </button>
+            </article>
+          </div>
         </div>
       </section>
     </section>
+    <div
+      v-if="configPlugin"
+      class="confirmation-backdrop"
+      role="presentation"
+      @click.self="closePluginConfig"
+    >
+      <section class="plugin-dialog" role="dialog" aria-modal="true">
+        <header>
+          <h2>{{ configPlugin.name }} · 配置</h2>
+          <p>{{ configPlugin.description }}</p>
+        </header>
+        <p v-if="configError" class="dialog-error">{{ configError }}</p>
+        <div v-if="configPlugin.permissions?.length" class="dialog-permissions">
+          <b>启用后将授予</b>
+          <span v-for="permission in configPlugin.permissions" :key="permission">{{
+            permission
+          }}</span>
+        </div>
+        <div
+          v-if="configPlugin.description.includes('iLink')"
+          class="dialog-notice"
+        >
+          该连接器通过第三方中继访问个人微信，并非官方接口。可用性与账号风险由使用者自行承担。
+        </div>
+        <div v-if="wechatQR || wechatStatus" class="wechat-login">
+          <img v-if="wechatQR" :src="wechatQR" alt="微信登录二维码" />
+          <p>{{ wechatStatus || "请使用微信扫描二维码" }}</p>
+        </div>
+        <button
+          v-if="configFields.some((field) => field.key === 'bot_token')"
+          @click="startWeChatLogin"
+        >
+          {{ wechatPolling ? "重新获取二维码" : "扫码登录微信" }}
+        </button>
+        <form v-if="configFields.length" @submit.prevent="savePluginConfig">
+          <label v-for="field in configFields" :key="field.key">
+            <span
+              >{{ field.key
+              }}<em v-if="field.required" class="required">必填</em></span
+            >
+            <input
+              :type="field.secret ? 'password' : 'text'"
+              :value="field.secret ? configDrafts[field.key] ?? '' : configDrafts[field.key] ?? field.value ?? ''"
+              :placeholder="
+                field.secret && field.is_set
+                  ? '已配置，输入新值可替换'
+                  : field.description || ''
+              "
+              :autocomplete="field.secret ? 'new-password' : 'off'"
+              @input="
+                configDrafts[field.key] = ($event.target as HTMLInputElement).value
+              "
+            />
+            <small v-if="field.description">{{ field.description }}</small>
+          </label>
+          <div class="dialog-actions">
+            <button type="button" @click="closePluginConfig">关闭</button>
+            <button class="primary" :disabled="configSaving">
+              {{ configSaving ? "保存中…" : "保存" }}
+            </button>
+          </div>
+        </form>
+        <div v-else class="dialog-actions">
+          <p class="empty-copy">这个插件没有需要填写的配置。</p>
+          <button type="button" @click="closePluginConfig">关闭</button>
+        </div>
+      </section>
+    </div>
+    <div
+      v-if="authorizeTarget"
+      class="confirmation-backdrop"
+      role="presentation"
+      @click.self="closeAuthorize"
+    >
+      <section class="plugin-dialog" role="dialog" aria-modal="true">
+        <header>
+          <h2>
+            放行「{{ authorizeTarget.display_name || authorizeTarget.external_key }}」
+          </h2>
+          <p>
+            这个会话发来的消息会触发一次助手回答。消息内容是外部数据，其中的指令不代表你的授权，
+            所以默认只有只读工具；下面勾选的工具才会开放给它。
+          </p>
+        </header>
+        <p v-if="authorizeError" class="dialog-error">{{ authorizeError }}</p>
+        <form @submit.prevent="confirmAuthorize">
+          <label
+            >使用模型<select v-model="authorizeSelection">
+              <option v-if="!modelOptions.length" value="">
+                请先在「模型」里添加提供商
+              </option>
+              <option
+                v-for="option in modelOptions"
+                :key="option.key"
+                :value="option.key"
+              >
+                {{ option.label }}
+              </option>
+            </select></label
+          >
+          <div class="grant-list">
+            <b>额外开放的工具</b>
+            <label
+              v-for="tool in grantableTools"
+              :key="tool.name"
+              class="grant"
+            >
+              <input
+                type="checkbox"
+                :checked="authorizeTools.includes(tool.name)"
+                @change="toggleGrant(tool.name)"
+              />
+              <span>{{ tool.label }}<code>{{ tool.name }}</code></span>
+            </label>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" @click="closeAuthorize">取消</button>
+            <button class="primary">确认放行</button>
+          </div>
+        </form>
+      </section>
+    </div>
     <div
       v-if="confirmation"
       class="confirmation-backdrop"

@@ -12,3 +12,6 @@ CHANGELOG.md
 /desktop/desktop
 /desktop/frontend/wailsjs/go/
 /web/
+/desktop/frontend/node_modules/
+/desktop/frontend/dist/assets/
+/desktop/frontend/dist/index.html

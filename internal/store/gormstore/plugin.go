@@ -46,6 +46,15 @@ func (s *GormStore) CreatePlugin(ctx context.Context, plugin *model.Plugin) erro
 	return s.db.WithContext(ctx).Create(plugin).Error
 }
 
+// UpsertPlugin writes a plugin record by UUID, used by the bundled plugin sync
+// so an upgrade refreshes name, version and manifest in place.
+func (s *GormStore) UpsertPlugin(ctx context.Context, plugin *model.Plugin) error {
+	if plugin.UUID == "" {
+		plugin.UUID = uuid.NewString()
+	}
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "uuid"}}, UpdateAll: true}).Create(plugin).Error
+}
+
 func (s *GormStore) SetPluginEnabled(ctx context.Context, pluginUUID string, enabled bool) error {
 	return s.db.WithContext(ctx).Model(&model.Plugin{}).Where("uuid = ?", pluginUUID).Update("enabled", enabled).Error
 }
@@ -59,4 +68,26 @@ func (s *GormStore) DeletePlugin(ctx context.Context, pluginUUID string) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+func (s *GormStore) ListPluginConfig(ctx context.Context, pluginUUID string) ([]model.PluginConfig, error) {
+	var items []model.PluginConfig
+	return items, s.db.WithContext(ctx).Where("plugin_uuid = ?", pluginUUID).Order("key ASC").Find(&items).Error
+}
+
+func (s *GormStore) SetPluginConfig(ctx context.Context, item *model.PluginConfig) error {
+	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "plugin_uuid"}, {Name: "key"}},
+		DoUpdates: clause.AssignmentColumns([]string{"value", "secret", "updated_at"}),
+	}).Create(item).Error
+}
+
+func (s *GormStore) DeletePluginConfig(ctx context.Context, pluginUUID, key string) error {
+	return s.db.WithContext(ctx).Where("plugin_uuid = ? AND key = ?", pluginUUID, key).Delete(&model.PluginConfig{}).Error
+}
+
+// DeletePluginConfigs removes every stored value of a plugin. Secrets must not
+// outlive the bundle they belong to.
+func (s *GormStore) DeletePluginConfigs(ctx context.Context, pluginUUID string) error {
+	return s.db.WithContext(ctx).Where("plugin_uuid = ?", pluginUUID).Delete(&model.PluginConfig{}).Error
 }

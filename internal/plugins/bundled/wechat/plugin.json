@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "id": "aiclaw.wechat",
+  "name": "微信",
+  "version": "0.1.0",
+  "description": "通过 iLink 中继接入个人微信：扫码登录后，私聊消息会触发一次助手回答。中继为第三方服务，可用性与账号风险由使用者自行承担。",
+  "author": "aiclaw",
+  "permissions": [
+    "network.access",
+    "channel.receive",
+    "channel.send",
+    "secrets.read",
+    "filesystem.write"
+  ],
+  "config": {
+    "bot_token": {
+      "type": "string",
+      "required": true,
+      "secret": true,
+      "description": "扫码登录后获得，仅保存在本机数据库"
+    },
+    "ilink_bot_id": {
+      "type": "string",
+      "required": true,
+      "description": "扫码登录后获得的 bot id"
+    },
+    "base_url": {
+      "type": "string",
+      "description": "中继地址，留空使用默认值"
+    },
+    "ilink_user_id": {
+      "type": "string",
+      "description": "扫码登录后获得的用户 id"
+    }
+  },
+  "contributes": {
+    "channels": [
+      { "id": "wechat", "provider": "builtin:wechat", "display_name": "微信" }
+    ]
+  }
+}

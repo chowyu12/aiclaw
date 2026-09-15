@@ -79,6 +79,8 @@ func autoMigrate(db *gorm.DB) error {
 		&model.SearchEngineConfig{},
 		&model.Skill{},
 		&model.Plugin{},
+		&model.PluginConfig{},
+		&model.ChannelBinding{},
 		&model.AppSetting{},
 	)
 }
