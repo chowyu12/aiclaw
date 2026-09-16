@@ -294,7 +294,10 @@ const grantableTools = [
   { name: "computer", label: "控制屏幕" },
   { name: "cron", label: "定时任务" },
 ];
-const wechatQR = ref(""),
+// wechatQRImage is a rendered PNG data URI. The relay's other string is the
+// code's payload, which is not an image address — treating it as one is what
+// produced a broken image here before.
+const wechatQRImage = ref(""),
   wechatStatus = ref(""),
   wechatPolling = ref(false);
 const prompt = ref(""),
@@ -1345,7 +1348,7 @@ async function openPluginConfig(item: Plugin) {
   configPlugin.value = item;
   configError.value = "";
   configDrafts.value = {};
-  wechatQR.value = "";
+  wechatQRImage.value = "";
   wechatStatus.value = "";
   try {
     configFields.value = (await PluginConfigFields(item.uuid)) ?? [];
@@ -1495,19 +1498,19 @@ async function startWeChatLogin() {
   wechatStatus.value = "";
   try {
     const qr = await StartWeChatLogin();
-    wechatQR.value = qr.qrcode_url || qr.qrcode;
+    wechatQRImage.value = qr.image;
     wechatPolling.value = true;
-    void pollWeChatLogin(target.uuid, qr.qrcode);
+    void pollWeChatLogin(target.uuid, qr.token);
   } catch (e) {
     configError.value = String(e);
   }
 }
-async function pollWeChatLogin(pluginUUID: string, qrcode: string) {
+async function pollWeChatLogin(pluginUUID: string, token: string) {
   while (wechatPolling.value) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     if (!wechatPolling.value) return;
     try {
-      const status = await PollWeChatLogin(pluginUUID, qrcode);
+      const status = await PollWeChatLogin(pluginUUID, token);
       wechatStatus.value =
         {
           wait: "等待扫码…",
@@ -1517,12 +1520,12 @@ async function pollWeChatLogin(pluginUUID: string, qrcode: string) {
         }[status.status] ?? status.status;
       if (status.status === "expired") {
         wechatPolling.value = false;
-        wechatQR.value = "";
+        wechatQRImage.value = "";
         return;
       }
       if (status.saved) {
         wechatPolling.value = false;
-        wechatQR.value = "";
+        wechatQRImage.value = "";
         wechatStatus.value = "登录成功，凭据已保存在本机";
         await refresh();
         configFields.value = (await PluginConfigFields(pluginUUID)) ?? [];
@@ -2592,8 +2595,8 @@ onUnmounted(() => {
         >
           该连接器通过第三方中继访问个人微信，并非官方接口。可用性与账号风险由使用者自行承担。
         </div>
-        <div v-if="wechatQR || wechatStatus" class="wechat-login">
-          <img v-if="wechatQR" :src="wechatQR" alt="微信登录二维码" />
+        <div v-if="wechatQRImage || wechatStatus" class="wechat-login">
+          <img v-if="wechatQRImage" :src="wechatQRImage" alt="微信登录二维码" />
           <p>{{ wechatStatus || "请使用微信扫描二维码" }}</p>
         </div>
         <button
