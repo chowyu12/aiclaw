@@ -10,8 +10,10 @@ import (
 
 // WeChatLoginQR is a login QR code for the WeChat connector.
 type WeChatLoginQR struct {
-	QRCode    string `json:"qrcode"`
-	QRCodeURL string `json:"qrcode_url"`
+	// Token identifies this login attempt when polling its status.
+	Token string `json:"token"`
+	// Image is the code rendered as a PNG data URI, ready for an <img src>.
+	Image string `json:"image"`
 }
 
 // WeChatLoginStatus reports the progress of a scan.
@@ -28,19 +30,19 @@ func (a *App) StartWeChatLogin() (WeChatLoginQR, error) {
 	if err := a.ready(); err != nil {
 		return WeChatLoginQR{}, err
 	}
-	result, err := wechatlink.FetchQRCode(a.ctx)
+	result, err := wechat.FetchLoginQR(a.ctx)
 	if err != nil {
 		return WeChatLoginQR{}, err
 	}
-	return WeChatLoginQR{QRCode: result.QRCode, QRCodeURL: result.QRCodeURL}, nil
+	return WeChatLoginQR{Token: result.Token, Image: result.Image}, nil
 }
 
 // PollWeChatLogin checks a scan and, once confirmed, stores the credentials in
-// the plugin's configuration.
+// the plugin's configuration. token comes from StartWeChatLogin.
 //
 // The credentials never travel back to the UI: the caller learns only that the
 // sign-in completed, the same way a stored secret is reported as set.
-func (a *App) PollWeChatLogin(pluginUUID, qrcode string) (WeChatLoginStatus, error) {
+func (a *App) PollWeChatLogin(pluginUUID, token string) (WeChatLoginStatus, error) {
 	if err := a.ready(); err != nil {
 		return WeChatLoginStatus{}, err
 	}
@@ -51,7 +53,7 @@ func (a *App) PollWeChatLogin(pluginUUID, qrcode string) (WeChatLoginStatus, err
 	if plugin.PluginID != "aiclaw.wechat" {
 		return WeChatLoginStatus{}, fmt.Errorf("plugin %q is not the WeChat connector", plugin.Name)
 	}
-	result, err := wechatlink.PollQRStatus(a.ctx, qrcode)
+	result, err := wechatlink.PollQRStatus(a.ctx, token)
 	if err != nil {
 		return WeChatLoginStatus{}, err
 	}
