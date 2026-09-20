@@ -43,13 +43,13 @@ jobs:
           - os: macos-14
             artifact: aiclaw-macos
             # One package per architecture; the core inside each is universal.
-            pattern: release/*.dmg
+            pattern: electron/release/*.dmg
           - os: windows-latest
             artifact: aiclaw-windows
-            pattern: release/*.exe
+            pattern: electron/release/*.exe
           - os: ubuntu-24.04
             artifact: aiclaw-linux
-            pattern: release/*.AppImage
+            pattern: electron/release/*.AppImage
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -101,6 +101,10 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.pattern }}
+          # Uploading nothing must not look like success. The default is to
+          # warn, which is how three green package jobs once produced an
+          # empty release.
+          if-no-files-found: error
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -118,7 +122,13 @@ jobs:
         run: |
           git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)' > RELEASE_NOTES.md
           test -s RELEASE_NOTES.md || echo "AIClaw ${GITHUB_REF_NAME}" > RELEASE_NOTES.md
-          cd release && sha256sum * > SHA256SUMS.txt
+          cd release
+          # Fail loudly on an empty download rather than publishing a release
+          # with nothing in it.
+          count=$(find . -maxdepth 1 -type f | wc -l)
+          [ "$count" -gt 0 ] || { echo "no packages were downloaded"; exit 1; }
+          find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -exec sha256sum {} + > SHA256SUMS.txt
+          cat SHA256SUMS.txt
       - uses: softprops/action-gh-release@v2
         with:
           body_path: RELEASE_NOTES.md
