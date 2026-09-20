@@ -66,7 +66,11 @@ type Host struct{ service *Service }
 // NewHost builds a service for a host. Nothing is opened until Start runs, so
 // a host can construct it before it has a context.
 func NewHost(options Options) *Host {
-	service := &Service{rootOverride: options.Root, dialogs: options.Dialogs}
+	service := &Service{
+		rootOverride: options.Root,
+		dialogs:      options.Dialogs,
+		previewURL:   options.PreviewURL,
+	}
 	if options.Emit != nil {
 		service.emit = options.Emit
 	}
@@ -104,6 +108,29 @@ func (h *Host) Stop() { h.service.shutdown(context.Background()) }
 // Root is the data directory in use.
 func (h *Host) Root() string { return h.service.root }
 
+// PreviewURLFunc builds the URL the interface loads to show an image
+// attachment.
+//
+// How a preview reaches the page is the host's business. The Wails shell
+// inlines the bytes as a data URI, which works because its bindings are
+// in-process. A host that talks over a pipe cannot afford that: an attachment
+// is capped at 20MB, which is roughly 27MB once base64-encoded, and sending
+// that as one protocol message would stall every other message behind it. Such
+// a host serves the file over its own scheme instead and returns a URL here.
+type PreviewURLFunc func(file PreviewFile) (string, bool)
+
+// PreviewFile describes the image a preview URL is wanted for.
+type PreviewFile struct {
+	// UUID identifies a stored attachment; empty for a loose output file.
+	UUID string
+	// Path is the file on disk.
+	Path string
+	// ContentType is the image's media type.
+	ContentType string
+	// Size is the file's length in bytes.
+	Size int64
+}
+
 // Options configure a Service for one host.
 type Options struct {
 	// Root overrides the data directory. Empty means ~/.aiclaw.
@@ -112,4 +139,7 @@ type Options struct {
 	Emit Emitter
 	// Dialogs shows native pickers; nil means none are available.
 	Dialogs Dialogs
+	// PreviewURL builds image preview URLs. Nil inlines them as data URIs,
+	// which is what an in-process host wants.
+	PreviewURL PreviewURLFunc
 }

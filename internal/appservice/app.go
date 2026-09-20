@@ -42,6 +42,8 @@ type Service struct {
 	rootOverride string
 	// dialogs are the host's native pickers.
 	dialogs Dialogs
+	// previewURL lets a host serve image previews its own way.
+	previewURL PreviewURLFunc
 	// host supervises the long-running channels enabled plugins contribute.
 	host *pluginpkg.Host
 	root string
@@ -421,7 +423,7 @@ func (s *Service) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 				})
 			}
 			executionByTurn[item.TurnID] = steps
-			for _, file := range desktopOutputFiles(payload.Output) {
+			for _, file := range s.desktopOutputFiles(payload.Output) {
 				filesByTurn[item.TurnID] = appendOutputFile(filesByTurn[item.TurnID], file)
 			}
 			continue
@@ -459,7 +461,7 @@ func (s *Service) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 		}
 		files := append([]DesktopOutputFile(nil), filesByTurn[item.TurnID]...)
 		if item.Kind == model.RolloutAssistantFinal {
-			for _, file := range desktopOutputFiles(payload.Content) {
+			for _, file := range s.desktopOutputFiles(payload.Content) {
 				files = appendOutputFile(files, file)
 			}
 		}

@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,10 +28,12 @@ func main() {
 
 	core := &Core{out: json.NewEncoder(os.Stdout)}
 	host := appservice.NewHost(appservice.Options{
-		Root:    *root,
-		Emit:    core.emit,
-		Dialogs: core,
+		Root:       *root,
+		Emit:       core.emit,
+		Dialogs:    core,
+		PreviewURL: core.previewURL,
 	})
+	core.dataDir = host.Root()
 	dispatcher, err := NewDispatcher(host.Service())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "dispatch:", err)
@@ -72,6 +76,28 @@ type Core struct {
 	// inflight counts requests still being served, so shutdown can let them
 	// finish writing their replies.
 	inflight sync.WaitGroup
+
+	// dataDir anchors attachment preview URLs; the host serves files from it.
+	dataDir string
+}
+
+// previewURL points the interface at the host's attachment scheme instead of
+// inlining the image.
+//
+// A base64 data URI would have to travel through this pipe, and an attachment
+// is capped at 20MB — roughly 27MB encoded — which would stall every other
+// message behind it. Only files inside the data directory can be addressed,
+// which is also what the host enforces when it serves them.
+func (c *Core) previewURL(file appservice.PreviewFile) (string, bool) {
+	if c.dataDir == "" || strings.TrimSpace(file.Path) == "" {
+		return "", false
+	}
+	relative, err := filepath.Rel(c.dataDir, filepath.Clean(file.Path))
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		// A file outside the data directory is not ours to serve.
+		return "", false
+	}
+	return "aiclaw://preview/" + filepath.ToSlash(relative), true
 }
 
 // serve reads until the input ends.

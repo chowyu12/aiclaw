@@ -261,3 +261,34 @@ func TestUnmatchedHostReplyIsDropped(t *testing.T) {
 }
 
 var _ io.Writer = (*pipe)(nil)
+
+// A preview URL reaches the host from the page, so it must only ever address
+// files inside the data directory.
+func TestPreviewURLStaysInsideTheDataDirectory(t *testing.T) {
+	core := &Core{dataDir: "/home/someone/.aiclaw"}
+
+	url, ok := core.previewURL(appservice.PreviewFile{
+		Path: "/home/someone/.aiclaw/uploads/2026/pic.png", ContentType: "image/png",
+	})
+	if !ok || url != "aiclaw://preview/uploads/2026/pic.png" {
+		t.Fatalf("url = %q ok = %v", url, ok)
+	}
+
+	for name, path := range map[string]string{
+		"escaping":  "/home/someone/.aiclaw/../.ssh/id_rsa",
+		"elsewhere": "/etc/passwd",
+		"empty":     "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if url, ok := core.previewURL(appservice.PreviewFile{Path: path}); ok {
+				t.Fatalf("a file outside the data directory was served: %q", url)
+			}
+		})
+	}
+
+	// Without a data directory there is nothing to serve from.
+	bare := &Core{}
+	if _, ok := bare.previewURL(appservice.PreviewFile{Path: "/tmp/x.png"}); ok {
+		t.Fatal("a preview was offered with no data directory configured")
+	}
+}

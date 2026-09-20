@@ -184,11 +184,11 @@ func existingDesktopFile(rawPath string) (string, error) {
 	return path, nil
 }
 
-func desktopOutputFiles(text string) []DesktopOutputFile {
+func (s *Service) desktopOutputFiles(text string) []DesktopOutputFile {
 	parsed := toolresult.ParseFileResults(text)
 	items := make([]DesktopOutputFile, 0, len(parsed))
 	for _, file := range parsed {
-		items = appendOutputFile(items, desktopOutputFile(file))
+		items = appendOutputFile(items, s.desktopOutputFile(file))
 	}
 	return items
 }
@@ -202,7 +202,7 @@ func appendOutputFile(items []DesktopOutputFile, item DesktopOutputFile) []Deskt
 	return append(items, item)
 }
 
-func desktopOutputFile(file toolresult.FileResult) DesktopOutputFile {
+func (s *Service) desktopOutputFile(file toolresult.FileResult) DesktopOutputFile {
 	item := DesktopOutputFile{
 		Path: filepath.Clean(file.Path), Filename: filepath.Base(file.Path),
 		ContentType: file.MimeType, Description: file.Description,
@@ -218,9 +218,9 @@ func desktopOutputFile(file toolresult.FileResult) DesktopOutputFile {
 	item.Available = true
 	item.FileSize = info.Size()
 	if desktopImageMIMEs[item.ContentType] && info.Size() <= maxDesktopAttachmentBytes {
-		if data, readErr := os.ReadFile(item.Path); readErr == nil {
-			item.PreviewURL = "data:" + item.ContentType + ";base64," + base64.StdEncoding.EncodeToString(data)
-		}
+		item.PreviewURL = s.previewFor(PreviewFile{
+			Path: item.Path, ContentType: item.ContentType, Size: info.Size(),
+		})
 	}
 	return item
 }
@@ -302,7 +302,7 @@ func (s *Service) importAttachment(sourcePath string) (DesktopAttachment, error)
 		_ = os.RemoveAll(dir)
 		return DesktopAttachment{}, err
 	}
-	return desktopAttachment(file, data), nil
+	return s.desktopAttachment(file), nil
 }
 
 func classifyDesktopAttachment(filename string, data []byte) (string, model.FileType, error) {
@@ -374,15 +374,37 @@ func copyPrivateFile(source, destination string) error {
 	return nil
 }
 
-func desktopAttachment(file *model.File, data []byte) DesktopAttachment {
+func (s *Service) desktopAttachment(file *model.File) DesktopAttachment {
 	item := DesktopAttachment{
 		UUID: file.UUID, Filename: file.Filename, ContentType: file.ContentType,
 		FileSize: file.FileSize, FileType: string(file.FileType), Available: true,
 	}
-	if file.IsImage() && len(data) > 0 {
-		item.PreviewURL = "data:" + file.ContentType + ";base64," + base64.StdEncoding.EncodeToString(data)
+	if file.IsImage() {
+		item.PreviewURL = s.previewFor(PreviewFile{
+			UUID: file.UUID, Path: file.StoragePath,
+			ContentType: file.ContentType, Size: file.FileSize,
+		})
 	}
 	return item
+}
+
+// previewFor asks the host for a preview URL, falling back to an inline data
+// URI when the host has no scheme of its own.
+func (s *Service) previewFor(file PreviewFile) string {
+	if s.previewURL != nil {
+		if url, ok := s.previewURL(file); ok {
+			return url
+		}
+		return ""
+	}
+	if file.Size > maxDesktopAttachmentBytes {
+		return ""
+	}
+	data, err := os.ReadFile(file.Path)
+	if err != nil {
+		return ""
+	}
+	return "data:" + file.ContentType + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 func (s *Service) attachmentByUUID(fileUUID string) (DesktopAttachment, error) {
@@ -390,13 +412,15 @@ func (s *Service) attachmentByUUID(fileUUID string) (DesktopAttachment, error) {
 	if err != nil {
 		return DesktopAttachment{}, err
 	}
-	data, readErr := os.ReadFile(file.StoragePath)
-	if readErr != nil {
-		item := desktopAttachment(file, nil)
+	item := s.desktopAttachment(file)
+	// Availability is whether the file is still on disk. Stat answers that
+	// without reading the whole attachment into memory, which the preview no
+	// longer needs either.
+	if info, statErr := os.Stat(file.StoragePath); statErr != nil || !info.Mode().IsRegular() {
 		item.Available = false
-		return item, nil
+		item.PreviewURL = ""
 	}
-	return desktopAttachment(file, data), nil
+	return item, nil
 }
 
 func (s *Service) attachmentsByUUIDs(ids []string) []DesktopAttachment {
