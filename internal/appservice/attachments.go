@@ -1,4 +1,4 @@
-package main
+package appservice
 
 import (
 	"bytes"
@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/parser"
@@ -73,13 +72,13 @@ var desktopTextExtensions = map[string]bool{
 	".sh": true, ".zsh": true, ".toml": true, ".ini": true, ".conf": true, ".log": true,
 }
 
-func (a *App) ChooseAttachments() ([]DesktopAttachment, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) ChooseAttachments() ([]DesktopAttachment, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	paths, err := wailsruntime.OpenMultipleFilesDialog(a.ctx, wailsruntime.OpenDialogOptions{
+	paths, err := s.dialogs.PickFiles(s.ctx, FilePicker{
 		Title: "选择文件或图片",
-		Filters: []wailsruntime.FileFilter{
+		Filters: []FileFilter{
 			{DisplayName: "支持的文件", Pattern: "*.jpg;*.jpeg;*.png;*.webp;*.gif;*.pdf;*.docx;*.xlsx;*.pptx;*.txt;*.md;*.markdown;*.json;*.jsonl;*.csv;*.tsv;*.xml;*.yaml;*.yml;*.go;*.py;*.js;*.ts;*.tsx;*.jsx;*.vue;*.html;*.css;*.scss;*.sql;*.sh;*.zsh;*.toml;*.ini;*.conf;*.log"},
 			{DisplayName: "全部文件", Pattern: "*"},
 		},
@@ -87,40 +86,40 @@ func (a *App) ChooseAttachments() ([]DesktopAttachment, error) {
 	if err != nil || len(paths) == 0 {
 		return nil, err
 	}
-	return a.ImportAttachments(paths)
+	return s.ImportAttachments(paths)
 }
 
-func (a *App) OpenAttachment(fileUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) OpenAttachment(fileUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	file, err := a.store.GetFileByUUID(a.ctx, strings.TrimSpace(fileUUID))
+	file, err := s.store.GetFileByUUID(s.ctx, strings.TrimSpace(fileUUID))
 	if err != nil {
 		return err
 	}
 	return launchDesktopFile(file.StoragePath, false)
 }
 
-func (a *App) RevealAttachment(fileUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) RevealAttachment(fileUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	file, err := a.store.GetFileByUUID(a.ctx, strings.TrimSpace(fileUUID))
+	file, err := s.store.GetFileByUUID(s.ctx, strings.TrimSpace(fileUUID))
 	if err != nil {
 		return err
 	}
 	return launchDesktopFile(file.StoragePath, true)
 }
 
-func (a *App) OpenOutputFile(path string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) OpenOutputFile(path string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
 	return launchDesktopFile(path, false)
 }
 
-func (a *App) RevealOutputFile(path string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) RevealOutputFile(path string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
 	return launchDesktopFile(path, true)
@@ -228,8 +227,8 @@ func desktopOutputFile(file toolresult.FileResult) DesktopOutputFile {
 
 // ImportAttachments is also used by native drag and drop. Every selected file
 // is copied into AIClaw's private local data directory before it is parsed.
-func (a *App) ImportAttachments(paths []string) ([]DesktopAttachment, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) ImportAttachments(paths []string) ([]DesktopAttachment, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
 	if len(paths) == 0 {
@@ -240,10 +239,10 @@ func (a *App) ImportAttachments(paths []string) ([]DesktopAttachment, error) {
 	}
 	result := make([]DesktopAttachment, 0, len(paths))
 	for _, path := range paths {
-		attachment, err := a.importAttachment(path)
+		attachment, err := s.importAttachment(path)
 		if err != nil {
 			for _, imported := range result {
-				_ = a.DiscardAttachment(imported.UUID)
+				_ = s.DiscardAttachment(imported.UUID)
 			}
 			return nil, err
 		}
@@ -252,7 +251,7 @@ func (a *App) ImportAttachments(paths []string) ([]DesktopAttachment, error) {
 	return result, nil
 }
 
-func (a *App) importAttachment(sourcePath string) (DesktopAttachment, error) {
+func (s *Service) importAttachment(sourcePath string) (DesktopAttachment, error) {
 	sourcePath = filepath.Clean(strings.TrimSpace(sourcePath))
 	info, err := os.Stat(sourcePath)
 	if err != nil {
@@ -278,7 +277,7 @@ func (a *App) importAttachment(sourcePath string) (DesktopAttachment, error) {
 	}
 
 	fileUUID := uuid.NewString()
-	dir := filepath.Join(a.root, "attachments", fileUUID)
+	dir := filepath.Join(s.root, "attachments", fileUUID)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return DesktopAttachment{}, fmt.Errorf("创建附件目录: %w", err)
 	}
@@ -299,7 +298,7 @@ func (a *App) importAttachment(sourcePath string) (DesktopAttachment, error) {
 			return DesktopAttachment{}, fmt.Errorf("无法解析附件 %q: %w", filename, err)
 		}
 	}
-	if err := a.store.CreateFile(a.ctx, file); err != nil {
+	if err := s.store.CreateFile(s.ctx, file); err != nil {
 		_ = os.RemoveAll(dir)
 		return DesktopAttachment{}, err
 	}
@@ -386,8 +385,8 @@ func desktopAttachment(file *model.File, data []byte) DesktopAttachment {
 	return item
 }
 
-func (a *App) attachmentByUUID(fileUUID string) (DesktopAttachment, error) {
-	file, err := a.store.GetFileByUUID(a.ctx, strings.TrimSpace(fileUUID))
+func (s *Service) attachmentByUUID(fileUUID string) (DesktopAttachment, error) {
+	file, err := s.store.GetFileByUUID(s.ctx, strings.TrimSpace(fileUUID))
 	if err != nil {
 		return DesktopAttachment{}, err
 	}
@@ -400,10 +399,10 @@ func (a *App) attachmentByUUID(fileUUID string) (DesktopAttachment, error) {
 	return desktopAttachment(file, data), nil
 }
 
-func (a *App) attachmentsByUUIDs(ids []string) []DesktopAttachment {
+func (s *Service) attachmentsByUUIDs(ids []string) []DesktopAttachment {
 	result := make([]DesktopAttachment, 0, len(ids))
 	for _, id := range ids {
-		item, err := a.attachmentByUUID(id)
+		item, err := s.attachmentByUUID(id)
 		if err == nil {
 			result = append(result, item)
 		}
@@ -411,25 +410,25 @@ func (a *App) attachmentsByUUIDs(ids []string) []DesktopAttachment {
 	return result
 }
 
-func (a *App) DiscardAttachment(fileUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) DiscardAttachment(fileUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	file, err := a.store.GetFileByUUID(a.ctx, strings.TrimSpace(fileUUID))
+	file, err := s.store.GetFileByUUID(s.ctx, strings.TrimSpace(fileUUID))
 	if err != nil {
 		return err
 	}
 	if file.ThreadID != 0 || file.ConversationID != 0 {
 		return fmt.Errorf("已发送的附件不能从历史会话中移除")
 	}
-	if err := a.store.DeleteFile(a.ctx, file.ID); err != nil {
+	if err := s.store.DeleteFile(s.ctx, file.ID); err != nil {
 		return err
 	}
-	return a.removeAttachmentStorage(file)
+	return s.removeAttachmentStorage(file)
 }
 
-func (a *App) removeAttachmentStorage(file *model.File) error {
-	root := filepath.Clean(filepath.Join(a.root, "attachments")) + string(os.PathSeparator)
+func (s *Service) removeAttachmentStorage(file *model.File) error {
+	root := filepath.Clean(filepath.Join(s.root, "attachments")) + string(os.PathSeparator)
 	dir := filepath.Clean(filepath.Dir(file.StoragePath))
 	if !strings.HasPrefix(dir+string(os.PathSeparator), root) {
 		return nil
@@ -437,14 +436,14 @@ func (a *App) removeAttachmentStorage(file *model.File) error {
 	return os.RemoveAll(dir)
 }
 
-func (a *App) cleanupPendingAttachments() {
-	files, err := a.store.ListPendingFilesBefore(a.ctx, time.Now().Add(-24*time.Hour))
+func (s *Service) cleanupPendingAttachments() {
+	files, err := s.store.ListPendingFilesBefore(s.ctx, time.Now().Add(-24*time.Hour))
 	if err != nil {
 		return
 	}
 	for _, file := range files {
-		if a.store.DeleteFile(a.ctx, file.ID) == nil {
-			_ = a.removeAttachmentStorage(file)
+		if s.store.DeleteFile(s.ctx, file.ID) == nil {
+			_ = s.removeAttachmentStorage(file)
 		}
 	}
 }

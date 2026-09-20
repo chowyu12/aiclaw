@@ -1,4 +1,4 @@
-package main
+package appservice
 
 import (
 	"context"
@@ -72,7 +72,7 @@ func (s *retryOnceSampler) Sample(_ context.Context, _ core.SamplingRequest, emi
 	return core.SamplingResult{Text: "recovered response"}, nil
 }
 
-func newTestDesktopApp(t *testing.T) *App {
+func newTestDesktopApp(t *testing.T) *Service {
 	t.Helper()
 	root := t.TempDir()
 	store, err := gormstore.New(config.DatabaseConfig{Driver: "sqlite", DSN: filepath.Join(root, "test.db")})
@@ -86,7 +86,7 @@ func newTestDesktopApp(t *testing.T) *App {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &App{
+	return &Service{
 		ctx: context.Background(), store: store,
 		tools:  core.NewLocalToolDispatcher(store, core.WithPluginRuntime(pluginRuntime)),
 		memory: memory.NewService(store), installer: pluginpkg.NewInstaller(store, root), root: root,
@@ -772,7 +772,7 @@ func TestBundledComputerUsePluginIsShippedDisabled(t *testing.T) {
 	}
 }
 
-func hasComputerTool(t *testing.T, app *App) bool {
+func hasComputerTool(t *testing.T, app *Service) bool {
 	t.Helper()
 	definitions, err := app.tools.Definitions(app.ctx, model.Thread{})
 	if err != nil {

@@ -1,4 +1,4 @@
-package main
+package appservice
 
 import (
 	"fmt"
@@ -26,11 +26,11 @@ type WeChatLoginStatus struct {
 }
 
 // StartWeChatLogin fetches a QR code for signing the connector in.
-func (a *App) StartWeChatLogin() (WeChatLoginQR, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) StartWeChatLogin() (WeChatLoginQR, error) {
+	if err := s.ready(); err != nil {
 		return WeChatLoginQR{}, err
 	}
-	result, err := wechat.FetchLoginQR(a.ctx)
+	result, err := wechat.FetchLoginQR(s.ctx)
 	if err != nil {
 		return WeChatLoginQR{}, err
 	}
@@ -42,18 +42,18 @@ func (a *App) StartWeChatLogin() (WeChatLoginQR, error) {
 //
 // The credentials never travel back to the UI: the caller learns only that the
 // sign-in completed, the same way a stored secret is reported as set.
-func (a *App) PollWeChatLogin(pluginUUID, token string) (WeChatLoginStatus, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) PollWeChatLogin(pluginUUID, token string) (WeChatLoginStatus, error) {
+	if err := s.ready(); err != nil {
 		return WeChatLoginStatus{}, err
 	}
-	plugin, err := a.findPlugin(pluginUUID)
+	plugin, err := s.findPlugin(pluginUUID)
 	if err != nil {
 		return WeChatLoginStatus{}, err
 	}
 	if plugin.PluginID != "aiclaw.wechat" {
 		return WeChatLoginStatus{}, fmt.Errorf("plugin %q is not the WeChat connector", plugin.Name)
 	}
-	result, err := wechatlink.PollQRStatus(a.ctx, token)
+	result, err := wechatlink.PollQRStatus(s.ctx, token)
 	if err != nil {
 		return WeChatLoginStatus{}, err
 	}
@@ -61,7 +61,7 @@ func (a *App) PollWeChatLogin(pluginUUID, token string) (WeChatLoginStatus, erro
 	if !strings.EqualFold(result.Status, "confirmed") || strings.TrimSpace(result.BotToken) == "" {
 		return status, nil
 	}
-	config := a.pluginConfig()
+	config := s.pluginConfig()
 	for key, value := range map[string]string{
 		wechat.ConfigBotToken:  result.BotToken,
 		wechat.ConfigBotID:     result.ILinkBotID,
@@ -71,7 +71,7 @@ func (a *App) PollWeChatLogin(pluginUUID, token string) (WeChatLoginStatus, erro
 		if strings.TrimSpace(value) == "" {
 			continue
 		}
-		if err := config.Set(a.ctx, plugin, key, value); err != nil {
+		if err := config.Set(s.ctx, plugin, key, value); err != nil {
 			return status, err
 		}
 	}

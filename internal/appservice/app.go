@@ -1,4 +1,4 @@
-package main
+package appservice
 
 import (
 	"context"
@@ -27,10 +27,9 @@ import (
 	providerpkg "github.com/chowyu12/aiclaw/internal/provider"
 	"github.com/chowyu12/aiclaw/internal/skills"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-type App struct {
+type Service struct {
 	ctx    context.Context
 	store  *gormstore.GormStore
 	server *appserver.Service
@@ -38,6 +37,11 @@ type App struct {
 	memory *memorypkg.Service
 	// installer owns plugin bundle installation, validation and removal.
 	installer *pluginpkg.Installer
+	// rootOverride lets a host place the data directory somewhere other than
+	// the user's home, which is what the tests rely on.
+	rootOverride string
+	// dialogs are the host's native pickers.
+	dialogs Dialogs
 	// host supervises the long-running channels enabled plugins contribute.
 	host *pluginpkg.Host
 	root string
@@ -166,63 +170,71 @@ type DesktopExecution struct {
 	DurationMS int64  `json:"duration_ms,omitempty"`
 }
 
-func NewApp() *App { return &App{} }
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
-	a.bgContext, a.bgCancel = context.WithCancel(ctx)
-	a.runs = make(map[string]*backgroundChatState)
-	a.emit = func(name string, data ...any) { runtime.EventsEmit(ctx, name, data...) }
-	home, err := os.UserHomeDir()
-	if err != nil {
-		a.err = err.Error()
-		return
+func (s *Service) startup(ctx context.Context) {
+	s.ctx = ctx
+	s.bgContext, s.bgCancel = context.WithCancel(ctx)
+	s.runs = make(map[string]*backgroundChatState)
+	if s.emit == nil {
+		s.emit = func(string, ...any) {}
 	}
-	root := filepath.Join(home, ".aiclaw")
-	a.root = root
+	if s.dialogs == nil {
+		s.dialogs = NoDialogs{}
+	}
+	root := s.rootOverride
+	if root == "" {
+		home, homeErr := os.UserHomeDir()
+		if homeErr != nil {
+			s.err = homeErr.Error()
+			return
+		}
+		root = filepath.Join(home, ".aiclaw")
+	}
+	s.root = root
+	var err error
 	cfg, err := config.Load(filepath.Join(root, "config.yaml"))
 	if err != nil {
-		a.err = err.Error()
+		s.err = err.Error()
 		return
 	}
 	cfg.Workspace, cfg.Database.Driver, cfg.Database.DSN = root, "sqlite", filepath.Join(root, "aiclaw.db")
 	if err := os.MkdirAll(root, 0o755); err != nil {
-		a.err = err.Error()
+		s.err = err.Error()
 		return
 	}
-	a.store, err = gormstore.New(cfg.Database)
+	s.store, err = gormstore.New(cfg.Database)
 	if err != nil {
-		a.err = err.Error()
+		s.err = err.Error()
 		return
 	}
-	a.store.InitFTS5()
-	if err := a.store.MigrateLegacyConversations(ctx, "local"); err != nil {
-		a.err = err.Error()
+	s.store.InitFTS5()
+	if err := s.store.MigrateLegacyConversations(ctx, "local"); err != nil {
+		s.err = err.Error()
 		return
 	}
-	if err := skills.EnsureBuiltins(ctx, a.store, root); err != nil {
-		a.err = err.Error()
+	if err := skills.EnsureBuiltins(ctx, s.store, root); err != nil {
+		s.err = err.Error()
 		return
 	}
-	sampler := core.ProviderSampler{Resolver: a.store}
-	a.installer = pluginpkg.NewInstaller(a.store, root)
-	if err := a.installer.EnsureBuiltins(ctx, bundled.FS()); err != nil {
-		a.err = err.Error()
+	sampler := core.ProviderSampler{Resolver: s.store}
+	s.installer = pluginpkg.NewInstaller(s.store, root)
+	if err := s.installer.EnsureBuiltins(ctx, bundled.FS()); err != nil {
+		s.err = err.Error()
 		return
 	}
 	pluginRuntime, err := pluginpkg.NewRuntime(map[string]pluginpkg.ToolProvider{
 		computeruse.ProviderName: computeruse.New(root),
 	})
 	if err != nil {
-		a.err = err.Error()
+		s.err = err.Error()
 		return
 	}
-	a.tools = core.NewLocalToolDispatcher(a.store,
+	s.tools = core.NewLocalToolDispatcher(s.store,
 		core.WithDispatcherRoot(root), core.WithSubAgentSampler(sampler),
 		core.WithPluginRuntime(pluginRuntime))
-	a.memory = memorypkg.NewService(a.store)
-	a.server = appserver.New(a.store, sampler, a.tools)
-	gateway := appserver.NewChannelGateway(a.server, a.store)
-	a.host, err = pluginpkg.NewHost(gateway, pluginpkg.NewConfigService(a.store),
+	s.memory = memorypkg.NewService(s.store)
+	s.server = appserver.New(s.store, sampler, s.tools)
+	gateway := appserver.NewChannelGateway(s.server, s.store)
+	s.host, err = pluginpkg.NewHost(gateway, pluginpkg.NewConfigService(s.store),
 		map[string]pluginpkg.ChannelFactory{
 			wecom.ProviderName:  wecom.New,
 			wechat.ProviderName: wechat.New,
@@ -231,59 +243,59 @@ func (a *App) startup(ctx context.Context) {
 			log.Printf("[plugin] "+format, args...)
 		}))
 	if err != nil {
-		a.err = err.Error()
+		s.err = err.Error()
 		return
 	}
-	if err := a.syncChannels(); err != nil {
-		a.err = err.Error()
+	if err := s.syncChannels(); err != nil {
+		s.err = err.Error()
 		return
 	}
-	a.cleanupPendingAttachments()
+	s.cleanupPendingAttachments()
 }
 
 // syncChannels brings the running channels in line with the enabled plugins.
-func (a *App) syncChannels() error {
-	if a.host == nil {
+func (s *Service) syncChannels() error {
+	if s.host == nil {
 		return nil
 	}
-	plugins, err := a.store.ListPlugins(a.ctx)
+	plugins, err := s.store.ListPlugins(s.ctx)
 	if err != nil {
 		return err
 	}
-	return a.host.Sync(a.bgContext, plugins)
+	return s.host.Sync(s.bgContext, plugins)
 }
 
 // ChannelStatus reports each supervised channel for the settings page.
-func (a *App) ChannelStatus() []pluginpkg.ChannelStatus {
-	if a.host == nil {
+func (s *Service) ChannelStatus() []pluginpkg.ChannelStatus {
+	if s.host == nil {
 		return nil
 	}
-	return a.host.Status()
+	return s.host.Status()
 }
 
-func (a *App) shutdown(context.Context) {
-	if a.host != nil {
-		a.host.Stop()
+func (s *Service) shutdown(context.Context) {
+	if s.host != nil {
+		s.host.Stop()
 	}
-	if a.bgCancel != nil {
-		a.bgCancel()
+	if s.bgCancel != nil {
+		s.bgCancel()
 	}
-	a.runMu.Lock()
-	for _, run := range a.runs {
+	s.runMu.Lock()
+	for _, run := range s.runs {
 		run.cancel()
 	}
-	a.runMu.Unlock()
-	a.runWG.Wait()
-	if a.store != nil {
-		_ = a.store.Close()
+	s.runMu.Unlock()
+	s.runWG.Wait()
+	if s.store != nil {
+		_ = s.store.Close()
 	}
 }
-func (a *App) Status() string { return a.err }
-func (a *App) Providers() ([]DesktopProvider, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) Status() string { return s.err }
+func (s *Service) Providers() ([]DesktopProvider, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	items, _, err := a.store.ListProviders(a.ctx, model.ListQuery{Page: 1, PageSize: 1000})
+	items, _, err := s.store.ListProviders(s.ctx, model.ListQuery{Page: 1, PageSize: 1000})
 	if err != nil {
 		return nil, err
 	}
@@ -296,11 +308,11 @@ func (a *App) Providers() ([]DesktopProvider, error) {
 	return result, nil
 }
 
-func (a *App) Threads() ([]DesktopThread, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) Threads() ([]DesktopThread, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	items, _, err := a.store.ListThreads(a.ctx, "local", false, 1, 100)
+	items, _, err := s.store.ListThreads(s.ctx, "local", false, 1, 100)
 	if err != nil {
 		return nil, err
 	}
@@ -311,11 +323,11 @@ func (a *App) Threads() ([]DesktopThread, error) {
 	return result, nil
 }
 
-func (a *App) Projects() ([]DesktopProject, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) Projects() ([]DesktopProject, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	items, err := a.store.ListProjects(a.ctx, "local")
+	items, err := s.store.ListProjects(s.ctx, "local")
 	if err != nil {
 		return nil, err
 	}
@@ -326,8 +338,8 @@ func (a *App) Projects() ([]DesktopProject, error) {
 	return result, nil
 }
 
-func (a *App) CreateProject(name string) (DesktopProject, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) CreateProject(name string) (DesktopProject, error) {
+	if err := s.ready(); err != nil {
 		return DesktopProject{}, err
 	}
 	name = strings.TrimSpace(name)
@@ -335,21 +347,21 @@ func (a *App) CreateProject(name string) (DesktopProject, error) {
 		return DesktopProject{}, fmt.Errorf("project name is required")
 	}
 	project := &model.Project{UserID: "local", Name: name}
-	if err := a.store.CreateProject(a.ctx, project); err != nil {
+	if err := s.store.CreateProject(s.ctx, project); err != nil {
 		return DesktopProject{}, err
 	}
 	return DesktopProject{UUID: project.UUID, Name: project.Name}, nil
 }
 
-func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	thread, err := a.store.GetThreadByUUID(a.ctx, threadUUID, false)
+	thread, err := s.store.GetThreadByUUID(s.ctx, threadUUID, false)
 	if err != nil {
 		return nil, err
 	}
-	items, err := a.store.LoadRollout(a.ctx, thread.ID)
+	items, err := s.store.LoadRollout(s.ctx, thread.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -452,7 +464,7 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 			}
 		}
 		result = append(result, DesktopMessage{
-			Role: role, Content: payload.Content, Attachments: a.attachmentsByUUIDs(payload.Attachments),
+			Role: role, Content: payload.Content, Attachments: s.attachmentsByUUIDs(payload.Attachments),
 			Files:     files,
 			Execution: append([]DesktopExecution(nil), executionByTurn[item.TurnID]...),
 		})
@@ -460,8 +472,8 @@ func (a *App) ThreadMessages(threadUUID string) ([]DesktopMessage, error) {
 	return result, nil
 }
 
-func (a *App) AddProvider(input ProviderInput) (DesktopProvider, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) AddProvider(input ProviderInput) (DesktopProvider, error) {
+	if err := s.ready(); err != nil {
 		return DesktopProvider{}, err
 	}
 	input.Name, input.Type, input.BaseURL, input.Model = strings.TrimSpace(input.Name), strings.TrimSpace(input.Type), strings.TrimSpace(input.BaseURL), strings.TrimSpace(input.Model)
@@ -477,7 +489,7 @@ func (a *App) AddProvider(input ProviderInput) (DesktopProvider, error) {
 		return DesktopProvider{}, err
 	}
 	provider := &model.Provider{Name: input.Name, Type: model.ProviderType(input.Type), BaseURL: input.BaseURL, APIKey: input.APIKey, Models: model.JSON(models), Enabled: true}
-	if err := a.store.CreateProvider(a.ctx, provider); err != nil {
+	if err := s.store.CreateProvider(s.ctx, provider); err != nil {
 		return DesktopProvider{}, err
 	}
 	return DesktopProvider{ID: provider.ID, Name: provider.Name, Type: string(provider.Type), BaseURL: provider.BaseURL, Models: modelNames}, nil
@@ -486,26 +498,26 @@ func (a *App) AddProvider(input ProviderInput) (DesktopProvider, error) {
 // SyncProviderModels queries the Provider's model API and returns searchable
 // candidates. It does not overwrite the user's local selection; models are
 // persisted only after AddProviderModel is called.
-func (a *App) SyncProviderModels(id int64) ([]string, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) SyncProviderModels(id int64) ([]string, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	item, err := a.store.GetProvider(a.ctx, id)
+	item, err := s.store.GetProvider(s.ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	return providerpkg.FetchRemoteModels(a.ctx, item)
+	return providerpkg.FetchRemoteModels(s.ctx, item)
 }
 
-func (a *App) AddProviderModel(id int64, name string) (DesktopProvider, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) AddProviderModel(id int64, name string) (DesktopProvider, error) {
+	if err := s.ready(); err != nil {
 		return DesktopProvider{}, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return DesktopProvider{}, fmt.Errorf("model name is required")
 	}
-	item, err := a.store.GetProvider(a.ctx, id)
+	item, err := s.store.GetProvider(s.ctx, id)
 	if err != nil {
 		return DesktopProvider{}, err
 	}
@@ -521,22 +533,22 @@ func (a *App) AddProviderModel(id int64, name string) (DesktopProvider, error) {
 	if err != nil {
 		return DesktopProvider{}, err
 	}
-	if err := a.store.UpdateProvider(a.ctx, id, model.UpdateProviderReq{Models: model.JSON(encoded)}); err != nil {
+	if err := s.store.UpdateProvider(s.ctx, id, model.UpdateProviderReq{Models: model.JSON(encoded)}); err != nil {
 		return DesktopProvider{}, err
 	}
 	item.Models = model.JSON(encoded)
 	return desktopProvider(item, names), nil
 }
 
-func (a *App) RemoveProviderModel(id int64, name string) (DesktopProvider, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) RemoveProviderModel(id int64, name string) (DesktopProvider, error) {
+	if err := s.ready(); err != nil {
 		return DesktopProvider{}, err
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return DesktopProvider{}, fmt.Errorf("model name is required")
 	}
-	item, err := a.store.GetProvider(a.ctx, id)
+	item, err := s.store.GetProvider(s.ctx, id)
 	if err != nil {
 		return DesktopProvider{}, err
 	}
@@ -558,7 +570,7 @@ func (a *App) RemoveProviderModel(id int64, name string) (DesktopProvider, error
 	if err != nil {
 		return DesktopProvider{}, err
 	}
-	if err := a.store.UpdateProvider(a.ctx, id, model.UpdateProviderReq{Models: model.JSON(encoded)}); err != nil {
+	if err := s.store.UpdateProvider(s.ctx, id, model.UpdateProviderReq{Models: model.JSON(encoded)}); err != nil {
 		return DesktopProvider{}, err
 	}
 	item.Models = model.JSON(encoded)
@@ -569,53 +581,53 @@ func desktopProvider(item *model.Provider, models []string) DesktopProvider {
 	return DesktopProvider{ID: item.ID, Name: item.Name, Type: string(item.Type), BaseURL: item.BaseURL, Models: models}
 }
 
-func (a *App) Chat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatResult, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) Chat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatResult, error) {
+	if err := s.ready(); err != nil {
 		return ChatResult{}, err
 	}
-	return a.runChat(profile, threadID, input, attachmentUUIDs)
+	return s.runChat(profile, threadID, input, attachmentUUIDs)
 }
 
 // StartChat creates or updates the conversation synchronously, then runs the
 // turn independently of the currently selected desktop view. Switching
 // conversations or opening settings therefore cannot cancel or misroute it.
-func (a *App) StartChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatStartResult, error) {
-	return a.startBackgroundChat(profile, threadID, input, attachmentUUIDs)
+func (s *Service) StartChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatStartResult, error) {
+	return s.startBackgroundChat(profile, threadID, input, attachmentUUIDs)
 }
 
-func (a *App) StartRetry(profile ChatProfile, threadID string) (ChatStartResult, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) StartRetry(profile ChatProfile, threadID string) (ChatStartResult, error) {
+	if err := s.ready(); err != nil {
 		return ChatStartResult{}, err
 	}
-	if a.threadRunning(threadID) {
+	if s.threadRunning(threadID) {
 		return ChatStartResult{}, fmt.Errorf("conversation already has a background task")
 	}
-	thread, err := a.store.GetThreadByUUID(a.ctx, threadID, false)
+	thread, err := s.store.GetThreadByUUID(s.ctx, threadID, false)
 	if err != nil {
 		return ChatStartResult{}, err
 	}
-	input, attachments, err := a.store.RewindLastTurnWithAttachments(a.ctx, thread.ID)
+	input, attachments, err := s.store.RewindLastTurnWithAttachments(s.ctx, thread.ID)
 	if err != nil {
 		return ChatStartResult{}, err
 	}
-	return a.startBackgroundChat(profile, threadID, input, attachments)
+	return s.startBackgroundChat(profile, threadID, input, attachments)
 }
 
-func (a *App) BackgroundChats() []BackgroundChat {
-	a.runMu.Lock()
-	defer a.runMu.Unlock()
-	items := make([]BackgroundChat, 0, len(a.runs))
-	for _, run := range a.runs {
+func (s *Service) BackgroundChats() []BackgroundChat {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	items := make([]BackgroundChat, 0, len(s.runs))
+	for _, run := range s.runs {
 		items = append(items, run.BackgroundChat)
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].StartedAt < items[j].StartedAt })
 	return items
 }
 
-func (a *App) threadRunning(threadID string) bool {
-	a.runMu.Lock()
-	defer a.runMu.Unlock()
-	for _, run := range a.runs {
+func (s *Service) threadRunning(threadID string) bool {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	for _, run := range s.runs {
 		if run.ThreadID == threadID {
 			return true
 		}
@@ -623,14 +635,14 @@ func (a *App) threadRunning(threadID string) bool {
 	return false
 }
 
-func (a *App) startBackgroundChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatStartResult, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) startBackgroundChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatStartResult, error) {
+	if err := s.ready(); err != nil {
 		return ChatStartResult{}, err
 	}
-	if threadID != "" && a.threadRunning(threadID) {
+	if threadID != "" && s.threadRunning(threadID) {
 		return ChatStartResult{}, fmt.Errorf("conversation already has a background task")
 	}
-	preparedThreadID, preparedInput, preparedAttachments, err := a.prepareChat(profile, threadID, input, attachmentUUIDs)
+	preparedThreadID, preparedInput, preparedAttachments, err := s.prepareChat(profile, threadID, input, attachmentUUIDs)
 	if err != nil {
 		return ChatStartResult{}, err
 	}
@@ -639,71 +651,71 @@ func (a *App) startBackgroundChat(profile ChatProfile, threadID, input string, a
 		requestID = fmt.Sprintf("chat-%d", time.Now().UnixNano())
 		profile.RequestID = requestID
 	}
-	runContext := a.bgContext
+	runContext := s.bgContext
 	if runContext == nil {
-		runContext = a.ctx
+		runContext = s.ctx
 	}
 	runContext, cancel := context.WithCancel(runContext)
 	state := &backgroundChatState{
 		BackgroundChat: BackgroundChat{RequestID: requestID, ThreadID: preparedThreadID, StartedAt: time.Now().UTC().Format(time.RFC3339Nano)},
 		cancel:         cancel,
 	}
-	a.runMu.Lock()
-	if a.runs == nil {
-		a.runs = make(map[string]*backgroundChatState)
+	s.runMu.Lock()
+	if s.runs == nil {
+		s.runs = make(map[string]*backgroundChatState)
 	}
-	for _, active := range a.runs {
+	for _, active := range s.runs {
 		if active.ThreadID == preparedThreadID {
-			a.runMu.Unlock()
+			s.runMu.Unlock()
 			cancel()
 			return ChatStartResult{}, fmt.Errorf("conversation already has a background task")
 		}
 	}
-	a.runs[requestID] = state
-	a.runWG.Add(1)
-	a.runMu.Unlock()
+	s.runs[requestID] = state
+	s.runWG.Add(1)
+	s.runMu.Unlock()
 
 	go func() {
-		defer a.runWG.Done()
-		content, runErr := a.executeChat(runContext, profile, preparedThreadID, preparedInput, preparedAttachments)
+		defer s.runWG.Done()
+		content, runErr := s.executeChat(runContext, profile, preparedThreadID, preparedInput, preparedAttachments)
 		finished := ChatFinished{RequestID: requestID, ThreadID: preparedThreadID, Content: content}
 		if runErr != nil {
 			finished.Error = runErr.Error()
 		}
-		a.emitDesktopEvent("chat:finished", finished)
-		a.runMu.Lock()
-		delete(a.runs, requestID)
-		a.runMu.Unlock()
+		s.emitDesktopEvent("chat:finished", finished)
+		s.runMu.Lock()
+		delete(s.runs, requestID)
+		s.runMu.Unlock()
 		cancel()
 	}()
 
 	return ChatStartResult{RequestID: requestID, ThreadID: preparedThreadID}, nil
 }
 
-func (a *App) Retry(profile ChatProfile, threadID string) (ChatResult, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) Retry(profile ChatProfile, threadID string) (ChatResult, error) {
+	if err := s.ready(); err != nil {
 		return ChatResult{}, err
 	}
 	if strings.TrimSpace(threadID) == "" {
 		return ChatResult{}, fmt.Errorf("choose a conversation to retry")
 	}
-	thread, err := a.store.GetThreadByUUID(a.ctx, threadID, false)
+	thread, err := s.store.GetThreadByUUID(s.ctx, threadID, false)
 	if err != nil {
 		return ChatResult{}, err
 	}
-	input, attachments, err := a.store.RewindLastTurnWithAttachments(a.ctx, thread.ID)
+	input, attachments, err := s.store.RewindLastTurnWithAttachments(s.ctx, thread.ID)
 	if err != nil {
 		return ChatResult{}, err
 	}
-	return a.runChat(profile, threadID, input, attachments)
+	return s.runChat(profile, threadID, input, attachments)
 }
 
-func (a *App) runChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatResult, error) {
-	preparedThreadID, preparedInput, preparedAttachments, err := a.prepareChat(profile, threadID, input, attachmentUUIDs)
+func (s *Service) runChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (ChatResult, error) {
+	preparedThreadID, preparedInput, preparedAttachments, err := s.prepareChat(profile, threadID, input, attachmentUUIDs)
 	if err != nil {
 		return ChatResult{}, err
 	}
-	content, runErr := a.executeChat(a.ctx, profile, preparedThreadID, preparedInput, preparedAttachments)
+	content, runErr := s.executeChat(s.ctx, profile, preparedThreadID, preparedInput, preparedAttachments)
 	result := ChatResult{ThreadID: preparedThreadID, Content: content}
 	if runErr != nil {
 		result.Error = runErr.Error()
@@ -712,7 +724,7 @@ func (a *App) runChat(profile ChatProfile, threadID, input string, attachmentUUI
 	return result, nil
 }
 
-func (a *App) prepareChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (string, string, []string, error) {
+func (s *Service) prepareChat(profile ChatProfile, threadID, input string, attachmentUUIDs []string) (string, string, []string, error) {
 	input = strings.TrimSpace(input)
 	attachmentUUIDs = normalizeAttachmentIDs(attachmentUUIDs)
 	if len(attachmentUUIDs) > maxDesktopAttachments {
@@ -727,49 +739,49 @@ func (a *App) prepareChat(profile ChatProfile, threadID, input string, attachmen
 	if profile.ProviderID == 0 || strings.TrimSpace(profile.ModelName) == "" {
 		return "", "", nil, fmt.Errorf("choose a provider and model")
 	}
-	searchID, err := a.selectedSearchEngine(profile.SearchEnabled)
+	searchID, err := s.selectedSearchEngine(profile.SearchEnabled)
 	if err != nil {
 		return "", "", nil, err
 	}
 	var thread *model.Thread
 	if threadID == "" {
 		projectUUID := strings.TrimSpace(profile.ProjectUUID)
-		if err := a.validateProject(projectUUID); err != nil {
+		if err := s.validateProject(projectUUID); err != nil {
 			return "", "", nil, err
 		}
 		thread = &model.Thread{UserID: "local", ProjectUUID: projectUUID, ProviderID: profile.ProviderID, ModelName: strings.TrimSpace(profile.ModelName), SearchEngineID: searchID, Title: input}
-		if err := a.store.CreateThread(a.ctx, thread); err != nil {
+		if err := s.store.CreateThread(s.ctx, thread); err != nil {
 			return "", "", nil, err
 		}
 		threadID = thread.UUID
 	} else {
-		if err := a.store.UpdateThreadProfile(a.ctx, threadID, profile.ProviderID, strings.TrimSpace(profile.ModelName), searchID); err != nil {
+		if err := s.store.UpdateThreadProfile(s.ctx, threadID, profile.ProviderID, strings.TrimSpace(profile.ModelName), searchID); err != nil {
 			return "", "", nil, err
 		}
-		thread, err = a.store.GetThreadByUUID(a.ctx, threadID, false)
+		thread, err = s.store.GetThreadByUUID(s.ctx, threadID, false)
 		if err != nil {
 			return "", "", nil, err
 		}
 	}
-	if err := a.store.LinkFilesToThread(a.ctx, thread.ID, attachmentUUIDs); err != nil {
+	if err := s.store.LinkFilesToThread(s.ctx, thread.ID, attachmentUUIDs); err != nil {
 		return "", "", nil, err
 	}
 	return threadID, input, attachmentUUIDs, nil
 }
 
-func (a *App) executeChat(ctx context.Context, profile ChatProfile, threadID, input string, attachmentUUIDs []string) (string, error) {
+func (s *Service) executeChat(ctx context.Context, profile ChatProfile, threadID, input string, attachmentUUIDs []string) (string, error) {
 	var answer strings.Builder
 	runCtx := memorypkg.WithTurnPolicy(ctx, memorypkg.TurnPolicy{
 		UseMemories: profile.MemoryUseEnabled, GenerateMemories: profile.MemoryGenerateEnabled,
 	})
-	err := a.server.Handle(runCtx, protocol.Command{Kind: protocol.CommandStartTurn, ThreadID: threadID, Input: input, Attachments: attachmentUUIDs}, func(e protocol.Event) error {
+	err := s.server.Handle(runCtx, protocol.Command{Kind: protocol.CommandStartTurn, ThreadID: threadID, Input: input, Attachments: attachmentUUIDs}, func(e protocol.Event) error {
 		if e.Kind == protocol.EventAssistantDelta {
 			answer.WriteString(e.Delta)
 			if profile.RequestID != "" {
-				a.emitDesktopEvent("chat:delta", ChatDelta{RequestID: profile.RequestID, ThreadID: threadID, Delta: e.Delta})
+				s.emitDesktopEvent("chat:delta", ChatDelta{RequestID: profile.RequestID, ThreadID: threadID, Delta: e.Delta})
 			}
 		} else if profile.RequestID != "" {
-			a.emitDesktopEvent("chat:progress", ChatProgress{
+			s.emitDesktopEvent("chat:progress", ChatProgress{
 				RequestID: profile.RequestID, ThreadID: threadID, TurnID: e.TurnID, Kind: string(e.Kind),
 				CallID: e.CallID, Name: e.Name, Status: e.Status, Message: e.Message,
 				Input: e.Input, Output: e.Output, Error: e.Error, StartedAt: e.StartedAt, DurationMS: e.DurationMS,
@@ -783,51 +795,51 @@ func (a *App) executeChat(ctx context.Context, profile ChatProfile, threadID, in
 	return answer.String(), nil
 }
 
-func (a *App) emitDesktopEvent(name string, data any) {
-	if a.emit != nil {
-		a.emit(name, data)
+func (s *Service) emitDesktopEvent(name string, data any) {
+	if s.emit != nil {
+		s.emit(name, data)
 	}
 }
 
-func (a *App) ArchiveThread(threadUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) ArchiveThread(threadUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	if a.threadRunning(threadUUID) {
+	if s.threadRunning(threadUUID) {
 		return fmt.Errorf("cannot archive a conversation while its background task is running")
 	}
-	thread, err := a.store.GetThreadByUUID(a.ctx, threadUUID, false)
+	thread, err := s.store.GetThreadByUUID(s.ctx, threadUUID, false)
 	if err != nil {
 		return err
 	}
-	return a.store.ArchiveThread(a.ctx, thread.ID)
+	return s.store.ArchiveThread(s.ctx, thread.ID)
 }
 
 // MoveThreadToProject changes only the conversation grouping. An empty
 // project UUID deliberately makes the conversation independent of any project.
-func (a *App) MoveThreadToProject(threadUUID, projectUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) MoveThreadToProject(threadUUID, projectUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
 	threadUUID, projectUUID = strings.TrimSpace(threadUUID), strings.TrimSpace(projectUUID)
-	thread, err := a.store.GetThreadByUUID(a.ctx, threadUUID, false)
+	thread, err := s.store.GetThreadByUUID(s.ctx, threadUUID, false)
 	if err != nil {
 		return err
 	}
 	if thread.UserID != "local" {
 		return fmt.Errorf("conversation does not belong to the local user")
 	}
-	if err := a.validateProject(projectUUID); err != nil {
+	if err := s.validateProject(projectUUID); err != nil {
 		return err
 	}
-	return a.store.UpdateThreadProject(a.ctx, threadUUID, projectUUID)
+	return s.store.UpdateThreadProject(s.ctx, threadUUID, projectUUID)
 }
 
-func (a *App) validateProject(projectUUID string) error {
+func (s *Service) validateProject(projectUUID string) error {
 	if projectUUID == "" {
 		return nil
 	}
-	projects, err := a.store.ListProjects(a.ctx, "local")
+	projects, err := s.store.ListProjects(s.ctx, "local")
 	if err != nil {
 		return err
 	}
@@ -839,48 +851,48 @@ func (a *App) validateProject(projectUUID string) error {
 	return fmt.Errorf("project %q was not found", projectUUID)
 }
 
-func (a *App) DeleteProject(projectUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) DeleteProject(projectUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
 	projectUUID = strings.TrimSpace(projectUUID)
 	if projectUUID == "" {
 		return fmt.Errorf("project ID is required")
 	}
-	if err := a.validateProject(projectUUID); err != nil {
+	if err := s.validateProject(projectUUID); err != nil {
 		return err
 	}
-	threads, _, err := a.store.ListThreads(a.ctx, "local", false, 1, 1000)
+	threads, _, err := s.store.ListThreads(s.ctx, "local", false, 1, 1000)
 	if err != nil {
 		return err
 	}
 	for _, thread := range threads {
-		if thread.ProjectUUID == projectUUID && a.threadRunning(thread.UUID) {
+		if thread.ProjectUUID == projectUUID && s.threadRunning(thread.UUID) {
 			return fmt.Errorf("cannot delete a project while one of its conversations is running")
 		}
 	}
-	if err := a.store.DeleteProject(a.ctx, projectUUID); err != nil {
+	if err := s.store.DeleteProject(s.ctx, projectUUID); err != nil {
 		return fmt.Errorf("delete project: %w", err)
 	}
 	return nil
 }
 
-func (a *App) ChoosePluginDirectory() (DesktopPlugin, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) ChoosePluginDirectory() (DesktopPlugin, error) {
+	if err := s.ready(); err != nil {
 		return DesktopPlugin{}, err
 	}
-	path, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{Title: "选择 AIClaw 插件目录"})
+	path, err := s.dialogs.PickDirectory(s.ctx, "选择 AIClaw 插件目录")
 	if err != nil || path == "" {
 		return DesktopPlugin{}, err
 	}
-	return a.installPlugin(path)
+	return s.installPlugin(path)
 }
 
-func (a *App) selectedSearchEngine(enabled bool) (int64, error) {
+func (s *Service) selectedSearchEngine(enabled bool) (int64, error) {
 	if !enabled {
 		return 0, nil
 	}
-	items, _, err := a.store.ListSearchEngineConfigs(a.ctx, model.ListQuery{Page: 1, PageSize: 100})
+	items, _, err := s.store.ListSearchEngineConfigs(s.ctx, model.ListQuery{Page: 1, PageSize: 100})
 	if err != nil {
 		return 0, err
 	}
@@ -891,11 +903,11 @@ func (a *App) selectedSearchEngine(enabled bool) (int64, error) {
 	}
 	return 0, nil
 }
-func (a *App) ready() error {
-	if a.err != "" {
-		return fmt.Errorf("desktop initialization: %s", a.err)
+func (s *Service) ready() error {
+	if s.err != "" {
+		return fmt.Errorf("desktop initialization: %s", s.err)
 	}
-	if a.store == nil {
+	if s.store == nil {
 		return fmt.Errorf("desktop is starting")
 	}
 	return nil

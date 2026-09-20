@@ -1,4 +1,4 @@
-package main
+package appservice
 
 import (
 	"database/sql"
@@ -75,11 +75,11 @@ type DesktopMemory struct {
 
 const lastModelSelectionSettingKey = "chat.last_model"
 
-func (a *App) LastModelSelection() (DesktopModelSelection, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) LastModelSelection() (DesktopModelSelection, error) {
+	if err := s.ready(); err != nil {
 		return DesktopModelSelection{}, err
 	}
-	value, err := a.store.GetAppSetting(a.ctx, lastModelSelectionSettingKey, "")
+	value, err := s.store.GetAppSetting(s.ctx, lastModelSelectionSettingKey, "")
 	if err != nil || value == "" {
 		return DesktopModelSelection{}, err
 	}
@@ -87,7 +87,7 @@ func (a *App) LastModelSelection() (DesktopModelSelection, error) {
 	if json.Unmarshal([]byte(value), &selection) != nil || selection.ProviderID <= 0 || strings.TrimSpace(selection.ModelName) == "" {
 		return DesktopModelSelection{}, nil
 	}
-	provider, err := a.store.GetProvider(a.ctx, selection.ProviderID)
+	provider, err := s.store.GetProvider(s.ctx, selection.ProviderID)
 	if err != nil {
 		// A deleted Provider makes the preference stale, not the application
 		// unusable. The frontend will select and persist the next available model.
@@ -108,15 +108,15 @@ func (a *App) LastModelSelection() (DesktopModelSelection, error) {
 	return DesktopModelSelection{}, nil
 }
 
-func (a *App) SetLastModelSelection(providerID int64, modelName string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) SetLastModelSelection(providerID int64, modelName string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
 	modelName = strings.TrimSpace(modelName)
 	if providerID <= 0 || modelName == "" {
 		return fmt.Errorf("provider and model are required")
 	}
-	provider, err := a.store.GetProvider(a.ctx, providerID)
+	provider, err := s.store.GetProvider(s.ctx, providerID)
 	if err != nil {
 		return err
 	}
@@ -132,41 +132,41 @@ func (a *App) SetLastModelSelection(providerID int64, modelName string) error {
 		if err != nil {
 			return err
 		}
-		return a.store.SetAppSetting(a.ctx, lastModelSelectionSettingKey, string(value))
+		return s.store.SetAppSetting(s.ctx, lastModelSelectionSettingKey, string(value))
 	}
 	return fmt.Errorf("model %q is not configured for Provider %d", modelName, providerID)
 }
 
-func (a *App) MemorySettings() (DesktopMemorySettings, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) MemorySettings() (DesktopMemorySettings, error) {
+	if err := s.ready(); err != nil {
 		return DesktopMemorySettings{}, err
 	}
-	use, err := a.store.GetAppSetting(a.ctx, "memory.use", "true")
+	use, err := s.store.GetAppSetting(s.ctx, "memory.use", "true")
 	if err != nil {
 		return DesktopMemorySettings{}, err
 	}
-	generate, err := a.store.GetAppSetting(a.ctx, "memory.generate", "true")
+	generate, err := s.store.GetAppSetting(s.ctx, "memory.generate", "true")
 	if err != nil {
 		return DesktopMemorySettings{}, err
 	}
 	return DesktopMemorySettings{UseMemories: use != "false", GenerateMemories: generate != "false"}, nil
 }
 
-func (a *App) SetMemorySettings(useMemories, generateMemories bool) error {
-	if err := a.ready(); err != nil {
+func (s *Service) SetMemorySettings(useMemories, generateMemories bool) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	if err := a.store.SetAppSetting(a.ctx, "memory.use", fmt.Sprintf("%t", useMemories)); err != nil {
+	if err := s.store.SetAppSetting(s.ctx, "memory.use", fmt.Sprintf("%t", useMemories)); err != nil {
 		return err
 	}
-	return a.store.SetAppSetting(a.ctx, "memory.generate", fmt.Sprintf("%t", generateMemories))
+	return s.store.SetAppSetting(s.ctx, "memory.generate", fmt.Sprintf("%t", generateMemories))
 }
 
-func (a *App) Memories() ([]DesktopMemory, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) Memories() ([]DesktopMemory, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	items, _, err := a.store.ListMemories(a.ctx, model.MemoryListQuery{UserID: "local", IncludeAll: false, Page: 1, PageSize: 200})
+	items, _, err := s.store.ListMemories(s.ctx, model.MemoryListQuery{UserID: "local", IncludeAll: false, Page: 1, PageSize: 200})
 	if err != nil {
 		return nil, err
 	}
@@ -181,12 +181,12 @@ func (a *App) Memories() ([]DesktopMemory, error) {
 	return result, nil
 }
 
-func (a *App) ApproveMemory(memoryUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) ApproveMemory(memoryUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
 	active := model.MemoryStatusActive
-	item, err := a.memory.Update(a.ctx, "local", memoryUUID, model.UpdateMemoryRequest{Status: &active}, "desktop_user")
+	item, err := s.memory.Update(s.ctx, "local", memoryUUID, model.UpdateMemoryRequest{Status: &active}, "desktop_user")
 	if err != nil {
 		return err
 	}
@@ -196,32 +196,32 @@ func (a *App) ApproveMemory(memoryUUID string) error {
 	return nil
 }
 
-func (a *App) ForgetMemory(memoryUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) ForgetMemory(memoryUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	return a.memory.Forget(a.ctx, "local", memoryUUID, "desktop_user")
+	return s.memory.Forget(s.ctx, "local", memoryUUID, "desktop_user")
 }
 
-func (a *App) DeleteProvider(id int64) error {
-	if err := a.ready(); err != nil {
+func (s *Service) DeleteProvider(id int64) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	count, err := a.store.CountThreadsUsingProvider(a.ctx, id)
+	count, err := s.store.CountThreadsUsingProvider(s.ctx, id)
 	if err != nil {
 		return err
 	}
 	if count > 0 {
 		return fmt.Errorf("provider is used by %d conversation(s) and cannot be deleted", count)
 	}
-	return a.store.DeleteProvider(a.ctx, id)
+	return s.store.DeleteProvider(s.ctx, id)
 }
 
-func (a *App) SearchEngines() ([]DesktopSearchEngine, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) SearchEngines() ([]DesktopSearchEngine, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	items, _, err := a.store.ListSearchEngineConfigs(a.ctx, model.ListQuery{Page: 1, PageSize: 1000})
+	items, _, err := s.store.ListSearchEngineConfigs(s.ctx, model.ListQuery{Page: 1, PageSize: 1000})
 	if err != nil {
 		return nil, err
 	}
@@ -231,8 +231,8 @@ func (a *App) SearchEngines() ([]DesktopSearchEngine, error) {
 	}
 	return result, nil
 }
-func (a *App) AddSearchEngine(input SearchEngineInput) (DesktopSearchEngine, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) AddSearchEngine(input SearchEngineInput) (DesktopSearchEngine, error) {
+	if err := s.ready(); err != nil {
 		return DesktopSearchEngine{}, err
 	}
 	input.Name, input.Provider, input.BaseURL = strings.TrimSpace(input.Name), strings.TrimSpace(input.Provider), strings.TrimSpace(input.BaseURL)
@@ -240,41 +240,41 @@ func (a *App) AddSearchEngine(input SearchEngineInput) (DesktopSearchEngine, err
 		return DesktopSearchEngine{}, fmt.Errorf("search provider, name, and base URL are required")
 	}
 	cfg := &model.SearchEngineConfig{Provider: model.SearchEngineProvider(input.Provider), Name: input.Name, BaseURL: input.BaseURL, APIKey: strings.TrimSpace(input.APIKey), Enabled: true}
-	if err := a.store.CreateSearchEngineConfig(a.ctx, cfg); err != nil {
+	if err := s.store.CreateSearchEngineConfig(s.ctx, cfg); err != nil {
 		return DesktopSearchEngine{}, err
 	}
 	return DesktopSearchEngine{ID: cfg.ID, Provider: input.Provider, Name: cfg.Name, BaseURL: cfg.BaseURL, Enabled: true, APIKeySet: cfg.APIKey != ""}, nil
 }
-func (a *App) ToggleSearchEngine(id int64, enabled bool) error {
-	if err := a.ready(); err != nil {
+func (s *Service) ToggleSearchEngine(id int64, enabled bool) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	cfg, err := a.store.GetSearchEngineConfig(a.ctx, id)
+	cfg, err := s.store.GetSearchEngineConfig(s.ctx, id)
 	if err != nil {
 		return err
 	}
 	cfg.Enabled = enabled
-	return a.store.UpdateSearchEngineConfig(a.ctx, id, cfg)
+	return s.store.UpdateSearchEngineConfig(s.ctx, id, cfg)
 }
-func (a *App) DeleteSearchEngine(id int64) error {
-	if err := a.ready(); err != nil {
+func (s *Service) DeleteSearchEngine(id int64) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	count, err := a.store.CountThreadsUsingSearchEngine(a.ctx, id)
+	count, err := s.store.CountThreadsUsingSearchEngine(s.ctx, id)
 	if err != nil {
 		return err
 	}
 	if count > 0 {
 		return fmt.Errorf("search engine is used by %d conversation(s) and cannot be deleted", count)
 	}
-	return a.store.DeleteSearchEngineConfig(a.ctx, id)
+	return s.store.DeleteSearchEngineConfig(s.ctx, id)
 }
 
-func (a *App) MCPServers() ([]DesktopMCPServer, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) MCPServers() ([]DesktopMCPServer, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	items, err := a.store.ListMCPServers(a.ctx)
+	items, err := s.store.ListMCPServers(s.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -284,8 +284,8 @@ func (a *App) MCPServers() ([]DesktopMCPServer, error) {
 	}
 	return result, nil
 }
-func (a *App) AddMCPServer(input MCPServerInput) (DesktopMCPServer, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) AddMCPServer(input MCPServerInput) (DesktopMCPServer, error) {
+	if err := s.ready(); err != nil {
 		return DesktopMCPServer{}, err
 	}
 	input.Name, input.Transport, input.Endpoint = strings.TrimSpace(input.Name), strings.TrimSpace(input.Transport), strings.TrimSpace(input.Endpoint)
@@ -313,43 +313,43 @@ func (a *App) AddMCPServer(input MCPServerInput) (DesktopMCPServer, error) {
 		return DesktopMCPServer{}, err
 	}
 	srv := &model.MCPServer{Name: input.Name, Description: input.Description, Transport: model.MCPTransport(input.Transport), Endpoint: input.Endpoint, Args: args, Env: env, Headers: headers, Enabled: true}
-	if err := a.store.UpsertMCPServer(a.ctx, srv); err != nil {
+	if err := s.store.UpsertMCPServer(s.ctx, srv); err != nil {
 		return DesktopMCPServer{}, err
 	}
-	a.tools.Reload()
+	s.tools.Reload()
 	return DesktopMCPServer{UUID: srv.UUID, Name: srv.Name, Description: srv.Description, Transport: string(srv.Transport), Endpoint: srv.Endpoint, Enabled: true}, nil
 }
-func (a *App) DeleteMCPServer(serverUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) DeleteMCPServer(serverUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	if err := a.store.DeleteMCPServer(a.ctx, strings.TrimSpace(serverUUID)); err != nil {
+	if err := s.store.DeleteMCPServer(s.ctx, strings.TrimSpace(serverUUID)); err != nil {
 		return err
 	}
-	a.tools.Reload()
+	s.tools.Reload()
 	return nil
 }
-func (a *App) ToggleMCPServer(serverUUID string, enabled bool) error {
-	if err := a.ready(); err != nil {
+func (s *Service) ToggleMCPServer(serverUUID string, enabled bool) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	if err := a.store.SetMCPServerEnabled(a.ctx, serverUUID, enabled); err != nil {
+	if err := s.store.SetMCPServerEnabled(s.ctx, serverUUID, enabled); err != nil {
 		return err
 	}
-	a.tools.Reload()
+	s.tools.Reload()
 	return nil
 }
 
-func (a *App) Plugins() ([]DesktopPlugin, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) Plugins() ([]DesktopPlugin, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	plugins, err := a.store.ListPlugins(a.ctx)
+	plugins, err := s.store.ListPlugins(s.ctx)
 	if err != nil {
 		return nil, err
 	}
-	skillItems, _ := a.store.ListSkills(a.ctx)
-	mcpItems, _ := a.store.ListMCPServers(a.ctx)
+	skillItems, _ := s.store.ListSkills(s.ctx)
+	mcpItems, _ := s.store.ListMCPServers(s.ctx)
 	result := make([]DesktopPlugin, 0, len(plugins))
 	for _, item := range plugins {
 		entry := DesktopPlugin{
@@ -376,7 +376,7 @@ func (a *App) Plugins() ([]DesktopPlugin, error) {
 			return nil, permissionErr
 		}
 		entry.Permissions = permissions
-		missing, missingErr := a.pluginConfig().MissingRequired(a.ctx, item)
+		missing, missingErr := s.pluginConfig().MissingRequired(s.ctx, item)
 		if missingErr != nil {
 			return nil, missingErr
 		}
@@ -385,48 +385,48 @@ func (a *App) Plugins() ([]DesktopPlugin, error) {
 	}
 	return result, nil
 }
-func (a *App) DeletePlugin(pluginUUID string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) DeletePlugin(pluginUUID string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	plugin, err := a.findPlugin(pluginUUID)
+	plugin, err := s.findPlugin(pluginUUID)
 	if err != nil {
 		return err
 	}
-	if err := a.installer.Uninstall(a.ctx, plugin); err != nil {
+	if err := s.installer.Uninstall(s.ctx, plugin); err != nil {
 		return err
 	}
-	a.tools.Reload()
+	s.tools.Reload()
 	return nil
 }
-func (a *App) TogglePlugin(pluginUUID string, enabled bool) error {
-	if err := a.ready(); err != nil {
+func (s *Service) TogglePlugin(pluginUUID string, enabled bool) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
 	if enabled {
-		plugin, err := a.findPlugin(pluginUUID)
+		plugin, err := s.findPlugin(pluginUUID)
 		if err != nil {
 			return err
 		}
 		// Enabling is what grants a plugin its declared permissions, so it is
 		// also where the declared configuration has to be complete.
-		if err := a.pluginConfig().ValidateEnable(a.ctx, plugin); err != nil {
+		if err := s.pluginConfig().ValidateEnable(s.ctx, plugin); err != nil {
 			return err
 		}
 	}
-	if err := a.store.SetPluginEnabled(a.ctx, pluginUUID, enabled); err != nil {
+	if err := s.store.SetPluginEnabled(s.ctx, pluginUUID, enabled); err != nil {
 		return err
 	}
-	if err := a.store.SetPluginSkillsEnabled(a.ctx, pluginUUID, enabled); err != nil {
+	if err := s.store.SetPluginSkillsEnabled(s.ctx, pluginUUID, enabled); err != nil {
 		return err
 	}
-	if err := a.store.SetPluginMCPEnabled(a.ctx, pluginUUID, enabled); err != nil {
+	if err := s.store.SetPluginMCPEnabled(s.ctx, pluginUUID, enabled); err != nil {
 		return err
 	}
-	a.tools.Reload()
+	s.tools.Reload()
 	// Tools are rebuilt every turn, but a channel holds a connection: it has
 	// to be started or stopped now.
-	return a.syncChannels()
+	return s.syncChannels()
 }
 
 // DesktopChannelBinding is one external conversation known to a connector.
@@ -447,11 +447,11 @@ type DesktopChannelBinding struct {
 
 // ChannelBindings lists every external conversation a connector has seen,
 // including the ones waiting for authorization.
-func (a *App) ChannelBindings() ([]DesktopChannelBinding, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) ChannelBindings() ([]DesktopChannelBinding, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	items, err := a.store.ListChannelBindings(a.ctx)
+	items, err := s.store.ListChannelBindings(s.ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -479,11 +479,11 @@ func (a *App) ChannelBindings() ([]DesktopChannelBinding, error) {
 // from that conversation is recorded and refused. The model and the acting
 // tools it may use are chosen here rather than inherited from the desktop
 // session, because the sender is not the local user.
-func (a *App) AuthorizeChannelBinding(pluginUUID, channelID, externalKey string, providerID int64, modelName string, allowedTools []string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) AuthorizeChannelBinding(pluginUUID, channelID, externalKey string, providerID int64, modelName string, allowedTools []string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	binding, err := a.store.GetChannelBinding(a.ctx, pluginUUID, channelID, externalKey)
+	binding, err := s.store.GetChannelBinding(s.ctx, pluginUUID, channelID, externalKey)
 	if err != nil {
 		return err
 	}
@@ -499,16 +499,16 @@ func (a *App) AuthorizeChannelBinding(pluginUUID, channelID, externalKey string,
 	}
 	binding.Allowed, binding.ProviderID, binding.ModelName = true, providerID, strings.TrimSpace(modelName)
 	binding.AllowedTools = model.JSON(tools)
-	return a.store.SaveChannelBinding(a.ctx, binding)
+	return s.store.SaveChannelBinding(s.ctx, binding)
 }
 
 // RevokeChannelBinding stops an external conversation from reaching the agent.
 // The binding and its thread are kept so the history stays readable.
-func (a *App) RevokeChannelBinding(pluginUUID, channelID, externalKey string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) RevokeChannelBinding(pluginUUID, channelID, externalKey string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	binding, err := a.store.GetChannelBinding(a.ctx, pluginUUID, channelID, externalKey)
+	binding, err := s.store.GetChannelBinding(s.ctx, pluginUUID, channelID, externalKey)
 	if err != nil {
 		return err
 	}
@@ -516,43 +516,43 @@ func (a *App) RevokeChannelBinding(pluginUUID, channelID, externalKey string) er
 		return fmt.Errorf("conversation %q is not known to this connector", externalKey)
 	}
 	binding.Allowed = false
-	return a.store.SaveChannelBinding(a.ctx, binding)
+	return s.store.SaveChannelBinding(s.ctx, binding)
 }
 
 // PluginConfigFields returns a plugin's declared configuration for the
 // settings form. A secret that is already stored is reported as set and its
 // value is never returned.
-func (a *App) PluginConfigFields(pluginUUID string) ([]pluginpkg.Field, error) {
-	if err := a.ready(); err != nil {
+func (s *Service) PluginConfigFields(pluginUUID string) ([]pluginpkg.Field, error) {
+	if err := s.ready(); err != nil {
 		return nil, err
 	}
-	plugin, err := a.findPlugin(pluginUUID)
+	plugin, err := s.findPlugin(pluginUUID)
 	if err != nil {
 		return nil, err
 	}
-	return a.pluginConfig().Fields(a.ctx, plugin)
+	return s.pluginConfig().Fields(s.ctx, plugin)
 }
 
 // SetPluginConfig stores one declared configuration value. An empty value
 // clears the key.
-func (a *App) SetPluginConfig(pluginUUID, key, value string) error {
-	if err := a.ready(); err != nil {
+func (s *Service) SetPluginConfig(pluginUUID, key, value string) error {
+	if err := s.ready(); err != nil {
 		return err
 	}
-	plugin, err := a.findPlugin(pluginUUID)
+	plugin, err := s.findPlugin(pluginUUID)
 	if err != nil {
 		return err
 	}
-	return a.pluginConfig().Set(a.ctx, plugin, key, value)
+	return s.pluginConfig().Set(s.ctx, plugin, key, value)
 }
 
-func (a *App) pluginConfig() *pluginpkg.ConfigService {
-	return pluginpkg.NewConfigService(a.store)
+func (s *Service) pluginConfig() *pluginpkg.ConfigService {
+	return pluginpkg.NewConfigService(s.store)
 }
 
-func (a *App) findPlugin(pluginUUID string) (model.Plugin, error) {
+func (s *Service) findPlugin(pluginUUID string) (model.Plugin, error) {
 	pluginUUID = strings.TrimSpace(pluginUUID)
-	plugins, err := a.store.ListPlugins(a.ctx)
+	plugins, err := s.store.ListPlugins(s.ctx)
 	if err != nil {
 		return model.Plugin{}, err
 	}
@@ -564,12 +564,12 @@ func (a *App) findPlugin(pluginUUID string) (model.Plugin, error) {
 	return model.Plugin{}, fmt.Errorf("plugin %q not found", pluginUUID)
 }
 
-func (a *App) installPlugin(source string) (DesktopPlugin, error) {
-	plugin, counts, err := a.installer.Install(a.ctx, source)
+func (s *Service) installPlugin(source string) (DesktopPlugin, error) {
+	plugin, counts, err := s.installer.Install(s.ctx, source)
 	if err != nil {
 		return DesktopPlugin{}, err
 	}
-	a.tools.Reload()
+	s.tools.Reload()
 	return DesktopPlugin{
 		UUID: plugin.UUID, Name: plugin.Name, Description: plugin.Description,
 		Version: plugin.Version, Source: string(plugin.Source), Enabled: plugin.Enabled,

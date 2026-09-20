@@ -52,7 +52,7 @@ import {
   ToggleMCPServer,
   TogglePlugin,
   ToggleSearchEngine,
-} from "../wailsjs/go/main/App";
+} from "../wailsjs/go/appservice/Service";
 import {
   BrowserOpenURL,
   EventsOn,
