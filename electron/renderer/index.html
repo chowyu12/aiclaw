@@ -1,0 +1,25 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>AIClaw</title>
+<body style="font:14px system-ui;padding:24px;background:#0f1724;color:#dbe4f5">
+<h1 id="h">连接本地核心…</h1>
+<pre id="out"></pre>
+<script type="module">
+const out = document.getElementById("out");
+const report = (line) => { out.textContent += line + "\n"; console.log("SMOKE " + line); };
+try {
+  const commands = await window.aiclaw.commands();
+  report("commands=" + commands.length);
+  const status = await window.aiclaw.invoke("Status");
+  report("status=" + JSON.stringify(status));
+  const plugins = await window.aiclaw.invoke("Plugins");
+  report("plugins=" + plugins.length);
+  // Subscribing must be restricted to the known event names.
+  try { window.aiclaw.on("arbitrary:channel", () => {}); report("FAIL subscribe-allowlist"); }
+  catch { report("subscribe-allowlist=enforced"); }
+  document.getElementById("h").textContent = "核心已连接";
+  report("DONE");
+} catch (e) {
+  report("ERROR " + e.message);
+}
+</script>

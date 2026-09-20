@@ -16,3 +16,6 @@ CHANGELOG.md
 /desktop/frontend/dist/assets/
 /desktop/frontend/dist/index.html
 /desktop/build/bin/
+/electron/node_modules/
+/electron/dist/
+/bin/aiclaw-core
