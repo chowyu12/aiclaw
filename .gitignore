@@ -22,3 +22,5 @@ CHANGELOG.md
 /renderer/node_modules/
 /renderer/dist/assets/
 /renderer/dist/index.html
+/electron/core/
+/electron/release/

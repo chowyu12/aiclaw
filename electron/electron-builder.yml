@@ -1,0 +1,56 @@
+appId: com.aiclaw.desktop
+productName: AIClaw
+copyright: Copyright © 2026 AIClaw
+
+directories:
+  output: release
+  buildResources: build
+
+# The compiled shell plus the built interface. The interface is placed beside
+# the shell as `renderer/`, which is where main.ts looks for it when packaged.
+files:
+  - dist/**/*
+  - package.json
+  - from: ../renderer/dist
+    to: renderer
+    filter: ["**/*", "!.gitkeep"]
+
+# The Go core ships as a resource rather than inside the app bundle's code, so
+# it stays an ordinary executable the shell can spawn. tools/build-core.mjs
+# produces it for the target platform before packaging.
+extraResources:
+  - from: core
+    to: core
+    filter: ["aiclaw-core", "aiclaw-core.exe"]
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [universal]
+  # Hardened runtime is required for notarisation. The core is spawned as a
+  # child process, which needs the inherit entitlement.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Signing identity comes from the environment in CI; an unsigned local build
+  # is ad-hoc signed, matching what the Wails pipeline did.
+  identity: null
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+linux:
+  category: Utility
+  target:
+    - target: AppImage
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+
+# Publishing is handled by the release workflow, not by electron-builder.
+publish: null

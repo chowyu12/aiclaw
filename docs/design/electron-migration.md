@@ -139,9 +139,10 @@ var commands = map[string]Handler{
 否则 renderer 里的任意链接都能触发本机命令——当前 Wails 版本也没做这个校验，
 迁移时应当补上。
 
-前端 `OpenAttachment` / `RevealAttachment` / `OpenOutputFile` 这几个方法现在在 Go 侧
-用 `exec.Command` 调 `open`/`explorer`/`xdg-open`。迁移后应改为 main process 的
-`shell.openPath` / `shell.showItemInFolder`——少一次进程创建，且路径转义由 Electron 负责。
+**更正**：初稿说 `OpenAttachment` / `RevealAttachment` / `OpenOutputFile` 应改为
+main process 的 `shell.openPath`，理由是「路径转义由 Electron 负责」。这个理由**不成立**——
+Go 的 `exec.Command` 不经过 shell，参数直接传给系统调用，本来就没有转义问题。
+因此这几个方法**保留 Go 实现**：三平台都正常工作，改走 host call 只是多一次往返，无功能收益。
 
 ## 附件预览：一处需要重新设计的地方
 
@@ -152,11 +153,17 @@ var commands = map[string]Handler{
    一条消息 27MB 会让行缓冲和 JSON 解析都很难看，且阻塞同一条管道上的其他事件。
 2. Electron 的默认 CSP 通常需要为 `data:` 显式放行 `img-src`。
 
-建议改为**自定义协议**：main process 注册 `aiclaw://attachment/<uuid>`，
-用 `protocol.handle` 流式读取本地文件返回，前端 `<img src="aiclaw://…">`。
-这样预览不进 IPC、不进内存、天然支持 range 请求。
+已改为**自定义协议** `aiclaw://preview/<数据目录相对路径>`，main process 用
+`protocol.handle` + `net.fetch` 返回本地文件，前端 `<img src="aiclaw://…">`。
+预览不进 IPC、不进内存。
 
-这是迁移中**唯一必须改动现有行为**的地方；其余都是等价替换。
+预览 URL 的构建方式按宿主注入（与 emitter、dialogs 同一模式），Wails 侧继续用 `data:`，
+未受影响。**两端都做范围限制**：核心不为数据目录外的文件生成 URL，外壳解析路径后再校验——
+因为这些 URL 来自页面。
+
+**实现时发现渲染层本身也需要自定义协议**，这是初稿没预料到的：Vite 把应用产出为 ES module，
+而模块脚本需要 CORS、`file://` 是不透明来源——结果是页面加载了、桥接答了全部 53 个命令、
+Vue 却没挂载。空窗口配一个健康的核心，静默失败。所以渲染层走 `app://` 方案。
 
 ## 进程生命周期
 
@@ -218,7 +225,9 @@ internal/                 # 不动
 
 ```text
 test（不变）→ go test ./... + 前端 type-check/test/build
-build-core  → 单个 runner 交叉编译 aiclaw-core 全部平台（CGO_ENABLED=0，已实测）
+build-core  → 每个 runner 用 tools/build-core.mjs 构建本平台的 core（CGO_ENABLED=0）
+              macOS 是例外：Electron 产物是 universal，core 也必须是，
+              所以分别构建 amd64/arm64 再 lipo 合并
 package     → electron-builder，按平台产出 dmg / nsis / AppImage
 release     → 与现在相同：tag annotation 作为 release notes + SHA256SUMS
 ```
@@ -228,6 +237,9 @@ release     → 与现在相同：tag annotation 作为 release notes + SHA256SU
 正常，且 `darwin/amd64`、`darwin/arm64`、`windows/amd64`、`linux/amd64` 四个目标
 全部交叉编译通过。**所以 sidecar 可以在单一 runner 上一次交叉编译出全部平台**，
 不需要三个 runner 各自原生编译，这比当前的 Wails 构建矩阵更简单。
+
+hardened runtime 下有一处必须做对：**`com.apple.security.inherit` entitlement**。
+外壳会 spawn Go 核心作为子进程，缺这个 entitlement 会直接拒绝 spawn，应用就是个空窗口。
 
 代码签名与公证是**新增的必做项**：Wails 当前只做 ad-hoc 签名
 （`codesign --sign -`），用户下载后需要手动放行。Electron 的自动更新（如果启用）
