@@ -1,35 +1,42 @@
 .PHONY: all build run dev test clean deps lint help
 
-WAILS ?= $(shell go env GOPATH)/bin/wails
-DESKTOP_DIR := desktop
+ELECTRON_DIR := electron
+RENDERER_DIR := renderer
 
 all: build
 
+# Compiles the shell, the interface and the Go core for this platform.
 build:
-	cd $(DESKTOP_DIR) && $(WAILS) build
+	cd $(ELECTRON_DIR) && npm run build
+	cd $(RENDERER_DIR) && npm run build
+	cd $(ELECTRON_DIR) && node tools/build-core.mjs $$(node -p process.platform)
 
-run: build
-	open $(DESKTOP_DIR)/build/bin/AIClaw.app
+# Runs the application from the working tree.
+dev: build
+	cd $(ELECTRON_DIR) && npx electron .
 
-dev:
-	cd $(DESKTOP_DIR) && $(WAILS) dev
+run: dev
+
+# Produces an installable package for this platform.
+package:
+	cd $(ELECTRON_DIR) && npm run package
 
 test:
 	go test ./...
-	cd $(DESKTOP_DIR) && go test ./...
-	cd $(DESKTOP_DIR)/frontend && npm test
-	cd $(DESKTOP_DIR)/frontend && npm run build
+	cd $(ELECTRON_DIR) && npm run typecheck && npm test
+	cd $(RENDERER_DIR) && npm test && npm run build
 
 deps:
 	go mod tidy
-	cd $(DESKTOP_DIR) && go mod tidy
+	cd $(ELECTRON_DIR) && npm install
+	cd $(RENDERER_DIR) && npm install
 
 clean:
-	rm -rf $(DESKTOP_DIR)/build/bin $(DESKTOP_DIR)/frontend/dist
+	rm -rf $(ELECTRON_DIR)/dist $(ELECTRON_DIR)/core $(ELECTRON_DIR)/release $(RENDERER_DIR)/dist/assets
 
 lint:
 	golangci-lint run ./...
 
 help:
-	@echo "Targets: build, run, dev, test, lint, deps, clean"
-	@echo "AIClaw is a Wails desktop application; all data is local in ~/.aiclaw."
+	@echo "Targets: build, dev, package, test, lint, deps, clean"
+	@echo "AIClaw is an Electron shell over a Go core; all data is local in ~/.aiclaw."
