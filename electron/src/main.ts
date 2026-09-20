@@ -6,7 +6,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
+import { BrowserWindow, app, dialog, ipcMain, net, protocol, shell } from "electron";
+import { pathToFileURL } from "node:url";
 
 import { Sidecar, type HostCall, type SidecarState } from "./sidecar";
 
@@ -14,8 +15,48 @@ import { Sidecar, type HostCall, type SidecarState } from "./sidecar";
  *  handler, so a link in the interface must not reach it. */
 const OPENABLE_PROTOCOLS = new Set(["http:", "https:"]);
 
+/**
+ * The renderer is served over a custom scheme rather than from file://.
+ *
+ * Vite emits the application as an ES module, and a module script cannot be
+ * fetched from a file:// page: modules require CORS and file:// is an opaque
+ * origin. The page loaded but Vue never mounted, silently — an empty window
+ * with a working bridge behind it. A standard scheme also gives the page a
+ * real origin, so storage and CSP behave predictably.
+ */
+const RENDERER_SCHEME = "app";
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: RENDERER_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+]);
+
 let window: BrowserWindow | undefined;
 let sidecar: Sidecar | undefined;
+
+/** Locates the built renderer: beside the compiled shell when packaged, in
+ *  the repository when developing. */
+function rendererRoot(): string {
+  const packaged = join(__dirname, "..", "renderer");
+  if (existsSync(join(packaged, "index.html"))) return packaged;
+  return join(__dirname, "..", "..", "renderer", "dist");
+}
+
+/** Serves the renderer, refusing any path that escapes its directory. */
+function serveRenderer(root: string): void {
+  protocol.handle(RENDERER_SCHEME, (request) => {
+    const { pathname } = new URL(request.url);
+    const relative = decodeURIComponent(pathname === "/" ? "/index.html" : pathname);
+    const target = join(root, relative);
+    const resolvedRoot = join(root, "/");
+    if (!target.startsWith(resolvedRoot) && target !== join(root, "index.html")) {
+      return new Response("forbidden", { status: 403 });
+    }
+    return net.fetch(pathToFileURL(target).toString());
+  });
+}
 
 /** Locates the core executable: alongside the app when packaged, in the
  *  repository when developing. */
@@ -96,7 +137,7 @@ async function createWindow(): Promise<void> {
     return { action: "deny" };
   });
 
-  await window.loadFile(join(__dirname, "..", "renderer", "index.html"));
+  await window.loadURL(`${RENDERER_SCHEME}://local/index.html`);
 }
 
 async function openExternal(url: string): Promise<void> {
@@ -122,6 +163,7 @@ function registerIpc(): void {
 }
 
 app.whenReady().then(async () => {
+  serveRenderer(rendererRoot());
   registerIpc();
   sidecar = new Sidecar({
     executable: coreExecutable(),

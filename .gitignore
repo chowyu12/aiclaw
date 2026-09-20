@@ -19,3 +19,6 @@ CHANGELOG.md
 /electron/node_modules/
 /electron/dist/
 /bin/aiclaw-core
+/renderer/node_modules/
+/renderer/dist/assets/
+/renderer/dist/index.html

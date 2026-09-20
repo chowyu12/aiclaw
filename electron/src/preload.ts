@@ -4,7 +4,7 @@
 // commands, subscribe to events, and ask the shell to open a path. It cannot
 // touch node, the filesystem, or the core's pipe directly.
 
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 /** Events the core emits that the interface subscribes to. Listening is
  *  restricted to these names so a page cannot attach to arbitrary IPC. */
@@ -31,6 +31,21 @@ contextBridge.exposeInMainWorld("aiclaw", {
     const listener = (_event: unknown, ...args: unknown[]) => handler(...args);
     ipcRenderer.on(name, listener);
     return () => ipcRenderer.removeListener(name, listener);
+  },
+
+  /**
+   * Resolves a dropped File to its path on disk.
+   *
+   * Electron 32 removed File.path, so a renderer reading it gets undefined for
+   * every file and drops silently do nothing. webUtils is the only remaining
+   * way, and it is only available here in the preload.
+   */
+  pathForFile: (file: File): string => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch {
+      return "";
+    }
   },
 
   openExternal: (url: string): Promise<void> =>
