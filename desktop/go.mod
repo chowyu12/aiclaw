@@ -5,11 +5,12 @@ go 1.26.0
 require (
 	github.com/chowyu12/aiclaw v0.0.0-00010101000000-000000000000
 	github.com/google/uuid v1.6.0
-	github.com/wailsapp/wails/v2 v2.11.0
+	github.com/wailsapp/wails/v2 v2.16.0
 )
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
+	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/bep/debounce v1.2.1 // indirect
 	github.com/chowyu12/go-openai v1.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
