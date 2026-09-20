@@ -27,15 +27,23 @@ mac:
   category: public.app-category.productivity
   target:
     - target: dmg
-      arch: [universal]
-  # Hardened runtime is required for notarisation. The core is spawned as a
-  # child process, which needs the inherit entitlement.
-  hardenedRuntime: true
+      # Two single-architecture builds rather than one universal package.
+      # Universal doubles the Electron download and adds a merge step, which
+      # is the only structural difference between this platform and the two
+      # that build cleanly. Separate artifacts are also smaller for the user,
+      # who downloads one of them rather than both fused together.
+      arch: [x64, arm64]
+  # Hardened runtime is a signing attribute, so it only applies when there is
+  # a certificate to sign with. Asking for it while also declining to sign is
+  # contradictory, so both follow the same switch: set CSC_LINK and
+  # CSC_KEY_PASSWORD and the build is signed with a hardened runtime, leave
+  # them unset and it is ad-hoc signed, which is what the Wails pipeline
+  # produced.
+  # Driven by the workflow: it turns this on only when a certificate is
+  # present, because hardened runtime without signing is contradictory.
+  hardenedRuntime: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # Signing identity comes from the environment in CI; an unsigned local build
-  # is ad-hoc signed, matching what the Wails pipeline did.
-  identity: null
 
 win:
   target:

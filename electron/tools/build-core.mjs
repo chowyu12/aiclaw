@@ -1,10 +1,10 @@
 // Cross-compiles the Go core for a packaging target.
 //
 // The core needs no cgo, so every platform builds from one machine — verified
-// across darwin, windows and linux. macOS is the exception in shape rather
-// than toolchain: the Electron package is universal, so the core beside it has
-// to be too, which means building both architectures and joining them with
-// lipo.
+// across darwin, windows and linux. The macOS core is still built as a
+// universal binary: the shell ships per-architecture packages, and one core
+// that runs on both is simpler than threading the architecture through
+// packaging for no size saving worth having.
 //
 // Usage: node tools/build-core.mjs <darwin|win32|linux> [outDir]
 

@@ -42,7 +42,7 @@ jobs:
         include:
           - os: macos-14
             artifact: aiclaw-macos
-            # The Electron package is universal, so the core is too.
+            # One package per architecture; the core inside each is universal.
             pattern: release/*.dmg
           - os: windows-latest
             artifact: aiclaw-windows
@@ -86,7 +86,17 @@ jobs:
         # matching what the Wails pipeline produced. Set CSC_LINK and
         # CSC_KEY_PASSWORD to sign properly, and APPLE_ID plus
         # APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID to notarise.
-        run: npx electron-builder --config electron-builder.yml --publish never
+        env:
+          # Packaging failures here are hard to diagnose after the fact: the
+          # job log is the only record, and reading it needs admin rights.
+          DEBUG: electron-builder
+        shell: bash
+        run: |
+          # Hardened runtime is a signing attribute, so it is only switched on
+          # when there is a certificate to sign with.
+          HARDENED=""
+          if [ -n "${CSC_LINK:-}" ]; then HARDENED="--config.mac.hardenedRuntime=true"; fi
+          npx electron-builder --config electron-builder.yml --publish never $HARDENED
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
