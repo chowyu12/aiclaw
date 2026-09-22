@@ -207,7 +207,7 @@ func TestWriteThenReadThenEdit(t *testing.T) {
 		t.Fatalf("read = %q, %v", out, err)
 	}
 
-	if _, err := call(t, registry, "edit_file", `{"path":"notes/a.txt","old_text":"world","new_text":"内部平台"}`, env); err != nil {
+	if _, err := call(t, registry, "edit_file", `{"path":"notes/a.txt","old_text":"world","new_text":"世界"}`, env); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
 	out, _ = call(t, registry, "read_file", `{"path":"notes/a.txt"}`, env)
