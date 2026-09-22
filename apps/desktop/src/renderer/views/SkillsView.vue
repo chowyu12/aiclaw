@@ -1,13 +1,63 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { computed, onMounted } from "vue";
 import { actions, store } from "../store";
 
 /**
- * 技能管理：这台机器上所有能用的技能，一个列表。
+ * 技能管理：这台机器上所有能用的技能，按来源分组。
  *
- * 自己目录里的能删能关；Claude Code / Codex / npm 里的只能关——
- * 那是人家的目录，在这里删掉会让那边也一起没了。
+ * 分组就是目录：自己的 ~/.aiclaw/skills、插件带的、项目里的 .claude/skills、
+ * Claude Code、Codex、npm 全局包。同名技能只保留优先级最高那组里的一个，
+ * 所以组的顺序也是「同名时谁说了算」的顺序。
+ *
+ * 自己目录里的能删能关；别处的只能关——那是人家的目录，在这里删掉会让那边也一起没了。
  */
+
+type SkillRow = (typeof store.skills)[number];
+
+interface SkillGroup {
+  source: string;
+  /** 这一组技能所在的目录，给人看「它们在哪儿」。 */
+  dir: string;
+  writable: boolean;
+  skills: SkillRow[];
+}
+
+/** 组的顺序，与主进程 skill-roots.ts 里的优先级一致。插件来源不止一个，按前缀归到同一位。 */
+const ORDER = ["AIClaw", "插件", "项目", "Claude Code", "Codex", "npm 全局"];
+
+function rank(source: string): number {
+  const index = ORDER.findIndex((label) => source === label || source.startsWith(`${label} `));
+  return index < 0 ? ORDER.length : index;
+}
+
+/** 技能目录的上一级，就是这组的根。渲染层没有 node 的 path，按两种分隔符手切。 */
+function parentDir(dir: string): string {
+  const cut = Math.max(dir.lastIndexOf("/"), dir.lastIndexOf("\\"));
+  return cut > 0 ? dir.slice(0, cut) : dir;
+}
+
+const groups = computed<SkillGroup[]>(() => {
+  const byLabel = new Map<string, SkillGroup>();
+  for (const skill of store.skills) {
+    const group = byLabel.get(skill.source);
+    if (group) {
+      group.skills.push(skill);
+      // 同一来源的技能不一定在同一个目录下（npm 全局有好几个 node_modules），
+      // 目录只在全组一致时显示，否则留空。
+      if (group.dir !== parentDir(skill.dir)) group.dir = "";
+    } else {
+      byLabel.set(skill.source, {
+        source: skill.source,
+        dir: parentDir(skill.dir),
+        writable: skill.writable,
+        skills: [skill],
+      });
+    }
+  }
+  return [...byLabel.values()].sort(
+    (a, b) => rank(a.source) - rank(b.source) || a.source.localeCompare(b.source, "zh"),
+  );
+});
 
 onMounted(() => void actions.refreshSkills());
 
@@ -46,12 +96,19 @@ async function remove(id: string, name: string): Promise<void> {
         还没有技能。点「打开技能目录」，在里面建一个子目录放 SKILL.md。
       </p>
 
-      <article v-for="skill in store.skills" :key="skill.id" class="card" :class="{ off: !skill.enabled }">
+      <div v-for="group in groups" :key="group.source" class="group">
+        <div class="group-head">
+          <span class="badge" :class="{ external: !group.writable }">{{ group.source }}</span>
+          <span class="count">{{ group.skills.length }} 个</span>
+          <span v-if="group.dir" class="group-dir" :title="group.dir">{{ group.dir }}</span>
+          <span v-if="!group.writable" class="group-note">只能关，不能删</span>
+        </div>
+
+        <article v-for="skill in group.skills" :key="skill.id" class="card" :class="{ off: !skill.enabled }">
         <div class="card-head">
           <div class="who">
             <span class="name">{{ skill.name }}</span>
             <span class="dir" :title="skill.dir">{{ skill.dirName }}</span>
-            <span class="badge" :class="{ external: !skill.writable }">{{ skill.source }}</span>
           </div>
           <label class="toggle">
             <input
@@ -73,7 +130,8 @@ async function remove(id: string, name: string): Promise<void> {
           </button>
         </div>
         <p class="desc">{{ skill.description || "（没写 description——模型无从判断什么时候该用它）" }}</p>
-      </article>
+        </article>
+      </div>
     </section>
   </div>
 </template>
@@ -116,6 +174,44 @@ h2 {
   display: flex;
   gap: 8px;
   align-items: center;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 组头压得比卡片轻：它是分隔，不是内容。 */
+.group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 2px 0;
+}
+
+.count {
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.group-dir {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.group-note {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .card {
