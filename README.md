@@ -16,6 +16,23 @@ JSON-RPC 通信。模型服务、插件、搜索引擎、会话全部存在本�
 - **搜索引擎**：Tavily / SerpAPI / 阿里云 IQS，启用后模型多一个 `web_search` 工具。
 - **技能**：一并认 Claude Code、Codex、npm 全局包与插件带来的 `SKILL.md`。
 
+## 安装
+
+**macOS 一条命令**（下载最新 Release、装进「应用程序」、去掉隔离标记、打开）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/master/scripts/install-mac.sh | bash
+```
+
+Apple Silicon 与 Intel 都认；已经手动下好 zip 的话 `install-mac.sh -l` 直接装
+`~/Downloads` 里最新的那个。脚本只做四件事：找包 → 退掉正在跑的 → 替换 `.app` →
+`xattr -dr com.apple.quarantine`——包未签名，不去这个标记 Gatekeeper 会拒绝打开。
+
+**Windows / Linux**：到 [Releases](https://github.com/chowyu12/aiclaw/releases) 下载
+`AIClaw-<版本>-win-x64.zip` 或 `AIClaw-<版本>-linux-x64.zip`，解压到任意目录运行。
+
+应用内也会检查新版本：macOS 一键替换并重开，其余平台下载到「下载」目录并指给你。
+
 ## 目录
 
 ```text
@@ -25,7 +42,7 @@ tools/claw-agent/    Go 内核：循环 / 工具 / MCP / 技能 / 记忆 / 会�
 internal/plugin      插件系统（bundle、manifest、权限、配置、通道）
 internal/plugins     内置插件：微信、企业微信
 internal/store       应用库（SQLite，gorm）：模型服务、插件、搜索引擎、通道授权
-scripts/             冒烟测试、打包、图标
+scripts/             冒烟测试、打包、图标、一键安装脚本
 docs/                设计文档；docs/agent-loop.md 改循环前必读
 ```
 
@@ -48,5 +65,6 @@ make help     # 其余 target
 Windows x64、Linux x64），内核 `CGO_ENABLED=0` 交叉编译。推 `v*` tag 触发
 GitHub Actions：测试 → 打包 → 建 Release（tag 注释作发布说明，附 SHA256SUMS）。
 
-macOS 包未签名，第一次打开要右键「打开」，或
-`xattr -dr com.apple.quarantine /Applications/AIClaw.app`。
+macOS 包未签名：用上面的安装脚本装不用管；手动解压的话第一次打开要右键「打开」，
+或 `xattr -dr com.apple.quarantine /Applications/AIClaw.app`。本机 `make install-mac`
+会构建并装进「应用程序」。

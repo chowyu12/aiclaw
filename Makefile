@@ -26,7 +26,7 @@ GO_SOURCES := $(shell find $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg -name '*.go
 
 .PHONY: help deps build build-go build-client build-desktop dev dev-ui \
         test test-go test-renderer smoke smoke-desktop icon \
-        package package-mac package-mac-intel package-win package-linux \
+        package package-mac package-mac-intel package-win package-linux install-mac \
         typecheck fmt fmt-check vet nocgo check doctor clean distclean
 
 help: ## 列出可用 target
@@ -127,11 +127,12 @@ typecheck: deps build-client ## TS 类型检查（主进程 + preload + 渲染�
 fmt: ## 格式化 Go 代码
 	gofmt -w $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg
 
-fmt-check: ## 检查 Go 格式（CI 用，不改文件）
+fmt-check: ## 检查 Go 格式与安装脚本语法（CI 用，不改文件）
 	@unformatted=$$(gofmt -l $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg); \
 	if [ -n "$$unformatted" ]; then \
 		echo "以下文件未格式化，跑 make fmt："; echo "$$unformatted"; exit 1; \
 	fi
+	@bash -n scripts/install-mac.sh
 
 vet: ## go vet
 	go vet ./...
@@ -176,6 +177,9 @@ package-linux: deps build-client build-desktop ## 打 Linux x64 包
 	$(call cross_build,linux,x64,linux,amd64,)
 
 package: package-mac package-mac-intel package-win package-linux ## 打全部四个平台的包
+
+install-mac: package-mac ## 本机构建并装进「应用程序」（不需要网络与凭据）
+	./scripts/install-mac.sh release/AIClaw-darwin-arm64
 
 # ---------- 清理 ----------
 
