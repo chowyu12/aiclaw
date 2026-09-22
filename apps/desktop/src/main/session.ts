@@ -64,7 +64,13 @@ export const PROFILES: ProfileSpec[] = [
   {
     id: "never",
     label: "无人值守",
-    description: "不弹确认；需要确认的操作直接失败。给定时任务用，别在交互会话里选。",
+    description: "不弹确认；需要确认的操作直接失败。给定时任务与外部通道用，别在交互会话里选。",
+    availableForScheduled: true,
+  },
+  {
+    id: "bypass",
+    label: "全部放行",
+    description: "不弹确认；需要确认的操作直接执行（rm -rf / 这类危险命令仍硬拒绝）。只在完全信任当前任务时用。",
     availableForScheduled: true,
   },
 ];

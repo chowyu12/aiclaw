@@ -178,7 +178,7 @@ async function pickModel(providerId: number, id: string): Promise<void> {
 
 async function pickPolicy(id: string): Promise<void> {
   policyOpen.value = false;
-  await actions.saveConfig({ profile: id as "on-write" | "always" | "never" });
+  await actions.saveConfig({ profile: id as "on-write" | "always" | "never" | "bypass" });
 }
 
 /** 按轮分组：一条提问 + 它触发的全部步骤 + 全部回答。 */
@@ -1005,7 +1005,8 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
   color: var(--accent);
 }
 
-.chip[data-policy="never"] {
+.chip[data-policy="never"],
+.chip[data-policy="bypass"] {
   color: var(--danger);
 }
 

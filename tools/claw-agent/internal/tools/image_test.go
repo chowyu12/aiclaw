@@ -121,7 +121,7 @@ func TestCurrentTimeIsSpelledOutForTheModel(t *testing.T) {
 }
 
 func TestCurrentTimeToolNeedsNoArguments(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	out, err := call(t, registry, "current_time", `{}`, env)
 	if err != nil {

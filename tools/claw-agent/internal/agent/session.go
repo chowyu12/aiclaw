@@ -628,6 +628,8 @@ func buildSystemPrompt(
 	switch config.ApprovalPolicy {
 	case protocol.ApprovalNever:
 		builder.WriteString("当前为无人值守模式，没有人会回答确认请求；需要确认的操作会直接失败。\n")
+	case protocol.ApprovalBypass:
+		builder.WriteString("当前为全部放行模式：操作不需要用户确认就会执行，所以动手前要格外确认意图；危险命令仍会被拒绝。\n")
 	case protocol.ApprovalAlways:
 		builder.WriteString("每个有副作用的操作都会先请用户确认。\n")
 	default:

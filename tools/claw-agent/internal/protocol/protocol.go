@@ -444,7 +444,11 @@ const (
 	// ApprovalAlways 对所有有副作用的工具都弹确认。
 	ApprovalAlways ApprovalPolicy = "always"
 	// ApprovalNever 不弹确认。无人值守场景用；需要审批的调用直接失败。
+	// 通道会话（微信、企业微信）用的就是它：另一头没有人能点「允许」。
 	ApprovalNever ApprovalPolicy = "never"
+	// ApprovalBypass 不弹确认，需要审批的调用直接放行。危险命令的硬拒绝不受影响。
+	// 与 never 的区别是失败还是执行：这是给完全信任这台机器上的任务用的档位。
+	ApprovalBypass ApprovalPolicy = "bypass"
 )
 
 type SessionStartParams struct {

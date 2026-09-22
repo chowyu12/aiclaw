@@ -25,9 +25,10 @@ export interface AppConfig {
    */
   contextWindow: number;
   /**
-   * 审批策略：on-write 默认，always 严格，never 无人值守（给定时任务）。
+   * 审批策略：on-write 默认，always 严格，never 无人值守（要确认的直接失败），
+   * bypass 全部放行（要确认的直接执行）。
    */
-  profile: "on-write" | "always" | "never";
+  profile: "on-write" | "always" | "never" | "bypass";
   /**
    * 没经过确认的命令跑不跑在 macOS 沙箱里。默认开。
    *

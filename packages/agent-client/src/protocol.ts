@@ -5,7 +5,8 @@
  * 改一边记得改另一边，方法名与字段名以 Go 侧为准。
  */
 
-export type ApprovalPolicy = "on-write" | "always" | "never";
+/** on-write 默认；always 全问；never 无人值守（要确认的直接失败）；bypass 全部放行。 */
+export type ApprovalPolicy = "on-write" | "always" | "never" | "bypass";
 
 export interface ModelConfig {
   /**

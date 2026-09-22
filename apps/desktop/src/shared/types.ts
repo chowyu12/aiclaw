@@ -244,7 +244,7 @@ export interface AppConfigView {
   /** 模型上下文窗口（token）；0 表示未知，内核退回被动压缩。 */
   contextWindow: number;
   /** 审批策略。没有沙箱之后这是唯一的安全档位。 */
-  profile: "on-write" | "always" | "never";
+  profile: "on-write" | "always" | "never" | "bypass";
   retentionDays: number;
   /** 没经过确认的命令跑不跑在 macOS 沙箱里。默认开。 */
   sandboxCommands: boolean;

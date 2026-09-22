@@ -70,7 +70,7 @@ func fullRegistry(t *testing.T) *Registry {
 // 走的就不是同一道门，再把 read_file 锁死只剩下碍事。
 
 func TestReadOutsideTheWorkspaceIsAllowed(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	outside := filepath.Join(t.TempDir(), "notes.txt")
 	if err := os.WriteFile(outside, []byte("外面的内容"), 0o644); err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestReadOutsideTheWorkspaceIsAllowed(t *testing.T) {
 func TestProtectedPathsAreRefusedOutright(t *testing.T) {
 	// 凭据类没有「仍然读」这个选项：读到之后，模型可以顺着内部平台的写接口、
 	// 联网搜索的 query、任何第三方 MCP 把它送出去，而那几条路都不弹框。
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	secrets := filepath.Join(env.Home, ".ssh")
 	if err := os.MkdirAll(secrets, 0o700); err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestProtectedPathsAreRefusedOutright(t *testing.T) {
 
 func TestHostSuppliedProtectedPathsAlsoApply(t *testing.T) {
 	// 宿主会把「应用自己存凭据的目录」加进来。
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	appData := t.TempDir()
 	env.ProtectedPaths = []string{appData}
 	if _, err := env.ResolveRead(filepath.Join(appData, "credentials.bin")); !errors.Is(err, ErrProtected) {
@@ -121,7 +121,7 @@ func TestHostSuppliedProtectedPathsAlsoApply(t *testing.T) {
 }
 
 func TestWriteInsideAndOutsideAreDistinguished(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	inside, isInside, err := env.ResolveWrite("sub/a.txt")
 	if err != nil {
 		t.Fatalf("工作区内：%v", err)
@@ -138,7 +138,7 @@ func TestWriteInsideAndOutsideAreDistinguished(t *testing.T) {
 func TestWithoutAWorkspaceEverythingCountsAsOutside(t *testing.T) {
 	// 没设工作区时没有「里面」，所以每次写都会问一句——这正是
 	// 「不设置也能用，但不会替你做主」的意思。
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	env.Workspace = ""
 	path, inside, err := env.ResolveWrite("a.txt")
 	if err != nil {
@@ -157,7 +157,7 @@ func TestSymlinkToProtectedIsStillRefused(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("windows 下软链需要特权")
 	}
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	secrets := filepath.Join(env.Home, ".ssh")
 	if err := os.MkdirAll(secrets, 0o700); err != nil {
 		t.Fatal(err)
@@ -176,7 +176,7 @@ func TestSymlinkOutOfWorkspaceCountsAsOutsideForWrites(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("windows 下软链需要特权")
 	}
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	outside := t.TempDir()
 	if err := os.Symlink(outside, filepath.Join(env.Workspace, "escape")); err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestWriteThenReadThenEdit(t *testing.T) {
 }
 
 func TestEditRequiresUniqueMatch(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	_, _ = call(t, registry, "write_file", `{"path":"a.txt","content":"x x x"}`, env)
 
@@ -232,7 +232,7 @@ func TestEditRequiresUniqueMatch(t *testing.T) {
 }
 
 func TestReadTruncatesLargeFile(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	big := strings.Repeat("a", maxReadBytes+100)
 	if err := os.WriteFile(filepath.Join(env.Workspace, "big.txt"), []byte(big), 0o644); err != nil {
@@ -248,7 +248,7 @@ func TestReadTruncatesLargeFile(t *testing.T) {
 }
 
 func TestSearchFilesSkipsNoiseDirs(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	_ = os.MkdirAll(filepath.Join(env.Workspace, "node_modules"), 0o755)
 	_ = os.WriteFile(filepath.Join(env.Workspace, "node_modules", "x.js"), []byte("needle"), 0o644)
@@ -357,7 +357,7 @@ func TestRunCommandBlocksDangerousWithoutAsking(t *testing.T) {
 }
 
 func TestRunCommandNonZeroExitIsResultNotError(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	out, err := call(t, registry, "run_command", `{"command":"exit 3"}`, env)
 	if err != nil {
@@ -371,7 +371,7 @@ func TestRunCommandNonZeroExitIsResultNotError(t *testing.T) {
 func TestRunCommandCanRunOutsideTheWorkspace(t *testing.T) {
 	// cwd 不再限制在工作区内：命令本来就能 cd 到任何地方，
 	// 只拦 cwd 参数属于自欺——拦得住的只有沙箱，这一版没有。
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	outside := t.TempDir()
 	out, err := call(t, registry, "run_command", `{"command":"pwd","cwd":"`+outside+`"}`, env)
@@ -384,7 +384,7 @@ func TestRunCommandCanRunOutsideTheWorkspace(t *testing.T) {
 }
 
 func TestRunCommandRefusesProtectedCwd(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	secrets := filepath.Join(env.Home, ".ssh")
 	if err := os.MkdirAll(secrets, 0o700); err != nil {
@@ -513,7 +513,7 @@ func TestOnceApprovalDoesNotGrantTheDirectory(t *testing.T) {
 }
 
 func TestGrantedDirectoryCountsAsInsideForLaterResolution(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	outside := t.TempDir()
 	env.Grants = func() []string { return []string{outside} }
 	_, inside, err := env.ResolveWrite(filepath.Join(outside, "sub", "c.txt"))
@@ -534,7 +534,7 @@ func TestGrantedDirectoryCountsAsInsideForLaterResolution(t *testing.T) {
 // 进程。用户那边卡了八分多钟，是从活着的进程里查出来的。
 
 func TestBackgroundLeftoverDoesNotBlockTheTool(t *testing.T) {
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 
 	started := time.Now()
@@ -563,7 +563,7 @@ func TestTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows 上没有进程组")
 	}
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	marker := filepath.Join(env.Workspace, "still-alive.txt")
 
@@ -588,7 +588,7 @@ func TestTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 func TestCommandsRunNonInteractively(t *testing.T) {
 	// 挂住的命令多半在等输入，而这里没有人可以回答。让 git 直接失败，
 	// 模型拿到「需要凭据」这个明确的错误还能换个做法。
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	out, err := call(t, registry, "run_command", `{"command":"echo $GIT_TERMINAL_PROMPT,$GIT_SSH_COMMAND"}`, env)
 	if err != nil {
@@ -604,7 +604,7 @@ func TestMissingCwdSaysWhatIsActuallyMissing(t *testing.T) {
 	// 「fork/exec /usr/bin/sandbox-exec: no such file or directory」——
 	// 那句话指向可执行文件，而真正不存在的是工作目录。模型据此判断
 	// 「sandbox-exec 没装」，朝完全错误的方向修了好几轮。
-	env, _ := newEnv(t, protocol.ApprovalNever, true)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	registry := fullRegistry(t)
 	_, err := call(t, registry, "run_command", `{"command":"pwd","cwd":"/Users/nobody-here"}`, env)
 	if err == nil {

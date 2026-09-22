@@ -106,22 +106,26 @@ func (e *Env) TakeAttachments() [][]byte {
 	return taken
 }
 
-// needsApproval 按策略判断某个副作用要不要问。
+// needsApproval 按策略判断某个副作用要不要确认。
+//
+// never 与 on-write 用同一条线判断「要不要确认」，差别在后面：on-write 去问，
+// never 直接失败。bypass 什么都不问、什么都放。
 func (e *Env) needsApproval(effect Effect) bool {
 	switch e.Policy {
-	case protocol.ApprovalNever:
+	case protocol.ApprovalBypass:
 		return false
 	case protocol.ApprovalAlways:
 		return effect != EffectRead
-	default: // on-write
+	default: // on-write / never
 		return effect == EffectExec || effect == EffectExternal || effect == EffectWriteOutside
 	}
 }
 
 // RequestApproval 按策略要一次审批。
 //
-// 策略为 never 时不问，直接放行——那是「无人值守」的语义，
-// 调用方（定时任务）应当配合把危险工具整个关掉，而不是指望这里拦。
+// 策略为 bypass 时不问，直接放行；为 never 时不问，直接失败——无人值守的
+// 另一头没有人能点「允许」，而通道会话正靠这一条守住「只读工具之外的都不动」。
+// 危险命令的硬拒绝在这之前就发生了，任何档位都绕不过。
 func (e *Env) RequestApproval(
 	ctx context.Context,
 	effect Effect,
@@ -143,6 +147,9 @@ func (e *Env) requestApprovalScoped(
 ) error {
 	if !e.needsApproval(effect) {
 		return nil
+	}
+	if e.Policy == protocol.ApprovalNever {
+		return fmt.Errorf("%s 需要确认，而当前是无人值守模式，不执行", title)
 	}
 	if e.Approve == nil {
 		return fmt.Errorf("%s 需要确认，但当前没有可用的审批通道", title)

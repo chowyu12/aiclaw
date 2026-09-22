@@ -461,7 +461,7 @@ func TestUnknownToolNameIsReported(t *testing.T) {
 		sseToolCall("c1", "nonexistent_tool", `{}`),
 		sseText("换个办法。"),
 	}}
-	session := newTestSession(t, model, protocol.ApprovalNever)
+	session := newTestSession(t, model, protocol.ApprovalBypass)
 	emitter := &recordingEmitter{approve: true}
 	session.RunTurn(context.Background(), "t1", "x", nil, emitter)
 

@@ -171,7 +171,7 @@ func TestWriteToolsDoNotRunInParallel(t *testing.T) {
 		),
 		sseText("写完了。"),
 	}}
-	session := newTestSession(t, model, protocol.ApprovalNever)
+	session := newTestSession(t, model, protocol.ApprovalBypass)
 
 	var inFlight, maxInFlight int32
 	register(t, session, tools.Tool{
@@ -205,7 +205,7 @@ func TestReadToolsRunInParallel(t *testing.T) {
 		),
 		sseText("读完了。"),
 	}}
-	session := newTestSession(t, model, protocol.ApprovalNever)
+	session := newTestSession(t, model, protocol.ApprovalBypass)
 
 	// 两个只读调用应当能撞在一起。用栅栏断言而不是比总耗时：
 	// 后者在慢机器上会假阳性。
@@ -243,7 +243,7 @@ func TestSteeringInputJoinsRunningTurn(t *testing.T) {
 		sseToolCalls([3]string{"c1", "park", `{}`}),
 		sseText("按新要求办。"),
 	}}
-	session := newTestSession(t, model, protocol.ApprovalNever)
+	session := newTestSession(t, model, protocol.ApprovalBypass)
 
 	// 第一个工具跑起来之后再插话，模拟用户看见跑偏了立刻纠正。
 	entered := make(chan struct{})
@@ -282,7 +282,7 @@ func TestSteeringInputJoinsRunningTurn(t *testing.T) {
 }
 
 func TestInterruptLeavesHistoryReusable(t *testing.T) {
-	session := newTestSession(t, &fakeModel{script: []string{sseText("不会跑到")}}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{script: []string{sseText("不会跑到")}}, protocol.ApprovalBypass)
 	// 造出「模型发了工具调用，结果还没回来」的中断现场。
 	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: "干活"})
 	session.appendMessage(llm.Message{
@@ -310,7 +310,7 @@ func TestInterruptLeavesHistoryReusable(t *testing.T) {
 }
 
 func TestDropOldestKeepsHistoryValid(t *testing.T) {
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	session.messages = []llm.Message{
 		{Role: llm.RoleSystem, Content: "系统"},
 		{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "c1"}}},
@@ -339,7 +339,7 @@ func TestToolOutputIsTruncatedInHistoryOnly(t *testing.T) {
 		sseToolCalls([3]string{"c1", "flood", `{}`}),
 		sseText("看完了。"),
 	}}
-	session := newTestSession(t, model, protocol.ApprovalNever)
+	session := newTestSession(t, model, protocol.ApprovalBypass)
 	register(t, session, tools.Tool{
 		Name: "flood", Effect: tools.EffectRead,
 		Handler: func(context.Context, json.RawMessage, *tools.Env) (string, error) { return big, nil },
@@ -398,7 +398,7 @@ func register(t *testing.T, session *Session, tool tools.Tool) {
 
 func TestConfigureSwitchesModelForNextSampling(t *testing.T) {
 	model := &fakeModel{script: []string{sseText("第一个模型"), sseText("第二个模型")}}
-	session := newTestSession(t, model, protocol.ApprovalNever)
+	session := newTestSession(t, model, protocol.ApprovalBypass)
 
 	session.RunTurn(context.Background(), "t1", "你好", nil, &recordingEmitter{approve: true})
 	if err := session.Configure(protocol.ModelConfig{Model: "another-model"}); err != nil {
@@ -419,7 +419,7 @@ func TestConfigureSwitchesModelForNextSampling(t *testing.T) {
 }
 
 func TestConfigureRejectsEmptyModel(t *testing.T) {
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	before := session.Model().Model
 
 	if err := session.Configure(protocol.ModelConfig{Model: "  "}); err == nil {
@@ -435,7 +435,7 @@ func TestHistoryRebuildsTimeline(t *testing.T) {
 		sseToolCalls([3]string{"c1", "read_file", `{"path":"a.txt"}`}),
 		sseText("读完了。"),
 	}}
-	session := newTestSession(t, model, protocol.ApprovalNever)
+	session := newTestSession(t, model, protocol.ApprovalBypass)
 	register(t, session, tools.Tool{
 		Name: "read_file_stub", Effect: tools.EffectRead,
 		Handler: func(context.Context, json.RawMessage, *tools.Env) (string, error) { return "内容", nil },
@@ -479,7 +479,7 @@ func TestHistoryRebuildsTimeline(t *testing.T) {
 }
 
 func TestHistoryMarksUnansweredToolCallAsFailed(t *testing.T) {
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: "干活"})
 	session.appendMessage(llm.Message{
 		Role:      llm.RoleAssistant,
@@ -517,7 +517,7 @@ func TestSkillsAreListedInPromptAndLoadableOnDemand(t *testing.T) {
 	session, err := New(context.Background(), "test", protocol.SessionStartParams{
 		Model:          protocol.ModelConfig{BaseURL: server.URL, Model: "fake"},
 		Workdir:        t.TempDir(),
-		ApprovalPolicy: protocol.ApprovalNever,
+		ApprovalPolicy: protocol.ApprovalBypass,
 		SkillDirs:      []string{dir},
 	}, StaticKey("sk-test"))
 	if err != nil {
@@ -562,7 +562,7 @@ func TestSkillsAreListedInPromptAndLoadableOnDemand(t *testing.T) {
 
 func TestNoSkillsMeansNoLoadSkillTool(t *testing.T) {
 	// 给模型一个"永远返回没有技能"的工具，只会让它反复去试。
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	for _, name := range session.Tools() {
 		if name == "load_skill" {
 			t.Fatal("没有技能时不该注册 load_skill")
@@ -585,7 +585,7 @@ func TestMemoryGoesIntoPromptAndRememberAppends(t *testing.T) {
 	session, err := New(context.Background(), "test", protocol.SessionStartParams{
 		Model:          protocol.ModelConfig{BaseURL: server.URL, Model: "fake"},
 		Workdir:        t.TempDir(),
-		ApprovalPolicy: protocol.ApprovalNever,
+		ApprovalPolicy: protocol.ApprovalBypass,
 		MemoryFile:     memoryFile,
 	}, StaticKey("sk-test"))
 	if err != nil {
@@ -617,7 +617,7 @@ func TestMemoryGoesIntoPromptAndRememberAppends(t *testing.T) {
 
 func TestNoMemoryFileMeansNoRememberTool(t *testing.T) {
 	// 没配记忆文件时不该给模型一个写不进任何地方的工具。
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	for _, name := range session.Tools() {
 		if name == "remember" {
 			t.Fatal("没有记忆文件时不该注册 remember")
@@ -680,14 +680,14 @@ func computerSession(t *testing.T, model *fakeModel, policy protocol.ApprovalPol
 
 func TestComputerToolsOnlyExistWhenEnabled(t *testing.T) {
 	// 默认关。这是权限最大的一组工具，不该因为忘了配就挂上去。
-	off := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	off := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	for _, name := range off.Tools() {
 		if strings.HasPrefix(name, "computer_") {
 			t.Fatalf("没开 computer use 时不该有 %s", name)
 		}
 	}
 
-	on := computerSession(t, &fakeModel{}, protocol.ApprovalNever)
+	on := computerSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	var found int
 	for _, name := range on.Tools() {
 		if strings.HasPrefix(name, "computer_") {
@@ -708,7 +708,7 @@ func TestScreenshotBecomesAnImageMessageNotAToolResult(t *testing.T) {
 		sseToolCalls([3]string{"c1", "computer_screenshot", `{}`}),
 		sseText("我看到了。"),
 	}}
-	session := computerSession(t, model, protocol.ApprovalNever)
+	session := computerSession(t, model, protocol.ApprovalBypass)
 
 	emitter := &recordingEmitter{approve: true, computerOK: true}
 	emitter.computerResult = protocol.ComputerResult{
@@ -794,7 +794,7 @@ func TestClickRejectsMissingOrNegativeCoordinates(t *testing.T) {
 		),
 		sseText("参数错了。"),
 	}}
-	session := computerSession(t, model, protocol.ApprovalNever)
+	session := computerSession(t, model, protocol.ApprovalBypass)
 
 	emitter := &recordingEmitter{approve: true, computerOK: true}
 	session.RunTurn(context.Background(), "t1", "点", nil, emitter)
@@ -820,7 +820,7 @@ func TestComputerFailureIsFedBackNotFatal(t *testing.T) {
 		sseToolCalls([3]string{"c1", "computer_click", `{"x":10,"y":10}`}),
 		sseText("那我换个办法。"),
 	}}
-	session := computerSession(t, model, protocol.ApprovalNever)
+	session := computerSession(t, model, protocol.ApprovalBypass)
 
 	emitter := &recordingEmitter{approve: true} // computerOK=false → 宿主报错
 	session.RunTurn(context.Background(), "t1", "点", nil, emitter)
@@ -1002,7 +1002,7 @@ func TestHistoryRestoresSamplingStepsAroundTools(t *testing.T) {
 	// 重开一个会话时，执行步骤必须还是「采样 → 那几个工具 → 采样」。
 	// 早先历史里只有工具，于是同一轮对话跑着的时候有 5 步、切走再切回来
 	// 只剩 3 步，而少掉的正是「谁决定调这些工具」。
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: "查一下这家公司"})
 	session.appendMessage(llm.Message{
 		Role: llm.RoleAssistant,
@@ -1057,7 +1057,7 @@ func TestHistoryRestoresSamplingStepsAroundTools(t *testing.T) {
 
 func TestHistorySeqResetsEachTurn(t *testing.T) {
 	// 序号跨轮累加的话，第二轮会从 4 开始，而界面上写的是「这一轮的第几步」。
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: "一"})
 	session.appendMessage(llm.Message{
 		Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "c1", Name: "read_file"}},
@@ -1095,7 +1095,7 @@ func TestLongSkillDescriptionsAreTruncatedInPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalNever)
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
 	session.loadSkills([]string{dir})
 
 	prompt := buildSystemPrompt(session.config, session.registry, session.skills, "")
