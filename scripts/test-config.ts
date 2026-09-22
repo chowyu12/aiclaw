@@ -11,11 +11,9 @@ import { DEFAULT_CONFIG, normalizeConfig } from "../apps/desktop/src/main/config
  * 而且错了不会报错——用户只会发现「配了没用」或者安全开关自己关了。
  */
 
-test("默认没选模型服务；computer use 默认关", () => {
+test("默认没选模型服务", () => {
   assert.equal(DEFAULT_CONFIG.providerId, 0);
   assert.equal(DEFAULT_CONFIG.model, "");
-  // computer use 默认必须是关的，见 AGENTS.md。
-  assert.equal(DEFAULT_CONFIG.enableComputerUse, false);
 });
 
 test("旧配置里没有 providerId 时算 0，不是 NaN", () => {
@@ -35,7 +33,6 @@ test("归一化只碰 providerId 与沙箱开关，别的原样传下去", () =>
   assert.equal(config.retentionDays, 7);
   assert.equal(config.model, "gpt-x");
   assert.equal(config.providerId, 3);
-  assert.equal(config.enableComputerUse, false);
 });
 
 // ---------- 沙箱开关的缺省 ----------

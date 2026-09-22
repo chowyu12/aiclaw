@@ -40,6 +40,26 @@ const api = {
     /** 到端点拉模型名。不落库。 */
     models: (id: number) => ipcRenderer.invoke(IPC.providerModels, id),
   },
+  plugins: {
+    list: () => ipcRenderer.invoke(IPC.pluginList),
+    /** 从一个目录装插件。目录由 dialog.pickDirectory 选出来。 */
+    install: (path: string) => ipcRenderer.invoke(IPC.pluginInstall, path),
+    toggle: (input: unknown) => ipcRenderer.invoke(IPC.pluginToggle, input),
+    remove: (uuid: string) => ipcRenderer.invoke(IPC.pluginDelete, uuid),
+    config: (uuid: string) => ipcRenderer.invoke(IPC.pluginConfig, uuid),
+    setConfig: (input: unknown) => ipcRenderer.invoke(IPC.pluginSetConfig, input),
+    contributions: () => ipcRenderer.invoke(IPC.pluginContributions),
+  },
+  channels: {
+    status: () => ipcRenderer.invoke(IPC.channelStatus),
+    bindings: () => ipcRenderer.invoke(IPC.channelBindings),
+    authorize: (input: unknown) => ipcRenderer.invoke(IPC.channelAuthorize, input),
+    revoke: (input: unknown) => ipcRenderer.invoke(IPC.channelRevoke, input),
+  },
+  wechat: {
+    loginStart: () => ipcRenderer.invoke(IPC.wechatLoginStart),
+    loginPoll: (input: unknown) => ipcRenderer.invoke(IPC.wechatLoginPoll, input),
+  },
   mcp: {
     read: () => ipcRenderer.invoke(IPC.mcpRead),
     write: (servers: unknown) => ipcRenderer.invoke(IPC.mcpWrite, servers),

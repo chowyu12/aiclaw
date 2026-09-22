@@ -17,7 +17,6 @@ export const DEFAULT_CONFIG: AppConfig = {
   retentionDays: 30,
   sandboxCommands: true,
   codeMode: false,
-  enableComputerUse: false,
 };
 
 /**

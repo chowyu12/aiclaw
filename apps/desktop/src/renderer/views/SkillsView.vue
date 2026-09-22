@@ -30,9 +30,10 @@ async function remove(id: string, name: string): Promise<void> {
         <p class="sub">
           这里会一并列出 Claude Code（<code>~/.claude/skills</code>）、Codex
           （<code>~/.codex/skills</code>）、当前工作目录的 <code>.claude/skills</code>、
-          npm 全局包里的技能——它们是同一种格式，没必要在这里再装一遍。
-          别处的技能可以关掉但删不了，去它自己的位置删。
-          同名时按这个顺序取第一个：AIClaw &gt; 项目 &gt; Claude Code &gt; Codex &gt; npm。
+          npm 全局包里的技能，以及启用中的插件带来的——它们是同一种格式，
+          没必要在这里再装一遍。别处的技能可以关掉但删不了，去它自己的位置删
+          （插件带的随插件停用一起消失）。同名时按这个顺序取第一个：
+          AIClaw &gt; 插件 &gt; 项目 &gt; Claude Code &gt; Codex &gt; npm。
         </p>
       </header>
 

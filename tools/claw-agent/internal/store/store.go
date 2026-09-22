@@ -1,6 +1,10 @@
 // Package store 把会话存进 data home 下的一个 SQLite 库。
 //
-// 驱动用 modernc.org/sqlite——它是把 SQLite 翻译成 Go 的纯 Go 实现，**不需要 cgo**。
+// 驱动用 github.com/glebarez/go-sqlite——modernc.org/sqlite 的一个分支，同样是把
+// SQLite 翻译成 Go 的纯 Go 实现，**不需要 cgo**。选它而不是 modernc 本尊，是因为
+// 同一个二进制里应用库（gorm + glebarez/sqlite）已经带着它，而两个包都注册名为
+// "sqlite" 的 database/sql 驱动，同时链进来进程一启动就 panic：
+// "sql: Register called twice for driver sqlite"。
 // 这一点是硬要求：开了 cgo 就没法交叉编译（macOS 上出不了 Windows 包），
 // 还要求每台构建机装好 C 工具链。换驱动前先确认新的那个也不需要 cgo。
 //
@@ -22,7 +26,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/glebarez/go-sqlite"
 )
 
 // Session 是一个会话的完整存档。Config 与 Messages 由调用方给出原始 JSON——

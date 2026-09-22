@@ -226,28 +226,11 @@ async function purge(): Promise<void> {
         脚本里的每次工具调用<strong>照常走审批</strong>，也照常受沙箱限制。
         开了之后，对话页顶部「工具」菜单里会显示实际省了多少。改动下一个会话生效。
       </p>
+      <p class="note">
+        computer use（截屏 + 鼠标键盘）是一个插件，开关在「插件」页：启用即授权，
+        那一页写着它能碰什么。
+      </p>
 
-      <label class="switch">
-        <input
-          type="checkbox"
-          :checked="store.config.enableComputerUse"
-          @change="
-            saveField({ enableComputerUse: ($event.target as HTMLInputElement).checked })
-          "
-        />
-        <span>启用 computer use（截屏 + 鼠标键盘）</span>
-      </label>
-      <p class="note warn">
-        开了之后 Agent 能<strong>看见并操作整个屏幕</strong>，不只是工作目录——
-        包括别的应用、系统设置、以及本应用自己的窗口。每个动作都会请你确认；
-        当最前面的应用是 AIClaw 自己时会直接拒绝，免得它点到自己的审批弹窗。
-        即便如此，这仍然是这里权限最大的一项，不用就关掉。
-      </p>
-      <p v-if="store.config.enableComputerUse" class="note">
-        还需要系统授权：macOS 在「隐私与安全性」里给<strong>屏幕录制</strong>（截屏）
-        与<strong>辅助功能</strong>（鼠标键盘）。另外模型得看得懂图——
-        换一个不支持视觉的模型，截屏发过去它也读不出来。
-      </p>
     </section>
 
     <section>

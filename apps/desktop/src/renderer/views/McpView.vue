@@ -139,6 +139,12 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
         <button class="ghost" @click="add('http')">+ 远程（HTTP）</button>
       </div>
 
+      <p v-if="Object.keys(store.contributions.mcpServers).length > 0" class="note">
+        启用中的插件另外带了
+        <code v-for="(server, name) in store.contributions.mcpServers" :key="name" class="chip">{{ name }}</code>
+        ——那些在「插件」页管，这里列的是你自己配的。
+      </p>
+
       <p v-if="store.mcpServers.length === 0" class="note">
         还没有配置。常见的本地 server 形如
         <code>npx -y @modelcontextprotocol/server-filesystem /some/dir</code>。
@@ -502,5 +508,14 @@ label > span {
   color: var(--muted);
   font-size: 11.5px;
   line-height: 1.6;
+}
+
+.chip {
+  margin: 0 2px;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-family: var(--mono);
+  font-size: 11px;
 }
 </style>

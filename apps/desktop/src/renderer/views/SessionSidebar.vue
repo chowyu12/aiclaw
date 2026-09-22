@@ -15,6 +15,7 @@ import type { SessionSummaryView } from "../../shared/types";
 const NAV = [
   { id: "settings", label: "配置", note: "默认模型、审批档位、数据" },
   { id: "providers", label: "模型服务", note: "端点、Key、模型清单" },
+  { id: "plugins", label: "插件", note: "computer use、微信、企业微信，以及从目录装的" },
   { id: "mcp", label: "MCP", note: "第三方 MCP server，stdio 或 HTTP" },
   { id: "skills", label: "技能", note: "本地 SKILL.md，也认 Claude Code / Codex 的" },
 ] as const;

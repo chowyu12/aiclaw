@@ -9,9 +9,18 @@ import type {
   Item,
   MCPProbeResult,
   MCPServerConfig,
+  ChannelAuthorizeParams,
+  ChannelBindingKey,
+  ChannelBindingView,
+  ChannelStatusView,
+  PluginConfigField,
+  PluginContributions,
+  PluginView,
   ProviderCreateParams,
   ProviderUpdateParams,
   ProviderView,
+  WeChatLoginPollResult,
+  WeChatLoginStartResult,
   SessionRefresh,
   SessionStartParams,
   SessionStartResult,
@@ -155,6 +164,83 @@ export class ClawAgentClient extends EventEmitter {
     this.assertReady();
     const result = await this.transport.request<{ models: string[] }>("provider/models", { id });
     return result.models ?? [];
+  }
+
+  // ---------- 插件与通道 ----------
+  //
+  // 插件的记录与配置在内核那边的应用库里；秘密从这里进（setConfig），
+  // 永远不从这里出。
+
+  async pluginList(): Promise<PluginView[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ plugins: PluginView[] }>("plugin/list", {});
+    return result.plugins ?? [];
+  }
+
+  /** 从一个目录装插件。装好是停用的。 */
+  pluginInstall(path: string): Promise<PluginView> {
+    this.assertReady();
+    return this.transport.request<PluginView>("plugin/install", { path });
+  }
+
+  pluginToggle(uuid: string, enabled: boolean): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("plugin/toggle", { uuid, enabled });
+  }
+
+  pluginDelete(uuid: string): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("plugin/delete", { uuid });
+  }
+
+  async pluginConfig(uuid: string): Promise<PluginConfigField[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ fields: PluginConfigField[] }>("plugin/config", { uuid });
+    return result.fields ?? [];
+  }
+
+  /** 空串表示清掉这一项。 */
+  pluginSetConfig(uuid: string, key: string, value: string): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("plugin/setConfig", { uuid, key, value });
+  }
+
+  /** 启用中的插件贡献给会话的东西。开会话前拿一次。 */
+  pluginContributions(): Promise<PluginContributions> {
+    this.assertReady();
+    return this.transport.request<PluginContributions>("plugin/contributions", {});
+  }
+
+  async channelStatus(): Promise<ChannelStatusView[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ channels: ChannelStatusView[] }>("channel/status", {});
+    return result.channels ?? [];
+  }
+
+  async channelBindings(): Promise<ChannelBindingView[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ bindings: ChannelBindingView[] }>("channel/bindings", {});
+    return result.bindings ?? [];
+  }
+
+  channelAuthorize(params: ChannelAuthorizeParams): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("channel/authorize", params);
+  }
+
+  channelRevoke(key: ChannelBindingKey): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("channel/revoke", key);
+  }
+
+  wechatLoginStart(): Promise<WeChatLoginStartResult> {
+    this.assertReady();
+    return this.transport.request<WeChatLoginStartResult>("wechat/loginStart", {});
+  }
+
+  wechatLoginPoll(uuid: string, token: string): Promise<WeChatLoginPollResult> {
+    this.assertReady();
+    return this.transport.request<WeChatLoginPollResult>("wechat/loginPoll", { uuid, token });
   }
 
   async sessionList(): Promise<SessionSummary[]> {

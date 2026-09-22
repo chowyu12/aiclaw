@@ -2,6 +2,7 @@
 import { store } from "../store";
 import SettingsView from "./SettingsView.vue";
 import ProvidersView from "./ProvidersView.vue";
+import PluginsView from "./PluginsView.vue";
 import McpView from "./McpView.vue";
 import SkillsView from "./SkillsView.vue";
 
@@ -17,6 +18,7 @@ import SkillsView from "./SkillsView.vue";
 <template>
   <SettingsView v-if="store.view === 'settings'" />
   <ProvidersView v-else-if="store.view === 'providers'" />
+  <PluginsView v-else-if="store.view === 'plugins'" />
   <McpView v-else-if="store.view === 'mcp'" />
   <SkillsView v-else-if="store.view === 'skills'" />
 </template>

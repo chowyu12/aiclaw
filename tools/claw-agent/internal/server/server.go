@@ -18,8 +18,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/appdb"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/mcpclient"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/pluginhost"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/providers"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
@@ -38,10 +41,13 @@ type Options struct {
 	DataHome string
 	// APIKey 从环境变量来，不经协议帧。会话没指定模型服务时用它。
 	APIKey string
-	// AppDB 是模型配置库（AIClaw 沿用的 SQLite）的路径。空表示不开：
-	// 那时 provider/* 方法都报错，会话只能走环境变量的 Key。
+	// AppDB 是应用库（AIClaw 沿用的 SQLite：模型服务、插件、通道授权）的路径。
+	// 空表示不开：那时 provider/* 与 plugin/* 都报错，会话只能走环境变量的 Key。
+	// 插件文件放在它所在目录下的 plugins/。
 	AppDB string
-	Logf  func(format string, args ...any)
+	// ProtectedPaths 是宿主追加的敏感路径，给通道会话用（桌面会话由宿主按会话传）。
+	ProtectedPaths []string
+	Logf           func(format string, args ...any)
 }
 
 type Server struct {
@@ -52,8 +58,10 @@ type Server struct {
 	sessMu   sync.Mutex
 	// db 是会话库。整个进程共用一个连接池。
 	db *store.Store
-	// providers 是模型配置库；Options.AppDB 为空时是 nil。
+	// appDB 是应用库；Options.AppDB 为空时下面三个都是 nil。
+	appDB     *gormstore.GormStore
 	providers *providers.Store
+	plugins   *pluginhost.Service
 
 	// 向宿主发出的请求，等它回。
 	outboundID      atomic.Int64
@@ -80,23 +88,31 @@ func New(options Options, out io.Writer) (*Server, error) {
 	} else if imported > 0 {
 		options.Logf("已从旧的 JSON 文件导入 %d 个会话", imported)
 	}
-	var providerStore *providers.Store
-	if options.AppDB != "" {
-		providerStore, err = providers.Open(options.AppDB)
-		if err != nil {
-			_ = db.Close()
-			return nil, err
-		}
-	}
-	return &Server{
+	server := &Server{
 		options:         options,
 		out:             out,
 		sessions:        map[string]*agent.Session{},
 		outboundPending: map[int64]chan json.RawMessage{},
 		shutdown:        make(chan struct{}),
 		db:              db,
-		providers:       providerStore,
-	}, nil
+	}
+	if options.AppDB != "" {
+		server.appDB, err = appdb.Open(options.AppDB)
+		if err != nil {
+			_ = db.Close()
+			return nil, err
+		}
+		server.providers = providers.New(server.appDB)
+		// 插件系统与通道。通道收到消息经 channelGateway 变成一轮，见 channel.go。
+		server.plugins, err = pluginhost.New(context.Background(), server.appDB,
+			filepath.Dir(options.AppDB), &channelGateway{server: server}, options.Logf)
+		if err != nil {
+			_ = server.appDB.Close()
+			_ = db.Close()
+			return nil, err
+		}
+	}
+	return server, nil
 }
 
 // keyFor 是交给会话的 Key 解析器：指定了模型服务就到库里查，否则用环境变量。
@@ -185,6 +201,12 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 	case protocol.MethodProviderList, protocol.MethodProviderCreate, protocol.MethodProviderUpdate,
 		protocol.MethodProviderDelete, protocol.MethodProviderModels:
 		s.handleProvider(ctx, f)
+	case protocol.MethodPluginList, protocol.MethodPluginInstall, protocol.MethodPluginToggle,
+		protocol.MethodPluginDelete, protocol.MethodPluginConfig, protocol.MethodPluginSetConfig,
+		protocol.MethodPluginContrib, protocol.MethodChannelStatus, protocol.MethodChannelBindings,
+		protocol.MethodChannelAuthorize, protocol.MethodChannelRevoke,
+		protocol.MethodWeChatLoginStart, protocol.MethodWeChatLoginPoll:
+		s.handlePlugin(ctx, f)
 	case protocol.MethodSessionSearch:
 		var params protocol.SessionSearchParams
 		// 参数解不出来就当空关键词：搜索框里打字很快，宁可回全部也不要报错。
@@ -461,10 +483,146 @@ func (s *Server) closeAll() {
 			s.options.Logf("关闭会话库失败：%v", err)
 		}
 	}
-	if s.providers != nil {
-		if err := s.providers.Close(); err != nil {
-			s.options.Logf("关闭模型配置库失败：%v", err)
+	// 通道先停：它们还可能往库里写授权记录。
+	if s.plugins != nil {
+		s.plugins.Close()
+	}
+	if s.appDB != nil {
+		if err := s.appDB.Close(); err != nil {
+			s.options.Logf("关闭应用库失败：%v", err)
 		}
+	}
+}
+
+// handlePlugin 处理 plugin/*、channel/*、wechat/* 方法。都是配置页上的操作。
+func (s *Server) handlePlugin(ctx context.Context, f frame) {
+	if s.plugins == nil {
+		s.writeError(f.ID, codeInternal, "没有打开应用库（启动时未传 --app-db）")
+		return
+	}
+	fail := func(code int, err error) { s.writeError(f.ID, code, err.Error()) }
+	switch f.Method {
+	case protocol.MethodPluginList:
+		list, err := s.plugins.List(ctx)
+		if err != nil {
+			fail(codeInternal, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{"plugins": list})
+	case protocol.MethodPluginInstall:
+		var params protocol.PluginInstallParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		installed, err := s.plugins.Install(ctx, params.Path)
+		if err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, installed)
+	case protocol.MethodPluginToggle:
+		var params protocol.PluginToggleParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		if err := s.plugins.Toggle(ctx, params.UUID, params.Enabled); err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodPluginDelete:
+		var params protocol.PluginUUIDParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		if err := s.plugins.Delete(ctx, params.UUID); err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodPluginConfig:
+		var params protocol.PluginUUIDParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		fields, err := s.plugins.ConfigFields(ctx, params.UUID)
+		if err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, protocol.PluginConfigResult{Fields: fields})
+	case protocol.MethodPluginSetConfig:
+		var params protocol.PluginSetConfigParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		if err := s.plugins.SetConfig(ctx, params.UUID, params.Key, params.Value); err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodPluginContrib:
+		contributions, err := s.plugins.Contributions(ctx)
+		if err != nil {
+			fail(codeInternal, err)
+			return
+		}
+		s.writeResult(f.ID, contributions)
+	case protocol.MethodChannelStatus:
+		s.writeResult(f.ID, map[string]any{"channels": s.plugins.ChannelStatus()})
+	case protocol.MethodChannelBindings:
+		bindings, err := s.plugins.Bindings(ctx)
+		if err != nil {
+			fail(codeInternal, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{"bindings": bindings})
+	case protocol.MethodChannelAuthorize:
+		var params protocol.ChannelAuthorizeParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		if err := s.plugins.Authorize(ctx, params); err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodChannelRevoke:
+		var params protocol.ChannelBindingKey
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		if err := s.plugins.Revoke(ctx, params); err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodWeChatLoginStart:
+		result, err := s.plugins.WeChatLoginStart(ctx)
+		if err != nil {
+			fail(codeInternal, err)
+			return
+		}
+		s.writeResult(f.ID, result)
+	case protocol.MethodWeChatLoginPoll:
+		var params protocol.WeChatLoginPollParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		result, err := s.plugins.WeChatLoginPoll(ctx, params)
+		if err != nil {
+			fail(codeInternal, err)
+			return
+		}
+		s.writeResult(f.ID, result)
 	}
 }
 

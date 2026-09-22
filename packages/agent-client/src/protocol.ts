@@ -155,6 +155,102 @@ export interface ProviderUpdateParams {
   enabled?: boolean;
 }
 
+// ---------- 插件 ----------
+//
+// 插件是一个带 plugin.json 的目录，声明权限、配置项，以及贡献的技能、MCP server、
+// 宿主能力（computer use）与通道（微信、企业微信）。与 Go 侧 protocol 同形。
+
+export interface PluginView {
+  uuid: string;
+  pluginId?: string;
+  name: string;
+  description?: string;
+  version?: string;
+  /** builtin 随应用分发，只能停用不能删；local 是用户从目录装的。 */
+  source: "builtin" | "local" | string;
+  enabled: boolean;
+  skills: number;
+  mcp: number;
+  tools: number;
+  channels: number;
+  /** 启用后会拿到的权限名。 */
+  permissions: string[];
+  /** 还没填的必填配置项；非空时启用会被拒绝。 */
+  missingConfig: string[];
+}
+
+/** 一个配置项。秘密只报 isSet，值永不回传。 */
+export interface PluginConfigField {
+  key: string;
+  type: string;
+  description?: string;
+  required: boolean;
+  secret: boolean;
+  isSet: boolean;
+  value?: string;
+}
+
+/** 启用中的插件合起来贡献给会话的东西，开会话时并进 SessionStartParams。 */
+export interface PluginContributions {
+  mcpServers: Record<string, MCPServerConfig>;
+  skills: PluginSkill[];
+  computerUse: boolean;
+}
+
+export interface PluginSkill {
+  /** 技能目录（里面直接放 SKILL.md）。 */
+  dir: string;
+  pluginName: string;
+  pluginUuid: string;
+}
+
+export interface ChannelStatusView {
+  pluginUuid: string;
+  pluginName: string;
+  channelId: string;
+  displayName?: string;
+  state: "starting" | "running" | "retrying" | "failed" | "stopped" | string;
+  attempts?: number;
+  lastError?: string;
+}
+
+/** 通道见过的一个外部会话。未授权的也在列表里，等用户放行。 */
+export interface ChannelBindingView {
+  pluginUuid: string;
+  channelId: string;
+  externalKey: string;
+  displayName?: string;
+  sessionId?: string;
+  providerId?: number;
+  model?: string;
+  allowed: boolean;
+  allowedTools: string[];
+  lastMessage?: string;
+}
+
+export interface ChannelBindingKey {
+  pluginUuid: string;
+  channelId: string;
+  externalKey: string;
+}
+
+export interface ChannelAuthorizeParams extends ChannelBindingKey {
+  providerId: number;
+  model: string;
+  allowedTools?: string[];
+}
+
+export interface WeChatLoginStartResult {
+  token: string;
+  /** 二维码，PNG data URI。 */
+  image: string;
+}
+
+export interface WeChatLoginPollResult {
+  status: "wait" | "scaned" | "confirmed" | "expired" | string;
+  saved: boolean;
+}
+
 export interface MCPProbeResult {
   ok: boolean;
   error?: string;

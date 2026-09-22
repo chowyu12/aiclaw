@@ -3,9 +3,8 @@
   "id": "aiclaw.computer-use",
   "name": "Computer Use",
   "version": "0.1.0",
-  "description": "截屏观察当前屏幕，并合成点击与键盘输入。启用后模型可以操作本机图形界面。",
+  "description": "截屏观察当前屏幕，并合成鼠标与键盘输入。启用后模型能看见并操作整个屏幕——不只是工作目录；除截屏外每个动作都会请你确认。",
   "author": "aiclaw",
-  "runtime": { "os": ["darwin"] },
   "permissions": ["computer.control", "filesystem.write"],
   "contributes": {
     "tools": [{ "provider": "builtin:computer_use", "names": ["computer"] }]

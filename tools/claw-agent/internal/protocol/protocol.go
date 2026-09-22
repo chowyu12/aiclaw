@@ -31,6 +31,19 @@ const (
 	MethodProviderUpdate   = "provider/update"
 	MethodProviderDelete   = "provider/delete"
 	MethodProviderModels   = "provider/models"
+	MethodPluginList       = "plugin/list"
+	MethodPluginInstall    = "plugin/install"
+	MethodPluginToggle     = "plugin/toggle"
+	MethodPluginDelete     = "plugin/delete"
+	MethodPluginConfig     = "plugin/config"
+	MethodPluginSetConfig  = "plugin/setConfig"
+	MethodPluginContrib    = "plugin/contributions"
+	MethodChannelStatus    = "channel/status"
+	MethodChannelBindings  = "channel/bindings"
+	MethodChannelAuthorize = "channel/authorize"
+	MethodChannelRevoke    = "channel/revoke"
+	MethodWeChatLoginStart = "wechat/loginStart"
+	MethodWeChatLoginPoll  = "wechat/loginPoll"
 	MethodShutdown         = "shutdown"
 )
 
@@ -179,6 +192,153 @@ type ProviderIDParams struct {
 // ProviderModelsResult 是到端点 /models 拉到的模型名，不落库。
 type ProviderModelsResult struct {
 	Models []string `json:"models"`
+}
+
+// ---------- 插件 ----------
+//
+// 插件是一个带 plugin.json 的目录（见 internal/plugin 的说明）：声明权限、
+// 配置项，以及它贡献的技能、MCP server、宿主能力（computer use）与通道
+// （微信、企业微信）。记录与配置都在模型配置库那个 SQLite 里。
+
+type PluginView struct {
+	UUID        string `json:"uuid"`
+	PluginID    string `json:"pluginId,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Version     string `json:"version,omitempty"`
+	/** builtin 随应用分发，只能停用不能删；local 是用户从目录装的。 */
+	Source  string `json:"source"`
+	Enabled bool   `json:"enabled"`
+	/** 各类贡献的数量，列表页上一眼看出这个插件是干什么的。 */
+	Skills   int `json:"skills"`
+	MCP      int `json:"mcp"`
+	Tools    int `json:"tools"`
+	Channels int `json:"channels"`
+	/** 启用后会拿到的权限名。 */
+	Permissions []string `json:"permissions"`
+	/** 还没填的必填配置项；非空时启用会被拒绝。 */
+	MissingConfig []string `json:"missingConfig"`
+}
+
+type PluginInstallParams struct {
+	/** 插件目录的绝对路径。宿主用系统对话框选出来后传进来。 */
+	Path string `json:"path"`
+}
+
+type PluginToggleParams struct {
+	UUID    string `json:"uuid"`
+	Enabled bool   `json:"enabled"`
+}
+
+type PluginUUIDParams struct {
+	UUID string `json:"uuid"`
+}
+
+// PluginConfigField 是一个配置项。秘密只报「配了没有」，值永不回传。
+type PluginConfigField struct {
+	Key         string `json:"key"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required"`
+	Secret      bool   `json:"secret"`
+	IsSet       bool   `json:"isSet"`
+	Value       string `json:"value,omitempty"`
+}
+
+type PluginConfigResult struct {
+	Fields []PluginConfigField `json:"fields"`
+}
+
+type PluginSetConfigParams struct {
+	UUID string `json:"uuid"`
+	Key  string `json:"key"`
+	/** 空串表示清掉。 */
+	Value string `json:"value"`
+}
+
+// PluginContributions 是启用中的插件合起来贡献给会话的东西。
+// 宿主开会话时把它并进 session/start 的参数。
+type PluginContributions struct {
+	/** 键是挂载名（也是工具名前缀）。 */
+	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
+	Skills     []PluginSkill              `json:"skills"`
+	/** 有启用中的插件贡献了 computer use。 */
+	ComputerUse bool `json:"computerUse"`
+}
+
+// PluginSkill 是插件带来的一个技能目录（里面直接放 SKILL.md）。
+type PluginSkill struct {
+	Dir string `json:"dir"`
+	/** 界面上「来自哪儿」显示插件名。 */
+	PluginName string `json:"pluginName"`
+	PluginUUID string `json:"pluginUuid"`
+}
+
+// ---------- 通道 ----------
+
+// ChannelStatusView 是一个正在被托管的通道的健康状况。
+type ChannelStatusView struct {
+	PluginUUID  string `json:"pluginUuid"`
+	PluginName  string `json:"pluginName"`
+	ChannelID   string `json:"channelId"`
+	DisplayName string `json:"displayName,omitempty"`
+	/** starting / running / retrying / failed / stopped */
+	State     string `json:"state"`
+	Attempts  int    `json:"attempts,omitempty"`
+	LastError string `json:"lastError,omitempty"`
+}
+
+// ChannelBindingView 是通道见过的一个外部会话（群或单聊）。
+//
+// 未授权的也在列表里：收到消息只是记下来等用户放行，绝不因此起一轮——
+// 一轮会跑工具，而发消息的人不是本机用户。
+type ChannelBindingView struct {
+	PluginUUID  string `json:"pluginUuid"`
+	ChannelID   string `json:"channelId"`
+	ExternalKey string `json:"externalKey"`
+	DisplayName string `json:"displayName,omitempty"`
+	/** 这个外部会话对应的本地会话 id；还没聊过是空。 */
+	SessionID  string `json:"sessionId,omitempty"`
+	ProviderID int64  `json:"providerId,omitempty"`
+	Model      string `json:"model,omitempty"`
+	Allowed    bool   `json:"allowed"`
+	/** 除只读工具外还放开了哪些内置工具。 */
+	AllowedTools []string `json:"allowedTools"`
+	LastMessage  string   `json:"lastMessage,omitempty"`
+}
+
+type ChannelBindingKey struct {
+	PluginUUID  string `json:"pluginUuid"`
+	ChannelID   string `json:"channelId"`
+	ExternalKey string `json:"externalKey"`
+}
+
+type ChannelAuthorizeParams struct {
+	ChannelBindingKey
+	ProviderID   int64    `json:"providerId"`
+	Model        string   `json:"model"`
+	AllowedTools []string `json:"allowedTools,omitempty"`
+}
+
+// ---------- 微信扫码登录 ----------
+
+type WeChatLoginStartResult struct {
+	/** 轮询时用来标识这次登录。 */
+	Token string `json:"token"`
+	/** 二维码，PNG data URI，直接放进 <img src>。 */
+	Image string `json:"image"`
+}
+
+type WeChatLoginPollParams struct {
+	UUID  string `json:"uuid"`
+	Token string `json:"token"`
+}
+
+type WeChatLoginPollResult struct {
+	/** wait / scaned / confirmed / expired */
+	Status string `json:"status"`
+	/** 凭据已写进插件配置。凭据本身不回传。 */
+	Saved bool `json:"saved"`
 }
 
 // MCPServerConfig 是一个要挂载的 MCP server。

@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
@@ -42,18 +41,15 @@ func DefaultBaseURL(providerType string) string {
 	return defaultBaseURLs[providerType]
 }
 
-// Store 是打开的配置库。
+// Store 是模型服务的配置库。
 type Store struct {
 	db *gormstore.GormStore
 }
 
-// Open 打开（必要时建出）path 处的 SQLite 库。
-func Open(path string) (*Store, error) {
-	db, err := gormstore.New(config.DatabaseConfig{Driver: "sqlite", DSN: path})
-	if err != nil {
-		return nil, fmt.Errorf("打开模型配置库失败：%w", err)
-	}
-	return &Store{db: db}, nil
+// New 在一个已打开的应用库上建 Store。库由调用方打开与关闭：插件系统
+// 用的是同一个库。
+func New(db *gormstore.GormStore) *Store {
+	return &Store{db: db}
 }
 
 // List 列出全部模型服务，按 id 排序。Key 不出来，只给「配了没有」。
@@ -209,9 +205,6 @@ func (s *Store) FetchModels(ctx context.Context, id int64) ([]string, error) {
 	sort.Strings(names)
 	return names, nil
 }
-
-// Close 关库。
-func (s *Store) Close() error { return s.db.Close() }
 
 func view(item *model.Provider) protocol.ProviderView {
 	return protocol.ProviderView{

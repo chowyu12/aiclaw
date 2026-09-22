@@ -157,6 +157,28 @@ function registerIpc(): void {
   ipcMain.handle(IPC.providerDelete, (_event, id: number) => sessions.deleteProvider(id));
   ipcMain.handle(IPC.providerModels, (_event, id: number) => sessions.fetchProviderModels(id));
 
+  ipcMain.handle(IPC.pluginList, () => sessions.listPlugins());
+  ipcMain.handle(IPC.pluginInstall, (_event, path: string) => sessions.installPlugin(path));
+  ipcMain.handle(IPC.pluginToggle, (_event, input: { uuid: string; enabled: boolean }) =>
+    sessions.togglePlugin(input.uuid, input.enabled),
+  );
+  ipcMain.handle(IPC.pluginDelete, (_event, uuid: string) => sessions.deletePlugin(uuid));
+  ipcMain.handle(IPC.pluginConfig, (_event, uuid: string) => sessions.pluginConfig(uuid));
+  ipcMain.handle(
+    IPC.pluginSetConfig,
+    (_event, input: { uuid: string; key: string; value: string }) =>
+      sessions.setPluginConfig(input.uuid, input.key, input.value),
+  );
+  ipcMain.handle(IPC.pluginContributions, () => sessions.pluginContributions());
+  ipcMain.handle(IPC.channelStatus, () => sessions.channelStatus());
+  ipcMain.handle(IPC.channelBindings, () => sessions.channelBindings());
+  ipcMain.handle(IPC.channelAuthorize, (_event, params) => sessions.authorizeChannel(params));
+  ipcMain.handle(IPC.channelRevoke, (_event, key) => sessions.revokeChannel(key));
+  ipcMain.handle(IPC.wechatLoginStart, () => sessions.wechatLoginStart());
+  ipcMain.handle(IPC.wechatLoginPoll, (_event, input: { uuid: string; token: string }) =>
+    sessions.wechatLoginPoll(input.uuid, input.token),
+  );
+
   ipcMain.handle(IPC.mcpRead, () => store.readMcpServers());
   ipcMain.handle(IPC.mcpWrite, (_event, servers: McpServer[]) => store.writeMcpServers(servers));
   ipcMain.handle(IPC.mcpProbe, (_event, server: McpServer) => sessions.probeMcp(server));
@@ -193,7 +215,6 @@ function registerIpc(): void {
           模型服务: config.providerId ? `#${config.providerId}` : "（未选）",
           模型: config.model,
           审批档位: config.profile,
-          computer_use: config.enableComputerUse ? "已开启" : "关闭",
         },
         mounts: sessions.lastMounts(),
       },

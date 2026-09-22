@@ -8,14 +8,23 @@ import {
   type ApprovalPolicy,
   type Item,
   type MCPProbeResult,
+  type ChannelAuthorizeParams,
+  type ChannelBindingKey,
+  type ChannelBindingView,
+  type ChannelStatusView,
   type MCPServerConfig,
   type PendingApproval,
+  type PluginConfigField,
+  type PluginContributions,
+  type PluginView,
   type ProviderCreateParams,
   type ProviderUpdateParams,
   type ProviderView,
   type SessionRefresh,
   type SessionStartParams,
   type SessionSummary,
+  type WeChatLoginPollResult,
+  type WeChatLoginStartResult,
 } from "@aiclaw/agent-client";
 import type { AppConfig, ConfigStore, McpServer } from "./config.js";
 import { ComputerController } from "./computer.js";
@@ -186,7 +195,7 @@ export class SessionManager extends EventEmitter {
   async startSession(workspace?: string): Promise<SessionInfo> {
     const client = this.requireClient();
     const config = this.store.readConfig();
-    const params = this.buildParams(config, workspace);
+    const params = await this.buildParams(config, workspace);
     if (params.workdir) mkdirSync(params.workdir, { recursive: true });
     this.workspace = params.workdir ?? "";
     this.skills.setWorkspace(this.workspace);
@@ -211,7 +220,7 @@ export class SessionManager extends EventEmitter {
    */
   async resumeSession(sessionId: string): Promise<SessionInfo> {
     const client = this.requireClient();
-    const result = await client.sessionResume(sessionId, this.buildRefresh());
+    const result = await client.sessionResume(sessionId, await this.buildRefresh());
     // 端点与 Key 不用在这里对齐：会话记的是 providerId，内核恢复时按 id 到库里
     // 取**当前**的端点与 Key。用户改了端点，旧会话点开就是新地址。
     this.mounts = result.mcpStatus ?? {};
@@ -307,9 +316,15 @@ export class SessionManager extends EventEmitter {
     this.requireClient().respondApproval(request.id, approved, scope);
   }
 
-  /** 把应用配置翻译成会话配置。 */
-  private buildParams(config: AppConfig, workspace?: string): SessionStartParams {
-    const mcpServers = this.buildMcpServers();
+  /**
+   * 把应用配置翻译成会话配置。
+   *
+   * 插件的贡献在这里并进来：启用中的插件带的 MCP server、技能目录，
+   * 以及 computer-use 插件是否启用——那个开关只有这一处，配置页上没有第二个。
+   */
+  private async buildParams(config: AppConfig, workspace?: string): Promise<SessionStartParams> {
+    const contributions = await this.contributions();
+    const mcpServers = this.buildMcpServers(contributions);
     return {
       model: {
         // 端点与 Key 由内核按 providerId 查；这里不传 baseUrl。
@@ -330,8 +345,25 @@ export class SessionManager extends EventEmitter {
       mcpServers,
       skillDirs: this.skills.enabledDirs(),
       memoryFile: this.store.memoryFile,
-      enableComputerUse: config.enableComputerUse,
+      enableComputerUse: contributions.computerUse,
     };
+  }
+
+  /**
+   * 向内核要一份启用中的插件贡献，并把技能目录交给 SkillManager。
+   *
+   * 每次开会话都重新要：用户刚在插件页开了一个，下一个会话就该带上。
+   * 拿不到（内核报错）就当没有插件——开会话不该因为插件系统的一个错误而失败。
+   */
+  private async contributions(): Promise<PluginContributions> {
+    let contributions: PluginContributions = { mcpServers: {}, skills: [], computerUse: false };
+    try {
+      contributions = await this.requireClient().pluginContributions();
+    } catch (error) {
+      this.emit("log", "app", `读取插件贡献失败：${String(error)}`);
+    }
+    this.skills.setPluginSkills(contributions.skills);
+    return contributions;
   }
 
   /**
@@ -339,8 +371,10 @@ export class SessionManager extends EventEmitter {
    *
    * 每次开会话都重新拼：用户在 MCP 页改完，下一次挂载就生效。
    */
-  private buildMcpServers(): Record<string, MCPServerConfig> {
-    const mcpServers: Record<string, MCPServerConfig> = {};
+  private buildMcpServers(contributions: PluginContributions): Record<string, MCPServerConfig> {
+    // 插件带的 server 先进：它们的代码随插件一起被用户装进来并启用了，
+    // 但仍是第三方的——不标 trusted，照常走审批。
+    const mcpServers: Record<string, MCPServerConfig> = { ...contributions.mcpServers };
     // 名字会成为工具名前缀——撞名时内核会在挂载阶段报重复注册，比静默遮蔽好查。
     for (const server of this.store.readMcpServers()) {
       if (!server.enabled) continue;
@@ -362,13 +396,14 @@ export class SessionManager extends EventEmitter {
    * 一个都挂不上，而界面上什么都不会说——用户只会得出「配了没用」。
    * 工作目录和模型不在里面，理由见 protocol 里 SessionRefresh 的说明。
    */
-  private buildRefresh(): SessionRefresh {
+  private async buildRefresh(): Promise<SessionRefresh> {
     const config = this.store.readConfig();
+    const contributions = await this.contributions();
     return {
-      mcpServers: this.buildMcpServers(),
+      mcpServers: this.buildMcpServers(contributions),
       skillDirs: this.skills.enabledDirs(),
       memoryFile: this.store.memoryFile,
-      enableComputerUse: config.enableComputerUse,
+      enableComputerUse: contributions.computerUse,
       disableSandbox: config.sandboxCommands === false,
       codeMode: config.codeMode === true,
       approvalPolicy: config.profile,
@@ -398,6 +433,62 @@ export class SessionManager extends EventEmitter {
 
   fetchProviderModels(id: number): Promise<string[]> {
     return this.requireClient().providerModels(id);
+  }
+
+  // ---------- 插件与通道 ----------
+  //
+  // 记录与配置在内核那边的应用库里，这里只透传。
+
+  listPlugins(): Promise<PluginView[]> {
+    return this.requireClient().pluginList();
+  }
+
+  installPlugin(path: string): Promise<PluginView> {
+    return this.requireClient().pluginInstall(path);
+  }
+
+  async togglePlugin(uuid: string, enabled: boolean): Promise<void> {
+    await this.requireClient().pluginToggle(uuid, enabled);
+  }
+
+  async deletePlugin(uuid: string): Promise<void> {
+    await this.requireClient().pluginDelete(uuid);
+  }
+
+  pluginConfig(uuid: string): Promise<PluginConfigField[]> {
+    return this.requireClient().pluginConfig(uuid);
+  }
+
+  async setPluginConfig(uuid: string, key: string, value: string): Promise<void> {
+    await this.requireClient().pluginSetConfig(uuid, key, value);
+  }
+
+  pluginContributions(): Promise<PluginContributions> {
+    return this.contributions();
+  }
+
+  channelStatus(): Promise<ChannelStatusView[]> {
+    return this.requireClient().channelStatus();
+  }
+
+  channelBindings(): Promise<ChannelBindingView[]> {
+    return this.requireClient().channelBindings();
+  }
+
+  async authorizeChannel(params: ChannelAuthorizeParams): Promise<void> {
+    await this.requireClient().channelAuthorize(params);
+  }
+
+  async revokeChannel(key: ChannelBindingKey): Promise<void> {
+    await this.requireClient().channelRevoke(key);
+  }
+
+  wechatLoginStart(): Promise<WeChatLoginStartResult> {
+    return this.requireClient().wechatLoginStart();
+  }
+
+  wechatLoginPoll(uuid: string, token: string): Promise<WeChatLoginPollResult> {
+    return this.requireClient().wechatLoginPoll(uuid, token);
   }
 
   /** 试连一个 MCP server 并列出它的工具。配置页用，与会话无关。 */

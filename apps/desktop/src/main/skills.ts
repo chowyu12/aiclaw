@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { ConfigStore } from "./config.js";
 import { dedupeByName, discoverSkills, type FoundSkill } from "./skill-roots.js";
 
@@ -58,12 +58,32 @@ export class SkillManager {
     this.workspace = workspace.trim();
   }
 
+  /**
+   * 插件贡献的技能目录。由 SessionManager 在开会话前从内核拿到后设进来。
+   *
+   * 它们不在文件系统扫描的范围里（装在应用数据目录的 plugins/ 下），
+   * 而且来源要显示成插件名而不是路径，所以单独一份。
+   */
+  private pluginSkills: { dir: string; pluginName: string }[] = [];
+
+  setPluginSkills(skills: { dir: string; pluginName: string }[]): void {
+    this.pluginSkills = skills;
+  }
+
   private discover(): FoundSkill[] {
-    return discoverSkills({
+    const found = discoverSkills({
       ownDir: this.dir,
       home: homedir(),
       workdir: this.workspace,
     });
+    // 插件的排在自己目录之后、别处的之前：装了插件就是想用它带的技能。
+    const extra: FoundSkill[] = this.pluginSkills.map((skill) => ({
+      dir: skill.dir,
+      dirName: basename(skill.dir),
+      rootLabel: `插件 · ${skill.pluginName}`,
+      writable: false,
+    }));
+    return [...found.filter((f) => f.writable), ...extra, ...found.filter((f) => !f.writable)];
   }
 
   /**

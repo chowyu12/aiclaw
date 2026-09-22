@@ -84,6 +84,66 @@ export interface ProviderView {
   enabled: boolean;
 }
 
+/** 一个插件。与 agent-client 的 PluginView 同形。 */
+export interface PluginView {
+  uuid: string;
+  pluginId?: string;
+  name: string;
+  description?: string;
+  version?: string;
+  /** builtin 随应用分发，只能停用不能删；local 是用户从目录装的。 */
+  source: string;
+  enabled: boolean;
+  skills: number;
+  mcp: number;
+  tools: number;
+  channels: number;
+  permissions: string[];
+  missingConfig: string[];
+}
+
+/** 插件的一个配置项。秘密只报 isSet，值永不回传。 */
+export interface PluginConfigFieldView {
+  key: string;
+  type: string;
+  description?: string;
+  required: boolean;
+  secret: boolean;
+  isSet: boolean;
+  value?: string;
+}
+
+export interface ChannelStatusView {
+  pluginUuid: string;
+  pluginName: string;
+  channelId: string;
+  displayName?: string;
+  state: string;
+  attempts?: number;
+  lastError?: string;
+}
+
+/** 通道见过的一个外部会话。未授权的也在列表里，等用户放行。 */
+export interface ChannelBindingView {
+  pluginUuid: string;
+  channelId: string;
+  externalKey: string;
+  displayName?: string;
+  sessionId?: string;
+  providerId?: number;
+  model?: string;
+  allowed: boolean;
+  allowedTools: string[];
+  lastMessage?: string;
+}
+
+/** 启用中的插件贡献了什么。MCP 页与技能页据此标出「来自插件」的条目。 */
+export interface PluginContributionsView {
+  mcpServers: Record<string, { command?: string; url?: string }>;
+  skills: { dir: string; pluginName: string; pluginUuid: string }[];
+  computerUse: boolean;
+}
+
 /** 试连一个 MCP server 的结果。连不上不算错误，原因在 error 里。 */
 export interface McpProbeView {
   ok: boolean;
@@ -171,6 +231,4 @@ export interface AppConfigView {
   sandboxCommands: boolean;
   /** 代码模式：把工具收进一个 exec 工具，模型写 JavaScript 调用。默认关。 */
   codeMode: boolean;
-  /** 是否启用 computer use（截屏 + 鼠标键盘）。默认关。 */
-  enableComputerUse: boolean;
 }

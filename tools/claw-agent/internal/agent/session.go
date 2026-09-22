@@ -416,6 +416,25 @@ func skillToolSchema(list []skills.Skill) json.RawMessage {
 	return encoded
 }
 
+// ReadOnlyBuiltins 是不改任何东西的那几个内置工具名。
+//
+// 通道（微信、企业微信）来的消息不是本机用户说的，默认只给这些；
+// 要放开写与执行由用户按会话逐个授权。列表从注册表算出来而不是写死，
+// 免得新加一个只读工具时这里漏了。
+func ReadOnlyBuiltins() []string {
+	registry := tools.NewRegistry()
+	if err := registerBuiltins(registry, nil); err != nil {
+		return nil
+	}
+	var names []string
+	for _, tool := range registry.List() {
+		if tool.Effect == tools.EffectRead {
+			names = append(names, tool.Name)
+		}
+	}
+	return names
+}
+
 func registerBuiltins(registry *tools.Registry, enabled []string) error {
 	if err := tools.RegisterFileTools(registry); err != nil {
 		return err

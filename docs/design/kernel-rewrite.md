@@ -103,6 +103,27 @@ AIClaw 的插件系统（bundle + manifest + 权限 + 贡献点）与 upstream �
 技能页展示的是「插件贡献的技能」，MCP 页展示的是「插件贡献的 MCP server」
 加上用户手工添加的——与今天 AIClaw 里 MCP 既可手工添加也可由插件贡献是一致的。
 
+**实现时的落点**（第 4 步）：
+
+- 插件系统整个跑在内核里：`tools/claw-agent/internal/pluginhost` 包住
+  `internal/plugin` 的 Installer / ConfigService / Host，暴露 `plugin/*`、
+  `channel/*`、`wechat/*` 十三个 JSON-RPC 方法；宿主开会话前调一次
+  `plugin/contributions`，把 MCP server、技能目录、computer use 开关并进
+  `session/start`。
+- **computer use 只有插件这一个开关**。upstream 配置页上那个复选框删了；
+  内置的 computer-use 插件启用即开，manifest 上原来的「仅 macOS」限制去掉——
+  截屏与输入合成由宿主按平台做，Windows 也行。`internal/plugins/computeruse`
+  （osascript 后端）随之作废，第 6 步删。
+- 通道（微信、企业微信）收到的消息经 `server/channel.go` 的 `channelGateway`
+  变成一轮：没见过的外部会话只记下等放行；放行了的跑在一个持久的受限会话里
+  （`c_` 前缀，桌面侧边栏能看到历史），审批档位「无人值守」，工具只有只读的
+  加放行时逐个勾的。内核通知在这里翻成旧的 `internal/protocol.Event`，
+  通道插件代码一行没改。
+- 一个二进制里 `modernc.org/sqlite` 与 `glebarez/go-sqlite` 都注册名为
+  `sqlite` 的驱动，进程一启动就 panic。内核的会话库改用 glebarez 那个分支
+  （它不用 FTS5，LIKE 检索不受影响）。第 3 步的二进制其实带着这个问题——
+  桌面冒烟不拉内核，没测出来；现在多了一条直接驱动内核的 JSON-RPC 冒烟。
+
 ### 3. 搜索引擎：claw-agent 里没有它的位置
 
 upstream 的 web search 在 `claw-mcp/internal/provider/websearch.go` 里，
@@ -145,7 +166,8 @@ upstream 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而�
    `config.ts` 的内部平台分支）。此时新界面能起来但还没有插件/搜索引擎。
 3. **接模型配置**：内核读 Provider 表并暴露 `provider/*` 方法；会话按 `providerId`
    选模型服务，Key 在内核侧解析。新增「模型服务」页，配置页只留默认模型的选择。
-4. **接插件系统**：插件贡献的 MCP/技能喂进 `session/start`；技能页与 MCP 页重做。
+4. **接插件系统**：`pluginhost` 进内核，贡献并进 `session/start`；新增「插件」页
+   （权限、配置、通道状态、外部会话放行、微信扫码），技能页与 MCP 页标出插件来源。
 5. **接搜索引擎**：内置 MCP server，按配置挂载。
 6. **打包发布**：`@electron/packager` + 现有 GitHub Actions，删掉 `electron/`、`renderer/`、
    `cmd/aiclaw-core`、`internal/core` 等被替换的部分。

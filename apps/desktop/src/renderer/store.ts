@@ -4,9 +4,14 @@ import type {
   AgentEventPayload,
   AppConfigView,
   ApprovalPayload,
+  ChannelBindingView,
+  ChannelStatusView,
   HistoryItemView,
   McpProbeView,
   McpServerView,
+  PluginConfigFieldView,
+  PluginContributionsView,
+  PluginView,
   ProviderView,
   SkillView,
   RuntimeStatus,
@@ -59,7 +64,7 @@ export type TimelineEntry =
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "providers" | "mcp" | "skills" | "settings",
+  view: "chat" as "chat" | "providers" | "plugins" | "mcp" | "skills" | "settings",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
@@ -86,6 +91,15 @@ const state = reactive({
   providersError: "",
   mcpServers: [] as McpServerView[],
   skills: [] as SkillView[],
+  /** 插件清单与它们合起来贡献的东西。由内核从应用库读，要运行时起来之后才有。 */
+  plugins: [] as PluginView[],
+  pluginsLoading: false,
+  pluginsError: "",
+  contributions: { mcpServers: {}, skills: [], computerUse: false } as PluginContributionsView,
+  /** 每个插件的配置项，点开时才拉。 */
+  pluginConfigs: {} as Record<string, PluginConfigFieldView[]>,
+  channels: [] as ChannelStatusView[],
+  bindings: [] as ChannelBindingView[],
   /** 检查更新的结果。null 表示还没查过。 */
   update: null as UpdateStatusView | null,
   /**
@@ -723,6 +737,116 @@ export const actions = {
     await window.aiclaw.skills.openDir();
   },
 
+  // ---------- 插件与通道 ----------
+
+  /** 插件清单、贡献、通道状态与授权一起刷：插件页要的就是这四样。 */
+  async loadPlugins(): Promise<void> {
+    state.pluginsLoading = true;
+    state.pluginsError = "";
+    try {
+      state.plugins = (await window.aiclaw.plugins.list()) as PluginView[];
+      state.contributions = (await window.aiclaw.plugins.contributions()) as PluginContributionsView;
+      state.channels = (await window.aiclaw.channels.status()) as ChannelStatusView[];
+      state.bindings = (await window.aiclaw.channels.bindings()) as ChannelBindingView[];
+    } catch (error) {
+      state.pluginsError = describeError(error);
+    } finally {
+      state.pluginsLoading = false;
+    }
+  },
+
+  async installPluginFromDirectory(): Promise<void> {
+    const dir = (await window.aiclaw.dialog.pickDirectory()) as string | null;
+    if (!dir) return;
+    await window.aiclaw.plugins.install(dir);
+    await actions.loadPlugins();
+  },
+
+  /**
+   * 启停一个插件。启用即授权：内核会先检查必填配置齐了没有，缺了就拒绝，
+   * 原因摆到错误条上。
+   */
+  async togglePlugin(uuid: string, enabled: boolean): Promise<void> {
+    try {
+      await window.aiclaw.plugins.toggle({ uuid, enabled });
+    } catch (error) {
+      state.error = describeError(error);
+    }
+    await actions.loadPlugins();
+    // 技能页也跟着变：插件带的技能随插件启停出现或消失。
+    await actions.refreshSkills();
+  },
+
+  async deletePlugin(uuid: string): Promise<void> {
+    try {
+      await window.aiclaw.plugins.remove(uuid);
+    } catch (error) {
+      state.error = describeError(error);
+    }
+    await actions.loadPlugins();
+  },
+
+  async loadPluginConfig(uuid: string): Promise<void> {
+    state.pluginConfigs[uuid] = (await window.aiclaw.plugins.config(uuid)) as PluginConfigFieldView[];
+  },
+
+  /** 空串表示清掉。存完重拉一遍，秘密只会以 isSet 的形式回来。 */
+  async setPluginConfig(uuid: string, key: string, value: string): Promise<void> {
+    try {
+      await window.aiclaw.plugins.setConfig({ uuid, key, value });
+    } catch (error) {
+      state.error = describeError(error);
+    }
+    await actions.loadPluginConfig(uuid);
+    await actions.loadPlugins();
+  },
+
+  async refreshChannels(): Promise<void> {
+    try {
+      state.channels = (await window.aiclaw.channels.status()) as ChannelStatusView[];
+      state.bindings = (await window.aiclaw.channels.bindings()) as ChannelBindingView[];
+    } catch (error) {
+      state.pluginsError = describeError(error);
+    }
+  },
+
+  /**
+   * 放行一个外部会话。这是入站消息的同意环节——放行前那边发来的消息只被记下。
+   * 模型与放开的工具在这里选，而不是沿用桌面会话的：发消息的人不是本机用户。
+   */
+  async authorizeBinding(input: {
+    pluginUuid: string;
+    channelId: string;
+    externalKey: string;
+    providerId: number;
+    model: string;
+    allowedTools: string[];
+  }): Promise<void> {
+    try {
+      await window.aiclaw.channels.authorize(plain(input));
+    } catch (error) {
+      state.error = describeError(error);
+    }
+    await actions.refreshChannels();
+  },
+
+  async revokeBinding(key: { pluginUuid: string; channelId: string; externalKey: string }): Promise<void> {
+    try {
+      await window.aiclaw.channels.revoke(plain(key));
+    } catch (error) {
+      state.error = describeError(error);
+    }
+    await actions.refreshChannels();
+  },
+
+  async wechatLoginStart(): Promise<{ token: string; image: string }> {
+    return (await window.aiclaw.wechat.loginStart()) as { token: string; image: string };
+  },
+
+  async wechatLoginPoll(uuid: string, token: string): Promise<{ status: string; saved: boolean }> {
+    return (await window.aiclaw.wechat.loginPoll({ uuid, token })) as { status: string; saved: boolean };
+  },
+
   // ---------- 模型 ----------
 
   // ---------- 检查更新 ----------
@@ -944,7 +1068,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "providers" | "mcp" | "skills" | "settings"): void {
+  setView(view: "chat" | "providers" | "plugins" | "mcp" | "skills" | "settings"): void {
     state.view = view;
   },
 

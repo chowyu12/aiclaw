@@ -44,13 +44,6 @@ export interface AppConfig {
    * 代价是模型得会写对代码——所以交给用户按自己用的模型来定。
    */
   codeMode: boolean;
-  /**
-   * 是否启用 computer use（截屏 + 鼠标键盘）。
-   *
-   * 默认关，而且应当保持默认关：开了之后模型能看见并操作**整个屏幕**，
-   * 不受工作目录约束。这是本应用里权限最大的一组能力。
-   */
-  enableComputerUse: boolean;
 }
 
 /** 用户自己配的 MCP server。 */
