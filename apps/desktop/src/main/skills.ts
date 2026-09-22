@@ -1,20 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { ClawClient } from "./claw.js";
 import type { ConfigStore } from "./config.js";
 import { dedupeByName, discoverSkills, type FoundSkill } from "./skill-roots.js";
-import { commonTopLevelDir, unzipInto } from "./unzip.js";
 
 /**
- * 本地技能的管理：列出、启停、删除、从内部平台 SkillHub 安装。
+ * 本地技能的管理：列出、启停、删除。
  *
  * 技能的运行时形态由 claw-agent 的 internal/skills 决定（目录 + SKILL.md +
- * frontmatter），这里只负责把目录整理成那个形状，以及把内部平台的包搬下来。
- *
- * 为什么「内部平台技能」不是另一套机制：查过内部平台的接口，SkillHub 没有运行时契约、
- * 也没有执行端点——它分发的就是装着 SKILL.md 的 ZIP。装到本地目录之后，
- * 与用户自己写的技能没有任何区别。
+ * frontmatter），这里只负责把目录整理成那个形状。
  */
 
 export interface SkillView {
@@ -32,36 +26,19 @@ export interface SkillView {
   name: string;
   description: string;
   enabled: boolean;
-  /** 来源标签：内部平台 / Claude Code / Codex / 项目 / npm 全局…… */
+  /** 来源标签：AIClaw / Claude Code / Codex / 项目 / npm 全局…… */
   source: string;
   /** false 表示技能在别人的目录里：能用、能关，但不能删也不能改。 */
   writable: boolean;
-  /** 来自内部平台 SkillHub 时记下包 id，用来判断能不能升级。 */
-  sourceId?: string;
-  sourceVersion?: string;
-}
-
-/** 内部平台 SkillHub 上的一个包。 */
-export interface SkillHubItem {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  version: string;
-  installed: boolean;
 }
 
 const DISABLED_MARKER = ".disabled";
-/** 记安装来源。放在技能目录里，删目录就一起没了，不留孤儿记录。 */
-const SOURCE_FILE = ".source.json";
 
 export class SkillManager {
   private readonly store: ConfigStore;
-  private readonly claw: ClawClient;
 
-  constructor(store: ConfigStore, claw: ClawClient) {
+  constructor(store: ConfigStore) {
     this.store = store;
-    this.claw = claw;
   }
 
   get dir(): string {
@@ -108,7 +85,6 @@ export class SkillManager {
     for (const { found, meta } of dedupeByName(withMeta, (x) => x.meta.name || x.found.dirName)) {
       const name = meta.name || found.dirName;
       const id = found.writable ? found.dirName : found.dir;
-      const source = readSource(found.dir);
       skills.push({
         id,
         dirName: found.dirName,
@@ -123,8 +99,6 @@ export class SkillManager {
           : !off.has(found.dir),
         source: found.rootLabel,
         writable: found.writable,
-        sourceId: source?.id,
-        sourceVersion: source?.version,
       });
     }
     skills.sort((a, b) => a.name.localeCompare(b.name, "zh"));
@@ -186,72 +160,6 @@ export class SkillManager {
     writeFileSync(this.disabledPath, `${JSON.stringify(list, null, 2)}\n`, "utf8");
   }
 
-  /** 列出内部平台 SkillHub 上可装的包。 */
-  async listHub(keyword: string): Promise<SkillHubItem[]> {
-    const installed = new Set(this.list().map((skill) => skill.sourceId).filter(Boolean));
-    const body = await this.claw.post<Record<string, unknown>>("/api/v1/skill-hub/list", {
-      keyword: keyword || undefined,
-      page: 1,
-      page_size: 100,
-    });
-    const list = (body?.list ?? body?.packages ?? []) as Record<string, unknown>[];
-    return list.map((item) => ({
-      id: String(item.id ?? ""),
-      name: String(item.display_name ?? item.name ?? ""),
-      description: String(item.description ?? ""),
-      category: String(item.category ?? ""),
-      version: String(
-        (item.current_version as Record<string, unknown> | undefined)?.semver ?? item.version ?? "",
-      ),
-      installed: installed.has(String(item.id ?? "")),
-    }));
-  }
-
-  /**
-   * 从内部平台装一个技能包。
-   *
-   * ZIP 解包走 unzip.ts，它会拦住指向目录之外的条目——包是别人上传的，
-   * 这条防护不是可选的。
-   */
-  async installFromHub(id: string, name: string): Promise<SkillView[]> {
-    const archive = await this.claw.download(
-      `/api/v1/skill-hub/${encodeURIComponent(id)}/download`,
-    );
-
-    // 先解到一个临时目录，确认里面真有 SKILL.md 再搬过去。直接解到目标位置的话，
-    // 一个不含 SKILL.md 的包会留下一个永远加载不了的半成品目录。
-    const staging = join(this.dir, `.staging-${Date.now().toString(36)}`);
-    rmSync(staging, { recursive: true, force: true });
-    mkdirSync(staging, { recursive: true });
-
-    try {
-      const { files } = unzipInto(archive, staging);
-      // 包通常整个套在一层顶层目录里，脱掉它，别让技能目录多一层。
-      const top = commonTopLevelDir(files);
-      const contentRoot = top ? join(staging, top) : staging;
-      if (!existsSync(join(contentRoot, "SKILL.md"))) {
-        throw new Error("这个包里没有 SKILL.md，不是一个技能包");
-      }
-
-      const dirName = sanitizeDirName(top || name || id);
-      const target = this.resolve(dirName);
-      rmSync(target, { recursive: true, force: true });
-      mkdirSync(this.dir, { recursive: true });
-      // 同盘改名是原子的：不会留下一个解到一半的技能目录。
-      const { renameSync } = await import("node:fs");
-      renameSync(contentRoot, target);
-
-      writeFileSync(
-        join(target, SOURCE_FILE),
-        JSON.stringify({ id, name, installedAt: new Date().toISOString() }, null, 2),
-        "utf8",
-      );
-      return this.list();
-    } finally {
-      rmSync(staging, { recursive: true, force: true });
-    }
-  }
-
   /** 解析目录名并确认它没跑出技能目录。界面传来的值也不能无条件相信。 */
   private resolve(dirName: string): string {
     const clean = sanitizeDirName(dirName);
@@ -274,18 +182,6 @@ function safeRead(path: string): string {
     return readFileSync(path, "utf8");
   } catch {
     return "";
-  }
-}
-
-function readSource(dir: string): { id: string; version?: string } | undefined {
-  try {
-    const parsed = JSON.parse(readFileSync(join(dir, SOURCE_FILE), "utf8")) as {
-      id?: string;
-      version?: string;
-    };
-    return parsed.id ? { id: parsed.id, version: parsed.version } : undefined;
-  } catch {
-    return undefined;
   }
 }
 

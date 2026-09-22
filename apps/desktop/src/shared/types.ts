@@ -66,24 +66,15 @@ export interface HistoryItemView {
   durationMs?: number;
 }
 
-/** airouter 上能调的一个模型。 */
+/** 端点上能调的一个模型。 */
 export interface ModelChoiceView {
   id: string;
   ownedBy: string;
-  /** 上下文窗口（token）。0 表示 airouter 没有这个模型的档案，窗口未知。 */
+  /** 上下文窗口（token）。0 表示端点没有这个模型的档案，窗口未知。 */
   contextWindow: number;
   maxOutputTokens: number;
   /** 合规等级名，例如「境内合规」，帮用户判断能不能喂内部数据。 */
   securityLevel: string;
-}
-
-/** 一个内部平台能力对象：一个数据 API、一个 API 服务、一个知识库、一个语料库。 */
-export interface ClawCapabilityView {
-  type: "knowledge" | "data-api" | "api-operation" | "corpus" | "web-search";
-  id: string;
-  name: string;
-  description?: string;
-  enabled: boolean;
 }
 
 /** 试连一个 MCP server 的结果。连不上不算错误，原因在 error 里。 */
@@ -116,13 +107,10 @@ export interface SkillView {
   name: string;
   description: string;
   enabled: boolean;
-  /** 来源：内部平台 / Claude Code / Codex / 项目 / npm 全局…… */
+  /** 来源：AIClaw / Claude Code / Codex / 项目 / npm 全局…… */
   source: string;
   /** false 表示技能在别人的目录里：能用、能关，但不能删。 */
   writable: boolean;
-  /** 来自内部平台 SkillHub 时带上包 id。 */
-  sourceId?: string;
-  sourceVersion?: string;
 }
 
 /** 检查更新的结果。 */
@@ -136,16 +124,6 @@ export interface UpdateStatusView {
   canInstall: boolean;
   /** 界面上那个按钮该写什么。平台不同，能做到的事也不同。 */
   installLabel?: string;
-}
-
-/** 内部平台 SkillHub 上可装的一个包。 */
-export interface SkillHubItemView {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  version: string;
-  installed: boolean;
 }
 
 /** 用户自建的会话分组，像文件夹。 */
@@ -178,7 +156,6 @@ export interface AppConfigView {
   reasoningEffort: string;
   /** 模型上下文窗口（token）；0 表示未知，内核退回被动压缩。 */
   contextWindow: number;
-  clawUrl: string;
   /** 审批策略。没有沙箱之后这是唯一的安全档位。 */
   profile: "on-write" | "always" | "never";
   retentionDays: number;
@@ -188,18 +165,4 @@ export interface AppConfigView {
   codeMode: boolean;
   /** 是否启用 computer use（截屏 + 鼠标键盘）。默认关。 */
   enableComputerUse: boolean;
-}
-
-export type PluginInstanceKind = "knowledge" | "data-api" | "api-operation" | "corpus";
-
-export interface PluginInstanceView {
-  id: string;
-  type: PluginInstanceKind;
-  label: string;
-  assets: string[];
-  toolPrefix: string;
-  enabled: boolean;
-  allowWrite?: boolean;
-  categories?: string[];
-  topK?: number;
 }

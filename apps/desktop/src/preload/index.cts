@@ -39,11 +39,6 @@ const api = {
   models: {
     list: (force?: boolean) => ipcRenderer.invoke(IPC.modelList, force),
   },
-  capabilities: {
-    list: () => ipcRenderer.invoke(IPC.capabilityList),
-    sync: () => ipcRenderer.invoke(IPC.capabilitySync),
-    toggle: (input: unknown) => ipcRenderer.invoke(IPC.capabilityToggle, input),
-  },
   mcp: {
     read: () => ipcRenderer.invoke(IPC.mcpRead),
     write: (servers: unknown) => ipcRenderer.invoke(IPC.mcpWrite, servers),
@@ -54,8 +49,6 @@ const api = {
     toggle: (input: unknown) => ipcRenderer.invoke(IPC.skillToggle, input),
     remove: (id: string) => ipcRenderer.invoke(IPC.skillDelete, id),
     openDir: () => ipcRenderer.invoke(IPC.skillOpenDir),
-    hubList: (keyword: string) => ipcRenderer.invoke(IPC.skillHubList, keyword),
-    hubInstall: (input: unknown) => ipcRenderer.invoke(IPC.skillHubInstall, input),
   },
   groups: {
     read: () => ipcRenderer.invoke(IPC.groupRead),

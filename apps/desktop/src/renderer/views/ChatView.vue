@@ -240,7 +240,7 @@ function stepsSummary(turn: Turn): string {
 /**
  * 挂载状态。
  *
- * 「内部平台能力到底绑上了没有」原来只能靠模型自己说，而模型经常只捡它想说的讲。
+ * 「MCP server 到底挂上了没有」原来只能靠模型自己说，而模型经常只捡它想说的讲。
  * 这里如实列出内核报回来的每一项：成功的写挂了几个工具，失败的把原因原样带出来。
  */
 const mounts = computed(() => {
@@ -437,7 +437,7 @@ const toolCount = computed(() => store.sessionInfo?.tools.length ?? 0);
                     <span class="menu-note">{{ status }}</span>
                   </div>
                   <p v-if="mounts.length === 0" class="menu-note pad">
-                    没有挂载任何内部平台能力或 MCP server。到「内部平台能力」页添加。
+                    没有挂载任何 MCP server。到「MCP」页添加。
                   </p>
                 </div>
 

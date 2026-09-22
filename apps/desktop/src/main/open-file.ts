@@ -9,7 +9,7 @@ import { classifyOpen, type OpenVerdict } from "./open-file-rules.js";
  * 打开模型在对话里提到的文件。
  *
  * 它连的是两头都不可信的东西：**路径来自模型输出**（而模型读得到文件、命令
- * 结果、内部平台数据，那些都可能被注入），**动作是交给系统用默认程序打开**——
+ * 结果、MCP 数据，那些都可能被注入），**动作是交给系统用默认程序打开**——
  * 在 macOS 上「用默认程序打开」对 .command/.app/.pkg 这类就是**执行**。
  * 判断规则在 open-file-rules.ts，那边能在 node 里逐条测。
  */

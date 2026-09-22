@@ -26,10 +26,10 @@ test("抹掉 Authorization 头与 Bearer", () => {
 });
 
 test("抹掉 KEY=value 形式的凭据", () => {
-  const text = redact("CLAW_TOKEN=abcdef123456 CLAW_URL=https://claw.example.internal");
+  const text = redact("MCP_TOKEN=abcdef123456 MCP_URL=https://mcp.example.com");
   assert.ok(!text.includes("abcdef123456"), text);
   // 地址不是凭据，抹了反而失去排查价值。
-  assert.ok(text.includes("https://claw.example.internal"), text);
+  assert.ok(text.includes("https://mcp.example.com"), text);
 });
 
 test("抹掉 URL 上当钥匙用的查询参数", () => {
@@ -48,10 +48,10 @@ test("报告里的每一处都过抹除，包括事实那几段", () => {
       platform: "darwin",
       arch: "arm64",
       paths: { 配置: "/Users/x/Library/Application Support/aiclaw" },
-      runtime: { 模型端点: "https://llm.example.internal/v1?key=verysecret123" },
+      runtime: { 模型端点: "https://api.example.com/v1?key=verysecret123" },
       mounts: { aihot: "挂载失败：Authorization: Bearer topsecret" },
     },
-    [{ at: 0, source: "kernel", text: "启动时 CLAW_TOKEN=leakedvalue" }],
+    [{ at: 0, source: "kernel", text: "启动时 MCP_TOKEN=leakedvalue" }],
   );
   for (const secret of ["verysecret123", "topsecret", "leakedvalue"]) {
     assert.ok(!report.includes(secret), `报告里漏了 ${secret}：\n${report}`);

@@ -4,12 +4,10 @@ import type {
   AgentEventPayload,
   AppConfigView,
   ApprovalPayload,
-  ClawCapabilityView,
   HistoryItemView,
   McpProbeView,
   McpServerView,
   ModelChoiceView,
-  SkillHubItemView,
   SkillView,
   RuntimeStatus,
   SessionGroupsView,
@@ -61,7 +59,7 @@ export type TimelineEntry =
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "plugins" | "mcp" | "skills" | "settings",
+  view: "chat" as "chat" | "mcp" | "skills" | "settings",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
@@ -72,7 +70,7 @@ const state = reactive({
   approvals: [] as ApprovalPayload[],
   busy: false,
   config: null as AppConfigView | null,
-  credentials: { llmKey: false, clawToken: false },
+  credentials: { llmKey: false },
   profiles: [] as { id: string; label: string; description: string }[],
   sessions: [] as SessionSummaryView[],
   /** 会话搜索。关键词为空时界面用 sessions，不看这里。 */
@@ -83,17 +81,8 @@ const state = reactive({
   },
   groups: { groups: [], assignments: {} } as SessionGroupsView,
   models: [] as ModelChoiceView[],
-  capabilities: [] as ClawCapabilityView[],
-  /** 上次同步内部平台能力的时间（ISO）。空串表示这次启动还没同步过。 */
-  capabilitiesSyncedAt: "",
-  capabilitiesSyncing: false,
-  /** 哪几类没拉到。拉不到的那类保留上次的结果，这里只是如实说一声。 */
-  capabilitySyncFailures: [] as { type: string; reason: string }[],
   mcpServers: [] as McpServerView[],
   skills: [] as SkillView[],
-  hubSkills: [] as SkillHubItemView[],
-  hubLoading: false,
-  hubError: "",
   modelsLoading: false,
   modelsError: "",
   /** 检查更新的结果。null 表示还没查过。 */
@@ -314,7 +303,7 @@ function applyEvent(payload: AgentEventPayload): void {
 /**
  * 工具步骤展开后看到的内容：**先参数、后结果**。
  *
- * 内部平台能力不再弹审批之后，这里是用户唯一能看见「它到底拿什么参数调的」的
+ * 只读工具不弹审批，所以这里是用户唯一能看见「它到底拿什么参数调的」的
  * 地方。只显示结果的话，「它查了哪家公司」这种问题就没有答案了。
  */
 function toolDetail(item: Record<string, unknown>): string {
@@ -424,17 +413,13 @@ export const actions = {
     try {
       state.config = (await window.aiclaw.config.read()) as AppConfigView;
       state.model = state.config.model;
-      state.credentials = (await window.aiclaw.credentials.status()) as {
-        llmKey: boolean;
-        clawToken: boolean;
-      };
+      state.credentials = (await window.aiclaw.credentials.status()) as { llmKey: boolean };
       state.profiles = (await window.aiclaw.profiles.list()) as {
         id: string;
         label: string;
         description: string;
       }[];
       state.groups = (await window.aiclaw.groups.read()) as SessionGroupsView;
-      state.capabilities = (await window.aiclaw.capabilities.list()) as ClawCapabilityView[];
       state.mcpServers = (await window.aiclaw.mcp.read()) as McpServerView[];
       state.skills = (await window.aiclaw.skills.list()) as SkillView[];
     } catch (error) {
@@ -464,12 +449,9 @@ export const actions = {
     if (!state.sessionId) state.model = state.config.model;
   },
 
-  async saveCredentials(patch: { llmKey?: string; clawToken?: string }): Promise<void> {
+  async saveCredentials(patch: { llmKey?: string }): Promise<void> {
     const wasReady = state.runtime.state === "ready";
-    state.credentials = (await window.aiclaw.credentials.write(patch)) as {
-      llmKey: boolean;
-      clawToken: boolean;
-    };
+    state.credentials = (await window.aiclaw.credentials.write(patch)) as { llmKey: boolean };
     // 主进程存完凭据会重启运行时（Key 只在拉起内核时进它的进程环境）。
     // 重启之后原来的会话句柄没了，这里重新接上——不接的话界面看着一切正常，
     // 下一句话却会报「会话不存在」。
@@ -479,10 +461,6 @@ export const actions = {
       state.timeline = [];
       await actions.startRuntime();
     }
-    // 刚填上 BFF Key 就把能力同步一遍：不同步的话，用户填完 Key 去看能力页
-    // 是空的，得重启应用才出来——而这里正好是唯一知道「Key 变了」的地方。
-    // 不 await：拉一遍内部平台要几秒，不该把「保存」按钮按在那儿转。
-    if (patch.clawToken) void actions.syncCapabilities();
   },
 
   /**
@@ -635,46 +613,6 @@ export const actions = {
     })) as SessionGroupsView;
   },
 
-  // ---------- 内部平台能力 ----------
-
-  async refreshCapabilities(): Promise<void> {
-    state.capabilities = (await window.aiclaw.capabilities.list()) as ClawCapabilityView[];
-  },
-
-  /**
-   * 同步内部平台能力：拉一遍你有权限的东西，默认全开，用户关过的保持关着。
-   *
-   * 失败不往错误条上报——网络抖一下、某一类接口没权限都很正常，
-   * 而那一类会保留上次的结果。界面上标一行就够了。
-   */
-  async syncCapabilities(): Promise<void> {
-    if (state.capabilitiesSyncing) return;
-    state.capabilitiesSyncing = true;
-    try {
-      const result = (await window.aiclaw.capabilities.sync()) as {
-        capabilities: ClawCapabilityView[];
-        failures: { type: string; reason: string }[];
-        syncedAt: string;
-      };
-      state.capabilities = result.capabilities;
-      state.capabilitySyncFailures = result.failures;
-      state.capabilitiesSyncedAt = result.syncedAt;
-    } catch (error) {
-      state.capabilitySyncFailures = [{ type: "*", reason: describeError(error) }];
-    } finally {
-      state.capabilitiesSyncing = false;
-    }
-  },
-
-  /** 开关一项能力。关掉的会被记住，之后每次同步都保持关着。 */
-  async toggleCapability(type: string, id: string, enabled: boolean): Promise<void> {
-    state.capabilities = (await window.aiclaw.capabilities.toggle({
-      type,
-      id,
-      enabled,
-    })) as ClawCapabilityView[];
-  },
-
   // ---------- 自定义 MCP server ----------
 
   /** 取可变副本：store 是 readonly() 包过的，直接改它的元素会被 DeepReadonly 挡住。 */
@@ -744,30 +682,6 @@ export const actions = {
 
   async openSkillsDir(): Promise<void> {
     await window.aiclaw.skills.openDir();
-  },
-
-  async loadHubSkills(keyword = ""): Promise<void> {
-    state.hubLoading = true;
-    state.hubError = "";
-    try {
-      state.hubSkills = (await window.aiclaw.skills.hubList(keyword)) as SkillHubItemView[];
-    } catch (error) {
-      // 内部平台没配或 Key 不对时只标在这一块，不占用顶部错误条——
-      // 本地技能不依赖内部平台，那部分照常能用。
-      state.hubError = describeError(error);
-    } finally {
-      state.hubLoading = false;
-    }
-  },
-
-  async installHubSkill(id: string, name: string): Promise<void> {
-    state.hubError = "";
-    try {
-      state.skills = (await window.aiclaw.skills.hubInstall({ id, name })) as SkillView[];
-      await actions.loadHubSkills();
-    } catch (error) {
-      state.hubError = describeError(error);
-    }
   },
 
   // ---------- 模型 ----------
@@ -947,7 +861,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "plugins" | "mcp" | "skills" | "settings"): void {
+  setView(view: "chat" | "mcp" | "skills" | "settings"): void {
     state.view = view;
   },
 

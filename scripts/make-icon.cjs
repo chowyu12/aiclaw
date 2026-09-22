@@ -37,7 +37,7 @@ const SHADOW_BLUR = 22;
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}" width="${SIZE}" height="${SIZE}">
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0052ff"/><stop offset="100%" stop-color="#578bfa"/>
+      <stop offset="0%" stop-color="#14685c"/><stop offset="100%" stop-color="#4fbca7"/>
     </linearGradient>
     <linearGradient id="s" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
@@ -45,7 +45,7 @@ const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="${SHADOW_DY}" stdDeviation="${SHADOW_BLUR}"
-                    flood-color="#0b2a6b" flood-opacity="0.28"/>
+                    flood-color="#0a2f2a" flood-opacity="0.28"/>
     </filter>
   </defs>
 
@@ -54,13 +54,12 @@ const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE
   </g>
   <rect x="${INSET}" y="${INSET}" width="${BODY}" height="${BODY}" rx="${RADIUS}" fill="url(#s)"/>
 
-  <!-- 星形按 32 格坐标画的，整体缩放到圆角方块里。 -->
-  <g transform="translate(${INSET} ${INSET}) scale(${BODY / 32})">
-    <path d="M16 6.5 C 16.6 11.4 18.6 13.4 23.5 14 C 18.6 14.6 16.6 16.6 16 21.5
-             C 15.4 16.6 13.4 14.6 8.5 14 C 13.4 13.4 15.4 11.4 16 6.5 Z" fill="#ffffff"/>
-    <path d="M23.4 20.6 C 23.55 22 24.05 22.5 25.45 22.65 C 24.05 22.8 23.55 23.3 23.4 24.7
-             C 23.25 23.3 22.75 22.8 21.35 22.65 C 22.75 22.5 23.25 22 23.4 20.6 Z"
-          fill="#ffffff" opacity="0.85"/>
+  <!-- 爪痕按 32 格坐标画的，整体缩放到圆角方块里。 -->
+  <g transform="translate(${INSET} ${INSET}) scale(${BODY / 32})"
+     fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round">
+    <path d="M9 23.5 C 9 16.5 12 12 16.5 9"/>
+    <path d="M15 24.5 C 15.2 18.5 17.8 14.5 21.5 12" opacity="0.92"/>
+    <path d="M21 25 C 21.5 20.5 23.3 17.8 26 16" opacity="0.8"/>
   </g>
 </svg>`;
 

@@ -14,9 +14,8 @@ import type { SessionSummaryView } from "../../shared/types";
 /** 设置态下左栏显示的导航。与会话行同一套样式，是同一个列表位置上的两种内容。 */
 const NAV = [
   { id: "settings", label: "配置", note: "凭据、工作目录、审批档位" },
-  { id: "plugins", label: "内部平台能力", note: "数据 API、API 服务、知识库、语料库" },
   { id: "mcp", label: "MCP", note: "第三方 MCP server，stdio 或 HTTP" },
-  { id: "skills", label: "技能", note: "本地 SKILL.md，可从内部平台安装" },
+  { id: "skills", label: "技能", note: "本地 SKILL.md，也认 Claude Code / Codex 的" },
 ] as const;
 
 /**

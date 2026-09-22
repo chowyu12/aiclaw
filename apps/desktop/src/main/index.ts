@@ -3,10 +3,8 @@ import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { PendingApproval } from "@aiclaw/agent-client";
-import { ConfigStore, type ClawCapability, type McpServer } from "./config.js";
+import { ConfigStore, type McpServer } from "./config.js";
 import { ModelCatalog } from "./models.js";
-import { ClawClient } from "./claw.js";
-import { CapabilityCatalog, type CapabilityKind } from "./catalog.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
 import { Updater } from "./updater.js";
@@ -19,7 +17,7 @@ import type { ApprovalPayload } from "../shared/types.js";
 const here = dirname(fileURLToPath(import.meta.url));
 
 // 必须在第一次取 userData 之前设置：Electron 默认拿 package.json 的 name，
-// 带 scope 的话数据目录会变成 "@upstream/desktop" 这种带斜杠的两级目录。
+// 带 scope 的话数据目录会变成 "@aiclaw/desktop" 这种带斜杠的两级目录。
 app.setName("aiclaw");
 
 /**
@@ -43,9 +41,7 @@ function applyAppIcon(): void {
 
 const store = new ConfigStore();
 const models = new ModelCatalog(store);
-const claw = new ClawClient(store);
-const catalog = new CapabilityCatalog(store, claw);
-const skills = new SkillManager(store, claw);
+const skills = new SkillManager(store);
 // SessionManager 要问技能：会话启动时把当前启用的技能目录下发给内核。
 const sessions = new SessionManager(store, skills, models);
 const updater = new Updater();
@@ -69,7 +65,7 @@ function createWindow(): void {
     height: 800,
     minWidth: 860,
     minHeight: 600,
-    title: "内部平台",
+    title: "AIClaw",
     backgroundColor: "#f5f7f7",
     // macOS 忽略这个字段（那边走 app.dock.setIcon），Windows 与 Linux 看它。
     icon: existsSync(iconPath) ? iconPath : undefined,
@@ -112,13 +108,10 @@ function push(channel: string, payload: unknown): void {
 
 function registerIpc(): void {
   ipcMain.handle(IPC.configRead, () => store.readConfig());
-  ipcMain.handle(IPC.configWrite, async (_event, patch: Record<string, unknown>) => {
+  ipcMain.handle(IPC.configWrite, (_event, patch: Record<string, unknown>) => {
     if ("modelBaseUrl" in patch) ModelCatalog.invalidate();
-    const next = store.writeConfig(patch);
-    // 内部平台地址是在启动内核时注入子进程环境的（claw-mcp 从那里继承），
-    // 不重启的话改了地址也还是打旧的。模型端点不用重启——它是按会话下发的。
-    if ("clawUrl" in patch) await sessions.restartIfRunning();
-    return next;
+    // 模型端点不用重启运行时——它是按会话下发的。
+    return store.writeConfig(patch);
   });
   ipcMain.handle(IPC.updateCheck, () => updater.check());
   // 下载进度往渲染层推：没有进度的话，用户点完「升级」看到的是一个不动的
@@ -176,14 +169,6 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.modelList, (_event, force?: boolean) => models.list(force === true));
 
-  ipcMain.handle(IPC.capabilityList, () => store.readCapabilities());
-  ipcMain.handle(IPC.capabilitySync, () => catalog.syncAll());
-  ipcMain.handle(
-    IPC.capabilityToggle,
-    (_event, input: { type: CapabilityKind; id: string; enabled: boolean }) =>
-      catalog.setEnabled(input.type, input.id, input.enabled),
-  );
-
   ipcMain.handle(IPC.mcpRead, () => store.readMcpServers());
   ipcMain.handle(IPC.mcpWrite, (_event, servers: McpServer[]) => store.writeMcpServers(servers));
   ipcMain.handle(IPC.mcpProbe, (_event, server: McpServer) => sessions.probeMcp(server));
@@ -218,11 +203,9 @@ function registerIpc(): void {
           状态: sessions.running ? "ready" : "stopped",
           模型端点: config.modelBaseUrl,
           模型: config.model,
-          内部平台地址: config.clawUrl,
           审批档位: config.profile,
           // 只说有没有，绝不放值。
           "LLM Key": credentials.llmKey ? "已配置" : "未配置",
-          "内部平台 BFF Key": credentials.clawToken ? "已配置" : "未配置",
           computer_use: config.enableComputerUse ? "已开启" : "关闭",
         },
         mounts: sessions.lastMounts(),
@@ -242,11 +225,6 @@ function registerIpc(): void {
     await shell.openPath(skills.dir);
     return skills.dir;
   });
-  ipcMain.handle(IPC.skillHubList, (_event, keyword: string) => skills.listHub(keyword ?? ""));
-  ipcMain.handle(IPC.skillHubInstall, (_event, input: { id: string; name: string }) =>
-    skills.installFromHub(input.id, input.name),
-  );
-
   ipcMain.handle(IPC.groupRead, () => store.readGroups());
   ipcMain.handle(IPC.groupCreate, (_event, name: string) => {
     const current = store.readGroups();

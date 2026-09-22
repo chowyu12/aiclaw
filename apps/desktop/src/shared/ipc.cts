@@ -35,10 +35,6 @@ export const IPC = {
   updateInstall: "update:install",
   updatePrepare: "update:prepare",
 
-  capabilityList: "capability:list",
-  capabilitySync: "capability:sync",
-  capabilityToggle: "capability:toggle",
-
   mcpRead: "mcp:read",
   mcpWrite: "mcp:write",
   mcpProbe: "mcp:probe",
@@ -49,8 +45,6 @@ export const IPC = {
   skillToggle: "skill:toggle",
   skillDelete: "skill:delete",
   skillOpenDir: "skill:openDir",
-  skillHubList: "skill:hubList",
-  skillHubInstall: "skill:hubInstall",
 
   groupRead: "group:read",
   groupCreate: "group:create",

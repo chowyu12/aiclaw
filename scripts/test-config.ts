@@ -2,11 +2,9 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
 import {
-  DEFAULT_CLAW_URL,
   DEFAULT_CONFIG,
   DEFAULT_MODEL_BASE_URL,
   normalizeConfig,
-  parseCapabilityChoices,
 } from "../apps/desktop/src/main/config-defaults.ts";
 
 /**
@@ -14,39 +12,32 @@ import {
  *
  * 只有一件事值得钉住：**空串会盖掉默认值**。
  * `{ ...DEFAULT_CONFIG, ...raw }` 看起来「有默认值兜底」，但兜的是 key 不存在的
- * 情况；早于这个版本写下的 config.json 里这两项存的正好是空串，于是升级上来的
+ * 情况；早于这个版本写下的 config.json 里这一项存的正好是空串，于是升级上来的
  * 用户拿到的是空地址，而装机的新用户拿到的是默认地址——两种人看到的应用行为不同，
  * 且报错发生在上游，指不回配置页。
  */
 
 test("空地址折回默认值——旧 config.json 里存的就是空串", () => {
-  const stored = { ...DEFAULT_CONFIG, modelBaseUrl: "", clawUrl: "" };
+  const stored = { ...DEFAULT_CONFIG, modelBaseUrl: "" };
   const merged = { ...DEFAULT_CONFIG, ...stored };
   // 先确认问题真的存在：不归一化的话展开默认值救不了。
   assert.equal(merged.modelBaseUrl, "");
 
   const config = normalizeConfig(merged);
   assert.equal(config.modelBaseUrl, DEFAULT_MODEL_BASE_URL);
-  assert.equal(config.clawUrl, DEFAULT_CLAW_URL);
 });
 
 test("只有空白也算空——输入框里剩个空格不该变成一个打不通的地址", () => {
-  const config = normalizeConfig({ ...DEFAULT_CONFIG, modelBaseUrl: "  ", clawUrl: "\t" });
+  const config = normalizeConfig({ ...DEFAULT_CONFIG, modelBaseUrl: "  " });
   assert.equal(config.modelBaseUrl, DEFAULT_MODEL_BASE_URL);
-  assert.equal(config.clawUrl, DEFAULT_CLAW_URL);
 });
 
 test("填了的地址原样保留", () => {
-  const config = normalizeConfig({
-    ...DEFAULT_CONFIG,
-    modelBaseUrl: "http://127.0.0.1:8080/v1",
-    clawUrl: "http://127.0.0.1:9000",
-  });
+  const config = normalizeConfig({ ...DEFAULT_CONFIG, modelBaseUrl: "http://127.0.0.1:8080/v1" });
   assert.equal(config.modelBaseUrl, "http://127.0.0.1:8080/v1");
-  assert.equal(config.clawUrl, "http://127.0.0.1:9000");
 });
 
-test("归一化只碰这两个字段，别的原样传下去", () => {
+test("归一化只碰地址与沙箱开关，别的原样传下去", () => {
   const source = { ...DEFAULT_CONFIG, workdir: "/tmp/x", retentionDays: 7, model: "gpt-x" };
   const config = normalizeConfig(source);
   assert.equal(config.workdir, "/tmp/x");
@@ -57,36 +48,8 @@ test("归一化只碰这两个字段，别的原样传下去", () => {
 
 test("默认值本身不为空——默认没填等于这一整套折回逻辑白写", () => {
   assert.ok(DEFAULT_CONFIG.modelBaseUrl.startsWith("https://"));
-  assert.ok(DEFAULT_CONFIG.clawUrl.startsWith("https://"));
   // computer use 默认必须是关的，见 AGENTS.md。
   assert.equal(DEFAULT_CONFIG.enableComputerUse, false);
-});
-
-// ---------- 能力开关的存档格式 ----------
-//
-// 唯一的难点是兼容旧格式，而兼容写错了**不会报错**：升级上来的用户会发现
-// 自己关掉的能力一次性全开回来，还以为是自动同步把它们打开的。
-
-test("旧格式（关掉的键数组）读成一组 false", () => {
-  assert.deepEqual(parseCapabilityChoices(["data-api:1", "corpus:7"]), {
-    "data-api:1": false,
-    "corpus:7": false,
-  });
-});
-
-test("新格式双向选择原样读出来", () => {
-  // 记双向是因为联网搜索那类里有些候选默认是关的，手动打开也要记住。
-  assert.deepEqual(parseCapabilityChoices({ "web-search:12": true, "data-api:1": false }), {
-    "web-search:12": true,
-    "data-api:1": false,
-  });
-});
-
-test("坏数据当成没有选择过，不要让一个坏文件把能力全关掉", () => {
-  assert.deepEqual(parseCapabilityChoices(null), {});
-  assert.deepEqual(parseCapabilityChoices("nonsense"), {});
-  assert.deepEqual(parseCapabilityChoices({ a: "yes", b: 1, c: true }), { c: true });
-  assert.deepEqual(parseCapabilityChoices([1, "data-api:1"]), { "data-api:1": false });
 });
 
 // ---------- 沙箱开关的缺省 ----------

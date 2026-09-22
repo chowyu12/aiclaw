@@ -3,10 +3,9 @@ import { ref } from "vue";
 import { actions, store } from "../store";
 
 const llmKey = ref("");
-/** 「高级」默认收起：这三项地址与模型对绝大多数人都是默认值，不该占据视线。 */
+/** 「高级」默认收起：端点与模型对绝大多数人都是默认值，不该占据视线。 */
 const advanced = ref(false);
 const modelPickerOpen = ref(false);
-const clawToken = ref("");
 const saving = ref(false);
 const purgeConfirm = ref(false);
 
@@ -42,18 +41,14 @@ async function saveField(patch: Record<string, unknown>): Promise<void> {
 }
 
 async function saveKeys(): Promise<void> {
-  const patch: { llmKey?: string; clawToken?: string } = {};
-  if (llmKey.value) patch.llmKey = llmKey.value;
-  if (clawToken.value) patch.clawToken = clawToken.value;
-  if (Object.keys(patch).length === 0) return;
-  await actions.saveCredentials(patch);
+  if (!llmKey.value) return;
+  await actions.saveCredentials({ llmKey: llmKey.value });
   // 存完立刻清空输入框：不让凭据留在 DOM 里。
   llmKey.value = "";
-  clawToken.value = "";
 }
 
 /**
- * 默认模型改成从 airouter 的列表里挑。
+ * 默认模型从端点的模型列表里挑。
  *
  * 手打模型名是这一页最容易出错的一格：名字写错了要等到第一次对话报 404 才知道，
  * 而那时错误来自上游、看起来像服务坏了。挑出来的同时把上下文窗口一起填上，
@@ -102,29 +97,20 @@ async function purge(): Promise<void> {
         <h2>凭据</h2>
         <p class="sub">只存进系统钥匙串，不写配置文件、不进日志、不进诊断包。</p>
       </header>
-      <p class="note warn">
-        BFF Key 等同于登录态，且<strong>永不过期</strong>——内部平台侧的校验不检查有效期或吊销时间。
-        它只存在系统钥匙串里，不会写进配置文件、日志或诊断包。怀疑泄露时请到内部平台删除该
-        Key，改密码没有用。
-      </p>
       <label>
         <span>LLM Key<em v-if="store.credentials.llmKey">已配置</em></span>
         <input v-model="llmKey" type="password" placeholder="留空表示不修改" />
       </label>
-      <label>
-        <span>内部平台 BFF Key<em v-if="store.credentials.clawToken">已配置</em></span>
-        <input v-model="clawToken" type="password" placeholder="bff-…（留空表示不修改）" />
-      </label>
-      <button class="primary" :disabled="!llmKey && !clawToken" @click="saveKeys()">
+      <button class="primary" :disabled="!llmKey" @click="saveKeys()">
         保存凭据
       </button>
 
-      <!-- 地址与模型收进「高级」：公司里这两个地址对所有人都一样，默认值就是对的，
+      <!-- 端点与模型收进「高级」：默认值对多数人就是对的，
            摊在页面上只是让人怀疑自己是不是漏填了什么。 -->
       <button class="disclosure" @click="advanced = !advanced">
         <span class="caret" :class="{ open: advanced }">›</span>
         高级
-        <span class="disclosure-note">模型端点、内部平台地址、默认模型</span>
+        <span class="disclosure-note">模型端点、默认模型</span>
       </button>
 
       <div v-if="advanced" class="advanced">
@@ -132,20 +118,10 @@ async function purge(): Promise<void> {
           <span>模型端点</span>
           <input
             :value="store.config.modelBaseUrl"
-            placeholder="https://llm.example.internal/v1"
+            placeholder="https://api.openai.com/v1"
             @change="saveField({ modelBaseUrl: ($event.target as HTMLInputElement).value })"
           />
-          <span class="hint">airouter 的 OpenAI 兼容地址，填到 <code>/v1</code>。清空会退回默认值。</span>
-        </label>
-
-        <label>
-          <span>内部平台地址</span>
-          <input
-            :value="store.config.clawUrl"
-            placeholder="https://claw.example.internal"
-            @change="saveField({ clawUrl: ($event.target as HTMLInputElement).value })"
-          />
-          <span class="hint">内部平台能力（数据 API、知识库这些）从这里拉。清空会退回默认值。</span>
+          <span class="hint">OpenAI 兼容地址，填到 <code>/v1</code>。清空会退回默认值。</span>
         </label>
 
         <label>
@@ -153,7 +129,7 @@ async function purge(): Promise<void> {
           <div class="picker">
             <button class="field-button" @click="openModelPicker()">
               <span v-if="store.config.model" class="picked-name">{{ store.config.model }}</span>
-              <span v-else class="placeholder">从 airouter 选一个</span>
+              <span v-else class="placeholder">从端点的模型列表里选一个</span>
               <span class="chev">⌄</span>
             </button>
 
@@ -298,7 +274,7 @@ async function purge(): Promise<void> {
       <p class="note warn">
         开了之后 Agent 能<strong>看见并操作整个屏幕</strong>，不只是工作目录——
         包括别的应用、系统设置、以及本应用自己的窗口。每个动作都会请你确认；
-        当最前面的应用是内部平台自己时会直接拒绝，免得它点到自己的审批弹窗。
+        当最前面的应用是 AIClaw 自己时会直接拒绝，免得它点到自己的审批弹窗。
         即便如此，这仍然是这里权限最大的一项，不用就关掉。
       </p>
       <p v-if="store.config.enableComputerUse" class="note">
@@ -313,7 +289,7 @@ async function purge(): Promise<void> {
         <h2>数据</h2>
         <p class="sub">会话与执行记录全部留在本机，不回写云端。</p>
       </header>
-      <p class="note">云端只能看到 LLM 用量与内部平台 API 调用。</p>
+      <p class="note">模型服务那边只能看到发给它的请求。</p>
       <label>
         <span>会话保留天数</span>
         <input

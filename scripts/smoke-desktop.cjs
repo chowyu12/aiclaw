@@ -27,7 +27,6 @@ const REQUIRED = [
   "runtime",
   "session",
   "profiles",
-  "capabilities",
   "groups",
   "models",
   "mcp",
@@ -59,16 +58,14 @@ app.whenReady().then(async () => {
     model: "",
     reasoningEffort: "medium",
     contextWindow: 0,
-    clawUrl: "",
     workdir: "/tmp/smoke",
     profile: "on-write",
     retentionDays: 30,
   }));
-  ipcMain.handle(IPC.credentialStatus, () => ({ llmKey: false, clawToken: false }));
+  ipcMain.handle(IPC.credentialStatus, () => ({ llmKey: false }));
   ipcMain.handle(IPC.profileList, () => [
     { id: "on-write", label: "默认", description: "执行命令与外部工具需确认" },
   ]);
-  ipcMain.handle(IPC.capabilityList, () => []);
   ipcMain.handle(IPC.groupRead, () => ({ groups: [], assignments: {} }));
   ipcMain.handle(IPC.mcpRead, () => []);
   ipcMain.handle(IPC.skillList, () => []);

@@ -6,7 +6,7 @@ import SettingsShell from "./views/SettingsShell.vue";
 import SessionSidebar from "./views/SessionSidebar.vue";
 import ApprovalDialog from "./views/ApprovalDialog.vue";
 
-// 地址有默认值，所以「配完了」实际只差一把 Key；模型没设过就去 airouter 挑一个。
+// 地址有默认值，所以「配完了」实际只差一把 Key；模型没设过就去端点挑一个。
 const configured = computed(() =>
   Boolean(store.config?.modelBaseUrl && store.credentials.llmKey),
 );
@@ -28,18 +28,6 @@ onMounted(async () => {
   // 开着应用第一件事总是点那个「启动」按钮，那这个按钮就不该存在——
   // 失败时会退回带重试按钮的提示页，不会卡在一个没有出口的界面上。
   await actions.startRuntime();
-});
-
-// 内部平台能力后台同步一次。
-//
-// 放在启动而不是每次开会话：那会把一次网络往返加进开会话的路径上，
-// 内部平台慢一点开会话就跟着慢。同步结果落本地文件，会话启动照旧只读文件。
-// 延后几秒，别和拉起运行时抢。
-onMounted(() => {
-  const timer = setTimeout(() => {
-    if (store.credentials.clawToken) void actions.syncCapabilities();
-  }, 3000);
-  onUnmounted(() => clearTimeout(timer));
 });
 
 // 开应用之后查一次，之后每 6 小时一次。
@@ -65,7 +53,7 @@ const updateReady = computed(
 
 <template>
   <!-- 没有顶栏：窗口自己有标题栏，再挂一条就是两层。导航挪进了侧边栏底部的
-       设置菜单——插件和配置都是低频的全局设置，不值得常驻一整行。 -->
+       设置菜单——MCP、技能和配置都是低频的全局设置，不值得常驻一整行。 -->
   <div class="shell">
     <SessionSidebar />
 

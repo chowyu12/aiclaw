@@ -28,8 +28,8 @@ const STAGING = join(REPO, "build", "app");
 const OUT = join(REPO, "release");
 
 /** 用户看到的名字。可执行文件、.app 目录、Dock 上显示的都是它。 */
-const APP_NAME = "内部平台";
-const BUNDLE_ID = "com.example.aiclaw";
+const APP_NAME = "AIClaw";
+const BUNDLE_ID = "com.github.chowyu12.aiclaw";
 
 function arg(name, fallback) {
   const hit = process.argv.find((value) => value.startsWith(`--${name}=`));
@@ -39,8 +39,10 @@ function arg(name, fallback) {
 const platform = arg("platform", process.platform);
 const arch = arg("arch", process.arch);
 // 版本号优先取 tag：CI 里 Release 的版本必须与 tag 一致，而不是与某次忘了
-// 提交的 package.json 一致。tag 形如 v0.2.0，去掉前缀的 v。
-const version = (process.env.CI_COMMIT_TAG ?? "").replace(/^v/, "") || rootVersion();
+// 提交的 package.json 一致。tag 形如 v2.1.0，去掉前缀的 v。GitHub Actions 把
+// tag 放在 GITHUB_REF_NAME；不是 tag 触发时那里是分支名，匹配不上就退回 package.json。
+const tag = process.env.GITHUB_REF_NAME ?? "";
+const version = (/^v\d/.test(tag) ? tag.slice(1) : "") || rootVersion();
 
 /**
  * 给 exe / .app 用的版本号，只留数字段。
@@ -119,7 +121,7 @@ function stage() {
         main: "dist/main/index.js",
         // Windows 打包必须有 author：packager 拿它填 exe 的 CompanyName，
         // 缺了会在推断阶段直接失败（与图标那一步无关，先于它发生）。
-        author: "示例公司",
+        author: "chowyu12",
         // 没有 dependencies：运行期要的东西都已经在 dist 与上面那份 agent-client 里。
         // 留着 dependencies 会让 packager 去装一遍构建期依赖。
       },
@@ -132,7 +134,7 @@ function stage() {
 
 function goBinaries() {
   const paths = [];
-  for (const name of ["claw-agent", "claw-mcp"]) {
+  for (const name of ["claw-agent"]) {
     // CI 里交叉编译的产物放在 build/bin/<平台>-<架构>/；本机打包时退回
     // tools/<name>/ 下那个（只在同平台同架构时才对，脚本会核对）。
     const fromCI = join(REPO, "build", "bin", `${platform}-${arch}`, binName(name));
@@ -222,10 +224,10 @@ async function main() {
     // 代价是文件多一些，对内部分发无所谓。
     asar: false,
     extraResource: goBinaries(),
-    appCopyright: "示例公司",
+    appCopyright: "AIClaw contributors",
     // macOS 这边**没有签名**：签名与公证都只能在 macOS 上做，而这条流水线
     // 跑在 Linux。用户第一次打开要右键「打开」，或者
-    // `xattr -dr com.apple.quarantine /Applications/内部平台.app`。
+    // `xattr -dr com.apple.quarantine /Applications/AIClaw.app`。
     // 以后有 macOS runner 了，在这里加 osxSign / osxNotarize。
     darwinDarkModeSupport: true,
     // win32metadata 同理：给了它 packager 就会去调 rcedit。

@@ -35,7 +35,7 @@ export interface ReportFacts {
 }
 
 const REDACTIONS: [RegExp, string][] = [
-  // OpenAI 风格的 Key。内部平台的 BFF Key 不是这个形状，但下面几条兜得住。
+  // OpenAI 风格的 Key。别的形状由下面几条兜住。
   [/\bsk-[A-Za-z0-9_-]{6,}/g, "sk-***"],
   [/\b(bearer\s+)\S+/gi, "$1***"],
   // KEY=value / "token": "value" / token: value
@@ -53,8 +53,7 @@ const REDACTIONS: [RegExp, string][] = [
 /**
  * 抹掉看起来像凭据的东西。
  *
- * 宁可多抹：抹错了最多让一行日志少几个字，漏了一次就是把等同登录态的
- * BFF Key 贴进了工单。
+ * 宁可多抹：抹错了最多让一行日志少几个字，漏了一次就是把模型 Key 贴进了工单。
  */
 export function redact(text: string): string {
   let out = text;
@@ -65,7 +64,7 @@ export function redact(text: string): string {
 /** 拼出给人看（和给人复制）的报告。 */
 export function buildReport(facts: ReportFacts, lines: LogLine[]): string {
   const rows: string[] = [];
-  rows.push("# 内部平台诊断信息");
+  rows.push("# AIClaw 诊断信息");
   rows.push("");
   rows.push(`版本：${facts.version}　Electron ${facts.electron}　Node ${facts.node}`);
   rows.push(`平台：${facts.platform} ${facts.arch}`);

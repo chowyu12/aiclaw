@@ -62,11 +62,11 @@ info.replaceAvailableLanguages([LANG]);
 info.setFileVersion(...quad(version), LANG.lang);
 info.setProductVersion(...quad(version), LANG.lang);
 info.setStringValues(LANG, {
-  CompanyName: "示例公司",
-  FileDescription: "内部平台",
-  ProductName: "内部平台",
-  OriginalFilename: "内部平台.exe",
-  LegalCopyright: "示例公司",
+  CompanyName: "chowyu12",
+  FileDescription: "AIClaw",
+  ProductName: "AIClaw",
+  OriginalFilename: "AIClaw.exe",
+  LegalCopyright: "AIClaw contributors",
   // 完整 tag（可能带 -rc1 这种后缀）只能放字符串字段：上面那两个数字版本
   // 只收整数，预发布后缀在那里表达不了。
   FileVersion: fullVersion || version,

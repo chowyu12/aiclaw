@@ -20,7 +20,7 @@ const KIND_LABEL: Record<ApprovalPayload["kind"], string> = {
  * 警告按类型说实话。
  *
  * 原来不分类型都写「这会直接在你的电脑上执行，没有沙箱隔离」——对一次打到
- * 内部平台的只读查询来说那句话是错的。弹窗上写错话比不写更糟：用户核对几次发现
+ * MCP 的只读查询来说那句话是错的。弹窗上写错话比不写更糟：用户核对几次发现
  * 对不上，之后就不看了。
  */
 const KIND_WARNING: Record<ApprovalPayload["kind"], string> = {

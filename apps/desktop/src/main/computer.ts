@@ -65,7 +65,7 @@ export class ComputerController {
     const frontmost = await this.frontmostApp();
     if (isSelf(frontmost)) {
       throw new Error(
-        `当前最前面的应用是内部平台自己（${frontmost}），已拒绝这次屏幕操作。` +
+        `当前最前面的应用是 AIClaw 自己（${frontmost}），已拒绝这次屏幕操作。` +
           `computer use 用来驱动别的应用；点自己的窗口意味着可能在点审批弹窗。` +
           `请先切到你要操作的那个应用。`,
       );
@@ -85,7 +85,7 @@ export class ComputerController {
       if (status !== "granted") {
         throw new Error(
           "没有屏幕录制权限，截不了屏。到「系统设置 → 隐私与安全性 → 屏幕录制」" +
-            "里勾上内部平台，然后重启应用。",
+            "里勾上 AIClaw，然后重启应用。",
         );
       }
     }
@@ -139,7 +139,7 @@ export class ComputerController {
     if (!systemPreferences.isTrustedAccessibilityClient(false)) {
       throw new Error(
         "没有辅助功能权限，动不了鼠标键盘。到「系统设置 → 隐私与安全性 → 辅助功能」" +
-          "里勾上内部平台。",
+          "里勾上 AIClaw。",
       );
     }
     const script = this.macScript(request);

@@ -108,7 +108,7 @@ export class ClawAgentClient extends EventEmitter {
 
   /**
    * 恢复会话。refresh 给的是当前配置里「跟着配置走」的那几项——不给的话
-   * 内核按存档恢复，用户后来加的 MCP server 与内部平台能力不会生效。
+   * 内核按存档恢复，用户后来加的 MCP server 与技能不会生效。
    */
   sessionResume(sessionId: string, refresh?: SessionRefresh): Promise<SessionStartResult> {
     this.assertReady();

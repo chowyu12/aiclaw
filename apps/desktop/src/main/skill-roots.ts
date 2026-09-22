@@ -4,7 +4,7 @@ import { join } from "node:path";
 /**
  * 找出这台机器上所有的技能目录。
  *
- * 技能是「目录 + SKILL.md」这个形状，Claude Code、Codex、内部平台 SkillHub 用的是
+ * 技能是「目录 + SKILL.md」这个形状，Claude Code、Codex 用的是
  * 同一套。既然如此，用户在别处装好的技能没有理由在这里看不见——让他为了同一份
  * SKILL.md 再装一遍，只会装出两份很快就不一致的副本。
  *
@@ -25,7 +25,7 @@ import { join } from "node:path";
  * 把它当成「装好的技能」会让列表时有时无。
  */
 
-export type RootLayout = "flat" | "versioned" | "npm";
+export type RootLayout = "flat" | "npm";
 
 export interface SkillRoot {
   path: string;
@@ -62,7 +62,7 @@ export function skillRoots(options: DiscoverOptions): SkillRoot[] {
   const platform = options.platform ?? process.platform;
 
   const roots: SkillRoot[] = [
-    { path: ownDir, label: "内部平台", writable: true, layout: "flat" },
+    { path: ownDir, label: "AIClaw", writable: true, layout: "flat" },
   ];
 
   // 项目级排在用户级前面：放进仓库的技能是为这个项目量身写的，
@@ -79,12 +79,6 @@ export function skillRoots(options: DiscoverOptions): SkillRoot[] {
   roots.push(
     { path: join(home, ".claude", "skills"), label: "Claude Code", writable: false, layout: "flat" },
     { path: join(home, ".codex", "skills"), label: "Codex", writable: false, layout: "flat" },
-    {
-      path: join(home, ".example-cli", "skill-cache"),
-      label: "内部平台 CLI",
-      writable: false,
-      layout: "versioned",
-    },
   );
 
   for (const path of npmGlobalRoots(home, env, platform)) {
@@ -141,13 +135,6 @@ export function scanRoot(root: SkillRoot): FoundSkill[] {
       case "flat":
         add(entry, name);
         break;
-      case "versioned": {
-        // `<名字>/<版本>/SKILL.md`。装了多个版本时只取最新的那个——
-        // 同一个技能的两个版本同时挂给模型，它无从选择。
-        const latest = latestVersion(safeReaddir(entry).filter((v) => isDir(join(entry, v))));
-        if (latest) add(join(entry, latest), name);
-        break;
-      }
       case "npm":
         if (name.startsWith("@")) {
           // 作用域包多一层：`@scope/<包>/SKILL.md`。
@@ -167,7 +154,7 @@ export function scanRoot(root: SkillRoot): FoundSkill[] {
 /**
  * 扫出全部技能，按真实路径去重。
  *
- * 同一个 CLI 缓存目录会被 Claude 和 Codex 各软链一次，再加上缓存本身就是三份；
+ * 同一个技能目录常被 Claude 和 Codex 各软链一次；
  * 按 `realpath` 去重之后只剩一份，而且留下的是**优先级最高**的那条路径——
  * 用户在界面上看到的来源标签因此是稳定的。
  */
@@ -188,8 +175,8 @@ export function discoverSkills(options: DiscoverOptions): FoundSkill[] {
 /**
  * 同名只留第一个。
  *
- * 按真实路径去重之后还会剩同名的：Claude 下是一份真目录、Codex 下是指向 CLI
- * 缓存的软链，路径不同但装的是同一个技能。两个同名技能一起挂给模型，
+ * 按真实路径去重之后还会剩同名的：Claude 下是一份真目录、Codex 下是指向别处
+ * 的软链，路径不同但装的是同一个技能。两个同名技能一起挂给模型，
  * `load_skill` 取到哪一个就成了运气——所以按 `skillRoots` 的顺序取第一个。
  *
  * 名字由调用方给出（要读 SKILL.md 的 frontmatter），这里只负责挑。
@@ -204,25 +191,6 @@ export function dedupeByName<T>(items: T[], nameOf: (item: T) => string): T[] {
     out.push(item);
   }
   return out;
-}
-
-/** 语义化版本比较，比不出来就按字符串排。取最大的那个。 */
-function latestVersion(versions: string[]): string | undefined {
-  if (versions.length === 0) return undefined;
-  const parse = (value: string): number[] =>
-    value.split(/[.\-+]/).map((part) => {
-      const n = Number(part);
-      return Number.isFinite(n) ? n : -1;
-    });
-  return [...versions].sort((a, b) => {
-    const left = parse(a);
-    const right = parse(b);
-    for (let i = 0; i < Math.max(left.length, right.length); i++) {
-      const diff = (right[i] ?? 0) - (left[i] ?? 0);
-      if (diff !== 0) return diff;
-    }
-    return b.localeCompare(a);
-  })[0];
 }
 
 /** statSync 跟符号链接，Dirent.isDirectory() 不跟——见文件头第 1 条。 */

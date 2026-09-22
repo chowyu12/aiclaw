@@ -100,7 +100,6 @@ export class SessionManager extends EventEmitter {
   private readonly models: ModelCatalog;
   private readonly computer = new ComputerController();
   private readonly agentBin: string;
-  private readonly clawMcpBin: string;
   /** 最近一段 stderr，失败时拼进错误信息，省得用户去翻日志。 */
   private lastStderr = "";
   /** 最近一次会话的挂载结果，诊断报告里要。 */
@@ -114,7 +113,6 @@ export class SessionManager extends EventEmitter {
     this.skills = skills;
     this.models = models;
     this.agentBin = resolveBin("CLAW_AGENT_BIN", "claw-agent");
-    this.clawMcpBin = resolveBin("CLAW_MCP_BIN", "claw-mcp");
   }
 
   get running(): boolean {
@@ -123,7 +121,6 @@ export class SessionManager extends EventEmitter {
 
   async start(): Promise<void> {
     if (this.client) return;
-    const config = this.store.readConfig();
     const credentials = this.store.readCredentials();
 
     this.emit("status", "starting");
@@ -133,12 +130,8 @@ export class SessionManager extends EventEmitter {
       args: ["serve", `--data-home=${this.store.agentHome}`],
       env: {
         ...process.env,
-        // 凭据只走进程环境，不写任何配置文件。
-        // AICLAW_LLM_KEY 给 claw-agent 打模型；CLAW_URL / CLAW_TOKEN 由它
-        // 拉起的 claw-mcp 子进程继承，用来打内部平台。
+        // 凭据只走进程环境，不写任何配置文件、不经协议帧。
         AICLAW_LLM_KEY: credentials.llmKey,
-        CLAW_URL: config.clawUrl,
-        CLAW_TOKEN: credentials.clawToken,
       },
     });
 
@@ -184,9 +177,9 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * 重启运行时。改了凭据或内部平台地址之后必须走一趟。
+   * 重启运行时。改了凭据之后必须走一趟。
    *
-   * **AICLAW_LLM_KEY / CLAW_URL / CLAW_TOKEN 是在 start() 里注入子进程环境的**
+   * **AICLAW_LLM_KEY 是在 start() 里注入子进程环境的**
    * ——凭据只进环境不进文件，这是刻意的，但代价是改完之后正在跑的那个内核
    * 仍然拿着旧值。不重启的话：换了 Key 继续聊会 401，而那个错来自上游、
    * 看起来像模型服务坏了，没人会想到是本地没生效。
@@ -207,7 +200,7 @@ export class SessionManager extends EventEmitter {
    * 新会话回到默认值，这是刻意的：一次临时换模型不该悄悄变成长期设置。
    *
    * workspace 同理，而且默认是**空的**：新会话不预设工作区，用户想好了再指。
-   * 早先这里用一个全局工作目录，结果是所有会话共用一个 ~/Workspace，
+   * 早先这里用一个全局工作目录，结果是所有会话共用一个目录，
    * 而用户真正想让 Agent 干活的地方在别处——他得先把文件搬进来。
    */
   async startSession(model?: string, workspace?: string): Promise<SessionInfo> {
@@ -361,11 +354,7 @@ export class SessionManager extends EventEmitter {
     this.requireClient().respondApproval(request.id, approved, scope);
   }
 
-  /**
-   * 把应用配置翻译成会话配置。
-   *
-   * 内部平台能力插件在这里挂载：每个实例一个 MCP server，工具集按实例裁剪。
-   */
+  /** 把应用配置翻译成会话配置。 */
   private buildParams(
     config: AppConfig,
     modelOverride?: string,
@@ -395,25 +384,13 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * 拼出这次要挂的全部 MCP server：内部平台能力实例 + 用户自己配的。
+   * 拼出这次要挂的全部 MCP server。
    *
-   * 每次都重新落一遍实例配置：用户在能力页改完、或者后台同步到了新的内部平台
-   * 能力，下一次挂载就生效。
+   * 每次开会话都重新拼：用户在 MCP 页改完，下一次挂载就生效。
    */
   private buildMcpServers(): Record<string, MCPServerConfig> {
     const mcpServers: Record<string, MCPServerConfig> = {};
-    for (const instance of this.store.materializeInstances()) {
-      mcpServers[instance.id] = {
-        command: this.clawMcpBin,
-        args: ["serve", `--type=${instance.type}`, `--config=${instance.configPath}`],
-        // 内部平台能力不问：这些工具是内部平台按当前员工的权限授出来的，准入已经在
-        // 内部平台侧判过一遍，客户端再弹一次框只是噪音。
-        trusted: true,
-      };
-    }
-
-    // 用户自己配的 MCP server。名字会成为工具名前缀，所以与内部平台实例用同一个
-    // 命名空间——撞名时内核会在挂载阶段报重复注册，比静默遮蔽好查。
+    // 名字会成为工具名前缀——撞名时内核会在挂载阶段报重复注册，比静默遮蔽好查。
     for (const server of this.store.readMcpServers()) {
       if (!server.enabled) continue;
       // 第三方 server 不标 trusted：来源与副作用都未知，照常走审批
@@ -430,7 +407,7 @@ export class SessionManager extends EventEmitter {
    * 恢复会话时要用当前配置盖掉存档的那几项。
    *
    * 存档里的是**建会话那一刻**的配置，而应用一启动就接着上次的会话：
-   * 不盖的话，用户后来加的 MCP server、刚同步到的内部平台能力、新装的技能
+   * 不盖的话，用户后来加的 MCP server、新装的技能
    * 一个都挂不上，而界面上什么都不会说——用户只会得出「配了没用」。
    * 工作目录和模型不在里面，理由见 protocol 里 SessionRefresh 的说明。
    */
