@@ -2,7 +2,7 @@
 import { useId } from "vue";
 
 /**
- * AIClaw 标识：主题色渐变的圆角方块上三道爪痕。
+ * AIClaw 标识：主题色渐变的圆角方块上一枚爪印。
  *
  * 与 `scripts/make-icon.cjs` 里的应用图标是同一份形状，改一处要改另一处。
  *
@@ -23,8 +23,8 @@ const shineId = `ac-shine-${uid}`;
       <svg class="svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
         <defs>
           <linearGradient :id="gradId" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stop-color="#14685c" />
-            <stop offset="100%" stop-color="#4fbca7" />
+            <stop offset="0%" stop-color="#1b7f45" />
+            <stop offset="100%" stop-color="#4fcd7f" />
           </linearGradient>
           <linearGradient :id="shineId" x1="0%" y1="0%" x2="0%" y2="100%">
             <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35" />
@@ -35,11 +35,18 @@ const shineId = `ac-shine-${uid}`;
         <rect width="32" height="32" rx="9" :fill="`url(#${gradId})`" />
         <rect width="32" height="32" rx="9" :fill="`url(#${shineId})`" class="shine" />
 
-        <!-- 三道爪痕：从左下向右上，越靠右越短。 -->
-        <g fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round">
-          <path d="M9 23.5 C 9 16.5 12 12 16.5 9" />
-          <path d="M15 24.5 C 15.2 18.5 17.8 14.5 21.5 12" opacity="0.92" />
-          <path d="M21 25 C 21.5 20.5 23.3 17.8 26 16" opacity="0.8" />
+        <!-- 爪印：一个掌垫、三个趾垫。比三道划痕更像一个「会做事的家伙」的印记。 -->
+        <g fill="#ffffff">
+          <circle cx="9.6" cy="11.4" r="3.1" />
+          <circle cx="16" cy="8.6" r="3.3" />
+          <circle cx="22.4" cy="11.4" r="3.1" />
+          <path
+            d="M16 26.6
+               C 11.2 26.6 8.4 23.8 8.9 20.3
+               C 9.4 16.9 12.4 15.2 16 15.2
+               C 19.6 15.2 22.6 16.9 23.1 20.3
+               C 23.6 23.8 20.8 26.6 16 26.6 Z"
+          />
         </g>
       </svg>
     </span>
@@ -61,8 +68,8 @@ const shineId = `ac-shine-${uid}`;
   position: relative;
   border-radius: 8px;
   box-shadow:
-    0 1px 2px rgba(20, 104, 92, 0.18),
-    0 6px 18px -8px rgba(20, 104, 92, 0.45);
+    0 1px 2px rgba(27, 127, 69, 0.18),
+    0 6px 18px -8px rgba(27, 127, 69, 0.45);
 }
 
 /* 内描边：深色底上如果没有它，圆角方块的边会糊进背景里。 */

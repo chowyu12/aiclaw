@@ -64,7 +64,7 @@ function createWindow(): void {
     minWidth: 860,
     minHeight: 600,
     title: "AIClaw",
-    backgroundColor: "#f5f7f7",
+    backgroundColor: "#f4f7f4",
     // macOS 忽略这个字段（那边走 app.dock.setIcon），Windows 与 Linux 看它。
     icon: existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {

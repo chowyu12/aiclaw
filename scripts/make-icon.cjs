@@ -37,7 +37,7 @@ const SHADOW_BLUR = 22;
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}" width="${SIZE}" height="${SIZE}">
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#14685c"/><stop offset="100%" stop-color="#4fbca7"/>
+      <stop offset="0%" stop-color="#1b7f45"/><stop offset="100%" stop-color="#4fcd7f"/>
     </linearGradient>
     <linearGradient id="s" x1="0%" y1="0%" x2="0%" y2="100%">
       <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
@@ -45,7 +45,7 @@ const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE
     </linearGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="${SHADOW_DY}" stdDeviation="${SHADOW_BLUR}"
-                    flood-color="#0a2f2a" flood-opacity="0.28"/>
+                    flood-color="#0a2f18" flood-opacity="0.28"/>
     </filter>
   </defs>
 
@@ -54,12 +54,13 @@ const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE
   </g>
   <rect x="${INSET}" y="${INSET}" width="${BODY}" height="${BODY}" rx="${RADIUS}" fill="url(#s)"/>
 
-  <!-- 爪痕按 32 格坐标画的，整体缩放到圆角方块里。 -->
-  <g transform="translate(${INSET} ${INSET}) scale(${BODY / 32})"
-     fill="none" stroke="#ffffff" stroke-width="2.8" stroke-linecap="round">
-    <path d="M9 23.5 C 9 16.5 12 12 16.5 9"/>
-    <path d="M15 24.5 C 15.2 18.5 17.8 14.5 21.5 12" opacity="0.92"/>
-    <path d="M21 25 C 21.5 20.5 23.3 17.8 26 16" opacity="0.8"/>
+  <!-- 爪印按 32 格坐标画的，整体缩放到圆角方块里。与 BrandLogo.vue 同一份形状。 -->
+  <g transform="translate(${INSET} ${INSET}) scale(${BODY / 32})" fill="#ffffff">
+    <circle cx="9.6" cy="11.4" r="3.1"/>
+    <circle cx="16" cy="8.6" r="3.3"/>
+    <circle cx="22.4" cy="11.4" r="3.1"/>
+    <path d="M16 26.6 C 11.2 26.6 8.4 23.8 8.9 20.3 C 9.4 16.9 12.4 15.2 16 15.2
+             C 19.6 15.2 22.6 16.9 23.1 20.3 C 23.6 23.8 20.8 26.6 16 26.6 Z"/>
   </g>
 </svg>`;
 

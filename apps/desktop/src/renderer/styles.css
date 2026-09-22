@@ -5,35 +5,36 @@
  *     一个元素属于哪一层决定它用哪个底色，不要临时挑颜色。
  *   - 文字分三级：ink 正文 / ink-2 次要 / muted 辅助。同一段里最多用两级，
  *     三级全上会糊成一锅灰。
- *   - 中性色统一往青绿偏一点（与 accent 同向）。纯灰看起来像没调过。
+ *   - 中性色统一往绿偏一点（与 accent 同向）。纯灰看起来像没调过。
  */
 :root {
-  --ground: #f4f6f6;
+  --ground: #f4f7f4;
   --surface: #ffffff;
-  --surface-2: #eef1f1;
-  --sidebar: #eceff0;
+  --surface-2: #eef2ee;
+  --sidebar: #ecf0ec;
 
   --ink: #10161a;
   --ink-2: #47535a;
   --muted: #727f86;
 
-  --rule: #e0e5e6;
-  --rule-strong: #cdd5d7;
+  --rule: #e0e6e1;
+  --rule-strong: #cdd6cf;
 
-  --accent: #14685c;
-  --accent-hover: #10554b;
-  --accent-soft: #e2efec;
+  /* 白字压在 accent 上对比度 4.9:1，别再往亮了调。 */
+  --accent: #1b7f45;
+  --accent-hover: #166a39;
+  --accent-soft: #e3f3e8;
   --on-accent: #ffffff;
 
-  --ok: #14685c;
-  --ok-soft: #e0efeb;
+  --ok: #1b7f45;
+  --ok-soft: #e1f1e6;
   --warn: #8a6210;
   --warn-soft: #f5ebd6;
   --danger: #a83329;
   --danger-soft: #f7e5e2;
 
-  --hover: #e5eaea;
-  --active: #d9e6e3;
+  --hover: #e5ebe6;
+  --active: #d7e9dc;
 
   /* 圆角只有这四档。混用会让界面看起来是拼出来的。 */
   --r-sm: 6px;
@@ -52,32 +53,32 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #0e1214;
-    --surface: #171d20;
-    --surface-2: #1e2529;
-    --sidebar: #121719;
+    --ground: #0e1310;
+    --surface: #161d18;
+    --surface-2: #1d2620;
+    --sidebar: #111813;
 
     --ink: #e8edee;
     --ink-2: #aab5ba;
     --muted: #7f8c92;
 
-    --rule: #262f33;
-    --rule-strong: #36403f;
+    --rule: #26302a;
+    --rule-strong: #364038;
 
-    --accent: #4fbca7;
-    --accent-hover: #63cbb7;
-    --accent-soft: #15302b;
-    --on-accent: #08201c;
+    --accent: #4fcd7f;
+    --accent-hover: #6ad893;
+    --accent-soft: #163524;
+    --on-accent: #06200f;
 
-    --ok: #4fbca7;
-    --ok-soft: #17332f;
+    --ok: #4fcd7f;
+    --ok-soft: #17332a;
     --warn: #d9ac52;
     --warn-soft: #322813;
     --danger: #e98379;
     --danger-soft: #35201d;
 
-    --hover: #1f282c;
-    --active: #1b332e;
+    --hover: #1f2923;
+    --active: #1a3425;
 
     /* 深色下靠亮度分层，投影几乎看不见，所以压得更轻。 */
     --shadow-1: 0 1px 2px rgb(0 0 0 / 30%);
