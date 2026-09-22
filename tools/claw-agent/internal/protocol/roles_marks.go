@@ -1,21 +1,48 @@
 package protocol
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
-// 模型清单里的能力标记：`qwen3-vl-plus#vision,image`。
+// 模型清单项的写法：`名字[#能力,能力][@上下文窗口]`。
 //
-// 为什么附在名字后面而不是换成对象数组：旧版的清单是一个纯字符串数组，
-// 换结构就要迁移所有人的配置库；而 `#` 不是模型名的合法字符，解析没有歧义。
-// 没有 `#` 的名字就是「只做对话」——这正是旧记录的语义。
+//	qwen3-vl-plus#vision@131072
+//	gpt-5.4#vision,image
+//	deepseek-chat
+//
+// 为什么把元数据附在名字后面而不是换成对象数组：旧版的清单是一个纯字符串
+// 数组，换结构就要迁移所有人的配置库；而 `#` 与 `@` 都不是模型名的合法字符，
+// 解析没有歧义。两段都省掉的名字就是「只做对话、窗口未知」——那正是旧记录
+// 的语义，所以旧清单原样可读。
 
-// ParseModelMark 把一条清单项拆成模型名与能力集。
-func ParseModelMark(entry string) (string, []ModelRole) {
-	name, marks, found := strings.Cut(strings.TrimSpace(entry), "#")
-	name = strings.TrimSpace(name)
-	if !found {
-		return name, nil
+// ParsedModel 是一条清单项拆开之后的样子。
+type ParsedModel struct {
+	Name  string
+	Roles []ModelRole
+	// Context 是上下文窗口（token）。0 表示不知道——那时内核只能等上游报
+	// 「超出上下文」再被动压缩，白花一次请求。
+	Context int
+}
+
+// ParseModelMark 把一条清单项拆成模型名、能力集与上下文窗口。
+func ParseModelMark(entry string) ParsedModel {
+	rest := strings.TrimSpace(entry)
+
+	// 窗口先切：`@` 一定在最后一段，而模型名里不会有它。
+	parsed := ParsedModel{}
+	if head, tail, found := strings.Cut(rest, "@"); found {
+		rest = head
+		if value, err := strconv.Atoi(strings.TrimSpace(tail)); err == nil && value > 0 {
+			parsed.Context = value
+		}
 	}
-	var roles []ModelRole
+
+	name, marks, found := strings.Cut(rest, "#")
+	parsed.Name = strings.TrimSpace(name)
+	if !found {
+		return parsed
+	}
 	seen := map[ModelRole]bool{}
 	for _, mark := range strings.Split(marks, ",") {
 		role := ModelRole(strings.ToLower(strings.TrimSpace(mark)))
@@ -23,38 +50,42 @@ func ParseModelMark(entry string) (string, []ModelRole) {
 			continue
 		}
 		seen[role] = true
-		roles = append(roles, role)
+		parsed.Roles = append(parsed.Roles, role)
 	}
-	return name, roles
+	return parsed
 }
 
-// FormatModelMark 把模型名与能力集拼回一条清单项。没有能力就只有名字。
-func FormatModelMark(name string, roles []ModelRole) string {
-	name = strings.TrimSpace(name)
-	if len(roles) == 0 {
-		return name
+// FormatModelMark 把拆开的部分拼回一条清单项。
+//
+// 顺序固定（能力按 KnownRoles 排、窗口在最后），同一份配置每次写出来都一样——
+// 否则每次同步都会让配置库无谓地变动。
+func FormatModelMark(parsed ParsedModel) string {
+	entry := strings.TrimSpace(parsed.Name)
+	if entry == "" {
+		return ""
 	}
-	marks := make([]string, 0, len(roles))
+	marks := make([]string, 0, len(parsed.Roles))
 	seen := map[ModelRole]bool{}
-	// 按 KnownRoles 的顺序输出，让同一份配置每次写出来都一样。
 	for _, known := range KnownRoles() {
-		for _, role := range roles {
+		for _, role := range parsed.Roles {
 			if role == known && !seen[known] {
 				seen[known] = true
 				marks = append(marks, string(known))
 			}
 		}
 	}
-	if len(marks) == 0 {
-		return name
+	if len(marks) > 0 {
+		entry += "#" + strings.Join(marks, ",")
 	}
-	return name + "#" + strings.Join(marks, ",")
+	if parsed.Context > 0 {
+		entry += "@" + strconv.Itoa(parsed.Context)
+	}
+	return entry
 }
 
 // ModelHasRole 报一条清单项带不带某个能力。
 func ModelHasRole(entry string, role ModelRole) bool {
-	_, roles := ParseModelMark(entry)
-	for _, item := range roles {
+	for _, item := range ParseModelMark(entry).Roles {
 		if item == role {
 			return true
 		}

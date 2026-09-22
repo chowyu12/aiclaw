@@ -73,10 +73,20 @@ function openModelPicker(): void {
   void nextTick(() => searchBox.value?.select());
 }
 
-async function pickModel(providerId: number, id: string): Promise<void> {
+/**
+ * 选默认模型。窗口跟着模型走。
+ *
+ * 换了模型窗口就不一样了，旧值不能沿用。清单项里有窗口（「模型服务」页按
+ * models.dev 标过）就填上——那个数字要去翻文档，没人愿意手抄；没有就清零，
+ * 内核退回「等上游报超窗再压缩」。
+ */
+async function pickModel(choice: { providerId: number; model: string; context: number }): Promise<void> {
   modelPickerOpen.value = false;
-  // 换了模型窗口就不一样了，旧值不能沿用；用户知道的话在下面那格填。
-  await saveField({ providerId, model: id, contextWindow: 0 });
+  await saveField({
+    providerId: choice.providerId,
+    model: choice.model,
+    contextWindow: choice.context,
+  });
 }
 
 /**
@@ -85,6 +95,12 @@ async function pickModel(providerId: number, id: string): Promise<void> {
  * 候选来自「模型服务」页勾过对应能力的模型——不在这里列出全部模型让用户猜
  * 哪个能看图：那等于把标记这件事推给每一次选择。
  */
+/** 窗口按量级换单位：272000 写成 272K 才读得出大小。 */
+function formatWindow(tokens: number): string {
+  if (!tokens) return "";
+  return tokens >= 1000 ? `${Math.round(tokens / 1000)}K 上下文` : `${tokens} 上下文`;
+}
+
 const candidates = computed(() =>
   Object.fromEntries(MODEL_ROLES.map((role) => [role, roleCandidates(store.providers, role)])) as
     Record<ModelRole, ReturnType<typeof roleCandidates>>,
@@ -165,7 +181,7 @@ async function purge(): Promise<void> {
               v-model="modelSearch"
               class="menu-search"
               placeholder="搜索模型或服务名"
-              @keydown.enter="choices[0] && pickModel(choices[0].providerId, choices[0].model)"
+              @keydown.enter="choices[0] && pickModel(choices[0])"
               @keydown.esc="modelPickerOpen = false"
             />
             <p v-if="store.providersLoading" class="menu-note">正在读取…</p>
@@ -177,10 +193,12 @@ async function purge(): Promise<void> {
               :key="`${choice.providerId}/${choice.model}`"
               class="menu-item"
               :class="{ picked: choice.providerId === store.config.providerId && choice.model === store.config.model }"
-              @click="pickModel(choice.providerId, choice.model)"
+              @click="pickModel(choice)"
             >
               <span class="menu-name">{{ choice.model }}</span>
-              <span class="menu-note">{{ choice.providerName }}</span>
+              <span class="menu-note">
+                {{ choice.providerName }}<template v-if="choice.context"> · {{ formatWindow(choice.context) }}</template>
+              </span>
             </button>
           </div>
         </div>
@@ -207,7 +225,7 @@ async function purge(): Promise<void> {
             type="number"
             min="0"
             step="1000"
-            placeholder="不知道就留空"
+            placeholder="选模型时自动填"
             :value="store.config.contextWindow || ''"
             @change="
               saveField({ contextWindow: Number(($event.target as HTMLInputElement).value) || 0 })
@@ -217,7 +235,8 @@ async function purge(): Promise<void> {
       </div>
       <p class="note">
         上下文窗口填了才能在撑满之前主动压缩历史；不填也能跑，只是要等上游报错再压，
-        白花一次请求。
+        白花一次请求。选模型时会用清单里记着的值自动填——那个值在「模型服务」页
+        点「按 models.dev 标记能力」时一并写进去。
       </p>
     </section>
 
@@ -245,7 +264,7 @@ async function purge(): Promise<void> {
             :key="`${item.providerId}/${item.model}`"
             :value="`${item.providerId}/${item.model}`"
           >
-            {{ item.model }} · {{ item.providerName }}
+            {{ item.model }} · {{ item.providerName }}{{ item.context ? ` · ${formatWindow(item.context)}` : "" }}
           </option>
         </select>
         <span class="hint">{{ ROLE_HINTS[role] }}</span>

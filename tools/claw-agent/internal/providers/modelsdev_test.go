@@ -15,11 +15,13 @@ const sample = `{
     "models": {
       "google/gemini-3-pro": {
         "id": "google/gemini-3-pro",
-        "modalities": {"input": ["audio","image","pdf","text","video"], "output": ["text"]}
+        "modalities": {"input": ["audio","image","pdf","text","video"], "output": ["text"]},
+        "limit": {"context": 1048576, "output": 65536}
       },
       "openai/gpt-5.4": {
         "id": "openai/gpt-5.4",
-        "modalities": {"input": ["text"], "output": ["text"]}
+        "modalities": {"input": ["text"], "output": ["text"]},
+        "limit": {"context": 272000}
       }
     }
   },
@@ -106,6 +108,22 @@ func TestRolesDoesNotMatchByPrefix(t *testing.T) {
 	// 前者的能力安到后者头上，那种错没人查得出来。
 	if roles := c.Roles("gpt-5.4-mini"); roles != nil {
 		t.Errorf("不该按前缀匹配：%v", roles)
+	}
+}
+
+func TestContextWindowComesFromTheTable(t *testing.T) {
+	c := catalog(t)
+	entry, ok := c.Lookup("google/gemini-3-pro")
+	if !ok || entry.Context != 1048576 {
+		t.Errorf("窗口 = %d，想要 1048576", entry.Context)
+	}
+	// 纯文本模型没有能力标记，但仍然要能查到窗口——那正是用户最需要自动填的那格。
+	plain, ok := c.Lookup("gpt-5.4")
+	if !ok {
+		t.Fatal("纯文本模型也要进索引：它有窗口")
+	}
+	if len(plain.Roles) != 0 || plain.Context != 272000 {
+		t.Errorf("纯文本模型 = %+v，想要没有能力、窗口 272000", plain)
 	}
 }
 

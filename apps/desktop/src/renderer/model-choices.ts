@@ -10,7 +10,10 @@
 export interface ModelChoice {
   providerId: number;
   providerName: string;
+  /** 发给服务的名字，不带能力/窗口标记。 */
   model: string;
+  /** 上下文窗口（token），来自清单项的 `@` 段。0 表示不知道。 */
+  context: number;
 }
 
 /**
@@ -25,6 +28,23 @@ type ProviderLike = {
   readonly models: readonly string[];
 };
 
+/**
+ * 拆一条清单项。只取名字与窗口——这个文件不该知道能力那一套，
+ * 完整的解析在 model-roles.ts。
+ */
+function parseEntry(entry: string): { name: string; context: number } {
+  let rest = entry.trim();
+  let context = 0;
+  const at = rest.indexOf("@");
+  if (at >= 0) {
+    const value = Number.parseInt(rest.slice(at + 1).trim(), 10);
+    if (Number.isFinite(value) && value > 0) context = value;
+    rest = rest.slice(0, at);
+  }
+  const hash = rest.indexOf("#");
+  return { name: (hash < 0 ? rest : rest.slice(0, hash)).trim(), context };
+}
+
 /** 能用的模型服务：启用了、配了 Key、清单里至少有一个模型。 */
 export function usable(provider: ProviderLike): boolean {
   return provider.enabled && provider.apiKeySet && provider.models.length > 0;
@@ -35,8 +55,11 @@ export function modelChoices(providers: readonly ProviderLike[]): ModelChoice[] 
   const choices: ModelChoice[] = [];
   for (const provider of providers) {
     if (!usable(provider)) continue;
-    for (const model of provider.models) {
-      choices.push({ providerId: provider.id, providerName: provider.name, model });
+    for (const entry of provider.models) {
+      // 清单项可能带能力与窗口标记（`名字#vision@131072`）。发给服务的是名字
+      // 那一段——把整条送过去，上游只会回一句「没有这个模型」。
+      const { name, context } = parseEntry(entry);
+      choices.push({ providerId: provider.id, providerName: provider.name, model: name, context });
     }
   }
   return choices;

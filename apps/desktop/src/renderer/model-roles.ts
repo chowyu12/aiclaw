@@ -27,25 +27,55 @@ export const ROLE_HINTS: Record<ModelRole, string> = {
   image: "按描述生成图片（generate_image 工具）",
 };
 
-/** 把一条清单项拆成模型名与能力集。 */
-export function parseModelMark(entry: string): { name: string; roles: ModelRole[] } {
-  const index = entry.indexOf("#");
-  if (index < 0) return { name: entry.trim(), roles: [] };
-  const name = entry.slice(0, index).trim();
+/** 一条清单项拆开之后的样子。 */
+export interface ParsedModel {
+  name: string;
+  roles: ModelRole[];
+  /** 上下文窗口（token）。0 表示不知道。 */
+  context: number;
+}
+
+/** 把一条清单项拆成模型名、能力集与上下文窗口。 */
+export function parseModelMark(entry: string): ParsedModel {
+  let rest = entry.trim();
+  let context = 0;
+
+  // 窗口先切：`@` 一定在最后一段，而模型名里不会有它。
+  const at = rest.indexOf("@");
+  if (at >= 0) {
+    const value = Number.parseInt(rest.slice(at + 1).trim(), 10);
+    if (Number.isFinite(value) && value > 0) context = value;
+    rest = rest.slice(0, at);
+  }
+
+  const hash = rest.indexOf("#");
+  if (hash < 0) return { name: rest.trim(), roles: [], context };
   const roles: ModelRole[] = [];
-  for (const mark of entry.slice(index + 1).split(",")) {
+  for (const mark of rest.slice(hash + 1).split(",")) {
     const role = mark.trim().toLowerCase() as ModelRole;
     // 不认识的标记丢掉而不是报错：清单是手写的。
     if (MODEL_ROLES.includes(role) && !roles.includes(role)) roles.push(role);
   }
-  return { name, roles };
+  return { name: rest.slice(0, hash).trim(), roles, context };
 }
 
-/** 把模型名与能力集拼回一条清单项。顺序固定，同一份配置每次写出来都一样。 */
-export function formatModelMark(name: string, roles: ModelRole[]): string {
-  const clean = name.trim();
-  const marks = MODEL_ROLES.filter((role) => roles.includes(role));
-  return marks.length === 0 ? clean : `${clean}#${marks.join(",")}`;
+/**
+ * 把拆开的部分拼回一条清单项。
+ *
+ * 顺序固定（能力按 MODEL_ROLES 排、窗口在最后），同一份配置每次写出来都一样——
+ * 否则每次同步都会让配置库无谓地变动。与 Go 侧 FormatModelMark 是同一套规则。
+ */
+export function formatModelMark(parsed: {
+  name: string;
+  roles: ModelRole[];
+  context?: number;
+}): string {
+  let entry = parsed.name.trim();
+  if (!entry) return "";
+  const marks = MODEL_ROLES.filter((role) => parsed.roles.includes(role));
+  if (marks.length > 0) entry += `#${marks.join(",")}`;
+  if (parsed.context && parsed.context > 0) entry += `@${parsed.context}`;
+  return entry;
 }
 
 /** 一条清单项带不带某个能力。 */
@@ -58,6 +88,8 @@ export interface RoleCandidate {
   providerId: number;
   providerName: string;
   model: string;
+  /** 上下文窗口（token）。0 表示不知道。 */
+  context: number;
 }
 
 type ProviderLike = {
@@ -81,7 +113,12 @@ export function roleCandidates(providers: readonly ProviderLike[], role: ModelRo
     for (const entry of provider.models) {
       const parsed = parseModelMark(entry);
       if (!parsed.roles.includes(role)) continue;
-      found.push({ providerId: provider.id, providerName: provider.name, model: parsed.name });
+      found.push({
+        providerId: provider.id,
+        providerName: provider.name,
+        model: parsed.name,
+        context: parsed.context,
+      });
     }
   }
   return found;

@@ -172,10 +172,10 @@ function toggleExpand(id: number): void {
  */
 async function toggleRole(provider: ProviderRow, entry: string, role: ModelRole, on: boolean): Promise<void> {
   const parsed = parseModelMark(entry);
-  const roles = on
-    ? [...parsed.roles, role]
-    : parsed.roles.filter((item) => item !== role);
-  const next = provider.models.map((item) => (item === entry ? formatModelMark(parsed.name, roles) : item));
+  const roles = on ? [...parsed.roles, role] : parsed.roles.filter((item) => item !== role);
+  const next = provider.models.map((item) =>
+    item === entry ? formatModelMark({ ...parsed, roles }) : item,
+  );
   await run(() => actions.updateProvider({ id: provider.id, models: next }));
 }
 

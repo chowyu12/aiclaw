@@ -176,6 +176,12 @@ const policy = computed(() =>
   store.profiles.find((profile) => profile.id === store.config?.profile),
 );
 
+/** 窗口按量级换单位：272000 写成 272K 才读得出大小。 */
+function formatWindow(tokens: number): string {
+  if (!tokens) return "";
+  return tokens >= 1000 ? `${Math.round(tokens / 1000)}K 上下文` : `${tokens} 上下文`;
+}
+
 /** 能选的模型：每个能用的模型服务下的每个模型。 */
 const allChoices = computed(() => modelChoices(store.providers));
 /** 搜索关键词。一个服务能列出上百个模型，翻找不现实。 */
@@ -193,9 +199,9 @@ function openModelMenu(): void {
   void nextTick(() => searchBox.value?.select());
 }
 
-async function pickModel(providerId: number, id: string): Promise<void> {
+async function pickModel(choice: { providerId: number; model: string; context: number }): Promise<void> {
   modelOpen.value = false;
-  await actions.switchModel(providerId, id);
+  await actions.switchModel(choice.providerId, choice.model, choice.context);
 }
 
 async function pickPolicy(id: string): Promise<void> {
@@ -497,7 +503,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                       v-model="modelSearch"
                       class="menu-search"
                       placeholder="搜索模型或服务名"
-                      @keydown.enter="choices[0] && pickModel(choices[0].providerId, choices[0].model)"
+                      @keydown.enter="choices[0] && pickModel(choices[0])"
                       @keydown.esc="modelOpen = false"
                     />
                     <p v-if="store.providersLoading" class="menu-note pad">正在读取模型服务…</p>
@@ -515,10 +521,12 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                       :key="`${choice.providerId}/${choice.model}`"
                       class="menu-item"
                       :class="{ picked: choice.providerId === store.providerId && choice.model === store.model }"
-                      @click="pickModel(choice.providerId, choice.model)"
+                      @click="pickModel(choice)"
                     >
                       <span class="menu-name">{{ choice.model }}</span>
-                      <span class="menu-note">{{ choice.providerName }}</span>
+                      <span class="menu-note">
+                        {{ choice.providerName }}<template v-if="choice.context"> · {{ formatWindow(choice.context) }}</template>
+                      </span>
                     </button>
                   </div>
                 </div>

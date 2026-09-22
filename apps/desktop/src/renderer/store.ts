@@ -1081,19 +1081,22 @@ export const actions = {
    * 上下文窗口一起下发：不同模型窗口能差一个数量级，沿用上一个模型的值
    * 会让内核要么过早压缩、要么撑爆窗口。这里只知道默认模型的窗口，别的传 0。
    */
-  async switchModel(providerId: number, modelId: string): Promise<void> {
+  async switchModel(providerId: number, modelId: string, contextWindow = 0): Promise<void> {
     if (!modelId || (modelId === state.model && providerId === state.providerId)) return;
     const previous = { model: state.model, providerId: state.providerId };
     state.model = modelId;
     state.providerId = providerId;
     if (!state.sessionId) return;
+    // 窗口优先用清单里记着的；切回默认模型时退回配置里那个（用户可能手填过）。
+    // 变量名别叫 window——那会遮蔽全局的 window，而下一行正要用它。
     const isDefault = modelId === state.config?.model && providerId === state.config?.providerId;
+    const limit = contextWindow || (isDefault ? (state.config?.contextWindow ?? 0) : 0);
     try {
       await window.aiclaw.session.configure({
         sessionId: state.sessionId,
         providerId,
         model: modelId,
-        contextWindow: isDefault ? (state.config?.contextWindow ?? 0) : 0,
+        contextWindow: limit,
       });
       await actions.refreshSessions();
     } catch (error) {

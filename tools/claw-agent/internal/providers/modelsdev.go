@@ -36,11 +36,18 @@ const catalogTTL = 6 * time.Hour
 // 出问题的响应把内存吃光。
 const maxCatalogBytes = 64 << 20
 
+// Entry 是那份表里关于一个模型的、我们用得上的部分。
+type Entry struct {
+	Roles []protocol.ModelRole
+	// Context 是上下文窗口（token）。0 表示那份表没给。
+	Context int
+}
+
 // Catalog 是按模型名索引的能力表。
 type Catalog struct {
-	// byName 的键是**规范化后的模型名**：小写、去掉 provider 前缀。
-	// 同名模型在不同网关下的能力取并集，见 add 的说明。
-	byName map[string][]protocol.ModelRole
+	// byName 的键是**规范化后的模型名**：小写，带前缀与不带前缀的写法都收。
+	// 同名模型在不同网关下的条目取并集，见 add 的说明。
+	byName map[string]Entry
 }
 
 var (
@@ -92,6 +99,9 @@ type catalogProvider struct {
 			Input  []string `json:"input"`
 			Output []string `json:"output"`
 		} `json:"modalities"`
+		Limit struct {
+			Context int `json:"context"`
+		} `json:"limit"`
 	} `json:"models"`
 }
 
@@ -102,17 +112,20 @@ func ParseCatalog(body []byte) (*Catalog, error) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("models.dev 的数据看不懂：%w", err)
 	}
-	catalog := &Catalog{byName: map[string][]protocol.ModelRole{}}
+	catalog := &Catalog{byName: map[string]Entry{}}
 	for _, provider := range raw {
 		for key, model := range provider.Models {
-			roles := rolesOf(model.Modalities.Input, model.Modalities.Output)
-			if len(roles) == 0 {
+			entry := Entry{
+				Roles:   rolesOf(model.Modalities.Input, model.Modalities.Output),
+				Context: model.Limit.Context,
+			}
+			if len(entry.Roles) == 0 && entry.Context == 0 {
 				continue
 			}
 			// 同一个模型在表里可能以好几种写法出现（带网关前缀、不带）。
 			// 两种都索引：用户配置里填的是发给端点的那个名字，而那取决于他用的网关。
-			catalog.add(key, roles)
-			catalog.add(model.ID, roles)
+			catalog.add(key, entry)
+			catalog.add(model.ID, entry)
 		}
 	}
 	return catalog, nil
@@ -148,44 +161,56 @@ func rolesOf(input, output []string) []protocol.ModelRole {
 // 同名取**并集**而不是覆盖或交集：同一个模型在二十个网关下的条目基本一致，
 // 偶有出入时，漏标会让用户找不到那个模型（功能像是坏的），而多标顶多是
 // 选中之后失败一次——后者的反馈清楚得多。
-func (c *Catalog) add(name string, roles []protocol.ModelRole) {
-	c.addOne(name, roles)
+func (c *Catalog) add(name string, entry Entry) {
+	c.addOne(name, entry)
 	if index := strings.LastIndex(name, "/"); index >= 0 {
-		c.addOne(name[index+1:], roles)
+		c.addOne(name[index+1:], entry)
 	}
 }
 
-func (c *Catalog) addOne(name string, roles []protocol.ModelRole) {
+func (c *Catalog) addOne(name string, entry Entry) {
 	key := normalizeModelName(name)
 	if key == "" {
 		return
 	}
 	existing := c.byName[key]
-	for _, role := range roles {
-		if !hasRole(existing, role) {
-			existing = append(existing, role)
+	for _, role := range entry.Roles {
+		if !hasRole(existing.Roles, role) {
+			existing.Roles = append(existing.Roles, role)
 		}
+	}
+	// 窗口取**最大**的那个：同一个模型在不同网关下报的窗口有出入时，报小了
+	// 会让内核提前压缩历史（白丢上下文），报大了只是退回被动压缩——后者的
+	// 代价小得多。
+	if entry.Context > existing.Context {
+		existing.Context = entry.Context
 	}
 	c.byName[key] = existing
 }
 
-// Roles 查一个模型名的能力。查不到返回 nil。
+// Lookup 查一个模型名。查不到时第二个返回值是 false。
 //
 // 索引里两种写法都有（见 add），这里再补一次去前缀的查询：用户可能在自建
 // 网关下填 `我的前缀/gpt-5.4`，而那个前缀不会出现在任何表里。
-func (c *Catalog) Roles(model string) []protocol.ModelRole {
+func (c *Catalog) Lookup(model string) (Entry, bool) {
 	if c == nil {
-		return nil
+		return Entry{}, false
 	}
-	if roles, ok := c.byName[normalizeModelName(model)]; ok {
-		return roles
+	if entry, ok := c.byName[normalizeModelName(model)]; ok {
+		return entry, true
 	}
 	if index := strings.LastIndex(model, "/"); index >= 0 {
-		if roles, ok := c.byName[normalizeModelName(model[index+1:])]; ok {
-			return roles
+		if entry, ok := c.byName[normalizeModelName(model[index+1:])]; ok {
+			return entry, true
 		}
 	}
-	return nil
+	return Entry{}, false
+}
+
+// Roles 查一个模型名的能力。查不到返回 nil。
+func (c *Catalog) Roles(model string) []protocol.ModelRole {
+	entry, _ := c.Lookup(model)
+	return entry.Roles
 }
 
 // Size 是索引里有多少个名字。冒烟与诊断用。
@@ -239,20 +264,25 @@ func (s *Store) AutoMark(ctx context.Context, id int64) (protocol.ProviderView, 
 	matched, unmatched := 0, 0
 	updated := make([]string, 0, len(entries))
 	for _, entry := range entries {
-		name, roles := protocol.ParseModelMark(entry)
-		found := catalog.Roles(name)
-		if len(found) == 0 {
+		parsed := protocol.ParseModelMark(entry)
+		found, ok := catalog.Lookup(parsed.Name)
+		if !ok {
 			unmatched++
 			updated = append(updated, entry)
 			continue
 		}
 		matched++
-		for _, role := range found {
-			if !hasRole(roles, role) {
-				roles = append(roles, role)
+		for _, role := range found.Roles {
+			if !hasRole(parsed.Roles, role) {
+				parsed.Roles = append(parsed.Roles, role)
 			}
 		}
-		updated = append(updated, protocol.FormatModelMark(name, roles))
+		// 窗口以那份表为准：它是模型的客观属性，而用户手填的往往是抄来的
+		// 或者干脆空着。手填过更大值的情况保留原值，见下。
+		if found.Context > parsed.Context {
+			parsed.Context = found.Context
+		}
+		updated = append(updated, protocol.FormatModelMark(parsed))
 	}
 
 	if err := s.db.UpdateProvider(ctx, id, model.UpdateProviderReq{Models: encodeModels(updated)}); err != nil {
