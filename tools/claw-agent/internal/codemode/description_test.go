@@ -86,7 +86,7 @@ func TestManyToolsAreNotAllDeclared(t *testing.T) {
 }
 
 func TestLongToolDescriptionsAreTrimmed(t *testing.T) {
-	// 内部平台那边的接口说明动辄几百字，还带着字面量的 \n。
+	// 服务那边的接口说明动辄几百字，还带着字面量的 \n。
 	long := "阿里云联网搜索\\n调用阿里云信息查询服务（IQS）进行开放域联网搜索，" +
 		strings.Repeat("还有很多说明文字。", 30)
 	text := Description(AssignIdentifiers([]Tool{tool("web_search", long, `{}`)}))

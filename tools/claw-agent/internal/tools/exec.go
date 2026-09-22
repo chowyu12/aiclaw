@@ -30,7 +30,7 @@ const (
 
 // dangerousCommands 是硬拒绝名单：命中即失败，**没有「仍然执行」的选项**。
 //
-// 这份名单沿用 upstream-agent 的 workspacetools，那边跑在 Sandbox 里都拦，
+// 这份名单沿用 早期实现里的 workspacetools，那边跑在 Sandbox 里都拦，
 // 这里没有沙箱更得拦。名单里的命令没有任何合法的 Agent 使用场景。
 // 它是应用层字符串匹配，绕过并不难——它防的是模型「顺手」写出这些命令，
 // 不防有意规避。有意规避这一层挡不住，只能靠审批。

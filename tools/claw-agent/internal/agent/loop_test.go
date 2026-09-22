@@ -909,7 +909,7 @@ func TestWriteMCPToolStillNeedsApproval(t *testing.T) {
 }
 
 func TestTrustedServerSkipsApprovalEvenForWriteTools(t *testing.T) {
-	// 内部平台能力一律不问，哪怕那个工具会改外部系统状态：准入已经在内部平台侧
+	// 可信 server 的工具一律不问，哪怕那个工具会改外部系统状态：准入已经在服务侧
 	// 按当前员工判过了。这是一条策略，不是把事实改掉——工具自己的
 	// readOnlyHint 保持如实，客户端还要靠它判断第三方 server。
 	model := &fakeModel{script: []string{
@@ -924,7 +924,7 @@ func TestTrustedServerSkipsApprovalEvenForWriteTools(t *testing.T) {
 	session.RunTurn(context.Background(), "t1", "建单", nil, emitter)
 
 	if len(emitter.approvals) != 0 {
-		t.Errorf("内部平台能力不该弹审批：%+v", emitter.approvals)
+		t.Errorf("可信 server 的工具不该弹审批：%+v", emitter.approvals)
 	}
 	if !emitter.find(protocol.NotifyItemCompleted, "建好了。") {
 		t.Errorf("应当照常执行：%v", emitter.methods())
@@ -942,10 +942,10 @@ func TestMCPToolEffectDecision(t *testing.T) {
 		why     string
 	}{
 		{
-			name: "内部平台能力：不问", trusted: true,
+			name: "可信 server：不问", trusted: true,
 			def:  mcpclient.ToolDef{Annotations: &mcpclient.ToolAnnotations{ReadOnlyHint: &notReadOnly}},
 			want: tools.EffectRead,
-			why:  "准入已经在内部平台侧按人判过，再问一遍只是噪音",
+			why:  "准入已经在服务侧按人判过，再问一遍只是噪音",
 		},
 		{
 			name: "第三方且声明只读：不问", trusted: false,
@@ -991,7 +991,7 @@ func TestTrustedServerSkipsApprovalUnderStrictProfile(t *testing.T) {
 	session.RunTurn(context.Background(), "t1", "查一下", nil, emitter)
 
 	if len(emitter.approvals) != 0 {
-		t.Errorf("严格档位下内部平台能力也不该弹审批：%+v", emitter.approvals)
+		t.Errorf("严格档位下可信 server 的工具也不该弹审批：%+v", emitter.approvals)
 	}
 	if !emitter.find(protocol.NotifyItemCompleted, "查到了。") {
 		t.Errorf("应当照常执行：%v", emitter.methods())

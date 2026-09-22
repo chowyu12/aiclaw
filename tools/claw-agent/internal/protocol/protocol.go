@@ -479,7 +479,7 @@ type SessionStartParams struct {
 	 * 不是「装着若干技能的根目录」。
 	 *
 	 * 为什么由宿主给出具体目录而不是给一个根：技能散在好几个地方——我们自己的
-	 * ~/.upstream/skills、Claude Code 的 ~/.claude/skills、Codex 的
+	 * ~/.aiclaw/skills、Claude Code 的 ~/.claude/skills、Codex 的
 	 * ~/.codex/skills、npx 装的 CLI 缓存、npm 全局包，每种的目录结构还不一样
 	 * （带版本号的、带 @scope 的）。发现逻辑只该有一份，而它必须在宿主侧——
 	 * 界面要把「这个技能从哪儿来」显示出来，还要记住用户关掉了哪些。
@@ -520,7 +520,7 @@ type SessionStartParams struct {
 //
 // Refresh 是**当前**宿主配置里那几项「跟着配置走」的东西。不给的话恢复出来的
 // 会话用的全是存档里的配置——用户新加的 MCP server、新装的技能、刚同步到的
-// 内部平台能力一个都不会挂上，而应用启动就接着上次的会话，于是「配了就是不生效」，
+// 新加的 server 一个都不会挂上，而应用启动就接着上次的会话，于是「配了就是不生效」，
 // 除非他自己想到去开个新会话。工作目录和模型不在里面：前者换了会让历史里的
 // 文件路径对不上，后者是会话自己的选择（端点由宿主另行对齐）。
 type SessionResumeParams struct {

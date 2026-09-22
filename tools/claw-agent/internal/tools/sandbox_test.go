@@ -32,7 +32,7 @@ func sandboxEnv(t *testing.T) (*Env, *Registry, string) {
 	if !SandboxAvailable() {
 		t.Skip("这台机器没有 sandbox-exec（只有 macOS 有）")
 	}
-	base, err := os.MkdirTemp("/private/var/tmp", "upstream-sandbox-")
+	base, err := os.MkdirTemp("/private/var/tmp", "aiclaw-sandbox-")
 	if err != nil {
 		t.Fatal(err)
 	}

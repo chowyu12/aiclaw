@@ -89,7 +89,7 @@ func TestReadOutsideTheWorkspaceIsAllowed(t *testing.T) {
 }
 
 func TestProtectedPathsAreRefusedOutright(t *testing.T) {
-	// 凭据类没有「仍然读」这个选项：读到之后，模型可以顺着内部平台的写接口、
+	// 凭据类没有「仍然读」这个选项：读到之后，模型可以顺着任何对外工具的写接口、
 	// 联网搜索的 query、任何第三方 MCP 把它送出去，而那几条路都不弹框。
 	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	secrets := filepath.Join(env.Home, ".ssh")
@@ -211,7 +211,7 @@ func TestWriteThenReadThenEdit(t *testing.T) {
 		t.Fatalf("edit: %v", err)
 	}
 	out, _ = call(t, registry, "read_file", `{"path":"notes/a.txt"}`, env)
-	if out != "hello 内部平台" {
+	if out != "hello 世界" {
 		t.Errorf("edit 后内容 = %q", out)
 	}
 }

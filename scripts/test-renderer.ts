@@ -2,7 +2,7 @@
  * 渲染层纯函数的测试：Markdown 渲染、错误文案。
  *
  * Markdown 渲染器的输入是**模型输出**，而模型输出会被它读到的文件、命令结果、
- * 内部平台返回的内容影响。所以下面前半段全是注入用例——渲染器出一次洞，
+ * MCP 返回的内容影响。所以下面前半段全是注入用例——渲染器出一次洞，
  * 相当于给「读一个文件」开了执行任意脚本的口子。
  *
  * 只放不依赖 vue 与 window 的纯函数：那两样在 node 里 import 不了，
@@ -120,7 +120,7 @@ test("file: 链接不放行", () => {
 test("图片渲染成可点开的缩略图", () => {
   const html = renderMarkdown("![猫](https://a.com/c.png)");
   assert.match(html, /<img src="https:\/\/a\.com\/c\.png"/);
-  // 不带 referrer：图片地址来自模型输出，而模型读得到本地文件与内部平台数据。
+  // 不带 referrer：图片地址来自模型输出，而模型读得到本地文件与MCP 数据。
   assert.match(html, /referrerpolicy="no-referrer"/);
   assert.match(html, /class="image-thumb"/);
 });

@@ -1,10 +1,10 @@
-# 以 upstream-app 为基重写 AIClaw
+# 以上游 Electron + Go 内核项目为基重写 AIClaw
 
 ## 这次改的是什么
 
-把 AIClaw 的内核换成 `upstream-app` 的 `claw-agent`，界面换成它的 Electron 宿主与 Vue 页面，
+把 AIClaw 的内核换成 上游项目 的 `claw-agent`，界面换成它的 Electron 宿主与 Vue 页面，
 **删掉全部内部平台能力**，同时**保留 AIClaw 现有的模型配置、插件系统、搜索引擎**。
-打包用 upstream 的 `@electron/packager` 规则，发布仍走我们已验证的 GitHub Actions。
+打包用 上游 的 `@electron/packager` 规则，发布仍走我们已验证的 GitHub Actions。
 
 落点：`aiclaw` 仓库 master 原地重写。
 
@@ -24,7 +24,7 @@
 `claw-agent` 把审批做进了循环本身，不是事后补的拦截器。
 
 computer use 那条也值得说：我在 AIClaw 里被迫从工具 schema 删掉的四个手势，
-在 upstream 里是**能做的**，因为它在宿主侧合成事件而不是 shell 出去调 osascript。
+在 上游 里是**能做的**，因为它在宿主侧合成事件而不是 shell 出去调 osascript。
 
 ## 目标结构
 
@@ -77,7 +77,7 @@ Key 与端点由内核按 id 到库里查——**Key 不经协议帧**，宿主�
   与 `internal/model`，单模块最直接；`modernc.org/sqlite` 与 `glebarez/sqlite`
   同时在依赖里，都是纯 Go，`CGO_ENABLED=0` 交叉编译到 Windows 验证过。
 - Key 存在 SQLite 的 `providers.api_key` 列里，**明文**——这是 AIClaw 旧版的
-  做法，按「保留现在模型配置」的决定沿用。它与 upstream 「凭据只进钥匙串」
+  做法，按「保留现在模型配置」的决定沿用。它与 上游 「凭据只进钥匙串」
   的规则相悖，记在这里：将来若要加密这一列，改 `providers` 包一处即可，
   宿主与协议都不用动。
 
@@ -87,7 +87,7 @@ Key 与端点由内核按 id 到库里查——**Key 不经协议帧**，宿主�
 
 ### 2. 扩展模型：插件系统吃掉技能与 MCP 两页
 
-AIClaw 的插件系统（bundle + manifest + 权限 + 贡献点）与 upstream 的「技能 + MCP」
+AIClaw 的插件系统（bundle + manifest + 权限 + 贡献点）与 上游 的「技能 + MCP」
 是两套模型。按决定：**以插件系统为准，技能页和 MCP 页重做成插件系统的两个视图**。
 
 接缝天然存在：`claw-agent` 的 `session/start` 接受一组 `MCPServerConfig`，
@@ -110,7 +110,7 @@ AIClaw 的插件系统（bundle + manifest + 权限 + 贡献点）与 upstream �
   `channel/*`、`wechat/*` 十三个 JSON-RPC 方法；宿主开会话前调一次
   `plugin/contributions`，把 MCP server、技能目录、computer use 开关并进
   `session/start`。
-- **computer use 只有插件这一个开关**。upstream 配置页上那个复选框删了；
+- **computer use 只有插件这一个开关**。上游 配置页上那个复选框删了；
   内置的 computer-use 插件启用即开，manifest 上原来的「仅 macOS」限制去掉——
   截屏与输入合成由宿主按平台做，Windows 也行。`internal/plugins/computeruse`
   （osascript 后端）随之作废，第 6 步删。
@@ -126,7 +126,7 @@ AIClaw 的插件系统（bundle + manifest + 权限 + 贡献点）与 upstream �
 
 ### 3. 搜索引擎：claw-agent 里没有它的位置
 
-upstream 的 web search 在 `claw-mcp/internal/provider/websearch.go` 里，
+上游 的 web search 在 `claw-mcp/internal/provider/websearch.go` 里，
 属于要删掉的内部平台部分。`claw-agent` 的工具注册表里**没有** web search。
 
 做法：AIClaw 的搜索引擎配置保留，实现为一个**内置 MCP server**——
@@ -158,11 +158,11 @@ v2.0.2 的用户库里有会话、Provider、插件、搜索引擎、记忆。�
 
 按决定取长：
 
-- **打包**用 upstream 的 `@electron/packager` 规则（含图标、Windows 版本资源 `resedit`）
+- **打包**用 上游 的 `@electron/packager` 规则（含图标、Windows 版本资源 `resedit`）
 - **发布**仍走我们的 GitHub Actions：三平台矩阵、`if-no-files-found: error`、
   tag annotation 作 release notes、SHA256SUMS
 
-upstream 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而这个仓库在 GitHub。
+上游 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而这个仓库在 GitHub。
 
 ## 交付顺序
 
@@ -202,7 +202,7 @@ upstream 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而�
   这是安全上的改进，但会改变使用手感，必须写进 release notes。
 - **历史会话不迁移**。旧的 `threads` / `rollout_items` 表原样留在 `~/.aiclaw/aiclaw.db`
   里，新会话在 Electron userData 下的会话库；3.0 的界面不显示旧会话。
-- **不做 OS 级沙箱**——这是 upstream 明确记录的决定，照搬过来同样成立：
+- **不做 OS 级沙箱**——这是 上游 明确记录的决定，照搬过来同样成立：
   命令直接在用户机器上跑，只有路径收敛与审批两道防护。
-- **upstream 的 AGENTS.md 有 57k**，包含大量项目约定。搬代码时要一并读，
+- **上游的 AGENTS.md 有 57k**，包含大量项目约定。搬代码时要一并读，
   否则会写出与它风格冲突的代码。

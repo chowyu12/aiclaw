@@ -2,7 +2,7 @@
 //
 // 一个技能就是一个目录，里面有 SKILL.md：开头是 YAML frontmatter（name、
 // description），下面是正文，写清楚什么时候用、怎么用。这与 Codex / Claude Code
-// 的技能是同一个形状，也与内部平台 SkillHub 的包内容一致——SkillHub 分发的就是
+// 的技能是同一个形状，也与技能市场 的包内容一致——SkillHub 分发的就是
 // 装着 SKILL.md 的 ZIP，装到本地目录之后与用户自己写的技能没有区别。
 //
 // 为什么不把技能正文直接塞进系统提示词：十几个技能的正文加起来能有几万 token，
@@ -46,7 +46,7 @@ const (
 // Load 加载一批技能目录。
 //
 // **每一项都是一个技能自己的目录**（里面直接放 SKILL.md），不是装着若干技能的
-// 根目录。技能散在好几个地方——我们自己的 ~/.upstream/skills、Claude Code 的
+// 根目录。技能散在好几个地方——我们自己的 ~/.aiclaw/skills、Claude Code 的
 // ~/.claude/skills、Codex 的 ~/.codex/skills、npx 装的 CLI 缓存、npm 全局包，
 // 而且各自的目录结构还不一样。那套发现逻辑只该有一份，且必须在宿主侧：
 // 界面要显示「这个技能从哪儿来」，还要记住用户关掉了哪些。

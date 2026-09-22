@@ -648,7 +648,7 @@ func (s *Session) snapshotMessages() []llm.Message {
 
 // summarizeCall 给工具调用一句人能看的摘要，宿主直接显示。
 //
-// 内部平台能力不再弹审批之后，这里是用户唯一能看见「它到底调了什么」的地方，
+// 可信 server 的工具不弹审批之后，这里是用户唯一能看见「它到底调了什么」的地方，
 // 所以认不出来的工具也要给出点东西：把参数压成一行，总比只显示一个
 // api_operation_87 强。
 func summarizeCall(call llm.ToolCall) string {

@@ -466,7 +466,7 @@ func registerBuiltins(registry *tools.Registry, enabled []string) error {
 
 func (s *Session) mountMCP(ctx context.Context, name string, config protocol.MCPServerConfig) {
 	// 走连接池：同一份配置的 server 在会话之间共用，不然每开一个会话都要
-	// 把「库里有哪些 API、契约长什么样」向内部平台重问一遍（实测每个 server
+	// 把「库里有哪些 API、契约长什么样」向服务重问一遍（实测每个 server
 	// 十几次串行 HTTPS），切会话就卡在这儿。
 	client, key, err := mcpShared.acquire(ctx, name, config)
 	if err != nil {
@@ -561,7 +561,7 @@ func formatTokens(tokens int) string {
 // 两个条件任一满足就不问：
 //
 //   - server 被标成可信（内部平台能力）：那些工具是内部平台按当前员工的权限授出来的，
-//     准入已经在内部平台侧判过，再问一遍只是噪音——而噪音会把用户训练成闭眼点
+//     准入已经在服务侧判过，再问一遍只是噪音——而噪音会把用户训练成闭眼点
 //     「允许」，那比少问一次危险；
 //   - 工具自己声明了 readOnlyHint（MCP 2025-03-26 的注解）：它不改任何东西。
 //
@@ -770,7 +770,7 @@ func (s *Session) MCPStatus() map[string]string { return s.mcpStatus }
 // MountsMatch 报告这个会话挂载时用的配置是不是就是 want。
 //
 // 不一样就该卸掉重挂——内核会把会话留在内存里，而用户可能在这期间加了
-// 一个 MCP server 或者同步到了新的内部平台能力。
+// 一个 MCP server 或者新加了可信 server。
 func (s *Session) MountsMatch(want protocol.SessionRefresh) bool {
 	return reflect.DeepEqual(s.applied, want)
 }

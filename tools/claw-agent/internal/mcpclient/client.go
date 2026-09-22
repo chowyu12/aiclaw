@@ -4,7 +4,7 @@
 //   - Streamable HTTP：POST 到一个地址，响应是 JSON 或 SSE（远程 MCP server）。
 //
 // 方法只做 initialize / tools/list / tools/call 三个，与 claw-mcp 那侧的最小
-// 服务端正好对上。公司内的 upstream-utils/mcpclient 只支持 HTTP、明确不做 stdio，
+// 服务端正好对上。公司内的 公司内部那个 mcpclient 只支持 HTTP、明确不做 stdio，
 // 所以这里另写一份；不引第三方库的理由与 claw-mcp 相同。
 package mcpclient
 
