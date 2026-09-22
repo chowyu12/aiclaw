@@ -686,6 +686,26 @@ export const actions = {
 
   async saveMcpServers(servers: McpServerView[]): Promise<void> {
     state.mcpServers = (await window.aiclaw.mcp.write(plain(servers))) as McpServerView[];
+    await actions.remountCurrentSession();
+  },
+
+  /**
+   * 让当前会话按现在的配置重挂一遍：MCP server、技能、插件、搜索引擎。
+   *
+   * 不做这一步的话，用户在 MCP 页加了一个 server，回到正在聊的会话里它并不在——
+   * 只有开新会话或切到别的会话再切回来才会挂上，而界面上什么都不会说，
+   * 用户只会得出「配了没用」。轮次正在跑时不动它：卸掉会让那一轮的事件没有出口。
+   */
+  async remountCurrentSession(): Promise<void> {
+    if (!state.sessionId || state.busy) return;
+    try {
+      const info = (await window.aiclaw.session.resume(state.sessionId)) as SessionStartView;
+      state.sessionInfo = info;
+      state.model = info.model;
+      state.providerId = info.providerId;
+    } catch (error) {
+      state.error = `重新挂载失败：${describeError(error)}`;
+    }
   },
 
   /**
@@ -727,6 +747,7 @@ export const actions = {
 
   async toggleSkill(id: string, enabled: boolean): Promise<void> {
     state.skills = (await window.aiclaw.skills.toggle({ id, enabled })) as SkillView[];
+    await actions.remountCurrentSession();
   },
 
   async deleteSkill(id: string): Promise<void> {
@@ -780,11 +801,14 @@ export const actions = {
   }): Promise<void> {
     const updated = (await window.aiclaw.search.update(params)) as SearchEngineView;
     state.searchEngines = state.searchEngines.map((item) => (item.id === updated.id ? updated : item));
+    // 启停或换 Key 会改变要不要挂搜索 server；改名字这类不会，但重挂一次无害。
+    await actions.remountCurrentSession();
   },
 
   async deleteSearchEngine(id: number): Promise<void> {
     await window.aiclaw.search.remove(id);
     state.searchEngines = state.searchEngines.filter((item) => item.id !== id);
+    await actions.remountCurrentSession();
   },
 
   async testSearchEngine(id: number, query: string): Promise<{ provider: string; results: SearchHitView[] }> {
@@ -829,6 +853,7 @@ export const actions = {
     await actions.loadPlugins();
     // 技能页也跟着变：插件带的技能随插件启停出现或消失。
     await actions.refreshSkills();
+    await actions.remountCurrentSession();
   },
 
   async deletePlugin(uuid: string): Promise<void> {

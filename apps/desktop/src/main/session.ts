@@ -82,6 +82,8 @@ export interface SessionInfo {
   providerId: number;
   /** 本次会话挂上的技能名。 */
   skills: string[];
+  /** 代码模式下被收进 exec 的工具名。 */
+  foldedTools: string[];
   /** 恢复旧会话时带回的时间线；新会话为空。 */
   history?: Item[];
 }
@@ -213,6 +215,7 @@ export class SessionManager extends EventEmitter {
       model: params.model.model,
       providerId: result.providerId ?? 0,
       skills: result.skills ?? [],
+      foldedTools: result.foldedTools ?? [],
     };
   }
 
@@ -239,6 +242,7 @@ export class SessionManager extends EventEmitter {
       model: result.model ?? this.store.readConfig().model,
       providerId: result.providerId ?? 0,
       skills: result.skills ?? [],
+      foldedTools: result.foldedTools ?? [],
       history: await client.sessionHistory(sessionId),
     };
   }

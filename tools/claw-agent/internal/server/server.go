@@ -333,13 +333,14 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 		s.options.Logf("保存会话失败：%v", err)
 	}
 	s.writeResult(f.ID, protocol.SessionStartResult{
-		SessionID:  id,
-		Tools:      session.Tools(),
-		MCPStatus:  session.MCPStatus(),
-		Model:      session.Model().Model,
-		ProviderID: session.Model().ProviderID,
-		Skills:     session.Skills(),
-		Workspace:  session.Workspace(),
+		SessionID:   id,
+		Tools:       session.Tools(),
+		MCPStatus:   session.MCPStatus(),
+		Model:       session.Model().Model,
+		ProviderID:  session.Model().ProviderID,
+		Skills:      session.Skills(),
+		FoldedTools: session.FoldedTools(),
+		Workspace:   session.Workspace(),
 	})
 }
 
@@ -361,7 +362,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 				SessionID: existing.ID, Tools: existing.Tools(),
 				MCPStatus: existing.MCPStatus(), Model: existing.Model().Model,
 				ProviderID: existing.Model().ProviderID,
-				Skills:     existing.Skills(), Workspace: existing.Workspace(),
+				Skills:     existing.Skills(), FoldedTools: existing.FoldedTools(), Workspace: existing.Workspace(),
 			})
 			return
 		}
@@ -382,7 +383,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		SessionID: session.ID, Tools: session.Tools(),
 		MCPStatus: session.MCPStatus(), Model: session.Model().Model,
 		ProviderID: session.Model().ProviderID,
-		Skills:     session.Skills(), Workspace: session.Workspace(),
+		Skills:     session.Skills(), FoldedTools: session.FoldedTools(), Workspace: session.Workspace(),
 	})
 }
 

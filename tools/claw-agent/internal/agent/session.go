@@ -69,6 +69,8 @@ type Session struct {
 	llm     *llm.Client
 	// keyFor 按模型配置给出 Key，换模型时重建客户端要它。只在内存里，不进存档。
 	keyFor KeyResolver
+	// folded 是代码模式下收进 exec 的工具名，给宿主展示用。
+	folded []string
 
 	mu        sync.Mutex
 	turnCount int

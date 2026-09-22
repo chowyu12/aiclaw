@@ -44,6 +44,8 @@ export interface SessionStartView {
   providerId: number;
   /** 本次会话挂上的技能名。 */
   skills?: string[];
+  /** 代码模式下被收进 exec 的工具名：tools 里只剩 exec，但这些在脚本里仍能调。 */
+  foldedTools?: string[];
   /** 恢复旧会话时带回的时间线条目；新会话没有。 */
   history?: HistoryItemView[];
 }

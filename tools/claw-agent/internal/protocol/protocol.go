@@ -583,6 +583,11 @@ type SessionStartResult struct {
 	ProviderID int64 `json:"providerId,omitempty"`
 	/** 本次会话挂上的技能名。 */
 	Skills []string `json:"skills,omitempty"`
+	/**
+	 * 代码模式下被收进 exec 的工具名。Tools 里只剩 exec 一个，但这些工具模型
+	 * 仍然能在脚本里调——界面不列出来的话，用户会以为它们没挂上。
+	 */
+	FoldedTools []string `json:"foldedTools,omitempty"`
 	/** 会话工作区。空串表示没设置——界面要如实显示这一点。 */
 	Workspace string `json:"workspace,omitempty"`
 }

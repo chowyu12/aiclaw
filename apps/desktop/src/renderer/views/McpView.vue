@@ -123,8 +123,8 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
         <h2>自定义 MCP server</h2>
         <p class="sub">
           挂第三方 MCP server 进来，它的工具会和内置工具一起交给模型。
-          本地的用 stdio（拉起一个进程），远程的用 HTTP。改动下一个会话生效，
-          回到已有会话也会重新挂一遍。
+          本地的用 stdio（拉起一个进程），远程的用 HTTP。改动立刻在当前会话重挂一遍，
+          新会话也带上。
         </p>
       </header>
 

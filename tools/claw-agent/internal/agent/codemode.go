@@ -95,7 +95,18 @@ func (s *Session) installCodeMode() int {
 	}
 
 	*s.registry = *replacement
+	s.folded = make([]string, 0, len(existing))
+	for _, tool := range existing {
+		s.folded = append(s.folded, tool.Name)
+	}
 	return len(bridged)
+}
+
+// FoldedTools 返回代码模式下被收进 exec 的工具名；没开代码模式是空的。
+func (s *Session) FoldedTools() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.folded...)
 }
 
 // codeModeSavings 估一下换成 exec 省了多少上下文。

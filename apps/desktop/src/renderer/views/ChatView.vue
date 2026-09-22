@@ -244,7 +244,9 @@ const mounts = computed(() => {
 const failedMounts = computed(() =>
   mounts.value.filter(([, status]) => status.includes("失败")),
 );
-const toolCount = computed(() => store.sessionInfo?.tools.length ?? 0);
+/** 代码模式下收进 exec 的那些也算：它们在脚本里照样能调。 */
+const folded = computed(() => store.sessionInfo?.foldedTools ?? []);
+const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded.value.length);
 </script>
 
 <template>
@@ -420,6 +422,12 @@ const toolCount = computed(() => store.sessionInfo?.tools.length ?? 0);
                   <div class="status-row">
                     <span class="menu-name">内置工具与插件</span>
                     <span class="menu-note">{{ (store.sessionInfo?.tools ?? []).join("、") || "无" }}</span>
+                  </div>
+                  <!-- 代码模式：模型面前只有 exec 一个工具，但下面这些在脚本里
+                       都能 tools.xxx() 调到。不列出来用户会以为 MCP 没挂上。 -->
+                  <div v-if="folded.length > 0" class="status-row">
+                    <span class="menu-name">收进 exec 的工具（{{ folded.length }}）</span>
+                    <span class="menu-note">{{ folded.join("、") }}</span>
                   </div>
                   <div v-if="(store.sessionInfo?.skills ?? []).length > 0" class="status-row">
                     <span class="menu-name">技能</span>
