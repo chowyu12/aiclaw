@@ -1,8 +1,8 @@
 // Package llm 是 OpenAI Chat Completions 兼容的客户端，带流式与工具调用。
 //
-// 选 Chat Completions 而不是 Responses API：airouter 的全部渠道
+// 选 Chat Completions 而不是 Responses API：常见模型网关的全部渠道
 // （OpenAI / Claude / DeepSeek / Kimi / Qwen）都原生支持它，工具调用语义
-// 成熟稳定；Responses 是 OpenAI 特有的，airouter 对非 OpenAI 上游会在内部
+// 成熟稳定；Responses 是 OpenAI 特有的，网关对非 OpenAI 上游会在内部
 // 转成 chat，等于多一层转换且能力取决于上游。
 package llm
 

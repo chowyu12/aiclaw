@@ -107,7 +107,11 @@ jobs:
           path: release
           merge-multiple: true
       - name: Prepare notes and checksums
+        # actions/checkout fetches the tag by commit SHA, which leaves a
+        # lightweight tag behind and loses the annotation — the release then
+        # shows the commit message instead of the notes. Fetch the real tag.
         run: |
+          git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
           git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)' > RELEASE_NOTES.md
           test -s RELEASE_NOTES.md || echo "AIClaw ${GITHUB_REF_NAME}" > RELEASE_NOTES.md
           cd release

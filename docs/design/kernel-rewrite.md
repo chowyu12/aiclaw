@@ -81,7 +81,7 @@ Key 与端点由内核按 id 到库里查——**Key 不经协议帧**，宿主�
   的规则相悖，记在这里：将来若要加密这一列，改 `providers` 包一处即可，
   宿主与协议都不用动。
 
-宿主侧不再有 `credentials.bin` 与 `ModelCatalog`（那是打 airouter 的
+宿主侧不再有 `credentials.bin` 与 `ModelCatalog`（那是打公司模型网关的
 `/v1/model-profiles`）。模型清单是 Provider 记录里的字符串数组，用户手写
 或点「从端点拉取」并进去；上下文窗口由用户在配置页填。
 

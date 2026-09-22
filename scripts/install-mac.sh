@@ -76,9 +76,17 @@ esac
 
 # ---------- 找安装包 ----------
 
-# 从 releases/latest 的 JSON 里取 tag_name。不用贪婪的 sed：整个 JSON 在一行里，
-# `.*` 会匹配到最后一个引号。
+# 查最新版本号。
+#
+# 先走网页的跳转：`/releases/latest` 会 302 到 `/releases/tag/<tag>`，只看响应头
+# 就拿到 tag，**不经 GitHub API**——匿名 API 每小时只有 60 次，公司出口共用一个
+# IP 时几个人一起装就会撞上「rate limit exceeded」。API 只作后备。
 latest_tag() {
+  local location tag
+  location=$(curl -fsSIL --max-time 20 -o /dev/null -w '%{url_effective}' "${RELEASES_URL}/latest" 2>/dev/null || true)
+  tag=${location##*/releases/tag/}
+  if [ -n "$tag" ] && [ "$tag" != "$location" ]; then printf '%s' "$tag"; return 0; fi
+  # 不用贪婪的 sed：整个 JSON 在一行里，`.*` 会匹配到最后一个引号。
   curl -fsSL --max-time 20 -H 'Accept: application/vnd.github+json' "$API_LATEST" 2>/dev/null \
     | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/'
 }

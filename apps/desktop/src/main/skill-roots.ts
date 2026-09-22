@@ -10,8 +10,8 @@ import { join } from "node:path";
  *
  * 三件必须处理对的事：
  *
- *  1. **跟符号链接。** 用 npx 跑的 example-cli CLI 把技能装进
- *     `~/.example-cli/skill-cache/<名字>/<版本>/`，再软链到 `~/.claude/skills`
+ *  1. **跟符号链接。** 有些 CLI 把技能装进自己的缓存目录
+ *     （`~/.cache/<工具>/skills/<名字>/`），再软链到 `~/.claude/skills`
  *     和 `~/.codex/skills` 下。而 `Dirent.isDirectory()` 对软链返回 **false**
  *     ——按它筛的话，这台机器上十个技能里有八个是看不见的。所以一律用
  *     `statSync`（跟链）而不是 Dirent 判类型。

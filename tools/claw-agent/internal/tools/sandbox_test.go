@@ -218,7 +218,7 @@ func TestOnlySSHItselfCanReadPrivateKeys(t *testing.T) {
 		读进上下文）。seatbelt 的 process-path 过滤让两件事能同时成立。
 
 		这条用例只验「cat 读不到」那一半——另一半（ssh 真的能认证）要连私服，
-		不适合放进单测；它是手工验过的：`ssh -T git@git.example.internal` 在同一份
+		不适合放进单测；它是手工验过的：`ssh -T git@github.com` 在同一份
 		策略下返回 Welcome。
 	*/
 	env, registry, _ := sandboxEnv(t)
