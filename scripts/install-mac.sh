@@ -98,9 +98,13 @@ download_zip() {
   local out="${TMPDIR:-/tmp}/${file}"
   local url="${RELEASES_URL}/download/${tag}/${file}"
   say "下载 ${file}（一百多兆，会花一会儿）…"
-  curl -fL --progress-bar --max-time 900 -o "$out" "$url" \
+  # 到 GitHub 的下载在国内网络上常常中途断掉：断了就续传（-C -），最多重试 8 次。
+  # 没有 --retry-all-errors 的话 curl 只重试少数几种错误，连接被重置不在其中。
+  curl -fL --progress-bar --max-time 1800 -C - --retry 8 --retry-delay 3 --retry-all-errors \
+    -o "$out" "$url" \
     || die "下载失败：${url}
-这个版本可能还没有 mac-${pkg_arch} 的包，到 ${RELEASES_URL} 看看。"
+网络到 GitHub 不稳定的话，可以用浏览器下载这个文件到 ~/Downloads，再跑：$0 -l
+这个版本也可能还没有 mac-${pkg_arch} 的包，到 ${RELEASES_URL} 看看。"
   # 没下完的文件解压时才报错，那时已经走了半天。这里立刻校验。
   unzip -tq "$out" >/dev/null 2>&1 || die "下下来的不是完整的 zip，重试一次。"
   printf '%s' "$out"
