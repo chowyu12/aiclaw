@@ -31,6 +31,7 @@ const (
 	MethodProviderUpdate   = "provider/update"
 	MethodProviderDelete   = "provider/delete"
 	MethodProviderModels   = "provider/models"
+	MethodProviderAutoMark = "provider/autoMark"
 	MethodPluginList       = "plugin/list"
 	MethodPluginInstall    = "plugin/install"
 	MethodPluginToggle     = "plugin/toggle"
@@ -201,6 +202,16 @@ type ProviderIDParams struct {
 // ProviderModelsResult 是到端点 /models 拉到的模型名，不落库。
 type ProviderModelsResult struct {
 	Models []string `json:"models"`
+}
+
+// ProviderAutoMarkResult 是按 models.dev 自动标记能力的结果。
+//
+// 带上匹配与未匹配的数量：那份表未必收了用户用的每个模型，说清楚「有几个
+// 没查到」用户才知道剩下的要自己勾，而不是以为同步没生效。
+type ProviderAutoMarkResult struct {
+	Provider  ProviderView `json:"provider"`
+	Matched   int          `json:"matched"`
+	Unmatched int          `json:"unmatched"`
 }
 
 // ---------- 搜索引擎 ----------

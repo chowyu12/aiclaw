@@ -1041,6 +1041,19 @@ export const actions = {
     return (await window.aiclaw.providers.models(id)) as string[];
   },
 
+  /** 按 models.dev 自动标记能力。只加不减，结果直接落库。 */
+  async autoMarkProvider(id: number): Promise<{ matched: number; unmatched: number }> {
+    const result = (await window.aiclaw.providers.autoMark(id)) as {
+      provider: ProviderView;
+      matched: number;
+      unmatched: number;
+    };
+    state.providers = state.providers.map((item) =>
+      item.id === result.provider.id ? result.provider : item,
+    );
+    return { matched: result.matched, unmatched: result.unmatched };
+  },
+
   /**
    * 没设过默认模型、或设的那个已经不可用时，挑第一个能用的顶上。
    *

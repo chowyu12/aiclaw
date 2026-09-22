@@ -16,6 +16,7 @@ import type {
   PluginConfigField,
   PluginContributions,
   PluginView,
+  ProviderAutoMarkResult,
   ProviderCreateParams,
   ProviderUpdateParams,
   ProviderView,
@@ -168,6 +169,12 @@ export class ClawAgentClient extends EventEmitter {
     this.assertReady();
     const result = await this.transport.request<{ models: string[] }>("provider/models", { id });
     return result.models ?? [];
+  }
+
+  /** 按 models.dev 给这个服务的模型补上能力标记。只加不减。 */
+  providerAutoMark(id: number): Promise<ProviderAutoMarkResult> {
+    this.assertReady();
+    return this.transport.request<ProviderAutoMarkResult>("provider/autoMark", { id });
   }
 
   // ---------- 搜索引擎 ----------

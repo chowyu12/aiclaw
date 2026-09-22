@@ -39,6 +39,8 @@ const api = {
     remove: (id: number) => ipcRenderer.invoke(IPC.providerDelete, id),
     /** 到端点拉模型名。不落库。 */
     models: (id: number) => ipcRenderer.invoke(IPC.providerModels, id),
+    /** 按 models.dev 自动标记能力。只加不减。 */
+    autoMark: (id: number) => ipcRenderer.invoke(IPC.providerAutoMark, id),
   },
   search: {
     list: () => ipcRenderer.invoke(IPC.searchList),

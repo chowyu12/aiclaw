@@ -157,6 +157,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.providerUpdate, (_event, params) => sessions.updateProvider(params));
   ipcMain.handle(IPC.providerDelete, (_event, id: number) => sessions.deleteProvider(id));
   ipcMain.handle(IPC.providerModels, (_event, id: number) => sessions.fetchProviderModels(id));
+  ipcMain.handle(IPC.providerAutoMark, (_event, id: number) => sessions.autoMarkProvider(id));
 
   ipcMain.handle(IPC.searchList, () => sessions.listSearchEngines());
   ipcMain.handle(IPC.searchCreate, (_event, params) => sessions.createSearchEngine(params));

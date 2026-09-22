@@ -202,7 +202,7 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 	case protocol.MethodMCPProbe:
 		s.handleMCPProbe(ctx, f)
 	case protocol.MethodProviderList, protocol.MethodProviderCreate, protocol.MethodProviderUpdate,
-		protocol.MethodProviderDelete, protocol.MethodProviderModels:
+		protocol.MethodProviderDelete, protocol.MethodProviderModels, protocol.MethodProviderAutoMark:
 		s.handleProvider(ctx, f)
 	case protocol.MethodPluginList, protocol.MethodPluginInstall, protocol.MethodPluginToggle,
 		protocol.MethodPluginDelete, protocol.MethodPluginConfig, protocol.MethodPluginSetConfig,
@@ -749,6 +749,20 @@ func (s *Server) handleProvider(ctx context.Context, f frame) {
 			return
 		}
 		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodProviderAutoMark:
+		var params protocol.ProviderIDParams
+		if err := json.Unmarshal(f.Params, &params); err != nil || params.ID == 0 {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		updated, matched, unmatched, err := s.providers.AutoMark(ctx, params.ID)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		s.writeResult(f.ID, protocol.ProviderAutoMarkResult{
+			Provider: updated, Matched: matched, Unmatched: unmatched,
+		})
 	case protocol.MethodProviderModels:
 		var params protocol.ProviderIDParams
 		if err := json.Unmarshal(f.Params, &params); err != nil || params.ID == 0 {

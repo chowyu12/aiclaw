@@ -38,23 +38,76 @@ const TYPES: { id: string; label: string; baseUrl: string }[] = [
 ];
 
 const expanded = ref(0);
-/** 能力那一块的搜索词，按服务 id 存。 */
-const capSearch = reactive<Record<number, string>>({});
+/** 清单的搜索词与「添加模型」输入框，按服务 id 存。 */
+const modelSearch = reactive<Record<number, string>>({});
+const modelDrafts = reactive<Record<number, string>>({});
+
+/** 一次最多列几行。一个网关能列出上百个模型，全铺出来那一块比整页还长。 */
+const MAX_ROWS = 25;
 
 /**
- * 能力勾选里显示哪几行。
+ * 清单里显示哪几行。
  *
- * 一个服务能列出上百个模型，全铺出来那一块比整页还长，而其中真正要标能力的
- * 通常只有一两个。所以默认只显示**已经标过的**——那正是回到这一页时想确认的
- * 东西；要给新模型标能力就搜它的名字。
+ * 没搜索时**已标能力的排在前面**：回到这一页最常做的事是确认「我标了哪些」，
+ * 而那几个往往淹在几百个名字中间。要给新模型标能力就搜它的名字。
  */
-function capRows(provider: ProviderRow): string[] {
-  const keyword = (capSearch[provider.id] ?? "").trim().toLowerCase();
+function modelRows(provider: ProviderRow): string[] {
+  const keyword = (modelSearch[provider.id] ?? "").trim().toLowerCase();
   if (keyword) {
-    return provider.models.filter((entry) => entry.toLowerCase().includes(keyword)).slice(0, 40);
+    return provider.models.filter((entry) => entry.toLowerCase().includes(keyword)).slice(0, MAX_ROWS);
   }
-  return provider.models.filter((entry) => parseModelMark(entry).roles.length > 0);
+  const marked = provider.models.filter((entry) => parseModelMark(entry).roles.length > 0);
+  const rest = provider.models.filter((entry) => parseModelMark(entry).roles.length === 0);
+  return [...marked, ...rest].slice(0, MAX_ROWS);
 }
+
+/** 没列出来的还有多少个。不说的话用户会以为清单只有这些。 */
+function hiddenCount(provider: ProviderRow): number {
+  return Math.max(0, provider.models.length - modelRows(provider).length);
+}
+
+function markedCount(provider: ProviderRow): number {
+  return provider.models.filter((entry) => parseModelMark(entry).roles.length > 0).length;
+}
+
+async function addModel(provider: ProviderRow): Promise<void> {
+  const name = (modelDrafts[provider.id] ?? "").trim();
+  if (!name) return;
+  // 已经在清单里就不重复加：重名的两行会让勾选改到哪一行都说不清。
+  if (!provider.models.some((entry) => parseModelMark(entry).name === name)) {
+    await run(() => actions.updateProvider({ id: provider.id, models: [...provider.models, name] }));
+  }
+  modelDrafts[provider.id] = "";
+}
+
+async function removeModel(provider: ProviderRow, entry: string): Promise<void> {
+  await run(() =>
+    actions.updateProvider({
+      id: provider.id,
+      models: provider.models.filter((item) => item !== entry),
+    }),
+  );
+}
+
+/**
+ * 按 models.dev 自动标记能力。
+ *
+ * 手动给上百个模型勾能力没人做得完，而没标的模型不会出现在角色候选里——
+ * 功能配了等于没配。那份表只用来**加**标记，不会去掉手动勾过的。
+ */
+async function autoMark(provider: ProviderRow): Promise<void> {
+  marking[provider.id] = { loading: true };
+  try {
+    const result = await actions.autoMarkProvider(provider.id);
+    marking[provider.id] = { loading: false, ...result };
+  } catch (error) {
+    marking[provider.id] = { loading: false, error: describeError(error) };
+  }
+}
+
+const marking = reactive<
+  Record<number, { loading: boolean; matched?: number; unmatched?: number; error?: string }>
+>({});
 const saving = ref(false);
 /** 每个服务的 Key 输入框。存完立刻清空，不让凭据留在 DOM 里。 */
 const keyDrafts = reactive<Record<number, string>>({});
@@ -109,14 +162,6 @@ async function remove(provider: ProviderRow): Promise<void> {
 
 function toggleExpand(id: number): void {
   expanded.value = expanded.value === id ? 0 : id;
-}
-
-/** 模型清单在文本框里一行一个。能力标记（`名字#vision`）原样留着。 */
-function parseModels(raw: string): string[] {
-  return raw
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
 }
 
 /**
@@ -261,37 +306,43 @@ function summary(provider: ProviderRow): string {
             </div>
           </label>
 
-          <label>
-            <span>模型清单（一行一个）</span>
-            <textarea
-              rows="4"
-              :value="provider.models.join('\n')"
-              placeholder="gpt-4.1&#10;o3-mini"
-              @change="patch(provider.id, { models: parseModels(($event.target as HTMLTextAreaElement).value) })"
-            />
-          </label>
-
-          <!-- 能力标记：勾上之后这个模型才会出现在「配置」页对应角色的候选里。
-               不勾也不影响它当对话模型用。 -->
-          <div v-if="provider.models.length > 0" class="caps">
-            <div class="caps-head">
-              <span class="caps-title">这些模型还能做什么</span>
+          <!-- 模型清单与能力标记是同一份数据的两个面，所以是一个列表而不是
+               两块：清单里每行就是「这个模型叫什么、它还能做什么」。 -->
+          <div class="models">
+            <div class="models-head">
+              <span class="models-title">
+                模型清单
+                <em>{{ provider.models.length }} 个{{ markedCount(provider) ? ` · ${markedCount(provider)} 个标了能力` : "" }}</em>
+              </span>
               <input
-                v-model="capSearch[provider.id]"
-                class="caps-search"
-                placeholder="搜模型名给它标能力"
+                v-model="modelSearch[provider.id]"
+                class="models-search"
+                placeholder="搜索模型"
               />
             </div>
-            <p v-if="capRows(provider).length === 0" class="hint">
-              {{
-                capSearch[provider.id]
-                  ? `没有匹配「${capSearch[provider.id]}」的模型。`
-                  : "还没有标过能力的模型。搜一个名字，给它勾上看图 / 听写 / 朗读 / 画图。"
-              }}
+
+            <div class="model-add">
+              <input
+                v-model="modelDrafts[provider.id]"
+                placeholder="手动添加一个模型名，回车确认"
+                @keydown.enter="addModel(provider)"
+              />
+              <button class="ghost small" :disabled="!modelDrafts[provider.id]" @click="addModel(provider)">
+                添加
+              </button>
+            </div>
+
+            <p v-if="provider.models.length === 0" class="hint">
+              还没有模型。从端点拉一遍，或者手动加一个——清单里的模型名就是发给
+              服务的那个名字。
             </p>
-            <div v-for="entry in capRows(provider)" :key="entry" class="cap-row">
-              <code class="cap-name">{{ parseModelMark(entry).name }}</code>
-              <label v-for="role in MODEL_ROLES" :key="role" class="cap">
+            <p v-else-if="modelRows(provider).length === 0" class="hint">
+              没有匹配「{{ modelSearch[provider.id] }}」的模型。
+            </p>
+
+            <div v-for="entry in modelRows(provider)" :key="entry" class="model-row">
+              <code class="model-name">{{ parseModelMark(entry).name }}</code>
+              <label v-for="role in MODEL_ROLES" :key="role" class="cap" :title="ROLE_LABELS[role]">
                 <input
                   type="checkbox"
                   :checked="parseModelMark(entry).roles.includes(role)"
@@ -299,15 +350,18 @@ function summary(provider: ProviderRow): string {
                 />
                 {{ ROLE_LABELS[role] }}
               </label>
+              <button class="icon" title="从清单里移除" @click="removeModel(provider, entry)">×</button>
             </div>
-            <p v-if="capSearch[provider.id] && capRows(provider).length >= 40" class="hint">
-              只列了前 40 个，把名字写得更具体一点。
+
+            <p v-if="hiddenCount(provider) > 0" class="hint">
+              还有 {{ hiddenCount(provider) }} 个没列出来，搜索名字找它们。
             </p>
             <p class="hint">
-              勾了的模型会出现在「配置」页对应角色的候选里：看图用来替对话模型读图，
-              另外三样各自对应一个工具。不勾不影响它当对话模型用。
+              勾了能力的模型会出现在「配置 → 多模态」对应角色的候选里。不勾不影响
+              它当对话模型用。
             </p>
           </div>
+
           <div class="fetch">
             <button
               class="ghost small"
@@ -316,6 +370,17 @@ function summary(provider: ProviderRow): string {
             >
               {{ fetches[provider.id]?.loading ? "拉取中…" : "从端点拉取模型名" }}
             </button>
+            <button
+              class="ghost small"
+              :disabled="provider.models.length === 0 || marking[provider.id]?.loading"
+              @click="autoMark(provider)"
+            >
+              {{ marking[provider.id]?.loading ? "查询中…" : "按 models.dev 标记能力" }}
+            </button>
+            <span v-if="marking[provider.id]?.error" class="hint bad">{{ marking[provider.id]!.error }}</span>
+            <span v-else-if="marking[provider.id]?.matched !== undefined" class="hint">
+              查到 {{ marking[provider.id]!.matched }} 个，另 {{ marking[provider.id]!.unmatched }} 个表里没有，要自己勾。
+            </span>
             <span v-if="fetches[provider.id]?.error" class="hint bad">{{ fetches[provider.id]?.error }}</span>
             <span v-else-if="fetches[provider.id]?.count !== undefined" class="hint">
               端点返回 {{ fetches[provider.id]?.count }} 个，已并进清单。
@@ -527,30 +592,37 @@ label > span em {
   gap: 10px;
 }
 
-.caps {
+.models {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--rule);
   border-radius: var(--r-md);
   background: var(--surface-2);
 }
 
-.caps-head {
+.models-head {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.caps-title {
+.models-title {
   flex: 0 0 auto;
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-2);
 }
 
-.caps-search {
+.models-title em {
+  margin-left: 6px;
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 400;
+}
+
+.models-search {
   flex: 1;
   min-width: 0;
   padding: 4px 8px;
@@ -561,14 +633,31 @@ label > span em {
   font-size: 12px;
 }
 
-.cap-row {
+.model-add {
+  display: flex;
+  gap: 8px;
+}
+
+.model-add input {
+  flex: 1;
+  min-width: 0;
+}
+
+.model-add button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.model-row {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  padding: 3px 0;
+  border-top: 1px solid var(--rule);
 }
 
-.cap-name {
+.model-name {
   flex: 1 1 160px;
   min-width: 0;
   font-family: var(--mono);

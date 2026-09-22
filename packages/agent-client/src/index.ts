@@ -26,6 +26,7 @@ export type {
   PluginContributions,
   PluginSkill,
   PluginView,
+  ProviderAutoMarkResult,
   ProviderCreateParams,
   ProviderUpdateParams,
   ProviderView,

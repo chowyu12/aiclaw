@@ -17,6 +17,7 @@ import {
   type PluginConfigField,
   type PluginContributions,
   type PluginView,
+  type ProviderAutoMarkResult,
   type ProviderCreateParams,
   type ProviderUpdateParams,
   type ProviderView,
@@ -484,6 +485,10 @@ export class SessionManager extends EventEmitter {
 
   fetchProviderModels(id: number): Promise<string[]> {
     return this.requireClient().providerModels(id);
+  }
+
+  autoMarkProvider(id: number): Promise<ProviderAutoMarkResult> {
+    return this.requireClient().providerAutoMark(id);
   }
 
   // ---------- 搜索引擎 ----------

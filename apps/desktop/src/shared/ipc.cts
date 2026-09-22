@@ -32,6 +32,7 @@ export const IPC = {
   providerUpdate: "provider:update",
   providerDelete: "provider:delete",
   providerModels: "provider:models",
+  providerAutoMark: "provider:autoMark",
 
   searchList: "search:list",
   searchCreate: "search:create",
