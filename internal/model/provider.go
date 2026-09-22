@@ -5,13 +5,13 @@ import "time"
 type ProviderType string
 
 const (
-	ProviderOpenAI     ProviderType = "openai"
-	ProviderQwen       ProviderType = "qwen"
-	ProviderKimi       ProviderType = "kimi"
-	ProviderOpenRouter ProviderType = "openrouter"
+	ProviderOpenAI       ProviderType = "openai"
+	ProviderQwen         ProviderType = "qwen"
+	ProviderKimi         ProviderType = "kimi"
+	ProviderOpenRouter   ProviderType = "openrouter"
 	ProviderOpenAICompat ProviderType = "openai-compatible"
-	ProviderClaude     ProviderType = "claude"
-	ProviderGemini     ProviderType = "gemini"
+	ProviderClaude       ProviderType = "claude"
+	ProviderGemini       ProviderType = "gemini"
 )
 
 type Provider struct {

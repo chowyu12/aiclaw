@@ -1,31 +1,35 @@
-uploads/*
-.cursor/skills
-bin/aiclaw
-aiclaw.db
-docs/swagger.yaml
-/server
-.gitignore
-/server.exe
-/main
-CHANGELOG.md
 .DS_Store
-/web/
-/electron/node_modules/
-/electron/dist/
-/bin/aiclaw-core
-/renderer/node_modules/
-/renderer/dist/assets/
-/renderer/dist/index.html
-/electron/core/
-/electron/release/
+.cursor/skills
+CHANGELOG.md
 
-# upstream 布局：workspaces + Go 内核 + packager 产物
+# 本机数据库（应用数据在 ~/.aiclaw，这里只防手滑）
+aiclaw.db
+
+# npm workspaces
 /node_modules/
 /packages/*/node_modules/
 /packages/*/dist/
 /apps/*/node_modules/
 /apps/*/dist/
+
+# Go 内核的本机产物
 /tools/claw-agent/claw-agent
 /tools/claw-agent/claw-agent.exe
+
+# 打包产物
 /build/
 /release/
+/dist-release/
+
+# 旧版残留的本机产物（目录已删，防再次误入库）
+/bin/
+/electron/
+/renderer/
+
+# 旧版遗留、从未入库的目录
+/web/
+/uploads/
+/server
+/server.exe
+/main
+docs/swagger.yaml

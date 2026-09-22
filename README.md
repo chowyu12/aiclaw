@@ -1,152 +1,52 @@
 # AIClaw
 
-AIClaw is a local-first native desktop AI application. It uses Wails to provide native windows for macOS, Windows, and Linux. All projects, conversations, model settings, and plugin configurations are stored in local SQLite. The application does not start an HTTP service and is not a command-line chat program.
+本地优先的 Agent 桌面应用：Electron 宿主 + Go 内核（`claw-agent`），通过 stdio 上的
+JSON-RPC 通信。模型服务、插件、搜索引擎、会话全部存在本机；应用不起 HTTP 服务。
 
-## Current Capabilities
+## 能做什么
 
-- Manage projects and conversations from a unified sidebar. A conversation may belong to a project or remain unassigned, and it can be moved between those states at any time.
-- Switch between dark and light themes with one click, with the last selected theme persisted locally.
-- Select a provider and model directly in each conversation without creating or maintaining agents.
-- Restore the last valid provider and model automatically when the desktop application starts.
-- Synchronize model lists from provider APIs, search and add candidate models, or add and remove model names manually. Removing a model configuration does not delete historical conversations.
-- Stream incremental provider responses in real time and retry the most recent model response.
-- Render model responses as GFM Markdown and sanitized HTML, including headings, lists, tables, blockquotes, code blocks, links, and images. HTML is sanitized against an allowlist before display.
-- Show a collapsible execution panel above each response with context analysis, response generation, and tool pending/running/success/failure states. Tool steps are stored in the rollout and restored with conversation history. The UI does not display or fabricate the model's private, token-by-token chain of thought.
-- Add or drag local files and images into the composer, similar to Codex. Attachments can be previewed and removed before sending, restored from conversation history afterward, and retained when retrying.
-- Render conversation inputs and generated outputs as structured file cards. Input copies and generated files can be opened directly or revealed in Finder, Explorer, or the Linux file manager; missing historical outputs remain visible with an unavailable state.
-- Send JPEG, PNG, WebP, and GIF files as native multimodal image blocks. Extract PDF, DOCX, XLSX, PPTX, text, source code, and common configuration-file content locally before adding it to model context.
-- Adapt the native window from compact `680×540` layouts through large desktop screens. Conversation height, sidebar width, composer controls, settings panels, and file grids reflow without horizontal clipping.
-- Use a fully local memory system stored in SQLite, with cross-conversation retrieval, explicit memories, candidate review, approval, and forgetting. Memory use and memory generation can be disabled independently.
-- Enable web search by default for new conversations and manage search services under **Settings → Web Search**.
-- Manage providers, local tool permissions, MCP, and plugins from Settings.
-- Use one registry for every model-visible tool; a tool cannot be advertised unless the same registry contains its executor.
-- Use built-in file, command, plan, sub-agent, skill-management, memory, search, and session-search tools. Browser automation is supplied by an installed MCP server or plugin instead of an embedded CDP daemon.
-- Discover, copy, install, enable, disable, and remove local plugin directories. Failed installations are rolled back.
-- Load `SKILL.md` instructions progressively, execute permission-declaring JavaScript/Python tools, and import MCP servers from plugins.
-- Connect MCP servers through stdio, SSE, or Streamable HTTP. MCP tools use collision-safe `mcp__server__tool` names while calls are routed to their original server names.
-- Store conversations, messages, projects, and configuration in `~/.aiclaw/aiclaw.db`.
-- Build universal macOS applications, Windows applications/installers, and Linux packages through GitHub Actions when a version tag is published, including SHA-256 checksum files.
+- **对话与执行**：模型在本机读写文件、执行命令、调用 MCP 工具。执行命令与调用外部
+  工具前会请你确认（可选严格 / 无人值守档位）；危险命令硬拒绝。上下文撑满前主动压缩。
+- **模型服务**：多个 OpenAI 兼容端点（OpenAI、通义、Kimi、OpenRouter、Claude / Gemini
+  的兼容入口、自建），各带 Key 与模型清单；会话之间随时切换。Key 只进本机配置库，
+  不经协议帧、不进日志。
+- **插件**：随应用分发 computer use（截屏 + 鼠标键盘，启用即授权）、微信（扫码登录）、
+  企业微信（智能机器人）三个插件；也能从目录装自己的（技能、MCP server）。外部会话
+  发来的消息先记下等你放行，放行后跑在只读工具的受限会话里。
+- **搜索引擎**：Tavily / SerpAPI / 阿里云 IQS，启用后模型多一个 `web_search` 工具。
+- **技能**：一并认 Claude Code、Codex、npm 全局包与插件带来的 `SKILL.md`。
 
-## Run the Desktop Application from Source
+## 目录
 
-You need Go, Node.js, Wails v2.11.0, and the desktop build dependencies for your platform.
+```text
+apps/desktop/        Electron 宿主 + Vue 界面
+packages/agent-client/  内核的 TS 客户端
+tools/claw-agent/    Go 内核：循环 / 工具 / MCP / 技能 / 记忆 / 会话库 / JSON-RPC
+internal/plugin      插件系统（bundle、manifest、权限、配置、通道）
+internal/plugins     内置插件：微信、企业微信
+internal/store       应用库（SQLite，gorm）：模型服务、插件、搜索引擎、通道授权
+scripts/             冒烟测试、打包、图标
+docs/                设计文档；docs/agent-loop.md 改循环前必读
+```
+
+## 开发
+
+需要 Go 1.27+ 与 Node 22+。
 
 ```bash
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
-make dev
+make dev      # 编译并起应用
+make check    # 交付前全量预检：格式、vet、测试、类型、两套冒烟
+make help     # 其余 target
 ```
 
-`make dev` starts a native Wails development window. It is not a browser application; the Vite URL is used only for frontend hot reload inside Wails.
+数据目录：`~/.aiclaw/`（`aiclaw.db` 应用库、`plugins/` 插件、`skills/` 技能、
+`memory.md` 长期记忆）；会话库与界面配置在 Electron 的 userData 目录。
 
-Build the production application:
+## 打包与发布
 
-```bash
-make test
-make build
-```
+`make package` 用 `@electron/packager` 在一台机器上出四个包（macOS arm64 / x64、
+Windows x64、Linux x64），内核 `CGO_ENABLED=0` 交叉编译。推 `v*` tag 触发
+GitHub Actions：测试 → 打包 → 建 Release（tag 注释作发布说明，附 SHA256SUMS）。
 
-On macOS, the application is usually written to `desktop/build/bin/AIClaw.app`. macOS builds require a complete, recent Xcode SDK. Old standalone Command Line Tools may not link the system frameworks required by Wails.
-
-## First-Time Setup
-
-1. Open **Settings → Model Providers**, add an API endpoint and key, then synchronize and search for models or add model names manually. Click the `×` next to an added model to remove it from the available-model list.
-2. To use external web search, add and enable a search service under **Settings → Web Search**.
-3. Return to the conversation and click the model button above the composer to select a provider and model.
-4. New conversations are unassigned by default. Open a project in the sidebar before creating a conversation to assign it to that project, or change an existing conversation's assignment later. **Unassigned** in the sidebar contains only standalone conversations.
-5. Click **Attach** in the composer toolbar or drag files directly into the composer. You can send attachments by themselves or add instructions describing what AIClaw should do with them.
-
-AIClaw does not bundle or host model credentials. API keys are stored in the local database.
-
-### Model Removal and Conversation History
-
-The provider model list represents the models currently available for selection. Removing a model only removes it from this list. Saved projects, conversations, messages, and the model names recorded with historical conversations remain intact. If you remove the currently selected model, AIClaw selects the next available model from the same provider. If no models remain, add one before sending another message.
-
-### Local Memory and Streaming Responses
-
-Under **Settings → Local Memory**, you can independently control whether new conversations use memories and whether conversations may generate memories. You can also review or forget existing entries. An explicit request such as “Remember that my location is Shanghai” is saved directly as a local memory, and relevant memories are injected into future conversations when needed. Memories and review records are written only to `~/.aiclaw/aiclaw.db`.
-
-Provider responses are displayed incrementally over a streaming connection. **Retry** under the latest model response starts a new request from the corresponding user message and replaces the response using the same streaming flow.
-
-### Files and Images
-
-Attachments are copied into AIClaw's private local directory before being associated with the conversation rollout. Remote providers never receive the original local path. Each request supports up to 10 attachments, with a maximum size of 20 MB per file.
-
-- **Images:** JPEG, PNG, WebP, and GIF. Image understanding depends on whether the selected model supports vision input.
-- **Documents:** PDF, DOCX, XLSX, and PPTX.
-- **Text:** Markdown, JSON/JSONL, CSV/TSV, XML/YAML, and common source-code, script, and configuration formats.
-- **Safe fallback:** Document content is parsed locally and capped before being injected. Unsupported binary files are rejected before sending instead of being passed to the model as unreadable text.
-
-Removing an attachment before sending also deletes its staged copy. Sent attachments belong to conversation history and cannot be silently removed from an individual message. Unsent staged attachments older than 24 hours are cleaned automatically when the application starts.
-
-Generated files returned by built-in tools are detected from structured tool results. AIClaw also recognizes existing absolute file paths in command output and assistant Markdown. These references are deduplicated and displayed below the corresponding response. **Open** launches the file with the operating system's default application; **Reveal** selects it in Finder or Explorer, or opens its containing folder on Linux. Generated output files remain at their original paths and are not copied into AIClaw's private attachment directory.
-
-## Plugin Format
-
-Choose a local directory under **Settings → Plugins** to install it. AIClaw recognizes the following structure:
-
-```text
-example-plugin/
-  .codex-plugin/plugin.json   # or plugin.json in the plugin root
-  skills/
-    research/
-      SKILL.md
-      manifest.json           # may declare a JS/Python tool entry point
-      main.py                 # or a JavaScript entry point
-  mcp.json                    # .mcp.json is also supported
-```
-
-The plugin manifest must provide at least a name:
-
-```json
-{
-  "name": "Research Kit",
-  "description": "Local research helpers",
-  "version": "1.0.0"
-}
-```
-
-MCP files use the common `mcpServers` structure. They may configure a local `command`/`args`/`env` combination or a remote `url`/`headers` combination. Disabling a plugin also disables its associated skills and MCP servers.
-
-Executable skills must declare `process.execute` in `manifest.json`. Supported permission declarations are `process.execute`, `filesystem.read`, `filesystem.write`, and `network.access`. AIClaw validates declarations, prevents entry points from escaping the installed skill directory, exposes requested permissions in Settings, and starts skill processes with a reduced environment. Stdio and remote MCP definitions automatically surface `process.execute` and `network.access`, respectively. New plugins are installed disabled; review their permissions before enabling them.
-
-## Local Data
-
-```text
-~/.aiclaw/
-  aiclaw.db
-  attachments/
-  plugins/
-  logs/
-```
-
-Deleting a project archives its conversations instead of physically deleting their content from the database.
-
-Project assignment is optional conversation-grouping metadata. It does not affect the provider, model, messages, or local memories. Moving a conversation from a project to **Unassigned** only clears its project UUID; it does not archive or delete the conversation.
-
-A provider cannot be deleted while a conversation still references it. This restriction does not apply when removing an individual model from a provider because doing so does not alter historical conversation records.
-
-## Release Application Packages
-
-Pushing a `v*` tag triggers `.github/workflows/release.yml` and produces:
-
-- `AIClaw-macos-universal.zip`
-- `AIClaw-windows-amd64.zip`
-- `AIClaw-linux-amd64.tar.gz`
-- `SHA256SUMS.txt`
-
-The workflow runs Go, desktop bridge, and frontend tests before building all three platforms in parallel and uploading the artifacts to the corresponding GitHub Release. Manually running the workflow performs validation and generates Actions artifacts; only a version-tag run creates a Release.
-
-CI writes tags such as `v1.2.3` into application metadata for each platform and performs ad-hoc signing and integrity checks for the macOS bundle. For public distribution, configuring an Apple Developer ID, notarization, and a Windows code-signing certificate is still recommended.
-
-## Technical Structure
-
-```text
-desktop/                 Native Wails window, Go bindings, and Vue frontend
-internal/core/           Local conversations, model sampling, and tool dispatch
-internal/store/gormstore SQLite persistence
-internal/tools/          File, command, web, and unified built-in tools
-internal/skills/         Progressive skill loading and permission-aware JS/Python execution
-internal/tools/mcp/      Namespaced MCP client and tool bridge
-```
-
-The desktop conversation path is `Wails UI → Go desktop bridge → local core session → unified tool registry → Provider/MCP/Skill execution → SQLite rollout`. The attachment path is `original file → private local copy and SQLite metadata → rollout attachment reference → provider multimodal/text content block`. Neither path depends on a web console, legacy agent runtime, CDP daemon, or local HTTP API at runtime.
+macOS 包未签名，第一次打开要右键「打开」，或
+`xattr -dr com.apple.quarantine /Applications/AIClaw.app`。

@@ -8,6 +8,11 @@ import (
 	"github.com/chowyu12/aiclaw/internal/model"
 )
 
+// computerManifest 是内置 computer-use 插件的 manifest 样本，配置校验用它当「没有配置项」的例子。
+const computerManifest = `{"schema_version":1,"id":"aiclaw.computer-use","name":"Computer Use",
+	"permissions":["computer.control","filesystem.write"],
+	"contributes":{"tools":[{"provider":"builtin:computer_use","names":["computer"]}]}}`
+
 const connectorManifest = `{"schema_version":1,"id":"acme.connector","name":"Connector",
 	"permissions":["network.access","channel.receive","channel.send","secrets.read","filesystem.write"],
 	"config":{

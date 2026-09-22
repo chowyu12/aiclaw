@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { copyFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { app, shell } from "electron";
 
 import { isNewer, normalizeVersion } from "./version.js";
@@ -11,26 +11,17 @@ import { isNewer, normalizeVersion } from "./version.js";
  * 检查更新。
  *
  * **这不是自动更新。** 真正的静默自动更新（Squirrel.Mac / electron-updater）
- * 要求安装包有 Developer ID 签名，而公司还没有 Apple 开发者证书——没有签名
- * 的更新包 Squirrel 会直接拒绝。所以这里做的是「发现新版本并帮你装」：
- * 提示 → 用户点一下 → 跑与手工安装完全相同的那个脚本。
+ * 要求安装包有 Developer ID 签名，而这个项目的包是未签名的——没有签名的更新包
+ * Squirrel 会直接拒绝。所以这里做的是「发现新版本并帮你装」：
+ * 提示 → 用户点一下 → 下载 zip → 一段脱离父进程的脚本替换 .app 并重开。
  *
- * 检查走的是软件包库里那个固定地址的指针文件，**不需要任何凭据**
- * （upstream-app 开了「允许任何人从软件包库拉取」）。用它而不是 releases 接口，
- * 是因为发现类接口匿名仍然 401/404。
- *
- * 装的时候不自己实现「替换正在运行的自己」这套：那要处理退出时机、
- * 替换失败回滚、重新拉起，每一条都能把用户的应用变成打不开。
- * 复用 install-mac.sh——它已经在做同样的事，而且是同事手工安装走的同一条路，
- * 出问题时两边一起暴露，不会有一条没人走过的分支。
+ * 检查走 GitHub Releases 的公开接口，**不需要任何凭据**。包名与
+ * .github/workflows/release.yml 里的 zip 命名一致：改一处要改另一处。
  */
 
-const PACKAGES =
-  "https://git.example.internal/api/v4/projects/1752/packages/generic/upstream-app";
-const LATEST_POINTER = `${PACKAGES}/latest/latest.txt`;
-const INSTALL_SCRIPT =
-  "https://git.example.internal/infra/upstream/-/raw/master/install-mac.sh";
-const RELEASES_PAGE = "https://git.example.internal/sfs/upstream-app/-/releases";
+const REPO = "chowyu12/aiclaw";
+const LATEST_RELEASE = `https://api.github.com/repos/${REPO}/releases/latest`;
+const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
 
 export interface UpdateStatus {
   current: string;
@@ -41,13 +32,26 @@ export interface UpdateStatus {
   /**
    * 这个平台点一下能不能把新版本弄下来。
    *
-   * macOS 是真·一键（跑安装脚本、自动重开）；Windows 只到「下载好并指给你」
-   * ——自替换在那边风险太高且我们无法验证。两者都比让用户自己去发布页
-   * 找文件强，所以都算 true，文案由界面按平台分。
+   * macOS 是真·一键（替换 .app、自动重开）；Windows 与 Linux 只到「下载好并指给你」
+   * ——自替换在那边风险太高且我们无法验证。三者都比让用户自己去发布页找文件强，
+   * 所以都算 true，文案由界面按平台分。
    */
   canInstall: boolean;
   /** 界面上那个按钮该写什么。 */
   installLabel: string;
+}
+
+/** 这台机器该下哪个包。与 release.yml 的 zip 命名一致。 */
+function assetName(tag: string): string {
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  switch (process.platform) {
+    case "darwin":
+      return `AIClaw-${tag}-mac-${arch}.zip`;
+    case "win32":
+      return `AIClaw-${tag}-win-x64.zip`;
+    default:
+      return `AIClaw-${tag}-linux-x64.zip`;
+  }
 }
 
 export class Updater {
@@ -58,46 +62,36 @@ export class Updater {
    * 用户会发现重启完版本号没变，而这种错没人会怀疑到缓存上。
    */
   private prepared = { tag: "", path: "" };
+  /** 最近一次查到的各资源下载地址，按文件名。 */
+  private assets = new Map<string, string>();
 
   async check(): Promise<UpdateStatus> {
     const current = app.getVersion();
-    const canInstall = process.platform === "darwin" || process.platform === "win32";
+    const canInstall = true;
     const installLabel = process.platform === "darwin" ? "升级并重启" : "下载新版本";
     try {
-      const response = await fetch(LATEST_POINTER, {
+      const response = await fetch(LATEST_RELEASE, {
         signal: AbortSignal.timeout(10_000),
-        // 指针文件会被每次发版覆盖，别让中间层给我们一份旧的。
-        headers: { "Cache-Control": "no-cache" },
+        headers: { Accept: "application/vnd.github+json", "Cache-Control": "no-cache" },
       });
       if (!response.ok) {
-        return {
-          current,
-          latest: "",
-          hasUpdate: false,
-          canInstall,
-          installLabel,
-          error: `HTTP ${response.status}`,
-        };
+        return { current, latest: "", hasUpdate: false, canInstall, installLabel, error: `HTTP ${response.status}` };
       }
-      // 只读前面一小段：正常内容就是一行版本号。真拿到一整页 HTML 错误页时，
-      // 截断能避免把它整个塞进内存和日志。
-      const latest = normalizeVersion((await response.text()).slice(0, 64));
-      return {
-        current,
-        latest,
-        hasUpdate: isNewer(latest, current),
-        canInstall,
-        installLabel,
-        error: "",
+      const release = (await response.json()) as {
+        tag_name?: string;
+        assets?: { name?: string; browser_download_url?: string }[];
       };
+      const latest = normalizeVersion(release.tag_name ?? "");
+      this.assets = new Map(
+        (release.assets ?? [])
+          .filter((asset) => asset.name && asset.browser_download_url)
+          .map((asset) => [asset.name!, asset.browser_download_url!]),
+      );
+      return { current, latest, hasUpdate: isNewer(latest, current), canInstall, installLabel, error: "" };
     } catch (error) {
       // 查不到不是错误状态，只是这次没查到。网络不通时不该在界面上报红。
       return {
-        current,
-        latest: "",
-        hasUpdate: false,
-        canInstall,
-        installLabel,
+        current, latest: "", hasUpdate: false, canInstall, installLabel,
         error: error instanceof Error ? error.message : String(error),
       };
     }
@@ -106,12 +100,11 @@ export class Updater {
   /**
    * 后台把新版本下好，等用户点「重启更新」。
    *
-   * 为什么改成自动下：旧流程是「提示 → 用户点 → 等几十秒下载 → 应用退出」，
-   * 那几十秒卡在用户按下按钮之后，他只能盯着一个不动的界面等。改成发现
-   * 新版本就先下好，点下去只剩替换与重开——两三秒的事。
+   * 发现新版本就先下好，点下去只剩替换与重开——两三秒的事；否则那几十秒
+   * 卡在用户按下按钮之后，他只能盯着一个不动的界面等。
    *
-   * 只在 macOS 上做：Windows 那边没有「重启即更新」这条路（替换正在运行的
-   * 自己要另一套机制），下好了也还是要用户自己解压，不如等他点了再下。
+   * 只在 macOS 上做：别的平台没有「重启即更新」这条路，下好了也还是要用户
+   * 自己解压，不如等他点了再下。
    */
   async prepare(
     onProgress?: (received: number, total: number) => void,
@@ -128,44 +121,35 @@ export class Updater {
       return { ready: true, version: status.latest, detail: this.prepared.path };
     }
     try {
-      const path = await this.download(tag, `upstream-${tag}-mac-arm64.zip`, onProgress);
+      const path = await this.download(assetName(tag), onProgress);
       this.prepared = { tag, path };
       return { ready: true, version: status.latest, detail: path };
     } catch (error) {
       // 下不下来不报到界面上：用户没点过任何东西，弹一条他看不懂的错误只是打扰。
       // 点「升级」时还会再试一次，那时候失败才该说。
-      return {
-        ready: false,
-        version: status.latest,
-        detail: error instanceof Error ? error.message : String(error),
-      };
+      return { ready: false, version: status.latest, detail: error instanceof Error ? error.message : String(error) };
     }
   }
 
   /**
    * 下载安装包，边下边报进度。
    *
-   * 自己下而不是把整件事甩给安装脚本，就是为了这个进度：脚本在终端里有
-   * curl 的进度条，而从应用里跑它时 stdio 是丢掉的——用户点完「升级」之后
-   * 看到的是一个不动的按钮，几十秒后应用突然退出。那不是慢，是没有反馈，
-   * 但感觉上比慢更糟。
+   * 分片读而不是 arrayBuffer()：后者要等下完才有第一个字节，也就没有进度可报——
+   * 用户点完「升级」看到的会是一个不动的按钮，几十秒后应用突然退出。
    */
   private async download(
-    tag: string,
     file: string,
     onProgress?: (received: number, total: number) => void,
   ): Promise<string> {
-    const response = await fetch(`${PACKAGES}/${tag}/${file}`, {
-      signal: AbortSignal.timeout(600_000),
-    });
+    const url = this.assets.get(file);
+    if (!url) throw new Error(`最新版本里没有 ${file}`);
+    const response = await fetch(url, { signal: AbortSignal.timeout(600_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const total = Number(response.headers.get("content-length") ?? 0);
 
     const target = join(tmpdir(), file);
     const chunks: Uint8Array[] = [];
     let received = 0;
-    // 分片读而不是 arrayBuffer()：后者要等下完才有第一个字节，
-    // 也就没有进度可报。
     const reader = response.body?.getReader();
     if (!reader) throw new Error("这个平台的 fetch 不支持流式读取");
     for (;;) {
@@ -182,97 +166,84 @@ export class Updater {
   /**
    * 下载并安装最新版。
    *
-   * macOS：脱离父进程跑安装脚本。脚本第一件事就是退掉正在运行的内部平台——
-   * 也就是**杀掉我们自己**，所以这个子进程必须 detached + unref，
+   * macOS：脱离父进程跑一段替换脚本。脚本第一件事是等我们退出——它要替换的
+   * 就是**正在运行的我们自己**，所以这个子进程必须 detached + unref，
    * 不然它会跟着我们一起死，用户看到的是应用退了但没升级。
    *
-   * Windows：只下载并在资源管理器里指给用户，**不自动替换**。
-   * 「替换正在运行的自己」在 Windows 上比 macOS 还难（文件被占用、
-   * 杀进程的时机、失败后没有回滚），而我们一台 Windows 机器都没有，
-   * 写一个没验证过的自替换脚本，失败方式正好是「应用打不开了」。
-   * 下载这一段是能验的，也已经省掉了最烦的一步——找到该下哪个文件。
+   * Windows / Linux：只下载并在文件管理器里指给用户，**不自动替换**。
+   * 「替换正在运行的自己」在那两边比 macOS 还难（文件被占用、杀进程的时机、
+   * 失败后没有回滚），而我们没有机器去验证，写一个没验证过的自替换脚本，
+   * 失败方式正好是「应用打不开了」。下载这一段是能验的，也已经省掉了最烦的
+   * 一步——找到该下哪个文件。
    */
   async install(
     onProgress?: (received: number, total: number) => void,
   ): Promise<{ started: boolean; detail: string }> {
-    if (process.platform === "win32") return this.downloadForWindows(onProgress);
-    if (process.platform !== "darwin") {
-      await shell.openExternal(RELEASES_PAGE);
-      return { started: false, detail: "已打开发布页，请下载对应平台的包。" };
+    if (process.platform !== "darwin") return this.downloadOnly(onProgress);
+    if (!app.isPackaged) {
+      return { started: false, detail: "开发模式下不替换自己；打好的包才能一键升级。" };
     }
-
-    // 先把包下下来（有进度），再让脚本装本地这一份。
-    //
-    // 脚本支持 `install-mac.sh <zip>`，走这条等于跳过它自己的「查版本 + 下载」
-    // 那一段——耗时没变，但**慢的那段发生在应用还活着的时候**，用户看得见
-    // 进度；剩下的替换与重开只有两三秒。
-    let localZip = "";
     try {
       const status = await this.check();
       const tag = status.latest ? `v${status.latest}` : "";
       if (!tag) throw new Error(status.error || "查不到最新版本");
       // 后台已经下好同一个版本就直接用，别再下一遍。
-      if (this.prepared.tag === tag && existsSync(this.prepared.path)) {
-        localZip = this.prepared.path;
-      } else {
-        localZip = await this.download(tag, `upstream-${tag}-mac-arm64.zip`, onProgress);
-      }
+      const zip =
+        this.prepared.tag === tag && existsSync(this.prepared.path)
+          ? this.prepared.path
+          : await this.download(assetName(tag), onProgress);
+      this.replaceAndRelaunch(zip);
+      app.quit();
+      return { started: true, detail: "已下载完成，正在替换并重新打开。" };
     } catch (error) {
-      // 下载失败就退回老路：让脚本自己去下。它在终端里久经使用，
-      // 比我们这段新代码更可靠。
-      const reason = error instanceof Error ? error.message : String(error);
-      this.runInstaller("");
-      return { started: true, detail: `自己下载失败（${reason}），改由安装脚本下载。` };
+      await shell.openExternal(RELEASES_PAGE);
+      return {
+        started: false,
+        detail: `自动升级失败（${error instanceof Error ? error.message : String(error)}），已打开发布页。`,
+      };
     }
-
-    this.runInstaller(localZip);
-    return { started: true, detail: "已下载完成，正在替换并重新打开。" };
   }
 
   /**
-   * 跑安装脚本。zip 为空表示让脚本自己去下。
+   * macOS：等自己退出，解包，替换当前的 .app，去掉 quarantine，再打开。
    *
-   * **必须脱离父进程**：脚本第一件事就是退掉正在运行的内部平台——也就是杀掉
-   * 我们自己。不 detached + unref 的话它会跟着我们一起死，用户看到的是
-   * 应用退了但没升级。
+   * 替换的是**我们正在运行的那个 bundle**（从可执行文件路径往上找 .app），
+   * 不假定装在 /Applications——用户可能放在别处。先解到临时目录、确认里面
+   * 真有 .app 再动原位置：解一半失败的话，原来的应用还完好。
    */
-  private runInstaller(zip: string): void {
-    const script = "/tmp/upstream-install.sh";
-    const argument = zip ? ` '${zip}'` : "";
-    const child = spawn(
-      "/bin/bash",
-      [
-        "-c",
-        `sleep 1; curl -fsSL '${INSTALL_SCRIPT}' -o '${script}' && /bin/bash '${script}'${argument}`,
-      ],
-      { detached: true, stdio: "ignore" },
-    );
+  private replaceAndRelaunch(zip: string): void {
+    const bundle = resolve(dirname(app.getPath("exe")), "..", "..");
+    const script = [
+      "set -e",
+      `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.2; done`,
+      `TMP=$(mktemp -d)`,
+      `ditto -x -k '${zip}' "$TMP"`,
+      `NEW=$(find "$TMP" -maxdepth 2 -name '*.app' -print -quit)`,
+      `[ -n "$NEW" ] || { echo "zip 里没有 .app"; exit 1; }`,
+      `rm -rf '${bundle}'`,
+      `mv "$NEW" '${bundle}'`,
+      `xattr -dr com.apple.quarantine '${bundle}' 2>/dev/null || true`,
+      `rm -rf "$TMP"`,
+      `open '${bundle}'`,
+    ].join("\n");
+    const child = spawn("/bin/bash", ["-c", script], { detached: true, stdio: "ignore" });
     child.unref();
   }
 
-  /**
-   * Windows：把安装包下到「下载」目录并在资源管理器里选中它。
-   *
-   * 下载走的同样是那个匿名可读的包仓库，所以不需要任何凭据；文件名里带着
-   * 版本号，用户解压覆盖就行。失败时退回开发布页——那条路一直是通的。
-   */
-  private async downloadForWindows(
+  /** Windows / Linux：把包下到「下载」目录并在文件管理器里选中它。 */
+  private async downloadOnly(
     onProgress?: (received: number, total: number) => void,
   ): Promise<{ started: boolean; detail: string }> {
     try {
       const status = await this.check();
       const tag = status.latest ? `v${status.latest}` : "";
       if (!tag) throw new Error(status.error || "查不到最新版本");
-
-      const name = `upstream-${tag}-win-x64.zip`;
-      const downloaded = await this.download(tag, name, onProgress);
+      const name = assetName(tag);
+      const downloaded = await this.download(name, onProgress);
       const target = join(app.getPath("downloads"), name);
       await copyFile(downloaded, target);
       shell.showItemInFolder(target);
-      return {
-        started: false,
-        detail: `已下载到 ${target}。退出内部平台后解压覆盖原目录即可。`,
-      };
+      return { started: false, detail: `已下载到 ${target}。退出 AIClaw 后解压覆盖原目录即可。` };
     } catch (error) {
       await shell.openExternal(RELEASES_PAGE);
       return {

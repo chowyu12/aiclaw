@@ -6,7 +6,7 @@ on:
 permissions:
   contents: write
 env:
-  GO_VERSION: "1.26.x"
+  GO_VERSION: "1.27.x"
   NODE_VERSION: "22"
 
 jobs:
@@ -22,35 +22,32 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            electron/package-lock.json
-            renderer/package-lock.json
-      - name: Test Go core
-        run: go test ./...
-      - name: Test the Electron shell
-        working-directory: electron
-        run: npm ci && npm run typecheck && npm test
-      - name: Build and test the interface
-        working-directory: renderer
-        run: npm ci && npm test && npm run build
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Go format, vet, no-cgo probe
+        run: make fmt-check vet nocgo
+      - name: Go tests
+        run: go test -race -count=1 ./...
+      - name: Build client and desktop, typecheck
+        run: make build-client build-desktop typecheck
+      - name: Renderer unit tests
+        run: npm run test:renderer
+      - name: Kernel smoke (real claw-agent over JSON-RPC)
+        run: make build-go && npm run smoke
+      - name: Desktop smoke (preload, IPC bridge, page render)
+        # Electron needs a display and its usual GTK/NSS libraries; xvfb
+        # provides a virtual display on the headless runner.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libasound2t64 >/dev/null
+          xvfb-run --auto-servernum npm run smoke:desktop
 
   package:
     needs: test
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            artifact: aiclaw-macos
-            # One package per architecture; the core inside each is universal.
-            pattern: electron/release/*.dmg
-          - os: windows-latest
-            artifact: aiclaw-windows
-            pattern: electron/release/*.exe
-          - os: ubuntu-24.04
-            artifact: aiclaw-linux
-            pattern: electron/release/*.AppImage
-    runs-on: ${{ matrix.os }}
+    # One Linux runner produces every package: the kernel builds with
+    # CGO_ENABLED=0 for any GOOS/GOARCH, @electron/packager cross-packages,
+    # and the Windows exe metadata is written with resedit (no wine).
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -61,46 +58,30 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            electron/package-lock.json
-            renderer/package-lock.json
-      - name: Set application version
-        shell: bash
-        working-directory: electron
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - name: Package all four targets
+        # scripts/package-app.mjs takes the version from GITHUB_REF_NAME when
+        # it is a v* tag, so the Release version always matches the tag.
+        run: make package
+      - name: Zip
+        # zip, not dmg: dmg can only be made on macOS. -y keeps the symlinks
+        # inside the .app (Frameworks/Current etc.) as symlinks; without it
+        # the bundle is broken and Gatekeeper refuses it.
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || VERSION="0.0.${GITHUB_RUN_NUMBER}"
-          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json"));p.version=process.argv[1];fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' "$VERSION"
-      - name: Build the interface
-        working-directory: renderer
-        run: npm ci && npm run build
-      - name: Build the Go core for this platform
-        working-directory: electron
-        run: npm ci && node tools/build-core.mjs ${{ runner.os == 'macOS' && 'darwin' || runner.os == 'Windows' && 'win32' || 'linux' }}
-      - name: Compile the shell
-        working-directory: electron
-        run: npm run build
-      - name: Package
-        working-directory: electron
-        # electron-builder signs macOS builds ad-hoc without credentials,
-        # matching what the Wails pipeline produced. Set CSC_LINK and
-        # CSC_KEY_PASSWORD to sign properly, and APPLE_ID plus
-        # APPLE_APP_SPECIFIC_PASSWORD and APPLE_TEAM_ID to notarise.
-        env:
-          # Packaging failures here are hard to diagnose after the fact: the
-          # job log is the only record, and reading it needs admin rights.
-          DEBUG: electron-builder
-        shell: bash
-        run: |
-          # Hardened runtime is a signing attribute, so it is only switched on
-          # when there is a certificate to sign with.
-          HARDENED=""
-          if [ -n "${CSC_LINK:-}" ]; then HARDENED="--config.mac.hardenedRuntime=true"; fi
-          npx electron-builder --config electron-builder.yml --publish never $HARDENED
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          [[ "$TAG" =~ ^v ]] || TAG="v0.0.${GITHUB_RUN_NUMBER}"
+          mkdir -p dist-release
+          (cd release && zip -qry "../dist-release/AIClaw-${TAG}-mac-arm64.zip" "AIClaw-darwin-arm64")
+          (cd release && zip -qry "../dist-release/AIClaw-${TAG}-mac-x64.zip"   "AIClaw-darwin-x64")
+          (cd release && zip -qry "../dist-release/AIClaw-${TAG}-win-x64.zip"   "AIClaw-win32-x64")
+          (cd release && zip -qry "../dist-release/AIClaw-${TAG}-linux-x64.zip" "AIClaw-linux-x64")
+          ls -la dist-release/
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.pattern }}
+          name: aiclaw-packages
+          path: dist-release/*.zip
           # Uploading nothing must not look like success. The default is to
           # warn, which is how three green package jobs once produced an
           # empty release.

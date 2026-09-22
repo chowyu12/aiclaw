@@ -206,3 +206,12 @@ func NativeContributions(plugin model.Plugin) (tools int, channels int, err erro
 	}
 	return tools, len(manifest.Contributes.Channels), nil
 }
+
+func covers(granted map[string]bool, required []string) bool {
+	for _, permission := range required {
+		if !granted[permission] {
+			return false
+		}
+	}
+	return true
+}

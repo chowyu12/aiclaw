@@ -181,6 +181,18 @@ upstream 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而�
 6. **打包发布**：`@electron/packager` + 现有 GitHub Actions，删掉 `electron/`、`renderer/`、
    `cmd/aiclaw-core`、`internal/core` 等被替换的部分。
 
+   落点：一台 ubuntu runner 出四个 zip（macOS arm64 / x64、Windows x64、Linux x64；
+   内核 `CGO_ENABLED=0` 交叉编译，exe 元数据用 resedit，不需要 wine），命名
+   `AIClaw-<tag>-<mac-arm64|mac-x64|win-x64|linux-x64>.zip`，与宿主 `updater.ts`
+   里的资源名一一对应。发布 job 沿用原来的：tag 注释作说明、SHA256SUMS、空产物
+   直接失败。更新器改查 GitHub Releases 的 `releases/latest`；macOS 一键升级由
+   应用自己下载 zip、`ditto` 解包、替换正在运行的 .app 并重开（不再依赖外部脚本）。
+   删掉的 Go 包按 `go list -deps ./tools/claw-agent` 之外的集合来定：`internal/core`、
+   `appserver`、`appservice`、`memory`、`parser`、`provider`、`scheduler`、`selfupdate`、
+   `workspace`、`tools/*`（除 websearch）、`plugins/computeruse`、`pkg/{harness,httputil,
+   modelcaps,sse}`，以及 `cmd/aiclaw-core`。`internal/model` 与 `gormstore` 里旧会话的
+   表与方法保留——库里的旧数据还在，只是没有界面读它。
+
 ## 风险与边界
 
 - **这是一次换心手术**，不是重构。`internal/core` 及其上的一切（rollout 模型、
@@ -188,7 +200,8 @@ upstream 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而�
   我为 AIClaw 写的那些测试大部分会随实现一起删除。
 - **审批是新增的用户可见行为**。今天 AIClaw 执行命令不问，换核后会问。
   这是安全上的改进，但会改变使用手感，必须写进 release notes。
-- **历史会话不迁移**，只读保留。
+- **历史会话不迁移**。旧的 `threads` / `rollout_items` 表原样留在 `~/.aiclaw/aiclaw.db`
+  里，新会话在 Electron userData 下的会话库；3.0 的界面不显示旧会话。
 - **不做 OS 级沙箱**——这是 upstream 明确记录的决定，照搬过来同样成立：
   命令直接在用户机器上跑，只有路径收敛与审批两道防护。
 - **upstream 的 AGENTS.md 有 57k**，包含大量项目约定。搬代码时要一并读，
