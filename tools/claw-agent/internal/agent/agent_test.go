@@ -488,3 +488,49 @@ func TestPromptSpellsOutTheHomeDirectoryWhenThereIsNoWorkspace(t *testing.T) {
 		t.Errorf("没有工作区时，提示词里必须有主目录的真实路径：%s", prompt)
 	}
 }
+
+// 代码模式下多模态工具要跟其它工具一起收进 exec：模型在脚本里写
+// tools.generate_image(...) 是最自然的写法，留在外面它会得到「没有这个工具」。
+func TestCodeModeFoldsMediaTools(t *testing.T) {
+	model := &fakeModel{}
+	server := httptest.NewServer(http.HandlerFunc(model.handler))
+	t.Cleanup(server.Close)
+	session, err := New(context.Background(), "test", protocol.SessionStartParams{
+		Model:    protocol.ModelConfig{BaseURL: server.URL, Model: "fake"},
+		Workdir:  t.TempDir(),
+		CodeMode: true,
+		Roles: protocol.RoleModels{
+			Image: protocol.RoleModel{ProviderID: 1, Model: "qwen-image-3.0"},
+			TTS:   protocol.RoleModel{ProviderID: 1, Model: "qwen3-tts-flash"},
+		},
+	}, StaticKey("sk-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(session.Close)
+
+	folded := strings.Join(session.FoldedTools(), ",")
+	for _, name := range []string{"generate_image", "speak"} {
+		if !strings.Contains(folded, name) {
+			t.Errorf("%s 应收进 exec，实际收进去的是：%s", name, folded)
+		}
+	}
+	for _, name := range session.Tools() {
+		if name == "generate_image" || name == "speak" {
+			t.Errorf("%s 不该再作为顶层工具出现：%v", name, session.Tools())
+		}
+	}
+	if !strings.Contains(strings.Join(session.Tools(), ","), "exec") {
+		t.Errorf("顶层应只剩 exec 等少数几个：%v", session.Tools())
+	}
+}
+
+func TestGuardAppendsAndDeduplicates(t *testing.T) {
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalOnWrite)
+	session.Guard("/a/x.db", " ", "/a/x.db-wal")
+	session.Guard("/a/x.db")
+	got := session.config.ProtectedPaths
+	if len(got) != 2 || got[0] != "/a/x.db" || got[1] != "/a/x.db-wal" {
+		t.Errorf("名单应追加且去重：%v", got)
+	}
+}

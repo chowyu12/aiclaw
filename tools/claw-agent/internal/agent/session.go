@@ -205,6 +205,14 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		session.mountMCP(ctx, name, config.MCPServers[name])
 	}
 
+	// 多模态工具在代码模式**之前**注册，跟内置工具与 MCP 一起收进 exec。
+	// 放在后面它就成了一个游离在 exec 外面的顶层工具，而模型在代码模式下
+	// 顺手写 tools.generate_image(...)，得到的是「没有这个工具」——实际踩过：
+	// 它随即去翻应用库找 Key 自己 curl。批量转写一堆录音也正需要在脚本里调。
+	if err := session.registerMediaTools(); err != nil {
+		return nil, err
+	}
+
 	// 代码模式在技能与 computer use **之前**装：它要把注册表里已有的工具
 	// 全部收进 exec，而 load_skill / computer_* 是之后才注册的——那几个
 	// 留在外面是对的，模型读技能、点屏幕不需要写脚本。
@@ -220,13 +228,10 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		}
 	}
 
-	// 技能、记忆、computer use、多模态都在系统提示词之前装好：提示词要列出它们。
+	// 技能、记忆、computer use 都在系统提示词之前装好：提示词要列出它们。
 	session.loadSkills(config.SkillDirs)
 	session.loadMemory(config.MemoryFile)
 	if err := session.registerComputerTools(); err != nil {
-		return nil, err
-	}
-	if err := session.registerMediaTools(); err != nil {
 		return nil, err
 	}
 
@@ -1009,4 +1014,26 @@ func summarize(records []store.Summary, err error) ([]Summary, error) {
 // Delete 删除会话。
 func Delete(ctx context.Context, db *store.Store, id string) error {
 	return db.Delete(ctx, id)
+}
+
+// Guard 往会话的敏感路径名单里追加几条。宿主与内核各有自己知道的秘密所在：
+// 桌面传它的 userData，内核追加自己的应用库——那里面是全部模型服务的 Key。
+//
+// 追加而不是替换，并且在会话建好之后也能调：恢复出来的旧会话存档里没有
+// 这几条，而它们同样要守住。名单在每一轮建 Env 时取用，所以这里改了下一轮就生效。
+func (s *Session) Guard(paths ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := make(map[string]bool, len(s.config.ProtectedPaths))
+	for _, existing := range s.config.ProtectedPaths {
+		seen[existing] = true
+	}
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		s.config.ProtectedPaths = append(s.config.ProtectedPaths, path)
+	}
 }
