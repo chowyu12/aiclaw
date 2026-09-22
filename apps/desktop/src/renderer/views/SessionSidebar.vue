@@ -190,7 +190,10 @@ function when(iso: string): string {
         @click="actions.openSession(session.id)"
       >
         <div class="item-main">
-          <div class="title">{{ session.title || "未命名会话" }}</div>
+          <div class="title">
+            <span v-if="store.live[session.id]?.busy" class="running" title="正在执行"></span>
+            {{ session.title || "未命名会话" }}
+          </div>
           <!-- 命中片段是搜索结果里最有用的一行：一列「未命名会话」挑不出来，
                看见命中的那句话就能认出是哪次。 -->
           <div v-if="session.snippet" class="snippet">{{ session.snippet }}</div>
@@ -251,7 +254,11 @@ function when(iso: string): string {
           @click="actions.openSession(session.id)"
         >
           <div class="item-main">
-            <div class="title">{{ session.title || "未命名会话" }}</div>
+            <div class="title">
+              <!-- 后台还在跑的会话点亮一个点：切走之后它没停，用户得看得见它在哪。 -->
+              <span v-if="store.live[session.id]?.busy" class="running" title="正在执行"></span>
+              {{ session.title || "未命名会话" }}
+            </div>
             <div class="meta">
               {{ when(session.updatedAt) }}
               <template v-if="session.turnCount"> · {{ session.turnCount }} 轮</template>
@@ -511,6 +518,28 @@ function when(iso: string): string {
   display: flex;
   gap: 2px;
   opacity: 0;
+}
+
+/* 正在执行的会话：标题前一个呼吸的小点。 */
+.running {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--accent, #3b82f6);
+  vertical-align: 1px;
+  animation: breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 
 .item:hover .item-actions,

@@ -1,13 +1,20 @@
 import { reactive, readonly } from "vue";
 import { describeError } from "./errors";
 import { modelChoices, usable, type ModelChoice } from "./model-choices";
+import {
+  applyAgentEvent,
+  ensureLive,
+  newLive,
+  restoreHistory,
+  type LiveSession,
+  type TimelineEntry,
+} from "./live-sessions";
 import type {
   AgentEventPayload,
   AppConfigView,
   ApprovalPayload,
   ChannelBindingView,
   ChannelStatusView,
-  HistoryItemView,
   McpProbeView,
   McpServerView,
   PluginConfigFieldView,
@@ -30,42 +37,7 @@ declare global {
   }
 }
 
-/**
- * 时间线上的一条。
- *
- * 消息与执行步骤在**同一个数组**里，按到达顺序排。
- * 早先它们是两个数组分别渲染，结果所有步骤都堆在对话末尾，看不出哪一步
- * 属于哪一轮——而执行过程的价值恰恰在于它发生的位置。
- */
-export type TimelineEntry =
-  /**
-   * images 用 readonly：store 外面拿到的是 readonly() 包过的深只读副本，
-   * 声明成可变数组的话 `groupTurns(store.timeline)` 这类调用会类型不兼容。
-   */
-  | { kind: "user"; id: string; text: string; images?: readonly string[] }
-  | { kind: "agent"; id: string; text: string; streaming: boolean }
-  | {
-      kind: "step";
-      id: string;
-      /** llm：一次模型采样；tool：工具调用；notice：内核说的话。 */
-      step: "llm" | "tool" | "notice";
-      title: string;
-      /** 工具结果、推理正文或失败原因，折叠在条目里。 */
-      detail: string;
-      state: "running" | "done" | "failed";
-      /** 轮次内的序号，从 1 开始。notice 没有。 */
-      seq?: number;
-      startedAt?: number;
-      durationMs?: number;
-      /** 这一步产出的文件（相对工作区）：生成的图、合成的语音。 */
-      artifacts?: readonly string[];
-      /** 仅 llm：模型名、第几次采样、首字节、推理耗时、发起了几个工具调用、用量。 */
-      round?: number;
-      ttftMs?: number;
-      thinkMs?: number;
-      toolCalls?: number;
-      tokens?: number;
-    };
+const EMPTY_TIMELINE: TimelineEntry[] = [];
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
@@ -77,9 +49,22 @@ const state = reactive({
   /** 当前会话用的模型与模型服务。与配置页的默认值分开：切模型只影响当前会话。 */
   model: "",
   providerId: 0,
-  timeline: [] as TimelineEntry[],
+  /**
+   * 每个会话自己的时间线与运行状态，按 sessionId 存。
+   *
+   * 切会话只是换 sessionId，正在后台跑的那一轮照样往它自己的记录里写；
+   * 切回去看到的就是它跑到哪儿了。见 live-sessions.ts。
+   */
+  live: {} as Record<string, LiveSession>,
+  /** 当前看着的会话的时间线。空会话给一个稳定的空数组，免得每次读都换引用。 */
+  get timeline(): TimelineEntry[] {
+    return this.live[this.sessionId]?.timeline ?? EMPTY_TIMELINE;
+  },
+  /** 当前看着的会话有一轮在跑。 */
+  get busy(): boolean {
+    return this.live[this.sessionId]?.busy ?? false;
+  },
   approvals: [] as ApprovalPayload[],
-  busy: false,
   config: null as AppConfigView | null,
   profiles: [] as { id: string; label: string; description: string }[],
   sessions: [] as SessionSummaryView[],
@@ -141,291 +126,13 @@ function plain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-function findEntry(id: string): TimelineEntry | undefined {
-  return state.timeline.find((entry) => entry.id === id);
+/** 侧边栏里那个会话叫什么，给错误条用。 */
+function sessionLabel(sessionId: string): string {
+  const found = state.sessions.find((session) => session.id === sessionId);
+  return found?.title || "另一个会话";
 }
 
-function upsertAgent(itemId: string): TimelineEntry {
-  const existing = findEntry(itemId);
-  if (existing) return existing;
-  const created: TimelineEntry = { kind: "agent", id: itemId, text: "", streaming: true };
-  state.timeline.push(created);
-  return created;
-}
-
-type StepStats = Pick<
-  Extract<TimelineEntry, { kind: "step" }>,
-  | "seq"
-  | "startedAt"
-  | "durationMs"
-  | "round"
-  | "ttftMs"
-  | "thinkMs"
-  | "toolCalls"
-  | "tokens"
-  | "artifacts"
->;
-
-function pushStep(
-  id: string,
-  step: "llm" | "tool" | "notice",
-  title: string,
-  stepState: "running" | "done" | "failed",
-  detail = "",
-  stats: StepStats = {},
-): void {
-  if (findEntry(id)) return;
-  state.timeline.push({ kind: "step", id, step, title, detail, state: stepState, ...stats });
-}
-
-/** 从条目里取出计时与统计。 */
-function stepStats(item: Record<string, unknown>): StepStats {
-  const usage = item.usage as { totalTokens?: number } | undefined;
-  return {
-    seq: numberOr(item.seq),
-    startedAt: numberOr(item.startedAt),
-    durationMs: numberOr(item.durationMs),
-    round: numberOr(item.round),
-    ttftMs: numberOr(item.ttftMs),
-    thinkMs: numberOr(item.thinkMs),
-    toolCalls: numberOr(item.toolCalls),
-    tokens: numberOr(usage?.totalTokens),
-  };
-}
-
-function numberOr(value: unknown): number | undefined {
-  return typeof value === "number" ? value : undefined;
-}
-
-/**
- * claw-agent 事件 → 界面状态。
- *
- * 事件模型是会话 → 轮次 → 条目三层；条目按 kind 分流进同一条时间线，
- * userMessage 忽略（发送时已经本地加过了，再加一次会重复）。
- */
-function applyEvent(payload: AgentEventPayload): void {
-  const params = (payload.params ?? {}) as Record<string, unknown>;
-  switch (payload.method) {
-    case "item/started": {
-      const item = (params.item ?? {}) as Record<string, unknown>;
-      const id = String(item.id ?? "");
-      switch (item.kind) {
-        case "agentMessage":
-          upsertAgent(id);
-          return;
-        case "toolCall":
-          pushStep(id, "tool", describeTool(item), "running", "", stepStats(item));
-          return;
-        case "llm":
-          // 一次模型采样。推理正文之后通过 delta 挂到它的 detail 上——
-          // 推理是这次采样的一部分，不是独立一步。
-          pushStep(
-            id,
-            "llm",
-            typeof item.summary === "string" ? item.summary : "模型",
-            "running",
-            "",
-            stepStats(item),
-          );
-          return;
-        default:
-          return;
-      }
-    }
-    case "item/delta": {
-      const id = String(params.itemId ?? "");
-      const delta = String(params.delta ?? "");
-      const entry = findEntry(id);
-      if (!entry) return;
-      if (entry.kind === "agent") {
-        entry.text += delta;
-      } else if (entry.kind === "step") {
-        // llm 步骤的 delta 是推理增量，挂在它的 detail 上。
-        entry.detail += delta;
-      }
-      return;
-    }
-    case "item/completed": {
-      const item = (params.item ?? {}) as Record<string, unknown>;
-      const id = String(item.id ?? "");
-      switch (item.kind) {
-        case "agentMessage": {
-          const entry = upsertAgent(id);
-          if (entry.kind !== "agent") return;
-          // 用完整文本覆盖增量拼接的结果：completed 带的是权威全文。
-          if (typeof item.text === "string" && item.text) entry.text = item.text;
-          entry.streaming = false;
-          return;
-        }
-        case "toolCall": {
-          const detail = toolDetail(item);
-          const stats = stepStats(item);
-          const artifacts = Array.isArray(item.artifacts) ? (item.artifacts as string[]) : [];
-          const entry = findEntry(id);
-          if (!entry || entry.kind !== "step") {
-            pushStep(
-              id,
-              "tool",
-              describeTool(item),
-              item.toolFailed ? "failed" : "done",
-              detail,
-              { ...stats, artifacts },
-            );
-            return;
-          }
-          entry.state = item.toolFailed ? "failed" : "done";
-          entry.detail = detail;
-          entry.title = describeTool(item);
-          entry.artifacts = artifacts;
-          Object.assign(entry, stats);
-          return;
-        }
-        case "llm": {
-          const stats = stepStats(item);
-          const title = typeof item.summary === "string" ? item.summary : "模型";
-          const entry = findEntry(id);
-          if (!entry || entry.kind !== "step") {
-            pushStep(id, "llm", title, item.toolFailed ? "failed" : "done", "", stats);
-            return;
-          }
-          entry.state = item.toolFailed ? "failed" : "done";
-          entry.title = title;
-          // 推理正文用 completed 带的权威全文覆盖流式拼接的结果。
-          if (typeof item.text === "string" && item.text) entry.detail = item.text;
-          Object.assign(entry, stats);
-          return;
-        }
-        case "notice": {
-          // 内核说的话：历史被压缩了、模型调用在重试。既不是模型输出也不是
-          // 错误——压缩会悄悄丢掉一段历史，不说一声用户会以为模型失忆了。
-          pushStep(id, "notice", typeof item.text === "string" ? item.text : "", "done");
-          return;
-        }
-        case "reasoning":
-          // 推理现在挂在 llm 步骤上，不再是独立条目。留着这个分支是为了
-          // 让旧存档里的条目不至于掉到 default 去。
-          return;
-        default:
-          return;
-      }
-    }
-    case "turn/started":
-      state.busy = true;
-      return;
-    case "turn/completed": {
-      state.busy = false;
-      for (const entry of state.timeline) {
-        if (entry.kind === "agent") entry.streaming = false;
-        else if (entry.kind === "step" && entry.state === "running") entry.state = "done";
-      }
-      const error = params.error;
-      // 「已中断」是用户自己点的停止，不算错误，不弹红条。
-      if (typeof error === "string" && error && error !== "已中断") state.error = error;
-      // 标题与轮次数变了，侧边栏跟一下。
-      void actions.refreshSessions();
-      return;
-    }
-    case "error":
-      state.busy = false;
-      state.error = String(params.message ?? "运行出错");
-      return;
-    default:
-      return;
-  }
-}
-
-/**
- * 工具步骤展开后看到的内容：**先参数、后结果**。
- *
- * 只读工具不弹审批，所以这里是用户唯一能看见「它到底拿什么参数调的」的
- * 地方。只显示结果的话，「它查了哪家公司」这种问题就没有答案了。
- */
-function toolDetail(item: Record<string, unknown>): string {
-  const args = typeof item.toolArgs === "string" ? item.toolArgs.trim() : "";
-  const result = typeof item.toolResult === "string" ? item.toolResult : "";
-  const sections: string[] = [];
-  // 空参数不占地方：一个 {} 挤在上面只会把结果推下去。
-  if (args && args !== "{}") sections.push(`参数\n${prettyJson(args)}`);
-  if (result) sections.push(`结果\n${result}`);
-  return sections.join("\n\n");
-}
-
-/** 参数能解析成 JSON 就缩进显示；解析不了就原样——原样总比丢掉强。 */
-function prettyJson(raw: string): string {
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
-}
-
-function describeTool(item: Record<string, unknown>): string {
-  const name = String(item.toolName ?? "");
-  const summary = typeof item.summary === "string" ? item.summary : "";
-  return summary ? `${name} · ${summary}` : name;
-}
-
-/** 把恢复会话时拿到的历史条目摊回时间线。 */
-function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
-  const entries: TimelineEntry[] = [];
-  for (const item of history) {
-    switch (item.kind) {
-      case "userMessage":
-        entries.push({
-          kind: "user",
-          id: item.id,
-          text: item.text ?? "",
-          // 恢复出来的是裸 base64，界面要的是能直接塞进 <img> 的 data URL。
-          // 内核那边统一成 JPEG，所以这里也按 JPEG 拼。
-          images: (item.images ?? []).map((data) => `data:image/jpeg;base64,${data}`),
-        });
-        break;
-      case "agentMessage":
-        entries.push({ kind: "agent", id: item.id, text: item.text ?? "", streaming: false });
-        break;
-      case "toolCall":
-        entries.push({
-          kind: "step",
-          id: item.id,
-          step: "tool",
-          title: describeTool(item as unknown as Record<string, unknown>),
-          detail: toolDetail(item as unknown as Record<string, unknown>),
-          state: item.toolFailed ? "failed" : "done",
-          ...stepStats(item as unknown as Record<string, unknown>),
-        });
-        break;
-      case "llm":
-        // 采样步骤也要还原，否则重开会话看到的步骤里只有工具、没有「谁决定
-        // 调它们」，与这一轮正在跑时看到的对不上。内核从 assistant 消息还原，
-        // 所以没有耗时与 token——那些数字只存在于当轮的事件流里。
-        entries.push({
-          kind: "step",
-          id: item.id,
-          step: "llm",
-          title: item.summary || "模型",
-          detail: "",
-          state: "done",
-          ...stepStats(item as unknown as Record<string, unknown>),
-        });
-        break;
-      case "notice":
-        entries.push({
-          kind: "step",
-          id: item.id,
-          step: "notice",
-          title: item.text ?? "",
-          detail: "",
-          state: "done",
-        });
-        break;
-      default:
-        break;
-    }
-  }
-  return entries;
-}
-
-export type { AppConfigView };
+export type { AppConfigView, TimelineEntry, LiveSession };
 
 export const store = readonly(state);
 
@@ -462,12 +169,25 @@ export const actions = {
       return;
     }
 
-    window.aiclaw.on.agentEvent((payload) => applyEvent(payload as AgentEventPayload));
+    window.aiclaw.on.agentEvent((payload) => {
+      const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId);
+      // 错误条是全局的：后台那个会话出错也要让人看见，不然它就静静地停了。
+      if (applied.error) {
+        const label = applied.sessionId === state.sessionId ? "" : `${sessionLabel(applied.sessionId)}：`;
+        state.error = label + applied.error;
+      }
+      // 标题与轮次数变了，侧边栏跟一下。
+      if (applied.method === "turn/completed") void actions.refreshSessions();
+    });
     window.aiclaw.on.approval((payload) => {
       state.approvals.push(payload as ApprovalPayload);
     });
     window.aiclaw.on.runtimeStatus((payload) => {
       state.runtime = payload as RuntimeStatus;
+      // 运行时一停，内存里跑着的轮次全没了；不清的话「正在执行」会一直亮着。
+      if (state.runtime.state !== "ready") {
+        for (const record of Object.values(state.live)) record.busy = false;
+      }
       if (state.runtime.state === "failed") {
         state.error = state.runtime.detail ?? "本地运行时启动失败";
       }
@@ -564,8 +284,7 @@ export const actions = {
     state.sessionInfo = info;
     state.model = info.model;
     state.providerId = info.providerId;
-    state.timeline = [];
-    state.busy = false;
+    state.live[info.sessionId] = newLive();
     await actions.refreshSessions();
   },
 
@@ -580,8 +299,12 @@ export const actions = {
       state.sessionInfo = info;
       state.model = info.model;
       state.providerId = info.providerId;
-      state.timeline = restoreHistory(info.history ?? []);
-      state.busy = false;
+      // 正在跑的会话用它自己的活动记录：内核给的历史只到上一条已完成的消息，
+      // 进行中的那几步只存在于事件流里，换成历史就把它们弄丢了。
+      // 没在跑的以内核的历史为准——那是权威的，也覆盖了这期间排队进去的输入。
+      if (!state.live[sessionId]?.busy) {
+        state.live[sessionId] = newLive(restoreHistory(info.history ?? []));
+      }
     } catch (error) {
       state.error = `打开会话失败：${describeError(error)}`;
     }
@@ -623,10 +346,10 @@ export const actions = {
 
   async deleteSession(sessionId: string): Promise<void> {
     await window.aiclaw.session.remove(sessionId);
+    delete state.live[sessionId];
     if (sessionId === state.sessionId) {
       state.sessionId = "";
       state.sessionInfo = null;
-      state.timeline = [];
     }
     await actions.refreshSessions();
     state.groups = (await window.aiclaw.groups.read()) as SessionGroupsView;
@@ -1130,22 +853,25 @@ export const actions = {
         return;
       }
     }
-    state.timeline.push({
+    // 记住发出去的是哪个会话：下面有几次 await，期间用户可能已经切走了。
+    const sessionId = state.sessionId;
+    const record = ensureLive(state.live, sessionId);
+    record.timeline.push({
       kind: "user",
       id: `user-${Date.now()}`,
       text,
       images: images.map((data) => `data:image/jpeg;base64,${data}`),
     });
-    state.busy = true;
+    record.busy = true;
     try {
       // 音频先落盘：行协议单帧 16MB 装不下一段录音，所以交给内核的是路径。
       const audioPaths: string[] = [];
       for (const item of audio) {
         audioPaths.push((await window.aiclaw.audio.stage(plain(item))) as string);
       }
-      await window.aiclaw.session.send({ sessionId: state.sessionId, text, images, audioPaths });
+      await window.aiclaw.session.send({ sessionId, text, images, audioPaths });
     } catch (error) {
-      state.busy = false;
+      record.busy = false;
       state.error = describeError(error);
     }
   },
