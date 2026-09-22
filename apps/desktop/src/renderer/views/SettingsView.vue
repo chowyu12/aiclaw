@@ -93,8 +93,11 @@ async function purge(): Promise<void> {
         <button class="link" @click="actions.setView('providers')">去添加</button>
       </p>
 
-      <label>
-        <span>默认模型</span>
+      <!-- 不用 <label> 包这个选择器。label 会把落在它里面非交互元素上的点击转发给
+           第一个可标注的后代——也就是那个 field-button：点遮罩想关掉，转发一次
+           又把它打开了，看起来就是「选了关不掉、整页点不动」。 -->
+      <div class="field">
+        <span class="field-label">默认模型</span>
         <div class="picker">
           <button class="field-button" @click="openModelPicker()">
             <span v-if="store.config.model" class="picked-name">
@@ -129,7 +132,7 @@ async function purge(): Promise<void> {
         <span class="hint">
           没设过的话第一次启动会自动挑一个。新会话用它；对话框上方切模型只影响那一个会话。
         </span>
-      </label>
+      </div>
 
       <div class="pair">
         <label>
@@ -345,6 +348,15 @@ label {
   font-size: 13px;
 }
 
+/* 与 label 同一套外观，但不是 label——见模板里的说明。 */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.field-label,
 label > span:first-child {
   color: var(--ink-2);
   font-size: 12px;
