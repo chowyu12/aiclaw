@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { actions, store } from "../store";
 
 /**
@@ -59,6 +59,31 @@ const groups = computed<SkillGroup[]>(() => {
   );
 });
 
+/**
+ * 收起的组。记在 localStorage 里：这是「我不想看 Codex 那一堆」这种个人偏好，
+ * 重开应用不该复位；但它只是便利，读写失败（隐私模式、被清空）就当全展开。
+ */
+const COLLAPSED_KEY = "skills.collapsedGroups";
+const collapsed = ref<Set<string>>(new Set());
+try {
+  const raw = localStorage.getItem(COLLAPSED_KEY);
+  if (raw) collapsed.value = new Set(JSON.parse(raw) as string[]);
+} catch {
+  // 见上面的说明。
+}
+
+function toggleGroup(source: string): void {
+  const next = new Set(collapsed.value);
+  if (next.has(source)) next.delete(source);
+  else next.add(source);
+  collapsed.value = next;
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]));
+  } catch {
+    // 记不住就记不住，本次会话里照样生效。
+  }
+}
+
 onMounted(() => void actions.refreshSkills());
 
 async function remove(id: string, name: string): Promise<void> {
@@ -97,14 +122,24 @@ async function remove(id: string, name: string): Promise<void> {
       </p>
 
       <div v-for="group in groups" :key="group.source" class="group">
-        <div class="group-head">
+        <!-- 整行都能点，收起/展开这一组。收起时顺带说有几个开着的，别让人为此展开。 -->
+        <button class="group-head" :aria-expanded="!collapsed.has(group.source)" @click="toggleGroup(group.source)">
+          <span class="chevron">{{ collapsed.has(group.source) ? "▸" : "▾" }}</span>
           <span class="badge" :class="{ external: !group.writable }">{{ group.source }}</span>
-          <span class="count">{{ group.skills.length }} 个</span>
+          <span class="count">
+            {{ group.skills.length }} 个<template v-if="collapsed.has(group.source)">
+              · {{ group.skills.filter((s) => s.enabled).length }} 个启用</template>
+          </span>
           <span v-if="group.dir" class="group-dir" :title="group.dir">{{ group.dir }}</span>
           <span v-if="!group.writable" class="group-note">只能关，不能删</span>
-        </div>
+        </button>
 
-        <article v-for="skill in group.skills" :key="skill.id" class="card" :class="{ off: !skill.enabled }">
+        <article
+          v-for="skill in collapsed.has(group.source) ? [] : group.skills"
+          :key="skill.id"
+          class="card"
+          :class="{ off: !skill.enabled }"
+        >
         <div class="card-head">
           <div class="who">
             <span class="name">{{ skill.name }}</span>
@@ -182,13 +217,29 @@ h2 {
   gap: 8px;
 }
 
-/* 组头压得比卡片轻：它是分隔，不是内容。 */
+/* 组头压得比卡片轻：它是分隔，不是内容。整行是一个按钮，点哪儿都能收起。 */
 .group-head {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
-  padding: 6px 2px 0;
+  padding: 6px 4px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+.group-head:hover {
+  background: var(--hover);
+}
+
+.chevron {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .count {
