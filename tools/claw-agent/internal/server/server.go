@@ -326,6 +326,7 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
 	}
+	s.guard(session)
 	s.sessMu.Lock()
 	s.sessions[id] = session
 	s.sessMu.Unlock()
@@ -376,6 +377,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
 	}
+	s.guard(session)
 	s.sessMu.Lock()
 	s.sessions[session.ID] = session
 	s.sessMu.Unlock()

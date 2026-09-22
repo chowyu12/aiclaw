@@ -100,6 +100,7 @@ func (g *channelGateway) sessionFor(ctx context.Context, binding *model.ChannelB
 		}
 		loaded, err := agent.Load(ctx, s.db, id, s.keyFor, nil)
 		if err == nil {
+			s.guard(loaded)
 			s.sessMu.Lock()
 			s.sessions[id] = loaded
 			s.sessMu.Unlock()
@@ -123,6 +124,7 @@ func (g *channelGateway) sessionFor(ctx context.Context, binding *model.ChannelB
 	if err != nil {
 		return nil, err
 	}
+	s.guard(session)
 	session.Title = bindingLabel(binding)
 	s.sessMu.Lock()
 	s.sessions[id] = session

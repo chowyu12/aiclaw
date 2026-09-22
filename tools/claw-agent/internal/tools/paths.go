@@ -94,14 +94,10 @@ func (e *Env) Protected(path string) bool {
 		if candidate == "" {
 			continue
 		}
-		cleaned := filepath.Clean(candidate)
 		// 名单里的路径也要解析软链：传进来的 path 是解析过的真实路径，
 		// 两边不在同一个形态上比，前缀判断会静默失效。macOS 上 /var 就是
 		// /private/var 的软链，这条不做的话整份名单在临时目录里全不生效。
-		if resolved, err := filepath.EvalSymlinks(cleaned); err == nil {
-			cleaned = resolved
-		}
-		if within(cleaned, path) {
+		if within(resolveLoose(filepath.Clean(candidate)), path) {
 			return true
 		}
 	}
@@ -220,4 +216,21 @@ func (e *Env) ResolveWrite(raw string) (path string, inside bool, err error) {
 		return path, false, nil
 	}
 	return path, within(realpath(filepath.Clean(workspace)), path), nil
+}
+
+// resolveLoose 解析一个**可能还不存在**的路径上的软链。
+//
+// 名单里有些条目是文件而且平时不在——SQLite 的 -shm / -journal 只在写的时候
+// 出现。EvalSymlinks 对不存在的路径直接报错，那样它就留在未解析的形态上，
+// 与解析过的目标比不上。所以退一步：解析它存在的那一段父目录，再把余下的接回去。
+func resolveLoose(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	parent, base := filepath.Split(path)
+	parent = filepath.Clean(parent)
+	if parent == path || parent == "." || parent == string(filepath.Separator) {
+		return path
+	}
+	return filepath.Join(resolveLoose(parent), base)
 }

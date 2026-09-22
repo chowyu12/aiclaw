@@ -120,6 +120,23 @@ func TestHostSuppliedProtectedPathsAlsoApply(t *testing.T) {
 	}
 }
 
+// 名单里可以是一个文件而不只是目录：应用库就是一个文件，它旁边的 -wal 单独列。
+func TestProtectedPathMayBeASingleFile(t *testing.T) {
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
+	dir := t.TempDir()
+	db := filepath.Join(dir, "aiclaw.db")
+	env.ProtectedPaths = []string{db, db + "-wal"}
+	for _, path := range []string{db, db + "-wal"} {
+		if _, err := env.ResolveRead(path); !errors.Is(err, ErrProtected) {
+			t.Errorf("%s 应当被拒绝，得到 %v", path, err)
+		}
+	}
+	// 同一目录下别的文件不受影响：名单精确到文件，不是整个目录。
+	if _, err := env.ResolveRead(filepath.Join(dir, "memory.md")); errors.Is(err, ErrProtected) {
+		t.Error("旁边的普通文件不该被拒绝")
+	}
+}
+
 func TestWriteInsideAndOutsideAreDistinguished(t *testing.T) {
 	env, _ := newEnv(t, protocol.ApprovalBypass, true)
 	inside, isInside, err := env.ResolveWrite("sub/a.txt")

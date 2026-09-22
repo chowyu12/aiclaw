@@ -96,6 +96,35 @@ func TestSandboxBlocksReadingCredentials(t *testing.T) {
 	}
 }
 
+// 宿主追加的名单可以精确到一个文件——应用库就是一个文件，里面是全部模型服务的 Key。
+// 这条复现的是实际发生过的事：模型用 sqlite3 把 ~/.aiclaw/aiclaw.db 里的 Key 读了出来。
+func TestSandboxBlocksReadingTheAppDatabaseFile(t *testing.T) {
+	env, registry, _ := sandboxEnv(t)
+	dir := filepath.Join(env.Home, ".aiclaw")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(dir, "aiclaw.db")
+	if err := os.WriteFile(db, []byte("sk-THE-SECRET-KEY"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// 旁边的普通文件要照常能读：名单是文件，不是整个目录。
+	memo := filepath.Join(dir, "memory.md")
+	if err := os.WriteFile(memo, []byte("ORDINARY-NOTE"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.ProtectedPaths = []string{db, db + "-wal"}
+
+	out, _ := call(t, registry, "run_command", `{"command":"cat `+db+`"}`, env)
+	if strings.Contains(out, "THE-SECRET-KEY") {
+		t.Errorf("应用库不该读得到，实际输出：%q", out)
+	}
+	out, _ = call(t, registry, "run_command", `{"command":"cat `+memo+`"}`, env)
+	if !strings.Contains(out, "ORDINARY-NOTE") {
+		t.Errorf("同目录的普通文件应当照常可读，实际输出：%q", out)
+	}
+}
+
 func TestSandboxLeavesOrdinaryWorkAlone(t *testing.T) {
 	// 临时目录要可写：go build / npm / git 全都写临时文件，
 	// 不放开的话「正常干活」这条就不成立了。
