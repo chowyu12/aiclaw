@@ -1,7 +1,0 @@
-database:
-    driver: sqlite
-    dsn: ~/.aiclaw/aiclaw.db
-    max_open_conns: 25
-    max_idle_conns: 10
-log:
-    level: info
