@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
+import { describeError } from "../errors";
 import {
   MODEL_ROLES,
   ROLE_HINTS,
@@ -39,6 +40,10 @@ async function saveField(patch: Record<string, unknown>): Promise<void> {
   saving.value = true;
   try {
     await actions.saveConfig(patch);
+  } catch (error) {
+    // 存不下去要说出来。不接住的话它只是一条未处理的 promise 拒绝，
+    // 界面上看起来就是「点了没反应」——而那正是这一页最难排查的故障。
+    actions.showError(`保存失败：${describeError(error)}`);
   } finally {
     saving.value = false;
   }

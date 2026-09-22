@@ -13,7 +13,7 @@
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { reactive } from "vue";
+import { reactive, readonly } from "vue";
 
 /** 与 store.ts 里那个同形。改那边要改这边。 */
 function plain<T>(value: T): T {
@@ -115,4 +115,45 @@ test("嵌套的数组与对象也剥得干净", () => {
   const sent = sendOverIpc(plain([...state.servers]));
   assert.deepEqual(sent[0]?.args, ["-y", "pkg"]);
   assert.deepEqual(sent[0]?.env, { TOKEN: "x" });
+});
+
+// ---------- 配置里的嵌套对象 ----------
+//
+// 配置项一直是原始值（字符串、数字、布尔），展开之后仍是原始值，所以
+// `config.write({ ...patch })` 从来没出过事。加进第一个**嵌套对象**（角色模型
+// 那一组）时它立刻炸了：从 readonly(store) 里读出来的子对象是 Proxy，
+// 而结构化克隆克隆不了 Proxy——表现是那一格「点了没反应」。
+
+test("从 readonly 的配置里读出嵌套对象再改，直接送会炸", () => {
+  const state = reactive({
+    config: { model: "m", roles: { vision: { providerId: 1, model: "v" } } },
+  });
+  const store = readonly(state);
+  const patch = {
+    roles: { ...store.config.roles, stt: { providerId: 2, model: "s" } },
+  };
+  // 先确认问题真的存在：不 plain 的话这一步就抛。
+  assert.throws(() => sendOverIpc(patch), /could not be cloned|DataCloneError/i);
+});
+
+test("过 plain() 之后嵌套对象送得出去，而且值不变", () => {
+  const state = reactive({
+    config: { model: "m", roles: { vision: { providerId: 1, model: "v" } } },
+  });
+  const store = readonly(state);
+  const patch = {
+    roles: { ...store.config.roles, stt: { providerId: 2, model: "s" } },
+  };
+
+  const sent = sendOverIpc(plain(patch));
+
+  assert.deepEqual(sent.roles.vision, { providerId: 1, model: "v" });
+  assert.deepEqual(sent.roles.stt, { providerId: 2, model: "s" });
+});
+
+test("清空一个角色（providerId 为 0）也送得出去", () => {
+  const state = reactive({ config: { roles: { vision: { providerId: 1, model: "v" } } } });
+  const store = readonly(state);
+  const patch = { roles: { ...store.config.roles, vision: { providerId: 0, model: "" } } };
+  assert.deepEqual(sendOverIpc(plain(patch)).roles.vision, { providerId: 0, model: "" });
 });

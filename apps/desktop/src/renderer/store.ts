@@ -479,7 +479,11 @@ export const actions = {
   },
 
   async saveConfig(patch: Partial<AppConfigView>): Promise<void> {
-    state.config = (await window.aiclaw.config.write(patch)) as AppConfigView;
+    // 必须过 plain()：patch 里的嵌套对象（角色模型那一组）常常是从 store 里
+    // 读出来再改的，而 store 是 readonly() 包过的——那些值是 Proxy，
+    // 结构化克隆克隆不了，IPC 会直接抛。带原始值的 patch 一直没事，
+    // 所以这个坑到有嵌套对象的配置项时才露出来。
+    state.config = (await window.aiclaw.config.write(plain(patch))) as AppConfigView;
     // 还没开会话时顶部显示的就是默认模型，跟着配置走。
     if (!state.sessionId) {
       state.model = state.config.model;
