@@ -153,34 +153,44 @@ func (c *Channel) reply(client transport, message *wecomaibot.NormalizedMessage,
 }
 
 // streamer pushes assistant output progressively and closes the stream once.
+//
+// **Every frame carries the whole answer so far, not the latest chunk.** A
+// WeCom stream frame replaces the bubble's content; it does not append to it.
+// Sending only the newly accumulated runes made the bubble show one fragment
+// at a time ("一段一段的") instead of a growing message.
 type streamer struct {
 	client   transport
 	message  *wecomaibot.NormalizedMessage
 	streamID string
 
-	mu      sync.Mutex
-	pending []rune
-	done    bool
+	mu sync.Mutex
+	// text is everything received so far; sinceFlush counts what arrived after
+	// the last frame so a long answer is not sent one frame per token.
+	text       []rune
+	sinceFlush int
+	done       bool
 }
 
 func newStreamer(client transport, message *wecomaibot.NormalizedMessage, streamID string) *streamer {
 	return &streamer{client: client, message: message, streamID: streamID}
 }
 
-// push buffers a delta and flushes once enough has accumulated.
+// push appends a delta and, once enough has accumulated since the last frame,
+// sends the full text so far.
 func (s *streamer) push(delta string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.done {
 		return nil
 	}
-	s.pending = append(s.pending, []rune(delta)...)
-	if len(s.pending) < streamFlushRunes {
+	runes := []rune(delta)
+	s.text = append(s.text, runes...)
+	s.sinceFlush += len(runes)
+	if s.sinceFlush < streamFlushRunes {
 		return nil
 	}
-	chunk := string(s.pending)
-	s.pending = nil
-	return s.client.ReplyStream(s.message.Frame, s.streamID, chunk, false)
+	s.sinceFlush = 0
+	return s.client.ReplyStream(s.message.Frame, s.streamID, string(s.text), false)
 }
 
 // finish sends the complete answer and closes the stream. The full text is
@@ -192,7 +202,7 @@ func (s *streamer) finish(text string) {
 		s.mu.Unlock()
 		return
 	}
-	s.done, s.pending = true, nil
+	s.done, s.text, s.sinceFlush = true, nil, 0
 	s.mu.Unlock()
 	_ = s.client.ReplyStream(s.message.Frame, s.streamID, text, true)
 }

@@ -226,6 +226,13 @@ func TestInboundMessageBecomesATurnAndIsAnswered(t *testing.T) {
 			t.Fatalf("the stream was closed early: %+v", replies)
 		}
 	}
+	// Every frame must carry the whole answer so far: a WeCom stream frame
+	// replaces the bubble, so sending only the new chunk shows fragments.
+	for i := 1; i < len(replies)-1; i++ {
+		if !strings.HasPrefix(replies[i].content, replies[i-1].content) {
+			t.Fatalf("frame %d is not cumulative: %q does not extend %q", i, replies[i].content, replies[i-1].content)
+		}
+	}
 }
 
 // An unauthorized conversation must be told to ask for approval, not left
