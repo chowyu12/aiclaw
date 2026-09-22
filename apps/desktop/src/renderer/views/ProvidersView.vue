@@ -38,6 +38,23 @@ const TYPES: { id: string; label: string; baseUrl: string }[] = [
 ];
 
 const expanded = ref(0);
+/** 能力那一块的搜索词，按服务 id 存。 */
+const capSearch = reactive<Record<number, string>>({});
+
+/**
+ * 能力勾选里显示哪几行。
+ *
+ * 一个服务能列出上百个模型，全铺出来那一块比整页还长，而其中真正要标能力的
+ * 通常只有一两个。所以默认只显示**已经标过的**——那正是回到这一页时想确认的
+ * 东西；要给新模型标能力就搜它的名字。
+ */
+function capRows(provider: ProviderRow): string[] {
+  const keyword = (capSearch[provider.id] ?? "").trim().toLowerCase();
+  if (keyword) {
+    return provider.models.filter((entry) => entry.toLowerCase().includes(keyword)).slice(0, 40);
+  }
+  return provider.models.filter((entry) => parseModelMark(entry).roles.length > 0);
+}
 const saving = ref(false);
 /** 每个服务的 Key 输入框。存完立刻清空，不让凭据留在 DOM 里。 */
 const keyDrafts = reactive<Record<number, string>>({});
@@ -257,8 +274,22 @@ function summary(provider: ProviderRow): string {
           <!-- 能力标记：勾上之后这个模型才会出现在「配置」页对应角色的候选里。
                不勾也不影响它当对话模型用。 -->
           <div v-if="provider.models.length > 0" class="caps">
-            <span class="caps-title">这些模型还能做什么</span>
-            <div v-for="entry in provider.models" :key="entry" class="cap-row">
+            <div class="caps-head">
+              <span class="caps-title">这些模型还能做什么</span>
+              <input
+                v-model="capSearch[provider.id]"
+                class="caps-search"
+                placeholder="搜模型名给它标能力"
+              />
+            </div>
+            <p v-if="capRows(provider).length === 0" class="hint">
+              {{
+                capSearch[provider.id]
+                  ? `没有匹配「${capSearch[provider.id]}」的模型。`
+                  : "还没有标过能力的模型。搜一个名字，给它勾上看图 / 听写 / 朗读 / 画图。"
+              }}
+            </p>
+            <div v-for="entry in capRows(provider)" :key="entry" class="cap-row">
               <code class="cap-name">{{ parseModelMark(entry).name }}</code>
               <label v-for="role in MODEL_ROLES" :key="role" class="cap">
                 <input
@@ -269,6 +300,9 @@ function summary(provider: ProviderRow): string {
                 {{ ROLE_LABELS[role] }}
               </label>
             </div>
+            <p v-if="capSearch[provider.id] && capRows(provider).length >= 40" class="hint">
+              只列了前 40 个，把名字写得更具体一点。
+            </p>
             <p class="hint">
               勾了的模型会出现在「配置」页对应角色的候选里：看图用来替对话模型读图，
               另外三样各自对应一个工具。不勾不影响它当对话模型用。
@@ -503,10 +537,28 @@ label > span em {
   background: var(--surface-2);
 }
 
+.caps-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .caps-title {
+  flex: 0 0 auto;
   font-size: 12px;
   font-weight: 600;
   color: var(--ink-2);
+}
+
+.caps-search {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: inherit;
+  font-size: 12px;
 }
 
 .cap-row {

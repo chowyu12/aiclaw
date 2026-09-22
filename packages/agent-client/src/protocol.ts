@@ -454,6 +454,8 @@ export interface Item {
   /** 用户消息带的图片，base64 的 PNG/JPEG。恢复会话时要能重新画出来。 */
   images?: string[];
   toolName?: string;
+  /** 这一步产出的文件（相对工作区）：生成的图、合成的语音。 */
+  artifacts?: string[];
   toolArgs?: string;
   toolResult?: string;
   toolFailed?: boolean;

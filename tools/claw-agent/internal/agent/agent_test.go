@@ -211,7 +211,7 @@ func TestTurnWithoutToolsEmitsMessageAndCompletes(t *testing.T) {
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	emitter := &recordingEmitter{approve: true}
 
-	session.RunTurn(context.Background(), "t1", "hi", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "hi", nil, nil, emitter)
 
 	methods := emitter.methods()
 	// 固定的事件顺序：
@@ -269,7 +269,7 @@ func TestTurnExecutesToolAndFeedsResultBack(t *testing.T) {
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	emitter := &recordingEmitter{approve: true}
 
-	session.RunTurn(context.Background(), "t1", "写个文件", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "写个文件", nil, nil, emitter)
 
 	// 工具真的执行了。
 	content, err := os.ReadFile(filepath.Join(session.config.Workdir, "out.txt"))
@@ -311,7 +311,7 @@ func TestToolFailureIsFedBackNotFatal(t *testing.T) {
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	emitter := &recordingEmitter{approve: true}
 
-	session.RunTurn(context.Background(), "t1", "读一下", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "读一下", nil, nil, emitter)
 
 	if !emitter.find(protocol.NotifyItemCompleted, `"toolFailed":true`) {
 		t.Error("失败的工具调用应当标记 toolFailed")
@@ -338,7 +338,7 @@ func TestExecAsksApprovalAndDenialStopsCommand(t *testing.T) {
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	emitter := &recordingEmitter{approve: false}
 
-	session.RunTurn(context.Background(), "t1", "跑个命令", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "跑个命令", nil, nil, emitter)
 
 	if len(emitter.approvals) != 1 {
 		t.Fatalf("应当弹 1 次审批，弹了 %d", len(emitter.approvals))
@@ -385,7 +385,7 @@ func TestInterruptEndsTurnWithMarker(t *testing.T) {
 	emitter := &recordingEmitter{approve: true}
 	done := make(chan struct{})
 	go func() {
-		session.RunTurn(context.Background(), "t1", "hi", nil, emitter)
+		session.RunTurn(context.Background(), "t1", "hi", nil, nil, emitter)
 		close(done)
 	}()
 
@@ -407,7 +407,7 @@ func TestInterruptEndsTurnWithMarker(t *testing.T) {
 func TestSaveAndLoadRestoresHistory(t *testing.T) {
 	model := &fakeModel{script: []string{sseText("记住了。")}}
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
-	session.RunTurn(context.Background(), "t1", "记住 42", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "记住 42", nil, nil, &recordingEmitter{approve: true})
 
 	ctx := context.Background()
 	db := newTestStore(t)
@@ -463,7 +463,7 @@ func TestUnknownToolNameIsReported(t *testing.T) {
 	}}
 	session := newTestSession(t, model, protocol.ApprovalBypass)
 	emitter := &recordingEmitter{approve: true}
-	session.RunTurn(context.Background(), "t1", "x", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "x", nil, nil, emitter)
 
 	messages := model.requests[1]["messages"].([]any)
 	last := messages[len(messages)-1].(map[string]any)

@@ -55,7 +55,7 @@ func TestTransientFailureIsRetried(t *testing.T) {
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	emitter := &recordingEmitter{approve: true}
 
-	session.RunTurn(context.Background(), "t1", "你好", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "你好", nil, nil, emitter)
 
 	if model.calls != 3 {
 		t.Fatalf("5xx 与 429 都该重试，期望打 3 次模型，实际 %d 次", model.calls)
@@ -77,7 +77,7 @@ func TestNonRetryableFailureStopsImmediately(t *testing.T) {
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	emitter := &recordingEmitter{approve: true}
 
-	session.RunTurn(context.Background(), "t1", "你好", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "你好", nil, nil, emitter)
 
 	if model.calls != 1 {
 		t.Fatalf("鉴权失败不该重试，期望打 1 次模型，实际 %d 次", model.calls)
@@ -100,7 +100,7 @@ func TestContextWindowExceededTriggersCompaction(t *testing.T) {
 	session.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "收到"})
 	emitter := &recordingEmitter{approve: true}
 
-	session.RunTurn(context.Background(), "t1", "继续", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "继续", nil, nil, emitter)
 
 	if model.calls != 3 {
 		t.Fatalf("期望「超窗 → 压缩 → 重试」共 3 次调用，实际 %d 次", model.calls)
@@ -190,7 +190,7 @@ func TestWriteToolsDoNotRunInParallel(t *testing.T) {
 		},
 	})
 
-	session.RunTurn(context.Background(), "t1", "写两个文件", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "写两个文件", nil, nil, &recordingEmitter{approve: true})
 
 	if got := atomic.LoadInt32(&maxInFlight); got != 1 {
 		t.Fatalf("有副作用的工具必须串行，实际同时在跑 %d 个", got)
@@ -229,7 +229,7 @@ func TestReadToolsRunInParallel(t *testing.T) {
 		},
 	})
 
-	session.RunTurn(context.Background(), "t1", "读两个文件", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "读两个文件", nil, nil, &recordingEmitter{approve: true})
 
 	select {
 	case <-both:
@@ -258,7 +258,7 @@ func TestSteeringInputJoinsRunningTurn(t *testing.T) {
 	emitter := &recordingEmitter{approve: true}
 	done := make(chan struct{})
 	go func() {
-		session.RunTurn(context.Background(), "t1", "原来的要求", nil, emitter)
+		session.RunTurn(context.Background(), "t1", "原来的要求", nil, nil, emitter)
 		close(done)
 	}()
 
@@ -346,7 +346,7 @@ func TestToolOutputIsTruncatedInHistoryOnly(t *testing.T) {
 	})
 
 	emitter := &recordingEmitter{approve: true}
-	session.RunTurn(context.Background(), "t1", "读", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "读", nil, nil, emitter)
 
 	var recorded string
 	for _, message := range session.messages {
@@ -400,11 +400,11 @@ func TestConfigureSwitchesModelForNextSampling(t *testing.T) {
 	model := &fakeModel{script: []string{sseText("第一个模型"), sseText("第二个模型")}}
 	session := newTestSession(t, model, protocol.ApprovalBypass)
 
-	session.RunTurn(context.Background(), "t1", "你好", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "你好", nil, nil, &recordingEmitter{approve: true})
 	if err := session.Configure(protocol.ModelConfig{Model: "another-model"}); err != nil {
 		t.Fatalf("configure: %v", err)
 	}
-	session.RunTurn(context.Background(), "t2", "再说一次", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t2", "再说一次", nil, nil, &recordingEmitter{approve: true})
 
 	if got := model.requests[0]["model"]; got != "fake" {
 		t.Errorf("第一轮应当用原模型，实际 %v", got)
@@ -441,7 +441,7 @@ func TestHistoryRebuildsTimeline(t *testing.T) {
 		Handler: func(context.Context, json.RawMessage, *tools.Env) (string, error) { return "内容", nil },
 	})
 
-	session.RunTurn(context.Background(), "t1", "看看 a.txt", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "看看 a.txt", nil, nil, &recordingEmitter{approve: true})
 
 	items := session.History()
 
@@ -531,7 +531,7 @@ func TestSkillsAreListedInPromptAndLoadableOnDemand(t *testing.T) {
 	}
 
 	emitter := &recordingEmitter{approve: true}
-	session.RunTurn(context.Background(), "t1", "帮我做日报", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "帮我做日报", nil, nil, emitter)
 
 	// 提示词里只放名字与说明，正文不能随轮次一直带着走——十几个技能的正文
 	// 加起来能有几万 token。
@@ -600,7 +600,7 @@ func TestMemoryGoesIntoPromptAndRememberAppends(t *testing.T) {
 		t.Errorf("长期记忆应当进系统提示词：%q", system)
 	}
 
-	session.RunTurn(context.Background(), "t1", "记一下", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "记一下", nil, nil, &recordingEmitter{approve: true})
 
 	saved, err := os.ReadFile(memoryFile)
 	if err != nil {
@@ -648,7 +648,7 @@ func TestRememberIsGatedByApproval(t *testing.T) {
 	t.Cleanup(session.Close)
 
 	emitter := &recordingEmitter{approve: false}
-	session.RunTurn(context.Background(), "t1", "记一下", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "记一下", nil, nil, emitter)
 
 	if len(emitter.approvals) == 0 {
 		t.Fatal("写长期记忆应当弹审批")
@@ -716,7 +716,7 @@ func TestScreenshotBecomesAnImageMessageNotAToolResult(t *testing.T) {
 		ImageBase64: base64.StdEncoding.EncodeToString(png),
 		Width:       1920, Height: 1080,
 	}
-	session.RunTurn(context.Background(), "t1", "看看屏幕", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "看看屏幕", nil, nil, emitter)
 
 	var toolMessage, imageMessage *llm.Message
 	for i := range session.messages {
@@ -756,7 +756,7 @@ func TestComputerActionsAreGatedByApproval(t *testing.T) {
 	session := computerSession(t, model, protocol.ApprovalOnWrite)
 
 	emitter := &recordingEmitter{approve: false, computerOK: true}
-	session.RunTurn(context.Background(), "t1", "点一下", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "点一下", nil, nil, emitter)
 
 	if len(emitter.approvals) == 0 {
 		t.Fatal("点击应当弹审批")
@@ -776,7 +776,7 @@ func TestScreenshotDoesNotRequireApprovalUnderOnWrite(t *testing.T) {
 
 	emitter := &recordingEmitter{approve: false, computerOK: true}
 	emitter.computerResult = protocol.ComputerResult{Text: "已截屏"}
-	session.RunTurn(context.Background(), "t1", "看看", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "看看", nil, nil, emitter)
 
 	if len(emitter.approvals) != 0 {
 		t.Errorf("截屏不该弹审批：%+v", emitter.approvals)
@@ -797,7 +797,7 @@ func TestClickRejectsMissingOrNegativeCoordinates(t *testing.T) {
 	session := computerSession(t, model, protocol.ApprovalBypass)
 
 	emitter := &recordingEmitter{approve: true, computerOK: true}
-	session.RunTurn(context.Background(), "t1", "点", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "点", nil, nil, emitter)
 
 	if len(emitter.computer) != 0 {
 		t.Errorf("参数不合法时不该发出屏幕操作：%v", emitter.computer)
@@ -823,7 +823,7 @@ func TestComputerFailureIsFedBackNotFatal(t *testing.T) {
 	session := computerSession(t, model, protocol.ApprovalBypass)
 
 	emitter := &recordingEmitter{approve: true} // computerOK=false → 宿主报错
-	session.RunTurn(context.Background(), "t1", "点", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "点", nil, nil, emitter)
 
 	if !emitter.find(protocol.NotifyItemCompleted, "那我换个办法。") {
 		t.Errorf("模型应当收到失败原因后继续：%v", emitter.methods())
@@ -871,7 +871,7 @@ func TestReadOnlyMCPToolSkipsApproval(t *testing.T) {
 	mountFakeMCPTool(t, session, "corpus_lookup", true)
 
 	emitter := &recordingEmitter{approve: false}
-	session.RunTurn(context.Background(), "t1", "查一下", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "查一下", nil, nil, emitter)
 
 	if len(emitter.approvals) != 0 {
 		t.Errorf("只读工具不该弹审批：%+v", emitter.approvals)
@@ -892,7 +892,7 @@ func TestWriteMCPToolStillNeedsApproval(t *testing.T) {
 	mountFakeMCPTool(t, session, "create_order", false)
 
 	emitter := &recordingEmitter{approve: false}
-	session.RunTurn(context.Background(), "t1", "建单", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "建单", nil, nil, emitter)
 
 	if len(emitter.approvals) != 1 {
 		t.Fatalf("写类工具应当弹一次审批，实际 %d 次", len(emitter.approvals))
@@ -921,7 +921,7 @@ func TestTrustedServerSkipsApprovalEvenForWriteTools(t *testing.T) {
 	mountFakeMCPTool(t, session, "claw__create_order", true)
 
 	emitter := &recordingEmitter{approve: false}
-	session.RunTurn(context.Background(), "t1", "建单", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "建单", nil, nil, emitter)
 
 	if len(emitter.approvals) != 0 {
 		t.Errorf("可信 server 的工具不该弹审批：%+v", emitter.approvals)
@@ -988,7 +988,7 @@ func TestTrustedServerSkipsApprovalUnderStrictProfile(t *testing.T) {
 	mountFakeMCPTool(t, session, "knowledge__knowledge_search", true)
 
 	emitter := &recordingEmitter{approve: false}
-	session.RunTurn(context.Background(), "t1", "查一下", nil, emitter)
+	session.RunTurn(context.Background(), "t1", "查一下", nil, nil, emitter)
 
 	if len(emitter.approvals) != 0 {
 		t.Errorf("严格档位下可信 server 的工具也不该弹审批：%+v", emitter.approvals)

@@ -57,6 +57,8 @@ export type TimelineEntry =
       seq?: number;
       startedAt?: number;
       durationMs?: number;
+      /** 这一步产出的文件（相对工作区）：生成的图、合成的语音。 */
+      artifacts?: readonly string[];
       /** 仅 llm：模型名、第几次采样、首字节、推理耗时、发起了几个工具调用、用量。 */
       round?: number;
       ttftMs?: number;
@@ -153,7 +155,15 @@ function upsertAgent(itemId: string): TimelineEntry {
 
 type StepStats = Pick<
   Extract<TimelineEntry, { kind: "step" }>,
-  "seq" | "startedAt" | "durationMs" | "round" | "ttftMs" | "thinkMs" | "toolCalls" | "tokens"
+  | "seq"
+  | "startedAt"
+  | "durationMs"
+  | "round"
+  | "ttftMs"
+  | "thinkMs"
+  | "toolCalls"
+  | "tokens"
+  | "artifacts"
 >;
 
 function pushStep(
@@ -250,6 +260,7 @@ function applyEvent(payload: AgentEventPayload): void {
         case "toolCall": {
           const detail = toolDetail(item);
           const stats = stepStats(item);
+          const artifacts = Array.isArray(item.artifacts) ? (item.artifacts as string[]) : [];
           const entry = findEntry(id);
           if (!entry || entry.kind !== "step") {
             pushStep(
@@ -258,13 +269,14 @@ function applyEvent(payload: AgentEventPayload): void {
               describeTool(item),
               item.toolFailed ? "failed" : "done",
               detail,
-              stats,
+              { ...stats, artifacts },
             );
             return;
           }
           entry.state = item.toolFailed ? "failed" : "done";
           entry.detail = detail;
           entry.title = describeTool(item);
+          entry.artifacts = artifacts;
           Object.assign(entry, stats);
           return;
         }
@@ -681,6 +693,16 @@ export const actions = {
    * 「在访达里显示」、凭据目录直接拒。这里只负责把结果说给用户听——
    * 点了没反应是最糟的，所以拒绝和找不到都要出现在错误条上。
    */
+  /**
+   * 读一个产出物用于内联显示。路径来自模型输出，校验在主进程。
+   *
+   * 读失败不进错误条：一张显示不出来的图旁边写一句原因就够了，不该盖住
+   * 正在进行的对话。
+   */
+  async readMedia(path: string): Promise<{ dataUrl: string; kind: "image" | "audio" }> {
+    return (await window.aiclaw.files.media(path)) as { dataUrl: string; kind: "image" | "audio" };
+  },
+
   async openFile(path: string): Promise<void> {
     try {
       const result = (await window.aiclaw.files.open(path)) as {
@@ -1072,8 +1094,12 @@ export const actions = {
    * 开口前就能看到。用户想纠正方向往往正是因为看见这一轮跑偏了，
    * 让他先等完一轮是最不该做的。
    */
-  async send(text: string, images: string[] = []): Promise<void> {
-    if (!text.trim() && images.length === 0) return;
+  async send(
+    text: string,
+    images: string[] = [],
+    audio: { name: string; data: string }[] = [],
+  ): Promise<void> {
+    if (!text.trim() && images.length === 0 && audio.length === 0) return;
     // 没有会话就先开一个。删掉当前会话之后运行时仍然是 ready，输入框还能打字，
     // 早先这里直接 return——发出去石沉大海，用户看不出发生了什么。
     if (!state.sessionId) {
@@ -1092,7 +1118,12 @@ export const actions = {
     });
     state.busy = true;
     try {
-      await window.aiclaw.session.send({ sessionId: state.sessionId, text, images });
+      // 音频先落盘：行协议单帧 16MB 装不下一段录音，所以交给内核的是路径。
+      const audioPaths: string[] = [];
+      for (const item of audio) {
+        audioPaths.push((await window.aiclaw.audio.stage(plain(item))) as string);
+      }
+      await window.aiclaw.session.send({ sessionId: state.sessionId, text, images, audioPaths });
     } catch (error) {
       state.busy = false;
       state.error = describeError(error);

@@ -81,7 +81,7 @@ func (g *channelGateway) Submit(ctx context.Context, pluginUUID string, message 
 
 	turnID := fmt.Sprintf("t_%d", time.Now().UnixNano())
 	emitter := &channelEmitter{observe: observe, kinds: map[string]protocol.ItemKind{}}
-	session.RunTurn(ctx, turnID, message.Text, nil, emitter)
+	session.RunTurn(ctx, turnID, message.Text, nil, nil, emitter)
 	if err := session.Save(ctx, s.db); err != nil {
 		s.options.Logf("保存通道会话失败：%v", err)
 	}

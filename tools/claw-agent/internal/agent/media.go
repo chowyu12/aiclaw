@@ -104,6 +104,8 @@ func (s *Session) generateImageTool(role protocol.RoleModel) tools.Tool {
 			}
 			// 同时给模型看一眼：它要判断这张图是不是用户要的，才能决定重画还是收工。
 			env.Attach(data)
+			// 界面按这个路径把图画出来。
+			tools.Produce(ctx, path)
 			return fmt.Sprintf("已生成并保存到 %s（%.0f KB）。画面在下一条消息里。",
 				path, float64(len(data))/1024), nil
 		},
@@ -195,9 +197,49 @@ func (s *Session) speakTool(role protocol.RoleModel) tools.Tool {
 			if err != nil {
 				return "", err
 			}
+			tools.Produce(ctx, path)
 			return fmt.Sprintf("已合成并保存到 %s（%.0f KB）。", path, float64(len(audio))/1024), nil
 		},
 	}
+}
+
+// transcribeAttached 把随消息附来的音频转成文字。
+//
+// 转不动不让整轮失败：把原因接在消息里告诉模型，它据此换个做法（比如请用户
+// 直接打字）。静默丢掉的话，用户发了一段录音、模型回了一句不相干的话，
+// 而两边都不知道发生了什么。
+func (s *Session) transcribeAttached(ctx context.Context, paths []string) string {
+	role := s.config.Roles.STT
+	if len(paths) == 0 {
+		return ""
+	}
+	if !role.Configured() {
+		return fmt.Sprintf("\n\n[附了 %d 段音频，但没有配听写模型，没能转成文字]", len(paths))
+	}
+	client, err := s.roleClient(role)
+	if err != nil {
+		return fmt.Sprintf("\n\n[附了 %d 段音频，但听写模型不可用：%v]", len(paths), err)
+	}
+	var out strings.Builder
+	for _, path := range paths {
+		name := filepath.Base(path)
+		audio, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(&out, "\n\n[音频 %s 读不了：%v]", name, err)
+			continue
+		}
+		text, err := client.Transcribe(ctx, role.Model, name, audio)
+		if err != nil {
+			fmt.Fprintf(&out, "\n\n[音频 %s 转写失败：%v]", name, err)
+			continue
+		}
+		if strings.TrimSpace(text) == "" {
+			fmt.Fprintf(&out, "\n\n[音频 %s 里没有听出语音]", name)
+			continue
+		}
+		fmt.Fprintf(&out, "\n\n[音频 %s 的转写：\n%s]", name, text)
+	}
+	return out.String()
 }
 
 // describeImages 用视觉模型把图片转成文字。

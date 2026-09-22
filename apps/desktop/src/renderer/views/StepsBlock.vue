@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { reactive } from "vue";
+import { actions } from "../store";
+import { describeError } from "../errors";
 import type { Turn } from "../turns";
 
 /**
@@ -19,6 +22,30 @@ defineProps<{
 defineEmits<{ toggle: [] }>();
 
 const STEP_LABEL = { llm: "llm", tool: "工具", notice: "提示" } as const;
+
+/**
+ * 产出物（生成的图、合成的语音）的内容，按路径缓存。
+ *
+ * 展开那一步才去读：一轮里可能生成好几张图，全都预加载会让时间线一次吃下
+ * 几十兆 data URL。读失败只在那一条旁边写一句——一张显示不出来的图不该
+ * 盖住正在进行的对话。
+ */
+const media = reactive<Record<string, { dataUrl?: string; kind?: string; error?: string }>>({});
+
+function loadArtifacts(step: { artifacts?: readonly string[] }): void {
+  for (const path of step.artifacts ?? []) {
+    if (media[path]) continue;
+    media[path] = {};
+    void actions
+      .readMedia(path)
+      .then((file) => {
+        media[path] = { dataUrl: file.dataUrl, kind: file.kind };
+      })
+      .catch((error) => {
+        media[path] = { error: describeError(error) };
+      });
+  }
+}
 
 /** 耗时按量级换单位：毫秒级的东西写成 0.02 s 读不出快慢。 */
 function formatDuration(ms: number | undefined): string {
@@ -60,7 +87,7 @@ function llmSubline(step: Turn["steps"][number]): string {
 
     <div v-if="open" class="steps-body">
       <details v-for="step in turn.steps" :key="step.id" class="step" :data-state="step.state">
-        <summary>
+        <summary @click="loadArtifacts(step)">
           <div class="row">
             <span class="dot" />
             <span class="kind" :data-kind="step.step">{{ STEP_LABEL[step.step] }}</span>
@@ -79,6 +106,21 @@ function llmSubline(step: Turn["steps"][number]): string {
           </div>
         </summary>
         <pre v-if="step.detail" class="step-detail">{{ step.detail }}</pre>
+
+        <!-- 产出物：生成的图直接画出来、语音给个播放器。只显示不算完——
+             点一下能在访达里打开，用户要的往往是那个文件本身。 -->
+        <div v-for="path in step.artifacts ?? []" :key="path" class="artifact">
+          <img
+            v-if="media[path]?.kind === 'image'"
+            :src="media[path]!.dataUrl"
+            :alt="path"
+            @click="actions.openFile(path)"
+          />
+          <audio v-else-if="media[path]?.kind === 'audio'" :src="media[path]!.dataUrl" controls />
+          <p v-else-if="media[path]?.error" class="artifact-note bad">{{ media[path]!.error }}</p>
+          <p v-else class="artifact-note">正在读取…</p>
+          <button class="artifact-path" @click="actions.openFile(path)">{{ path }}</button>
+        </div>
       </details>
     </div>
   </div>
@@ -269,6 +311,51 @@ function llmSubline(step: Turn["steps"][number]): string {
   padding-left: 28px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.artifact {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+  margin: 8px 0 4px 26px;
+}
+
+/* 生成的图按宽度自适应，但不铺满：对话列很宽时一张图占满一屏反而难看。 */
+.artifact img {
+  max-width: min(420px, 100%);
+  max-height: 320px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--rule);
+  cursor: zoom-in;
+}
+
+.artifact audio {
+  width: min(420px, 100%);
+}
+
+.artifact-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.artifact-note.bad {
+  color: var(--danger);
+}
+
+.artifact-path {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.artifact-path:hover {
+  text-decoration: underline;
 }
 
 .step-detail {

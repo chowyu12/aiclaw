@@ -23,7 +23,7 @@ func TestUserImagesReachTheModelAndTheTimeline(t *testing.T) {
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	emitter := &recordingEmitter{approve: true}
 
-	session.RunTurn(context.Background(), "t1", "这是什么问题", [][]byte{png(64)}, emitter)
+	session.RunTurn(context.Background(), "t1", "这是什么问题", [][]byte{png(64)}, nil, emitter)
 
 	var user *llm.Message
 	for i := range session.messages {
@@ -42,7 +42,7 @@ func TestUserImagesReachTheModelAndTheTimeline(t *testing.T) {
 func TestHistoryRestoresUserImages(t *testing.T) {
 	model := &fakeModel{script: []string{sseText("看到了。")}}
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
-	session.RunTurn(context.Background(), "t1", "这是什么问题", [][]byte{png(64)}, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "这是什么问题", [][]byte{png(64)}, nil, &recordingEmitter{approve: true})
 
 	ctx := context.Background()
 	db := newTestStore(t)

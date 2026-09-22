@@ -280,8 +280,11 @@ export class SessionManager extends EventEmitter {
     sessionId: string;
     text: string;
     images?: string[];
+    audioPaths?: string[];
   }): Promise<string> {
-    const result = await this.requireClient().turnStart(input.sessionId, input.text, input.images);
+    const result = await this.requireClient().turnStart(
+      input.sessionId, input.text, input.images, input.audioPaths,
+    );
     return result.turnId;
   }
 

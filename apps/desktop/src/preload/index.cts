@@ -94,6 +94,12 @@ const api = {
   files: {
     /** 打开模型在对话里提到的一个路径。主进程会校验，渲染层不碰文件系统。 */
     open: (path: string) => ipcRenderer.invoke(IPC.fileOpen, path),
+    /** 读一个图片/音频文件用于内联显示。校验同样在主进程。 */
+    media: (path: string) => ipcRenderer.invoke(IPC.fileMedia, path),
+  },
+  audio: {
+    /** 把一段音频落到磁盘，返回路径；发消息时把路径交给内核转写。 */
+    stage: (input: unknown) => ipcRenderer.invoke(IPC.audioStage, input),
   },
   update: {
     check: () => ipcRenderer.invoke(IPC.updateCheck),

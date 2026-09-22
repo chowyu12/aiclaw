@@ -52,7 +52,7 @@ func fakeMCPOverHTTP(t *testing.T, toolName string) string {
 func TestResumeMountsMCPServersFromCurrentConfig(t *testing.T) {
 	model := &fakeModel{script: []string{sseText("好。")}}
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
-	session.RunTurn(context.Background(), "t1", "第一句", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "第一句", nil, nil, &recordingEmitter{approve: true})
 
 	ctx := context.Background()
 	db := newTestStore(t)
@@ -90,7 +90,7 @@ func TestResumeRefreshesSystemPromptSoItListsTheNewTools(t *testing.T) {
 	// 刚挂上的工具能用，或者去调一个已经不在的技能。
 	model := &fakeModel{script: []string{sseText("好。")}}
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
-	session.RunTurn(context.Background(), "t1", "第一句", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "第一句", nil, nil, &recordingEmitter{approve: true})
 
 	ctx := context.Background()
 	db := newTestStore(t)
@@ -127,7 +127,7 @@ func TestResumeWithoutRefreshKeepsTheArchivedConfig(t *testing.T) {
 	// 不该因为没传这个参数就把会话的配置清空。
 	model := &fakeModel{script: []string{sseText("好。")}}
 	session := newTestSession(t, model, protocol.ApprovalAlways)
-	session.RunTurn(context.Background(), "t1", "第一句", nil, &recordingEmitter{approve: true})
+	session.RunTurn(context.Background(), "t1", "第一句", nil, nil, &recordingEmitter{approve: true})
 
 	ctx := context.Background()
 	db := newTestStore(t)

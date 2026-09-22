@@ -321,13 +321,20 @@ export class ClawAgentClient extends EventEmitter {
   }
 
   /**
-   * 起一轮。images 是随这条消息发给模型的图片，base64 的 PNG/JPEG。
-   *
-   * 缩放由调用方做完再进来——内核只兜上限，超了整张丢掉。
+   * 起一轮。images 是随这条消息发给模型的图片，base64 的 PNG/JPEG；
+   * audioPaths 是磁盘上的音频文件，由内核用听写模型转成文字并进消息
+   *（给路径不给字节：行协议单帧 16MB 装不下一段录音）。
    */
-  turnStart(sessionId: string, text: string, images?: string[]): Promise<TurnStartResult> {
+  turnStart(
+    sessionId: string,
+    text: string,
+    images?: string[],
+    audioPaths?: string[],
+  ): Promise<TurnStartResult> {
     this.assertReady();
-    return this.transport.request<{ turnId: string }>("turn/start", { sessionId, text, images });
+    return this.transport.request<{ turnId: string }>("turn/start", {
+      sessionId, text, images, audioPaths,
+    });
   }
 
   turnInterrupt(sessionId: string): Promise<unknown> {

@@ -52,6 +52,7 @@ import {
   MAX_IMAGES,
   MAX_TEXT_BYTES,
   clampText,
+  MAX_AUDIO,
   classifyFile,
   fitSize,
   inlineText,
@@ -502,4 +503,44 @@ test("file-ref 这个类名活过净化，而 onclick 之类活不过", () => {
   // 模型自己写一个同名 class 也只是个 class——真正的校验在主进程。
   const forged = renderMarkdown('<code class="file-ref" onclick="alert(1)">x.md</code>');
   assert.doesNotMatch(forged, /onclick/);
+});
+
+// ---------- 音频附件 ----------
+//
+// 音频要交给听写模型转成文字，而转写按时长收费、一段几分钟的录音 base64 之后
+// 就超过行协议的单帧上限。所以「收不收、收几段」必须在这里判准。
+
+test("常见音频格式按扩展名认出来——拖进来的文件常常没有 MIME", () => {
+  for (const name of ["a.mp3", "a.m4a", "a.wav", "a.ogg", "a.opus", "a.flac", "a.aac"]) {
+    assert.deepEqual(classifyFile({ name, type: "", size: 1000 }, 0, 0), { accept: "audio" }, name);
+  }
+});
+
+test("audio/* 的 MIME 也认", () => {
+  assert.deepEqual(classifyFile({ name: "录音", type: "audio/mpeg", size: 1000 }, 0, 0), {
+    accept: "audio",
+  });
+});
+
+test("一条消息最多两段音频——每段都要打一次听写模型", () => {
+  const full = classifyFile({ name: "a.mp3", type: "", size: 1000 }, 0, MAX_AUDIO);
+  assert.equal(full.accept, "no");
+});
+
+test("超过 25MB 拒绝：多数听写服务自己也卡在这儿", () => {
+  const huge = classifyFile({ name: "a.mp3", type: "", size: 30 * 1024 * 1024 }, 0, 0);
+  assert.equal(huge.accept, "no");
+});
+
+test("图片与文本的判断不受音频影响", () => {
+  assert.deepEqual(classifyFile({ name: "a.png", type: "image/png", size: 100 }, 0, 0), {
+    accept: "image",
+  });
+  assert.deepEqual(classifyFile({ name: "a.md", type: "", size: 100 }, 0, 0), { accept: "text" });
+});
+
+test("mp4 当音频收：模型读不了视频，但录屏配音是常见的输入", () => {
+  assert.deepEqual(classifyFile({ name: "a.mp4", type: "video/mp4", size: 100 }, 0, 0), {
+    accept: "audio",
+  });
 });

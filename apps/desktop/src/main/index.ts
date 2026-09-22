@@ -10,6 +10,7 @@ import { Updater } from "./updater.js";
 import { DiagnosticsLog, buildReport } from "./diagnostics.js";
 import { LogFile } from "./logfile.js";
 import { openFromChat } from "./open-file.js";
+import { readMedia, stageAudio } from "./media-files.js";
 import { IPC } from "../shared/ipc.cjs";
 import type { ApprovalPayload } from "../shared/types.js";
 
@@ -198,6 +199,13 @@ function registerIpc(): void {
       base: sessions.currentWorkspace(),
       protectedPaths: [store.dataDir],
     }),
+  );
+  // 内联显示产出物：路径同样来自模型输出，校验与打开走同一条线。
+  ipcMain.handle(IPC.fileMedia, (_event, path: string) =>
+    readMedia(path, { base: sessions.currentWorkspace(), protectedPaths: [store.dataDir] }),
+  );
+  ipcMain.handle(IPC.audioStage, (_event, input: { name: string; data: string }) =>
+    stageAudio(input.name, input.data),
   );
 
   ipcMain.handle(IPC.diagnosticsRead, () => {

@@ -1,5 +1,5 @@
 /**
- * 往对话里贴东西：截图、图片文件、文本文件。
+ * 往对话里贴东西：截图、图片文件、音频、文本文件。
  *
  * 分两半写是为了能测：**判断**（这个文件要怎么处理、能不能收）是纯函数，
  * 在 node 里跑得起来；**转换**（解码、缩放、读文件）要 DOM，只能在渲染层跑。
@@ -26,7 +26,23 @@ export interface TextAttachment {
   truncated: boolean;
 }
 
-export type Attachment = ImageAttachment | TextAttachment;
+/**
+ * 一段随消息发出去的音频。
+ *
+ * 模型读不了音频：发送时先交给主进程落盘，再把路径给内核，由听写模型转成
+ * 文字并进消息。所以这里留的是原始字节（base64），不做任何转换——转码要
+ * 解码器，而浏览器里没有一个能覆盖 m4a/opus/flac 的。
+ */
+export interface AudioAttachment {
+  kind: "audio";
+  name: string;
+  /** base64 的原始音频字节。 */
+  data: string;
+  /** 字节数，界面上显示大小用。 */
+  size: number;
+}
+
+export type Attachment = ImageAttachment | TextAttachment | AudioAttachment;
 
 /**
  * 模型一次最多看几张图。与内核里的上限一致（`limitImages`），
@@ -39,6 +55,19 @@ export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
 /** 文本文件并进正文的字节上限。超了截断并注明。 */
 export const MAX_TEXT_BYTES = 128 * 1024;
+
+/** 音频大小上限。与内核转写的上限一致（多数服务也卡在 25MB）。 */
+export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
+
+/**
+ * 一条消息最多附几段音频。
+ *
+ * 每一段都要打一次听写模型，四段就是四次网络往返卡在发送那一下；而真要处理
+ * 一堆录音，把它们放进工作区让模型逐个调 transcribe_audio 是更好的做法。
+ */
+export const MAX_AUDIO = 2;
+
+const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "mp4", "wav", "ogg", "opus", "webm", "flac", "aac"]);
 
 /** 缩放后图片的最长边。再大对模型的识别没有帮助，只是更贵。 */
 export const MAX_IMAGE_EDGE = 1568;
@@ -54,6 +83,7 @@ const TEXT_EXTENSIONS = new Set([
 export type Verdict =
   | { accept: "image" }
   | { accept: "text" }
+  | { accept: "audio" }
   | { accept: "no"; reason: string };
 
 /**
@@ -65,9 +95,22 @@ export type Verdict =
 export function classifyFile(
   file: { name: string; type: string; size: number },
   imagesAlready: number,
+  audioAlready = 0,
 ): Verdict {
   const type = file.type.toLowerCase();
   const extension = (file.name.split(".").pop() ?? "").toLowerCase();
+
+  // 音频排在图片前面判：webm 既可能是视频也可能是音频，而 type 常常是空的
+  //（拖进来的文件在某些系统上没有 MIME），所以以扩展名为准。
+  if (AUDIO_EXTENSIONS.has(extension) || (type.startsWith("audio/") && extension !== "svg")) {
+    if (audioAlready >= MAX_AUDIO) {
+      return { accept: "no", reason: `一条消息最多 ${MAX_AUDIO} 段音频` };
+    }
+    if (file.size > MAX_AUDIO_BYTES) {
+      return { accept: "no", reason: "音频太大（超过 25MB）" };
+    }
+    return { accept: "audio" };
+  }
 
   if (type.startsWith("image/")) {
     if (type === "image/svg+xml") {
@@ -147,6 +190,17 @@ export async function readImage(file: File): Promise<ImageAttachment> {
     data: preview.slice(preview.indexOf(",") + 1),
     preview,
   };
+}
+
+/** 读一段音频的原始字节。不转码：浏览器里没有覆盖 m4a/opus/flac 的解码器。 */
+export async function readAudio(file: File): Promise<AudioAttachment> {
+  const buffer = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  // 分块拼：一次 apply 几 MB 会爆调用栈。
+  for (let index = 0; index < buffer.length; index += 8192) {
+    binary += String.fromCharCode(...buffer.subarray(index, index + 8192));
+  }
+  return { kind: "audio", name: file.name || "录音", data: btoa(binary), size: buffer.length };
 }
 
 /** 读一个文本文件，按上限截断。 */

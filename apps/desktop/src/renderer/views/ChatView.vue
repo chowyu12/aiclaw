@@ -4,10 +4,12 @@ import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
 import {
   classifyFile,
+  readAudio,
   inlineText,
   readImage,
   readTextFile,
   type Attachment,
+  type AudioAttachment,
   type ImageAttachment,
   type TextAttachment,
 } from "../attachments";
@@ -56,9 +58,11 @@ async function accept(files: FileList | File[] | null | undefined): Promise<void
   attachError.value = "";
   for (const file of Array.from(files ?? [])) {
     const images = attachments.value.filter((item) => item.kind === "image").length;
-    const verdict = classifyFile(file, images);
+    const audio = attachments.value.filter((item) => item.kind === "audio").length;
+    const verdict = classifyFile(file, images, audio);
     try {
       if (verdict.accept === "image") attachments.value.push(await readImage(file));
+      else if (verdict.accept === "audio") attachments.value.push(await readAudio(file));
       else if (verdict.accept === "text") attachments.value.push(await readTextFile(file));
       // 拒绝的要说出来。默默忽略的话，用户以为模型看过了那份文件。
       else attachError.value = verdict.reason;
@@ -127,6 +131,13 @@ function removeAttachment(index: number): void {
   attachments.value.splice(index, 1);
 }
 
+/** 附件上那行字。音频标出大小——转写按时长收费，用户该知道自己发了多大一段。 */
+function attachmentLabel(item: Attachment): string {
+  if (item.kind === "image") return item.name;
+  if (item.kind === "audio") return `${item.name}（${(item.size / 1024 / 1024).toFixed(1)} MB）`;
+  return `${item.name}${item.truncated ? "（已截断）" : ""}`;
+}
+
 // 轮次进行中也允许发：内核会把输入排进那一轮，模型下一次开口前就看到了。
 // 拦住不让发是最难受的——用户想插话，正是因为看见这一轮跑偏了。
 async function submit(): Promise<void> {
@@ -141,11 +152,15 @@ async function submit(): Promise<void> {
   const images = pending
     .filter((item): item is ImageAttachment => item.kind === "image")
     .map((item) => item.data);
-  if (!text.trim() && images.length === 0) return;
+  // 音频不并进正文：它要先交给听写模型，转写由内核接在消息后面。
+  const audio = pending
+    .filter((item): item is AudioAttachment => item.kind === "audio")
+    .map((item) => ({ name: item.name, data: item.data }));
+  if (!text.trim() && images.length === 0 && audio.length === 0) return;
   draft.value = "";
   attachments.value = [];
   attachError.value = "";
-  await actions.send(text, images);
+  await actions.send(text, images, audio);
   await scrollToEnd();
 }
 
@@ -357,9 +372,8 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
             <div v-if="attachments.length > 0" class="chips">
               <div v-for="(item, index) in attachments" :key="index" class="attach">
                 <img v-if="item.kind === 'image'" :src="item.preview" alt="" />
-                <span class="attach-name">
-                  {{ item.kind === "image" ? item.name : `${item.name}${item.truncated ? "（已截断）" : ""}` }}
-                </span>
+                <span v-else-if="item.kind === 'audio'" class="attach-icon">🎙</span>
+                <span class="attach-name">{{ attachmentLabel(item) }}</span>
                 <button class="attach-x" title="移除" @click="removeAttachment(index)">×</button>
               </div>
             </div>
@@ -876,6 +890,10 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
   height: 22px;
   border-radius: var(--r-full);
   object-fit: cover;
+}
+
+.attach-icon {
+  font-size: 14px;
 }
 
 .attach-name {

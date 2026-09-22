@@ -410,7 +410,7 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 	s.writeResult(f.ID, protocol.TurnStartResult{TurnID: turnID})
 
 	go func() {
-		session.RunTurn(ctx, turnID, params.Text, params.Images, &emitter{server: s})
+		session.RunTurn(ctx, turnID, params.Text, params.Images, params.AudioPaths, &emitter{server: s})
 		if err := session.Save(ctx, s.db); err != nil {
 			s.options.Logf("保存会话失败：%v", err)
 		}

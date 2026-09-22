@@ -32,6 +32,7 @@ func (s *Session) RunTurn(
 	parent context.Context,
 	turnID, text string,
 	images [][]byte,
+	audioPaths []string,
 	emitter Emitter,
 ) {
 	ctx, cancel := context.WithCancel(parent)
@@ -61,6 +62,11 @@ func (s *Session) RunTurn(
 
 	emitter.Notify(protocol.NotifyTurnStarted, protocol.TurnNotification{SessionID: s.ID, TurnID: turnID})
 
+	// 音频先转成文字：模型读不了音频，而用户发过来就是希望它「听」到。
+	// 转写接在正文后面，界面上的那条消息仍是用户原话。
+	if transcript := s.transcribeAttached(ctx, audioPaths); transcript != "" {
+		text += transcript
+	}
 	s.acceptUserInput(ctx, turnID, text, images, emitter)
 
 	usage, err := s.loop(ctx, turnID, emitter)
@@ -107,6 +113,9 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text string, imag
 }
 
 // Enqueue 在有轮次进行中时把输入排队，返回 true 与那一轮的 id。
+//
+// 排队的输入不带音频：它们在下一次打模型之前被插进历史，而转写要打一次网络，
+// 卡在那里会让正在跑的这一轮停住。宿主在有音频时不走排队（见 handleTurnStart）。
 //
 // 没有进行中的轮次时返回 false，调用方按常规起新一轮。
 func (s *Session) Enqueue(text string, images [][]byte) (string, bool) {
@@ -549,7 +558,10 @@ func (s *Session) executeOne(
 	}
 	emitter.Notify(protocol.NotifyItemStarted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
 
-	output, err := s.runTool(ctx, call, env)
+	// 产出物按调用收集：一轮里的工具可能并发跑，挂在 Env 上会串。
+	artifacts := &tools.ArtifactSink{}
+	output, err := s.runTool(tools.WithArtifacts(ctx, artifacts), call, env)
+	item.Artifacts = artifacts.Paths()
 	if err != nil {
 		item.ToolFailed = true
 		item.ToolResult = err.Error()

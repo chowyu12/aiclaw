@@ -62,6 +62,10 @@ export const IPC = {
   mcpProbe: "mcp:probe",
   diagnosticsRead: "diagnostics:read",
   fileOpen: "file:open",
+  /** 读一个图片/音频文件，回 data URL，界面内联显示用。 */
+  fileMedia: "file:media",
+  /** 把贴进来的音频落到磁盘，回路径。 */
+  audioStage: "audio:stage",
 
   skillList: "skill:list",
   skillToggle: "skill:toggle",

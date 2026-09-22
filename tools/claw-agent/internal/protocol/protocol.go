@@ -619,6 +619,14 @@ type TurnStartParams struct {
 	 * 内核只兜住上限——一张没缩过的 4K 截图能把上下文和会话库一起撑坏。
 	 */
 	Images [][]byte `json:"images,omitempty"`
+	/**
+	 * 随这条消息附上的音频文件路径，由内核用听写模型转成文字并进消息。
+	 *
+	 * 给路径而不是字节：行协议的单帧上限是 16MB，而一段几分钟的录音 base64
+	 * 之后就超了——超了的表现是「协议帧解析失败」，没人能从那句话联想到
+	 * 是附件太大。宿主把文件暂存到磁盘，这里只传路径。
+	 */
+	AudioPaths []string `json:"audioPaths,omitempty"`
 }
 
 type TurnStartResult struct {
@@ -688,6 +696,13 @@ type Item struct {
 	ToolFailed bool   `json:"toolFailed,omitempty"`
 	/** 给人看的一句话摘要，宿主直接显示，不用自己解析参数。 */
 	Summary string `json:"summary,omitempty"`
+	/**
+	 * 这一步产出的文件（相对工作区）：生成的图、合成的语音。
+	 *
+	 * 只给路径不给字节：图片进时间线与会话库会让两者都胀几个数量级，而界面
+	 * 要显示时按路径读一次就够了。
+	 */
+	Artifacts []string `json:"artifacts,omitempty"`
 
 	// ---------- 执行步骤的计时与统计 ----------
 	//
