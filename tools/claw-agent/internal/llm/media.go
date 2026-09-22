@@ -33,6 +33,9 @@ const maxAudioBytes = 25 << 20
 // 兼容两种返回：b64_json（直接给字节）与 url（再去下一次）。DashScope、
 // OpenAI 走前者，有些网关走后者——两种都认，省得用户按服务挑写法。
 func (c *Client) GenerateImage(ctx context.Context, model, prompt, size string) ([]byte, error) {
+	if c.dialect == dialectDashScope {
+		return c.dashScopeGenerateImage(ctx, model, prompt, size)
+	}
 	body := map[string]any{"model": model, "prompt": prompt, "n": 1}
 	if strings.TrimSpace(size) != "" {
 		body["size"] = size
@@ -78,6 +81,9 @@ func (c *Client) Transcribe(ctx context.Context, model, name string, audio []byt
 	if len(audio) > maxAudioBytes {
 		return "", fmt.Errorf("音频太大（%.1f MB，上限 %d MB）", float64(len(audio))/(1<<20), maxAudioBytes>>20)
 	}
+	if c.dialect == dialectDashScope {
+		return c.dashScopeTranscribe(ctx, model, name, audio)
+	}
 	var buffer bytes.Buffer
 	form := multipart.NewWriter(&buffer)
 	part, err := form.CreateFormFile("file", filepath.Base(name))
@@ -118,6 +124,9 @@ func (c *Client) Transcribe(ctx context.Context, model, name string, audio []byt
 
 // Speak 把文字读成音频，返回音频字节与格式后缀。
 func (c *Client) Speak(ctx context.Context, model, text, voice string) ([]byte, string, error) {
+	if c.dialect == dialectDashScope {
+		return c.dashScopeSpeak(ctx, model, text, voice)
+	}
 	if strings.TrimSpace(voice) == "" {
 		voice = "alloy"
 	}
@@ -144,7 +153,12 @@ func (c *Client) Speak(ctx context.Context, model, text, voice string) ([]byte, 
 
 // postJSON 发一次 JSON 请求并读回整个响应体。
 func (c *Client) postJSON(ctx context.Context, path string, payload []byte) ([]byte, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
+	return c.postJSONTo(ctx, c.baseURL+path, payload)
+}
+
+// postJSONTo 与 postJSON 相同，但地址由调用方给全——方言的原生接口不在 baseURL 下面。
+func (c *Client) postJSONTo(ctx context.Context, target string, payload []byte) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -168,7 +182,13 @@ func (c *Client) do(request *http.Request) ([]byte, error) {
 		return nil, fmt.Errorf("读取响应失败：%w", err)
 	}
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("上游返回 %d：%s", response.StatusCode, upstreamMessage(body))
+		message := upstreamMessage(body)
+		if message == "" && response.StatusCode == http.StatusNotFound {
+			// 空的 404 几乎只有一个意思：这个端点没有这条路。说出来，模型才不会
+			// 换个尺寸再试三次。
+			message = "这个端点没有 " + request.URL.Path + " 这条接口，这家服务的这个能力可能要走别的地址"
+		}
+		return nil, fmt.Errorf("上游返回 %d：%s", response.StatusCode, message)
 	}
 	return body, nil
 }

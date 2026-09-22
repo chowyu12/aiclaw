@@ -95,6 +95,9 @@ type Client struct {
 	baseURL string
 	apiKey  string
 	http    *http.Client
+	// dialect 决定对话之外的接口（画图、听写、朗读）打哪一套地址。对话本身
+	// 各家都是 /chat/completions，不受它影响。
+	dialect dialect
 }
 
 func New(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
@@ -113,7 +116,12 @@ func New(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
 		// 真正的中断由 context 负责，不靠这个超时。
 		timeout = 10 * time.Minute
 	}
-	return &Client{baseURL: baseURL, apiKey: apiKey, http: &http.Client{Timeout: timeout}}, nil
+	return &Client{
+		baseURL: baseURL,
+		apiKey:  apiKey,
+		http:    &http.Client{Timeout: timeout},
+		dialect: detectDialect(baseURL),
+	}, nil
 }
 
 // ---------- 线格式 ----------
