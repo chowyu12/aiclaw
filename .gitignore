@@ -18,3 +18,14 @@ CHANGELOG.md
 /renderer/dist/index.html
 /electron/core/
 /electron/release/
+
+# upstream 布局：workspaces + Go 内核 + packager 产物
+/node_modules/
+/packages/*/node_modules/
+/packages/*/dist/
+/apps/*/node_modules/
+/apps/*/dist/
+/tools/claw-agent/claw-agent
+/tools/claw-agent/claw-agent.exe
+/build/
+/release/

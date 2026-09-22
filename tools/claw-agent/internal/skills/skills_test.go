@@ -1,0 +1,205 @@
+package skills
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func write(t *testing.T, root, name, content string) string {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if content != "" {
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestLoadParsesFrontmatter(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "daily-report", `---
+name: 销售日报
+description: 需要生成或核对每日销售流水报表时用
+---
+
+# 怎么做
+
+1. 先拉昨日流水
+2. 再比对上月同期
+`)
+
+	loaded, err := Load(dirsIn(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("期望 1 个技能，实际 %d", len(loaded))
+	}
+	skill := loaded[0]
+	if skill.Name != "销售日报" {
+		t.Errorf("name = %q", skill.Name)
+	}
+	if skill.Description != "需要生成或核对每日销售流水报表时用" {
+		t.Errorf("description = %q", skill.Description)
+	}
+	if !strings.Contains(skill.Body, "先拉昨日流水") {
+		t.Errorf("正文没取到：%q", skill.Body)
+	}
+	// frontmatter 不该留在正文里，否则会被当成内容喂给模型。
+	if strings.Contains(skill.Body, "description:") {
+		t.Errorf("frontmatter 漏进正文了：%q", skill.Body)
+	}
+}
+
+func TestLoadFallsBackToDirNameAndFirstLine(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "no-meta", "# 清理临时文件\n\n把 tmp 下超过 7 天的删掉。")
+
+	loaded, err := Load(dirsIn(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("期望 1 个技能，实际 %d", len(loaded))
+	}
+	if loaded[0].Name != "no-meta" {
+		t.Errorf("没有 name 时应当用目录名，实际 %q", loaded[0].Name)
+	}
+	// 没有说明的技能对模型没用——它无从判断什么时候该用，所以拿首行顶上。
+	if loaded[0].Description != "清理临时文件" {
+		t.Errorf("应当拿正文首行当说明，实际 %q", loaded[0].Description)
+	}
+}
+
+func TestLoadSkipsBrokenSkillsWithoutFailingTheRest(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "good", "---\nname: 好的\ndescription: 能用\n---\n正文")
+	write(t, root, "no-skill-md", "") // 目录在，但没有 SKILL.md
+	if err := os.WriteFile(filepath.Join(root, "散落的文件.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(dirsIn(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 一个手写坏的技能不该让整个技能系统失灵。
+	if len(loaded) != 1 || loaded[0].Name != "好的" {
+		t.Fatalf("坏的应当被跳过、好的应当留下，实际 %+v", loaded)
+	}
+}
+
+func TestLoadRespectsDisabledMarker(t *testing.T) {
+	root := t.TempDir()
+	dir := write(t, root, "paused", "---\nname: 停用的\ndescription: x\n---\n正文")
+	if err := os.WriteFile(filepath.Join(dir, ".disabled"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	write(t, root, "active", "---\nname: 启用的\ndescription: y\n---\n正文")
+
+	loaded, err := Load(dirsIn(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]bool{}
+	for _, skill := range loaded {
+		byName[skill.Name] = skill.Disabled
+	}
+	if !byName["停用的"] {
+		t.Error("有 .disabled 标记的技能应当标成禁用")
+	}
+	if byName["启用的"] {
+		t.Error("没有标记的技能不该被禁用")
+	}
+}
+
+func TestLoadIsSortedAndSkipsHiddenDirs(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "b-skill", "---\nname: b\ndescription: x\n---\n正文")
+	write(t, root, "a-skill", "---\nname: a\ndescription: x\n---\n正文")
+	write(t, root, ".git", "---\nname: 不该出现\ndescription: x\n---\n正文")
+
+	loaded, err := Load(dirsIn(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 2 {
+		t.Fatalf("隐藏目录应当跳过，实际 %+v", loaded)
+	}
+	// 顺序稳定，模型看到的清单才可复现。
+	if loaded[0].Name != "a" || loaded[1].Name != "b" {
+		t.Errorf("应当按名字排序，实际 %q %q", loaded[0].Name, loaded[1].Name)
+	}
+}
+
+func TestLoadOnMissingDirIsNotAnError(t *testing.T) {
+	// 全新安装还没有技能目录，这不是错误。
+	loaded, err := Load([]string{filepath.Join(t.TempDir(), "还没建")})
+	if err != nil {
+		t.Errorf("目录不存在时不该报错：%v", err)
+	}
+	if len(loaded) != 0 {
+		t.Errorf("不该凭空出技能：%+v", loaded)
+	}
+}
+
+func TestLoadRejectsOversizedSkill(t *testing.T) {
+	root := t.TempDir()
+	// 技能是提示词不是数据集。几 MB 的 SKILL.md 多半是放错了东西，
+	// 挂上去会把上下文一次吃光。
+	write(t, root, "huge", strings.Repeat("x", maxBodyBytes+1))
+
+	loaded, err := Load(dirsIn(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 0 {
+		t.Errorf("超限的技能应当被跳过，实际 %+v", loaded)
+	}
+}
+
+func TestSplitFrontmatterHandlesCRLFAndQuotes(t *testing.T) {
+	meta, body := splitFrontmatter("---\r\nname: \"带引号\"\r\ndescription: '单引号'\r\n---\r\n正文\r\n")
+	if meta["name"] != "带引号" {
+		t.Errorf("引号应当去掉，实际 %q", meta["name"])
+	}
+	if meta["description"] != "单引号" {
+		t.Errorf("单引号也要去掉，实际 %q", meta["description"])
+	}
+	if strings.TrimSpace(body) != "正文" {
+		t.Errorf("正文 = %q", body)
+	}
+}
+
+func TestSplitFrontmatterLeavesPlainMarkdownAlone(t *testing.T) {
+	// 没有 frontmatter 的文件整篇都是正文，不能被啃掉开头。
+	_, body := splitFrontmatter("# 标题\n\n内容")
+	if !strings.HasPrefix(body, "# 标题") {
+		t.Errorf("正文被改动了：%q", body)
+	}
+}
+
+// dirsIn 把一个「装着若干技能的目录」展开成 Load 要的技能目录清单。
+//
+// Load 现在收的是具体技能目录：技能散在 Claude / Codex / npm 等好几处，
+// 发现逻辑统一放在宿主侧了。测试里用这个小助手保留原来的写法。
+func dirsIn(root string) []string {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		dirs = append(dirs, filepath.Join(root, entry.Name()))
+	}
+	return dirs
+}

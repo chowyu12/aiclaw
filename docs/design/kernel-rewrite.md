@@ -1,0 +1,145 @@
+# 以 upstream-app 为基重写 AIClaw
+
+## 这次改的是什么
+
+把 AIClaw 的内核换成 `upstream-app` 的 `claw-agent`，界面换成它的 Electron 宿主与 Vue 页面，
+**删掉全部内部平台能力**，同时**保留 AIClaw 现有的模型配置、插件系统、搜索引擎**。
+打包用 upstream 的 `@electron/packager` 规则，发布仍走我们已验证的 GitHub Actions。
+
+落点：`aiclaw` 仓库 master 原地重写。
+
+## 为什么值得换内核
+
+两个项目架构同源——Electron 宿主 + Go 内核 + stdio——但 `claw-agent` 在三处明显更完整：
+
+| | AIClaw 现状 | claw-agent |
+| --- | --- | --- |
+| 线协议 | 自定 JSON Lines，53 个命令的白名单 | JSON-RPC 2.0，session→turn→item 三层模型 |
+| 审批 | **没有**。工具直接执行 | 执行命令、调外部工具默认要用户确认，危险命令硬拒绝 |
+| computer use | osascript 后端，**做不到右键/双击/移动/滚轮**，schema 里只好删掉 | 委托宿主用 `desktopCapturer` 截屏、按平台合成输入，八个动作齐全 |
+| 上下文管理 | 无。撑满即失败 | 主动压缩、截断恢复、中断后历史修复 |
+| 会话检索 | FTS5 全文 | 同上，另有 `session/search` 协议方法 |
+
+审批那条是决定性的：AIClaw 的插件系统能让模型执行任意本机命令，而它**没有任何确认环节**。
+`claw-agent` 把审批做进了循环本身，不是事后补的拦截器。
+
+computer use 那条也值得说：我在 AIClaw 里被迫从工具 schema 删掉的四个手势，
+在 upstream 里是**能做的**，因为它在宿主侧合成事件而不是 shell 出去调 osascript。
+
+## 目标结构
+
+```text
+tools/claw-agent/         # 照搬：Go 内核（循环/工具/MCP/技能/记忆/SQLite/JSON-RPC）
+packages/agent-client/    # 照搬：TS 客户端
+apps/desktop/             # 照搬（去内部平台）：Electron 宿主 + Vue 界面
+  src/main/               #   窗口、配置、会话、computer、技能、更新
+  src/renderer/           #   App.vue + views/ + styles.css
+internal/plugin/          # 保留：插件系统（bundle/manifest/权限/通道）
+internal/plugins/         # 保留：computer-use / wechat / wecom / connector
+internal/model/           # 保留其中的 Provider / SearchEngineConfig / Plugin 等
+internal/store/           # 保留：插件与配置的持久化
+scripts/                  # 照搬：冒烟测试
+.github/workflows/        # 保留：我们已验证的发布流水线
+```
+
+删除：`tools/claw-mcp/`（3297 行，纯内部平台）、`CapabilitiesView.vue`、`catalog.ts`，
+以及 `config.ts` / `SettingsView.vue` / `SkillsView.vue` 里的内部平台分支。
+
+AIClaw 这边被替换掉的：`internal/core`、`internal/appserver`、`internal/appservice`、
+`internal/protocol`、`cmd/aiclaw-core`、`electron/`、`renderer/`。
+
+## 三处必须自己设计的接缝
+
+照搬解决不了这三个地方——它们是「保留我们的」与「照搬他们的」正面相撞的点。
+
+### 1. 模型配置：多 Provider 落到单 ModelConfig
+
+`claw-agent` 的 `ModelConfig` 是**每会话一份**的 `{baseUrl, model, reasoningEffort,
+temperature, maxTokens, contextWindow}`，没有 Provider 概念；API Key **只从进程环境变量来，
+不经过协议帧**——这是他们有意的安全设计，保留。
+
+AIClaw 的 `Provider` 是 SQLite 里的多条记录（`name/type/base_url/api_key/models[]/enabled`），
+thread 引用 `provider_id + model_name`。
+
+做法：**Provider 表保留，宿主做翻译**。用户在设置页管理多个 Provider，
+开会话时选中的 `provider + model` 被宿主翻译成一份 `ModelConfig`，
+API Key 在 spawn `claw-agent` 时经环境变量注入。
+`contextWindow` / `reasoningEffort` 是 claw-agent 多出来的字段，
+由 Provider 记录补充——这是升级而非妥协。
+
+### 2. 扩展模型：插件系统吃掉技能与 MCP 两页
+
+AIClaw 的插件系统（bundle + manifest + 权限 + 贡献点）与 upstream 的「技能 + MCP」
+是两套模型。按决定：**以插件系统为准，技能页和 MCP 页重做成插件系统的两个视图**。
+
+接缝天然存在：`claw-agent` 的 `session/start` 接受一组 `MCPServerConfig`，
+而插件系统的 `mcpServers` 贡献点产出的正是这个。所以插件系统成为
+**会话配置的来源**，而不是另一套并行的东西：
+
+```text
+插件（启用）→ 贡献点 → ┬ mcpServers → session/start 的 MCPServerConfig
+                      ├ skills     → claw-agent 的技能目录
+                      └ tools      → 宿主能力（computer use）
+```
+
+技能页展示的是「插件贡献的技能」，MCP 页展示的是「插件贡献的 MCP server」
+加上用户手工添加的——与今天 AIClaw 里 MCP 既可手工添加也可由插件贡献是一致的。
+
+### 3. 搜索引擎：claw-agent 里没有它的位置
+
+upstream 的 web search 在 `claw-mcp/internal/provider/websearch.go` 里，
+属于要删掉的内部平台部分。`claw-agent` 的工具注册表里**没有** web search。
+
+做法：AIClaw 的搜索引擎配置保留，实现为一个**内置 MCP server**——
+宿主在组装 `session/start` 的 MCP 列表时，若用户配了搜索引擎就加上它。
+这样搜索能力走的是 claw-agent 已有的 MCP 通道，不用改内核的工具注册表；
+换引擎、关掉引擎都只是改会话配置。
+
+## 数据迁移
+
+v2.0.2 的用户库里有会话、Provider、插件、搜索引擎、记忆。两套 SQLite schema 不同。
+
+- **Provider / SearchEngineConfig / Plugin / PluginConfig / ChannelBinding**：
+  表结构不动，`internal/store` 保留，这些直接沿用。
+- **会话与消息**：AIClaw 的 `Thread` + `RolloutItem` 与 claw-agent 的会话库结构不同。
+  **不做自动迁移**：历史会话以只读形式保留在旧表里，新会话走新库。
+  理由是两边的条目模型（rollout kind vs item kind）不是一一对应的，
+  强行翻译会产生看起来对、实际错位的历史，比明说「旧会话在这里、只读」更糟。
+  这一条必须写进 release notes。
+
+## 打包与发布
+
+按决定取长：
+
+- **打包**用 upstream 的 `@electron/packager` 规则（含图标、Windows 版本资源 `resedit`）
+- **发布**仍走我们的 GitHub Actions：三平台矩阵、`if-no-files-found: error`、
+  tag annotation 作 release notes、SHA256SUMS
+
+upstream 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而这个仓库在 GitHub。
+
+## 交付顺序
+
+每一步结束时仓库必须是可构建的。
+
+1. **搬内核**：`tools/claw-agent` + `packages/agent-client` 进来，删 `claw-mcp`。
+   此时旧的 `electron/` 仍在跑，两套并存。
+2. **搬宿主与界面**：`apps/desktop` 进来，摘掉内部平台（`CapabilitiesView`、`catalog.ts`、
+   `config.ts` 的内部平台分支）。此时新界面能起来但还没有插件/搜索引擎。
+3. **接模型配置**：Provider 表接进设置页，翻译成 `ModelConfig`，API Key 走环境变量。
+4. **接插件系统**：插件贡献的 MCP/技能喂进 `session/start`；技能页与 MCP 页重做。
+5. **接搜索引擎**：内置 MCP server，按配置挂载。
+6. **打包发布**：`@electron/packager` + 现有 GitHub Actions，删掉 `electron/`、`renderer/`、
+   `cmd/aiclaw-core`、`internal/core` 等被替换的部分。
+
+## 风险与边界
+
+- **这是一次换心手术**，不是重构。`internal/core` 及其上的一切（rollout 模型、
+  工具分发、附件回灌、工具策略闸门）会被 claw-agent 的等价物取代。
+  我为 AIClaw 写的那些测试大部分会随实现一起删除。
+- **审批是新增的用户可见行为**。今天 AIClaw 执行命令不问，换核后会问。
+  这是安全上的改进，但会改变使用手感，必须写进 release notes。
+- **历史会话不迁移**，只读保留。
+- **不做 OS 级沙箱**——这是 upstream 明确记录的决定，照搬过来同样成立：
+  命令直接在用户机器上跑，只有路径收敛与审批两道防护。
+- **upstream 的 AGENTS.md 有 57k**，包含大量项目约定。搬代码时要一并读，
+  否则会写出与它风格冲突的代码。

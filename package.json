@@ -1,23 +1,43 @@
 {
   "name": "aiclaw",
-  "version": "1.0.0",
-  "description": "AiClaw is a self-hosted AI agent platform for building, operating, and observing tool-using agents. It combines a Go backend, a Vue 3 admin console, multi-provider LLM support, nested sub-agents, persistent memory, runtime planning, tool execution, and messaging-channel integrations in a single deployable binary.",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "private": true,
+  "version": "2.0.2",
+  "description": "AIClaw：本地 Agent 桌面客户端（Electron 宿主 + Go 内核 claw-agent）",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/chowyu12/aiclaw.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "bugs": {
     "url": "https://github.com/chowyu12/aiclaw/issues"
   },
-  "homepage": "https://github.com/chowyu12/aiclaw#readme"
+  "homepage": "https://github.com/chowyu12/aiclaw#readme",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm run build -w @aiclaw/agent-client && npm run build:go",
+    "build:go": "cd tools/claw-agent && CGO_ENABLED=0 go build -o claw-agent .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:go": "cd tools/claw-agent && go test ./...",
+    "smoke": "node --experimental-strip-types scripts/smoke-agent.ts",
+    "smoke:desktop": "electron scripts/smoke-desktop.cjs",
+    "test:renderer": "node --test --experimental-strip-types scripts/test-renderer.ts scripts/test-unzip.ts scripts/test-store-ipc.ts scripts/test-computer.ts scripts/test-config.ts scripts/test-turns.ts scripts/test-skill-roots.ts scripts/test-version.ts scripts/test-diagnostics.ts scripts/test-open-file.ts scripts/test-logfile.ts"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "@types/jsdom": "^30.0.0",
+    "@types/markdown-it": "^14.2.0",
+    "@types/markdown-it-footnote": "^3.0.4",
+    "dompurify": "^3.4.15",
+    "jsdom": "^29.1.1",
+    "markdown-it": "^15.0.2",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-task-lists": "^2.1.1",
+    "resedit": "^3.1.0",
+    "typescript": "~5.9.3"
+  }
 }

@@ -1,0 +1,253 @@
+/* 与 upstream-web 保持同一套视觉语言：同样的中性色偏向、同样的等宽字体角色。
+ *
+ * 几条贯穿全局的规矩：
+ *   - 底色分三层：页面 ground → 卡片 surface → 卡片内的凹陷 surface-2。
+ *     一个元素属于哪一层决定它用哪个底色，不要临时挑颜色。
+ *   - 文字分三级：ink 正文 / ink-2 次要 / muted 辅助。同一段里最多用两级，
+ *     三级全上会糊成一锅灰。
+ *   - 中性色统一往青绿偏一点（与 accent 同向）。纯灰看起来像没调过。
+ */
+:root {
+  --ground: #f4f6f6;
+  --surface: #ffffff;
+  --surface-2: #eef1f1;
+  --sidebar: #eceff0;
+
+  --ink: #10161a;
+  --ink-2: #47535a;
+  --muted: #727f86;
+
+  --rule: #e0e5e6;
+  --rule-strong: #cdd5d7;
+
+  --accent: #14685c;
+  --accent-hover: #10554b;
+  --accent-soft: #e2efec;
+  --on-accent: #ffffff;
+
+  --ok: #14685c;
+  --ok-soft: #e0efeb;
+  --warn: #8a6210;
+  --warn-soft: #f5ebd6;
+  --danger: #a83329;
+  --danger-soft: #f7e5e2;
+
+  --hover: #e5eaea;
+  --active: #d9e6e3;
+
+  /* 圆角只有这四档。混用会让界面看起来是拼出来的。 */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-full: 999px;
+
+  /* 投影压得很轻：这是桌面应用不是落地页，阴影只用来分层，不做装饰。 */
+  --shadow-1: 0 1px 2px rgb(16 22 26 / 5%);
+  --shadow-2: 0 2px 8px rgb(16 22 26 / 7%);
+  --shadow-3: 0 12px 32px rgb(16 22 26 / 14%);
+
+  --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #0e1214;
+    --surface: #171d20;
+    --surface-2: #1e2529;
+    --sidebar: #121719;
+
+    --ink: #e8edee;
+    --ink-2: #aab5ba;
+    --muted: #7f8c92;
+
+    --rule: #262f33;
+    --rule-strong: #36403f;
+
+    --accent: #4fbca7;
+    --accent-hover: #63cbb7;
+    --accent-soft: #15302b;
+    --on-accent: #08201c;
+
+    --ok: #4fbca7;
+    --ok-soft: #17332f;
+    --warn: #d9ac52;
+    --warn-soft: #322813;
+    --danger: #e98379;
+    --danger-soft: #35201d;
+
+    --hover: #1f282c;
+    --active: #1b332e;
+
+    /* 深色下靠亮度分层，投影几乎看不见，所以压得更轻。 */
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 30%);
+    --shadow-2: 0 2px 8px rgb(0 0 0 / 35%);
+    --shadow-3: 0 12px 32px rgb(0 0 0 / 50%);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+}
+
+button {
+  font: inherit;
+}
+
+/* ---------- 按钮 ---------- */
+
+button.primary,
+button.ghost,
+button.danger {
+  border-radius: var(--r-sm);
+  padding: 7px 15px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
+}
+
+button.primary {
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 1px solid var(--accent);
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+button.primary:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.ghost {
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  color: var(--ink);
+}
+
+button.ghost:hover {
+  border-color: var(--muted);
+}
+
+button.danger {
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  align-self: flex-start;
+}
+
+button.danger:hover {
+  background: var(--danger-soft);
+}
+
+/* ---------- 表单 ---------- */
+
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input:not([type]),
+select,
+textarea {
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 13px;
+  background: var(--surface);
+  color: var(--ink);
+  width: 100%;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+
+input:hover:not(:disabled):not([readonly]),
+select:hover,
+textarea:hover {
+  border-color: var(--muted);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+input[readonly] {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+select {
+  appearance: none;
+  /* 自画箭头：原生箭头是系统件，深色模式下会是浅色的，和周围对不上。 */
+  background-image: linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position: calc(100% - 15px) center, calc(100% - 10px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 30px;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 滚动条收细。默认那条在浅色面板上太重，一直在抢视线。 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: var(--r-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
