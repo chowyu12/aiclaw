@@ -236,10 +236,26 @@ export interface SessionSummaryView {
   snippet?: string;
 }
 
+/** 一个角色用哪个模型。providerId 为 0 表示没配。 */
+export interface RoleModelView {
+  providerId: number;
+  model: string;
+}
+
+/** 对话之外的角色模型：看图、听写、朗读、画图。 */
+export interface RoleConfigView {
+  vision: RoleModelView;
+  stt: RoleModelView;
+  tts: RoleModelView;
+  image: RoleModelView;
+}
+
 export interface AppConfigView {
   /** 新会话默认用的模型服务 id；0 表示没选。 */
   providerId: number;
   model: string;
+  /** 角色模型。没配的角色对应的工具不会注册。 */
+  roles: RoleConfigView;
   reasoningEffort: string;
   /** 模型上下文窗口（token）；0 表示未知，内核退回被动压缩。 */
   contextWindow: number;

@@ -219,6 +219,9 @@ func view(item *model.Provider) protocol.ProviderView {
 }
 
 // 模型清单在库里是一个 JSON 字符串数组——旧版就是这么存的。
+//
+// 能力标记写成 `名字#vision,image` 附在名字后面，而不是换成对象数组：
+// 旧版写下的纯字符串照样读得出来（没有 `#` 就是只做对话），也不用动表结构。
 func encodeModels(names []string) model.JSON {
 	clean := make([]string, 0, len(names))
 	seen := map[string]bool{}

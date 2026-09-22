@@ -20,6 +20,7 @@ import {
   type ProviderCreateParams,
   type ProviderUpdateParams,
   type ProviderView,
+  type RoleModels,
   type SearchEngineCreateParams,
   type SearchEngineTestResult,
   type SearchEngineUpdateParams,
@@ -360,7 +361,29 @@ export class SessionManager extends EventEmitter {
       skillDirs: this.skills.enabledDirs(),
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
+      roles: toRoles(config),
+      modelSeesImages: await this.modelSeesImages(config),
     };
+  }
+
+  /**
+   * 对话模型自己看不看得懂图。
+   *
+   * 看模型清单里的 `#vision` 标记。拿不到清单时按「看得懂」处理：那时走旁路
+   * 会把每张图都转成转述，而多数主流模型本来就认图——宁可让不认图的模型
+   * 报一次上游错误，也不要让认图的模型永远只读到二手描述。
+   */
+  private async modelSeesImages(config: AppConfig): Promise<boolean> {
+    if (!config.providerId || !config.model) return true;
+    try {
+      const provider = (await this.listProviders()).find((item) => item.id === config.providerId);
+      if (!provider) return true;
+      const entry = provider.models.find((item) => item.split("#")[0]!.trim() === config.model);
+      if (entry === undefined) return true;
+      return entry.includes("#") && entry.split("#")[1]!.split(",").some((m) => m.trim() === "vision");
+    } catch {
+      return true;
+    }
   }
 
   /**
@@ -430,6 +453,8 @@ export class SessionManager extends EventEmitter {
       disableSandbox: config.sandboxCommands === false,
       codeMode: config.codeMode === true,
       approvalPolicy: config.profile,
+      roles: toRoles(config),
+      modelSeesImages: await this.modelSeesImages(config),
     };
   }
 
@@ -592,4 +617,19 @@ function resolveBin(envVar: string, name: string): string {
     if (candidate && existsSync(candidate)) return candidate;
   }
   return exe;
+}
+
+/**
+ * 把配置里的角色翻成协议的形状。没配的角色整个省掉——协议那边 providerId 为 0
+ * 就是「没配」，传一个空壳只是噪音。
+ */
+function toRoles(config: AppConfig): RoleModels {
+  const roles: RoleModels = {};
+  for (const name of ["vision", "stt", "tts", "image"] as const) {
+    const role = config.roles?.[name];
+    if (role?.providerId && role.model) {
+      roles[name] = { providerId: role.providerId, model: role.model };
+    }
+  }
+  return roles;
 }

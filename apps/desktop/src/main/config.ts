@@ -13,10 +13,30 @@ import { DEFAULT_CONFIG, normalizeConfig } from "./config-defaults.js";
  * 别人看，诊断包同理只带它。
  */
 
+/** 一个角色用哪个模型。providerId 为 0 表示没配。 */
+export interface RoleModelConfig {
+  providerId: number;
+  model: string;
+}
+
+export interface RoleConfig {
+  vision: RoleModelConfig;
+  stt: RoleModelConfig;
+  tts: RoleModelConfig;
+  image: RoleModelConfig;
+}
+
 export interface AppConfig {
   /** 新会话默认用的模型服务 id（aiclaw.db 里 providers 表的主键）；0 表示没选。 */
   providerId: number;
   model: string;
+  /**
+   * 对话之外的角色模型：看图、听写、朗读、画图。
+   *
+   * 每个角色独立配，没配的那个角色对应的工具不会注册——给模型一个用不了的
+   * 工具，它会调、会失败、会重试，而失败原因它无从修复。
+   */
+  roles: RoleConfig;
   reasoningEffort: string;
   /**
    * 模型的上下文窗口（token）。内核据此在撑满之前主动压缩历史。

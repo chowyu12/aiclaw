@@ -160,10 +160,14 @@ type ProviderView struct {
 	/** openai / qwen / kimi / openrouter / openai-compatible / claude / gemini */
 	Type string `json:"type"`
 	/** 空表示用该类型的默认端点。 */
-	BaseURL   string   `json:"baseUrl"`
-	APIKeySet bool     `json:"apiKeySet"`
-	Models    []string `json:"models"`
-	Enabled   bool     `json:"enabled"`
+	BaseURL   string `json:"baseUrl"`
+	APIKeySet bool   `json:"apiKeySet"`
+	/**
+	 * 模型清单。带能力标记的写成 `名字#vision,image`（见 roles.go）；
+	 * 没有 `#` 的就是只做对话——旧版写下的清单原样可读。
+	 */
+	Models  []string `json:"models"`
+	Enabled bool     `json:"enabled"`
 }
 
 type ProviderListResult struct {

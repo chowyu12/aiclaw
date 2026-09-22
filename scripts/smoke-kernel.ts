@@ -101,6 +101,34 @@ async function main(): Promise<number> {
 
     record("通道与授权列表可读", (await client.channelStatus()).length === 0 && (await client.channelBindings()).length === 0);
 
+    // 多模态：没配角色时那几个工具根本不该出现——给模型一个用不了的工具，
+    // 它会调、会失败、会重试，而失败原因它无从修复。
+    const bare = await client.sessionStart({
+      model: { providerId: provider.id, baseUrl: "", model: "m1" },
+      approvalPolicy: "never",
+    });
+    record(
+      "没配角色时多模态工具不注册",
+      !["generate_image", "transcribe_audio", "speak"].some((name) => bare.tools.includes(name)),
+      bare.tools.join(", "),
+    );
+
+    const withRoles = await client.sessionStart({
+      model: { providerId: provider.id, baseUrl: "", model: "m1" },
+      approvalPolicy: "never",
+      roles: {
+        image: { providerId: provider.id, model: "wan" },
+        stt: { providerId: provider.id, model: "asr" },
+      },
+    });
+    record(
+      "配了角色就只注册那几个",
+      withRoles.tools.includes("generate_image") &&
+        withRoles.tools.includes("transcribe_audio") &&
+        !withRoles.tools.includes("speak"),
+      withRoles.tools.filter((t) => ["generate_image", "transcribe_audio", "speak"].includes(t)).join(", ") || "一个都没有",
+    );
+
     // 搜索引擎：建一个、Key 不回传；再把内核自带的搜索 MCP server 挂进会话，
     // 工具应当以 web_search__web_search 出现（挂载只列工具，不打网络）。
     const engine = await client.searchCreate({ provider: "tavily", apiKey: "tvly-smoke", enabled: true });

@@ -2,6 +2,13 @@
 import { onMounted, reactive, ref } from "vue";
 import { actions, store } from "../store";
 import { describeError } from "../errors";
+import {
+  MODEL_ROLES,
+  ROLE_LABELS,
+  formatModelMark,
+  parseModelMark,
+  type ModelRole,
+} from "../model-roles";
 
 /**
  * 模型服务的管理：一个 OpenAI 兼容端点 + 它的 Key + 模型清单。
@@ -87,12 +94,27 @@ function toggleExpand(id: number): void {
   expanded.value = expanded.value === id ? 0 : id;
 }
 
-/** 模型清单在文本框里一行一个。 */
+/** 模型清单在文本框里一行一个。能力标记（`名字#vision`）原样留着。 */
 function parseModels(raw: string): string[] {
   return raw
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+/**
+ * 给某个模型加上或去掉一个能力。
+ *
+ * 能力标记直接写在清单项上（`qwen3-vl#vision`），所以这里改的是清单本身——
+ * 不另存一份映射：另存一份就要处理「模型改名了标记还留着」这类不同步。
+ */
+async function toggleRole(provider: ProviderRow, entry: string, role: ModelRole, on: boolean): Promise<void> {
+  const parsed = parseModelMark(entry);
+  const roles = on
+    ? [...parsed.roles, role]
+    : parsed.roles.filter((item) => item !== role);
+  const next = provider.models.map((item) => (item === entry ? formatModelMark(parsed.name, roles) : item));
+  await run(() => actions.updateProvider({ id: provider.id, models: next }));
 }
 
 /**
@@ -231,6 +253,27 @@ function summary(provider: ProviderRow): string {
               @change="patch(provider.id, { models: parseModels(($event.target as HTMLTextAreaElement).value) })"
             />
           </label>
+
+          <!-- 能力标记：勾上之后这个模型才会出现在「配置」页对应角色的候选里。
+               不勾也不影响它当对话模型用。 -->
+          <div v-if="provider.models.length > 0" class="caps">
+            <span class="caps-title">这些模型还能做什么</span>
+            <div v-for="entry in provider.models" :key="entry" class="cap-row">
+              <code class="cap-name">{{ parseModelMark(entry).name }}</code>
+              <label v-for="role in MODEL_ROLES" :key="role" class="cap">
+                <input
+                  type="checkbox"
+                  :checked="parseModelMark(entry).roles.includes(role)"
+                  @change="toggleRole(provider, entry, role, ($event.target as HTMLInputElement).checked)"
+                />
+                {{ ROLE_LABELS[role] }}
+              </label>
+            </div>
+            <p class="hint">
+              勾了的模型会出现在「配置」页对应角色的候选里：看图用来替对话模型读图，
+              另外三样各自对应一个工具。不勾不影响它当对话模型用。
+            </p>
+          </div>
           <div class="fetch">
             <button
               class="ghost small"
@@ -448,6 +491,53 @@ label > span em {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.caps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.caps-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.cap-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cap-name {
+  flex: 1 1 160px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.cap input {
+  width: auto;
 }
 
 button.small {

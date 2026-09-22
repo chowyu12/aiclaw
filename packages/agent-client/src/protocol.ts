@@ -79,6 +79,10 @@ export interface SessionStartParams {
   disableSandbox?: boolean;
   instructions?: string;
   approvalPolicy?: ApprovalPolicy;
+  /** 对话之外的角色模型。没配的角色对应的工具不注册。 */
+  roles?: RoleModels;
+  /** 对话模型自己看得懂图；false 时用户发的图先由视觉模型转成文字。 */
+  modelSeesImages?: boolean;
   mcpServers?: Record<string, MCPServerConfig>;
   enabledBuiltins?: string[];
   /**
@@ -117,6 +121,8 @@ export interface SessionRefresh {
   disableSandbox: boolean;
   codeMode: boolean;
   approvalPolicy: ApprovalPolicy;
+  roles?: RoleModels;
+  modelSeesImages?: boolean;
 }
 
 /** 试连一个 MCP server 的结果。连不上不算错误，原因在 error 里。 */
@@ -154,6 +160,29 @@ export interface ProviderUpdateParams {
   apiKey?: string;
   models?: string[];
   enabled?: boolean;
+}
+
+// ---------- 模型角色 ----------
+//
+// 对话之外的那几件事各自交给一个模型：看图、听写、朗读、画图。没有哪个对话
+// 模型四样都好，而用户手上往往各有一个便宜的专用模型。
+
+export type ModelRole = "vision" | "stt" | "tts" | "image";
+
+/** 全部角色，界面按它出勾选项。与 Go 侧 KnownRoles 同序。 */
+export const MODEL_ROLES: ModelRole[] = ["vision", "stt", "tts", "image"];
+
+/** 某个角色用哪个模型。providerId 为 0 / 缺省表示这个角色没配。 */
+export interface RoleModel {
+  providerId?: number;
+  model?: string;
+}
+
+export interface RoleModels {
+  vision?: RoleModel;
+  stt?: RoleModel;
+  tts?: RoleModel;
+  image?: RoleModel;
 }
 
 // ---------- 搜索引擎 ----------

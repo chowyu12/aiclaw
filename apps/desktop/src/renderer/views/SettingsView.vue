@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
+import {
+  MODEL_ROLES,
+  ROLE_HINTS,
+  ROLE_LABELS,
+  roleCandidates,
+  type ModelRole,
+} from "../model-roles";
 
 const modelPickerOpen = ref(false);
 const saving = ref(false);
@@ -65,6 +72,34 @@ async function pickModel(providerId: number, id: string): Promise<void> {
   modelPickerOpen.value = false;
   // 换了模型窗口就不一样了，旧值不能沿用；用户知道的话在下面那格填。
   await saveField({ providerId, model: id, contextWindow: 0 });
+}
+
+/**
+ * 角色模型：对话之外的四件事各自交给一个模型。
+ *
+ * 候选来自「模型服务」页勾过对应能力的模型——不在这里列出全部模型让用户猜
+ * 哪个能看图：那等于把标记这件事推给每一次选择。
+ */
+const candidates = computed(() =>
+  Object.fromEntries(MODEL_ROLES.map((role) => [role, roleCandidates(store.providers, role)])) as
+    Record<ModelRole, ReturnType<typeof roleCandidates>>,
+);
+
+/** `providerId/model`，给 select 当值用。空串表示没配。 */
+function roleValue(role: ModelRole): string {
+  const current = store.config?.roles?.[role];
+  return current?.providerId && current.model ? `${current.providerId}/${current.model}` : "";
+}
+
+async function pickRole(role: ModelRole, value: string): Promise<void> {
+  const [providerId, ...rest] = value.split("/");
+  const next = {
+    ...(store.config?.roles ?? {}),
+    [role]: value
+      ? { providerId: Number(providerId), model: rest.join("/") }
+      : { providerId: 0, model: "" },
+  };
+  await saveField({ roles: next });
 }
 
 async function purge(): Promise<void> {
@@ -178,6 +213,43 @@ async function purge(): Promise<void> {
       <p class="note">
         上下文窗口填了才能在撑满之前主动压缩历史；不填也能跑，只是要等上游报错再压，
         白花一次请求。
+      </p>
+    </section>
+
+    <section>
+      <header>
+        <h2>多模态</h2>
+        <p class="sub">
+          对话之外的几件事各自交给一个模型。候选来自「模型服务」页上勾过对应能力的模型——
+          没有哪个对话模型四样都好，而你手上往往各有一个便宜的专用模型。
+        </p>
+      </header>
+
+      <label v-for="role in MODEL_ROLES" :key="role">
+        <span>{{ ROLE_LABELS[role] }}</span>
+        <select
+          :value="roleValue(role)"
+          :disabled="candidates[role].length === 0"
+          @change="pickRole(role, ($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">
+            {{ candidates[role].length === 0 ? "没有标记为「" + ROLE_LABELS[role] + "」的模型" : "不使用" }}
+          </option>
+          <option
+            v-for="item in candidates[role]"
+            :key="`${item.providerId}/${item.model}`"
+            :value="`${item.providerId}/${item.model}`"
+          >
+            {{ item.model }} · {{ item.providerName }}
+          </option>
+        </select>
+        <span class="hint">{{ ROLE_HINTS[role] }}</span>
+      </label>
+
+      <p class="note">
+        没配的角色对应的工具不会出现在会话里——给模型一个用不了的工具，它会调、
+        会失败、会重试，而失败原因它无从修复。看图是例外：它不是工具，而是在
+        对话模型不认图时替它读图。
       </p>
     </section>
 

@@ -1,6 +1,7 @@
 export { AgentTransport } from "./transport.js";
 export type { TransportOptions, RpcError, JsonValue } from "./transport.js";
 export { ClawAgentClient } from "./client.js";
+export { MODEL_ROLES } from "./protocol.js";
 export type { PendingApproval, ClientEvents } from "./client.js";
 export type {
   AgentNotification,
@@ -20,6 +21,7 @@ export type {
   MCPServerConfig,
   MCPToolInfo,
   ModelConfig,
+  ModelRole,
   PluginConfigField,
   PluginContributions,
   PluginSkill,
@@ -27,6 +29,8 @@ export type {
   ProviderCreateParams,
   ProviderUpdateParams,
   ProviderView,
+  RoleModel,
+  RoleModels,
   SearchEngineCreateParams,
   SearchEngineTestResult,
   SearchEngineUpdateParams,

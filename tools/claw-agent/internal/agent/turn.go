@@ -61,7 +61,7 @@ func (s *Session) RunTurn(
 
 	emitter.Notify(protocol.NotifyTurnStarted, protocol.TurnNotification{SessionID: s.ID, TurnID: turnID})
 
-	s.acceptUserInput(turnID, text, images, emitter)
+	s.acceptUserInput(ctx, turnID, text, images, emitter)
 
 	usage, err := s.loop(ctx, turnID, emitter)
 
@@ -78,7 +78,11 @@ func (s *Session) RunTurn(
 }
 
 // acceptUserInput 把一条用户输入同时交给宿主和模型历史。
-func (s *Session) acceptUserInput(turnID, text string, images [][]byte, emitter Emitter) {
+//
+// 对话模型不认图时，图先由视觉模型转成文字接在消息后面——时间线上仍然显示
+// 原图（用户发的就是图），进模型历史的是转述。不转的话那几张图要么被上游
+// 拒绝（一句看不懂的报错），要么被静默忽略（模型答非所问，而用户以为它看见了）。
+func (s *Session) acceptUserInput(ctx context.Context, turnID, text string, images [][]byte, emitter Emitter) {
 	images = limitImages(images)
 	// 用户消息本身也是一个条目，让宿主的时间线和模型看到的历史一致。
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{
@@ -87,6 +91,15 @@ func (s *Session) acceptUserInput(turnID, text string, images [][]byte, emitter 
 			ID: newID("user"), Kind: protocol.ItemUserMessage, Text: text, Images: images,
 		},
 	})
+	if len(images) > 0 && !s.config.ModelSeesImages {
+		if described := s.describeImages(ctx, images); described != "" {
+			s.appendMessage(llm.Message{Role: llm.RoleUser, Content: text + described})
+			if s.Title == "" {
+				s.Title = firstLine(text, 40)
+			}
+			return
+		}
+	}
 	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: text, Images: images})
 	if s.Title == "" {
 		s.Title = firstLine(text, 40)
@@ -146,13 +159,13 @@ func userHome() string {
 }
 
 // drainPending 把排队的输入插进历史，在下一次打模型之前调用。
-func (s *Session) drainPending(turnID string, emitter Emitter) {
+func (s *Session) drainPending(ctx context.Context, turnID string, emitter Emitter) {
 	s.mu.Lock()
 	queued := s.pending
 	s.pending = nil
 	s.mu.Unlock()
 	for _, input := range queued {
-		s.acceptUserInput(turnID, input.text, input.images, emitter)
+		s.acceptUserInput(ctx, turnID, input.text, input.images, emitter)
 	}
 }
 
@@ -181,7 +194,7 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 
 		// 转向输入必须在采样之前插进去，不然模型这一次看到的还是旧要求，
 		// 用户会觉得「我都说了别改那个文件了它还在改」。
-		s.drainPending(turnID, emitter)
+		s.drainPending(ctx, turnID, emitter)
 
 		// 主动压缩：等上游报超窗再压要白花一次请求，而那一次请求恰恰是
 		// 历史最长、最贵的一次。

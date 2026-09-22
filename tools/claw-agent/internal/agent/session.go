@@ -220,10 +220,13 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		}
 	}
 
-	// 技能、记忆、computer use 都在系统提示词之前装好：提示词要列出它们。
+	// 技能、记忆、computer use、多模态都在系统提示词之前装好：提示词要列出它们。
 	session.loadSkills(config.SkillDirs)
 	session.loadMemory(config.MemoryFile)
 	if err := session.registerComputerTools(); err != nil {
+		return nil, err
+	}
+	if err := session.registerMediaTools(); err != nil {
 		return nil, err
 	}
 
@@ -625,6 +628,12 @@ func buildSystemPrompt(
 		builder.WriteString(
 			"没有经过确认的命令跑在系统沙箱里：只能写工作区与临时目录，读不到凭据目录。" +
 				"被拦下时不要反复重试同一条命令，换个落点或者告诉用户。\n",
+		)
+	}
+	if !config.ModelSeesImages && config.Roles.Vision.Configured() {
+		builder.WriteString(
+			"你自己看不了图：用户发来的图片会先由另一个模型转成文字描述再交给你，" +
+				"所以你读到的是转述而不是原图。描述里没有的细节就是没有，不要凭空补。\n",
 		)
 	}
 	switch config.ApprovalPolicy {
