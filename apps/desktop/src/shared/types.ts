@@ -40,6 +40,8 @@ export interface SessionStartView {
   workspace: string;
   /** 会话当前用的模型。恢复旧会话时可能与配置页的默认值不同。 */
   model: string;
+  /** 模型所属的模型服务 id；0 表示走环境变量的 Key。 */
+  providerId: number;
   /** 本次会话挂上的技能名。 */
   skills?: string[];
   /** 恢复旧会话时带回的时间线条目；新会话没有。 */
@@ -66,15 +68,20 @@ export interface HistoryItemView {
   durationMs?: number;
 }
 
-/** 端点上能调的一个模型。 */
-export interface ModelChoiceView {
-  id: string;
-  ownedBy: string;
-  /** 上下文窗口（token）。0 表示端点没有这个模型的档案，窗口未知。 */
-  contextWindow: number;
-  maxOutputTokens: number;
-  /** 合规等级名，例如「境内合规」，帮用户判断能不能喂内部数据。 */
-  securityLevel: string;
+/**
+ * 一个模型服务：OpenAI 兼容端点 + Key + 模型清单。与 agent-client 的
+ * ProviderView 同形；Key 只进不出，这里只有 apiKeySet 一位。
+ */
+export interface ProviderView {
+  id: number;
+  name: string;
+  /** openai / qwen / kimi / openrouter / openai-compatible / claude / gemini */
+  type: string;
+  /** 空表示用该类型的默认端点。 */
+  baseUrl: string;
+  apiKeySet: boolean;
+  models: string[];
+  enabled: boolean;
 }
 
 /** 试连一个 MCP server 的结果。连不上不算错误，原因在 error 里。 */
@@ -151,7 +158,8 @@ export interface SessionSummaryView {
 }
 
 export interface AppConfigView {
-  modelBaseUrl: string;
+  /** 新会话默认用的模型服务 id；0 表示没选。 */
+  providerId: number;
   model: string;
   reasoningEffort: string;
   /** 模型上下文窗口（token）；0 表示未知，内核退回被动压缩。 */

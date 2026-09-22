@@ -6,28 +6,22 @@ import SettingsShell from "./views/SettingsShell.vue";
 import SessionSidebar from "./views/SessionSidebar.vue";
 import ApprovalDialog from "./views/ApprovalDialog.vue";
 
-// 地址有默认值，所以「配完了」实际只差一把 Key；模型没设过就去端点挑一个。
-const configured = computed(() =>
-  Boolean(store.config?.modelBaseUrl && store.credentials.llmKey),
-);
+/** 「配完了」= 选好了默认模型（它所属的模型服务在库里带着端点与 Key）。 */
+const configured = computed(() => Boolean(store.config?.providerId && store.config.model));
 
 onMounted(async () => {
   await actions.bootstrap();
-  // 没配完就直接落到配置页，省得用户在对话页对着一个不能用的输入框。
-  if (!configured.value) {
-    actions.setView("settings");
-    return;
-  }
-  // 模型拉不到（Key 不对、端点不通）就别硬启动：启动会在几秒后以一句上游报错
-  // 失败，而那句话不会指向真正该改的那一格。
-  if (!(await actions.ensureDefaultModel())) {
-    actions.setView("settings");
-    return;
-  }
-  // 配置齐了就自己把运行时拉起来，接着上次的会话。
+  // 运行时总是先拉起来：模型服务的清单在内核那边的库里，配置页要靠它才能读写。
   // 开着应用第一件事总是点那个「启动」按钮，那这个按钮就不该存在——
   // 失败时会退回带重试按钮的提示页，不会卡在一个没有出口的界面上。
   await actions.startRuntime();
+  if (store.runtime.state !== "ready") return;
+  // 没有能用的模型就落到模型服务页，省得用户在对话页对着一个不能用的输入框。
+  if (!(await actions.ensureDefaultModel())) {
+    actions.setView(store.providers.length === 0 ? "providers" : "settings");
+    return;
+  }
+  await actions.resumeLatest();
 });
 
 // 开应用之后查一次，之后每 6 小时一次。

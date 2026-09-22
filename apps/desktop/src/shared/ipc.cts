@@ -11,8 +11,6 @@
 export const IPC = {
   configRead: "config:read",
   configWrite: "config:write",
-  credentialStatus: "credential:status",
-  credentialWrite: "credential:write",
   purgeAll: "data:purge",
 
   runtimeStart: "runtime:start",
@@ -29,7 +27,11 @@ export const IPC = {
   sessionDelete: "session:delete",
   sessionConfigure: "session:configure",
 
-  modelList: "model:list",
+  providerList: "provider:list",
+  providerCreate: "provider:create",
+  providerUpdate: "provider:update",
+  providerDelete: "provider:delete",
+  providerModels: "provider:models",
 
   updateCheck: "update:check",
   updateInstall: "update:install",

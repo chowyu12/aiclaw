@@ -49,7 +49,7 @@ func TestHistoryRestoresUserImages(t *testing.T) {
 	if err := session.Save(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := Load(ctx, db, "test", "sk-test", nil)
+	loaded, err := Load(ctx, db, "test", StaticKey("sk-test"), nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

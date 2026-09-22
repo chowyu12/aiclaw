@@ -7,7 +7,7 @@ import type {
   HistoryItemView,
   McpProbeView,
   McpServerView,
-  ModelChoiceView,
+  ProviderView,
   SkillView,
   RuntimeStatus,
   SessionGroupsView,
@@ -59,18 +59,18 @@ export type TimelineEntry =
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "mcp" | "skills" | "settings",
+  view: "chat" as "chat" | "providers" | "mcp" | "skills" | "settings",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
   sessionInfo: null as SessionStartView | null,
-  /** 当前会话用的模型。与配置页的默认值分开：切模型只影响当前会话。 */
+  /** 当前会话用的模型与模型服务。与配置页的默认值分开：切模型只影响当前会话。 */
   model: "",
+  providerId: 0,
   timeline: [] as TimelineEntry[],
   approvals: [] as ApprovalPayload[],
   busy: false,
   config: null as AppConfigView | null,
-  credentials: { llmKey: false },
   profiles: [] as { id: string; label: string; description: string }[],
   sessions: [] as SessionSummaryView[],
   /** 会话搜索。关键词为空时界面用 sessions，不看这里。 */
@@ -80,11 +80,12 @@ const state = reactive({
     loading: false,
   },
   groups: { groups: [], assignments: {} } as SessionGroupsView,
-  models: [] as ModelChoiceView[],
+  /** 模型服务清单。由内核从配置库读，所以要运行时起来之后才有。 */
+  providers: [] as ProviderView[],
+  providersLoading: false,
+  providersError: "",
   mcpServers: [] as McpServerView[],
   skills: [] as SkillView[],
-  modelsLoading: false,
-  modelsError: "",
   /** 检查更新的结果。null 表示还没查过。 */
   update: null as UpdateStatusView | null,
   /**
@@ -395,6 +396,42 @@ export type { AppConfigView };
 
 export const store = readonly(state);
 
+/** 一个能选的模型：服务 + 模型名。 */
+export interface ModelChoice {
+  providerId: number;
+  providerName: string;
+  model: string;
+}
+
+/**
+ * store 里那份是 readonly() 包过的深只读副本，模板上拿到的就是这个形状；
+ * 参数按它来声明，免得每个调用方都要 cast。
+ */
+type ProviderLike = {
+  readonly id: number;
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly apiKeySet: boolean;
+  readonly models: readonly string[];
+};
+
+/** 能用的模型服务：启用了、配了 Key、清单里至少有一个模型。 */
+export function usable(provider: ProviderLike): boolean {
+  return provider.enabled && provider.apiKeySet && provider.models.length > 0;
+}
+
+/** 把全部能用的模型服务铺成一张可选清单，给对话页顶部与配置页的选择器用。 */
+export function modelChoices(providers: readonly ProviderLike[]): ModelChoice[] {
+  const choices: ModelChoice[] = [];
+  for (const provider of providers) {
+    if (!usable(provider)) continue;
+    for (const model of provider.models) {
+      choices.push({ providerId: provider.id, providerName: provider.name, model });
+    }
+  }
+  return choices;
+}
+
 export const actions = {
   /**
    * 拉起界面需要的全部状态。
@@ -413,7 +450,7 @@ export const actions = {
     try {
       state.config = (await window.aiclaw.config.read()) as AppConfigView;
       state.model = state.config.model;
-      state.credentials = (await window.aiclaw.credentials.status()) as { llmKey: boolean };
+      state.providerId = state.config.providerId;
       state.profiles = (await window.aiclaw.profiles.list()) as {
         id: string;
         label: string;
@@ -446,20 +483,9 @@ export const actions = {
   async saveConfig(patch: Partial<AppConfigView>): Promise<void> {
     state.config = (await window.aiclaw.config.write(patch)) as AppConfigView;
     // 还没开会话时顶部显示的就是默认模型，跟着配置走。
-    if (!state.sessionId) state.model = state.config.model;
-  },
-
-  async saveCredentials(patch: { llmKey?: string }): Promise<void> {
-    const wasReady = state.runtime.state === "ready";
-    state.credentials = (await window.aiclaw.credentials.write(patch)) as { llmKey: boolean };
-    // 主进程存完凭据会重启运行时（Key 只在拉起内核时进它的进程环境）。
-    // 重启之后原来的会话句柄没了，这里重新接上——不接的话界面看着一切正常，
-    // 下一句话却会报「会话不存在」。
-    if (wasReady) {
-      state.sessionId = "";
-      state.sessionInfo = null;
-      state.timeline = [];
-      await actions.startRuntime();
+    if (!state.sessionId) {
+      state.model = state.config.model;
+      state.providerId = state.config.providerId;
     }
   },
 
@@ -492,24 +518,35 @@ export const actions = {
   // ---------- 运行时与会话 ----------
 
   /**
-   * 拉起本地运行时，然后接着上次的会话。
+   * 拉起本地运行时。
    *
-   * 接着上次而不是每次都开新的：应用现在是启动即拉起运行时，每次都开新会话
-   * 的话，侧边栏会攒出一串从没说过话的「未命名会话」。真想要新的，左上角
-   * 就是「新对话」。一个会话都没有时才开新的。
+   * 不需要先配好模型：模型服务的清单就在内核那边的库里，配置页要靠运行时
+   * 才能读写它。所以应用一启动就拉，配没配模型只决定接下来开不开会话。
    */
   async startRuntime(): Promise<void> {
     state.error = "";
     try {
       await window.aiclaw.runtime.start();
+      // start() 返回就是起来了。状态推送通常先到，但别赌顺序——App.vue 接下来
+      // 就要按这个状态决定开不开会话。
+      state.runtime = { state: "ready" };
       await actions.refreshSessions();
-      const latest = state.sessions[0];
-      if (latest) await actions.openSession(latest.id);
-      else await actions.newSession();
-      void actions.loadModels();
+      await actions.loadProviders();
     } catch (error) {
       state.error = `启动本地运行时失败：${describeError(error)}`;
     }
+  },
+
+  /**
+   * 接着上次的会话；一个都没有时才开新的。
+   *
+   * 接着上次而不是每次都开新的：每次都开新会话的话，侧边栏会攒出一串
+   * 从没说过话的「未命名会话」。真想要新的，左上角就是「新对话」。
+   */
+  async resumeLatest(): Promise<void> {
+    const latest = state.sessions[0];
+    if (latest) await actions.openSession(latest.id);
+    else await actions.newSession();
   },
 
   /**
@@ -524,6 +561,7 @@ export const actions = {
     state.sessionId = info.sessionId;
     state.sessionInfo = info;
     state.model = info.model;
+    state.providerId = info.providerId;
     state.timeline = [];
     state.busy = false;
     await actions.refreshSessions();
@@ -539,6 +577,7 @@ export const actions = {
       state.sessionId = info.sessionId;
       state.sessionInfo = info;
       state.model = info.model;
+      state.providerId = info.providerId;
       state.timeline = restoreHistory(info.history ?? []);
       state.busy = false;
     } catch (error) {
@@ -756,59 +795,103 @@ export const actions = {
     state.updateDismissed = state.update?.latest ?? "";
   },
 
-  async loadModels(force = false): Promise<void> {
-    state.modelsLoading = true;
-    state.modelsError = "";
+  // ---------- 模型服务 ----------
+
+  async loadProviders(): Promise<void> {
+    state.providersLoading = true;
+    state.providersError = "";
     try {
-      state.models = (await window.aiclaw.models.list(force)) as ModelChoiceView[];
+      state.providers = (await window.aiclaw.providers.list()) as ProviderView[];
     } catch (error) {
-      // 拉不到列表不影响已配好的模型继续用，所以只标在下拉里，
+      // 拉不到清单不影响已经开着的会话，所以只标在用到它的那一块，
       // 不占用顶部的错误条。
-      state.modelsError = describeError(error);
+      state.providersError = describeError(error);
     } finally {
-      state.modelsLoading = false;
+      state.providersLoading = false;
     }
   },
 
+  async createProvider(params: {
+    name: string;
+    type?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    models?: string[];
+    enabled?: boolean;
+  }): Promise<ProviderView> {
+    const created = (await window.aiclaw.providers.create(params)) as ProviderView;
+    await actions.loadProviders();
+    return created;
+  },
+
+  /** 没给的字段不动；apiKey 给空串表示清掉。 */
+  async updateProvider(params: {
+    id: number;
+    name?: string;
+    type?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    models?: string[];
+    enabled?: boolean;
+  }): Promise<void> {
+    const updated = (await window.aiclaw.providers.update(params)) as ProviderView;
+    state.providers = state.providers.map((item) => (item.id === updated.id ? updated : item));
+  },
+
+  async deleteProvider(id: number): Promise<void> {
+    await window.aiclaw.providers.remove(id);
+    state.providers = state.providers.filter((item) => item.id !== id);
+    // 默认模型指着被删的服务就清掉，别让配置页显示一个已经不存在的名字。
+    if (state.config?.providerId === id) await actions.saveConfig({ providerId: 0, model: "" });
+  },
+
+  /** 到端点拉模型名。不落库——调用方决定要不要写进清单。 */
+  async fetchProviderModels(id: number): Promise<string[]> {
+    return (await window.aiclaw.providers.models(id)) as string[];
+  },
+
   /**
-   * 没设过默认模型时，拿 airouter 返回的第一个顶上。
+   * 没设过默认模型、或设的那个已经不可用时，挑第一个能用的顶上。
    *
-   * 配置页不再有「默认模型」这一格（挪进了「高级」），所以这里必须自己补上——
-   * 否则新装的应用配完 Key 仍然开不了会话，而配置页上没有任何一处告诉用户
-   * 缺的是什么。选第一个是因为顺序由 airouter 自己给；用户随时能在对话框上方
-   * 换这个会话的模型，或到「高级」里改默认值。
+   * 配置页上的默认模型可以手动改，但新装的应用不该卡在「没选模型」上：
+   * 用户在模型服务页填完端点、Key 与模型名，回到对话页就该能聊。
+   * 能用 = 启用了、配了 Key、清单里至少有一个模型。
    */
   async ensureDefaultModel(): Promise<boolean> {
-    if (state.config?.model) return true;
-    if (state.models.length === 0) await actions.loadModels();
-    const first = state.models[0];
+    if (state.providers.length === 0) await actions.loadProviders();
+    const current = state.providers.find((item) => item.id === state.config?.providerId);
+    if (current && usable(current) && state.config?.model) return true;
+    const first = state.providers.find(usable);
     if (!first) return false;
-    await actions.saveConfig({ model: first.id, contextWindow: first.contextWindow });
+    await actions.saveConfig({ providerId: first.id, model: first.models[0] ?? "" });
     return true;
   },
 
   /**
-   * 换当前会话的模型。只影响这个会话；新会话仍用配置页的默认值。
+   * 换当前会话的模型（连模型服务一起）。只影响这个会话；新会话仍用配置页的默认值。
    *
    * 上下文窗口一起下发：不同模型窗口能差一个数量级，沿用上一个模型的值
-   * 会让内核要么过早压缩、要么撑爆窗口。
+   * 会让内核要么过早压缩、要么撑爆窗口。这里只知道默认模型的窗口，别的传 0。
    */
-  async switchModel(modelId: string): Promise<void> {
-    if (!modelId || modelId === state.model) return;
-    const choice = state.models.find((model) => model.id === modelId);
-    const previous = state.model;
+  async switchModel(providerId: number, modelId: string): Promise<void> {
+    if (!modelId || (modelId === state.model && providerId === state.providerId)) return;
+    const previous = { model: state.model, providerId: state.providerId };
     state.model = modelId;
+    state.providerId = providerId;
     if (!state.sessionId) return;
+    const isDefault = modelId === state.config?.model && providerId === state.config?.providerId;
     try {
       await window.aiclaw.session.configure({
         sessionId: state.sessionId,
+        providerId,
         model: modelId,
-        contextWindow: choice?.contextWindow ?? 0,
+        contextWindow: isDefault ? (state.config?.contextWindow ?? 0) : 0,
       });
       await actions.refreshSessions();
     } catch (error) {
       // 切失败就把显示切回去，别让界面显示一个内核并没有在用的模型。
-      state.model = previous;
+      state.model = previous.model;
+      state.providerId = previous.providerId;
       state.error = `切换模型失败：${describeError(error)}`;
     }
   },
@@ -861,11 +944,16 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "mcp" | "skills" | "settings"): void {
+  setView(view: "chat" | "providers" | "mcp" | "skills" | "settings"): void {
     state.view = view;
   },
 
   clearError(): void {
     state.error = "";
+  },
+
+  /** 把一条错误放到顶部的错误条上。给那些自己不管错误展示的页面用。 */
+  showError(message: string): void {
+    state.error = message;
   },
 };

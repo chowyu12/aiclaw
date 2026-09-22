@@ -22,13 +22,12 @@ const { IPC } = require(path.join(DESKTOP, "dist", "shared", "ipc.cjs"));
 // 少一个就是某个页面会在运行时炸。
 const REQUIRED = [
   "config",
-  "credentials",
   "data",
   "runtime",
   "session",
   "profiles",
   "groups",
-  "models",
+  "providers",
   "mcp",
   "skills",
   "approval",
@@ -54,7 +53,7 @@ app.whenReady().then(async () => {
   // 这里要验的是"桥接通了、界面起得来"，接上真实 ConfigStore 会连带碰用户的
   // 本机配置和钥匙串。但通道名取自真实的 IPC 常量，改名了这里会一起报错。
   ipcMain.handle(IPC.configRead, () => ({
-    modelBaseUrl: "",
+    providerId: 0,
     model: "",
     reasoningEffort: "medium",
     contextWindow: 0,
@@ -62,7 +61,10 @@ app.whenReady().then(async () => {
     profile: "on-write",
     retentionDays: 30,
   }));
-  ipcMain.handle(IPC.credentialStatus, () => ({ llmKey: false }));
+  // 应用一启动就拉运行时、列会话、读模型服务；这里都给空的。
+  ipcMain.handle(IPC.runtimeStart, () => undefined);
+  ipcMain.handle(IPC.sessionList, () => []);
+  ipcMain.handle(IPC.providerList, () => []);
   ipcMain.handle(IPC.profileList, () => [
     { id: "on-write", label: "默认", description: "执行命令与外部工具需确认" },
   ]);
@@ -122,10 +124,12 @@ app.whenReady().then(async () => {
   check("Vue 应用已挂载", mounted === true, mounted ? ".shell" : "根节点为空");
 
   // 这一条是全文重点：配置页曾经因为 preload 没加载而整页空白，而上面每一项
-  // 单独看都"没报错"。所以直接断言配置页真的渲染出了可填的字段。
+  // 单独看都"没报错"。所以直接断言落地的那一页真的渲染出了东西。
+  // 一个模型服务都没有时应用落到「模型服务」页（那里有「添加」按钮），
+  // 有的话落到配置页（那里是一组 label）——两种都算渲染出来了。
   const fields = await waitFor(
     win,
-    "document.querySelectorAll('.settings label').length",
+    "document.querySelectorAll('.settings label, .page .add button').length",
     (count) => typeof count === "number" && count > 0,
   );
   check(

@@ -519,7 +519,7 @@ func TestSkillsAreListedInPromptAndLoadableOnDemand(t *testing.T) {
 		Workdir:        t.TempDir(),
 		ApprovalPolicy: protocol.ApprovalNever,
 		SkillDirs:      []string{dir},
-	}, "sk-test")
+	}, StaticKey("sk-test"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -587,7 +587,7 @@ func TestMemoryGoesIntoPromptAndRememberAppends(t *testing.T) {
 		Workdir:        t.TempDir(),
 		ApprovalPolicy: protocol.ApprovalNever,
 		MemoryFile:     memoryFile,
-	}, "sk-test")
+	}, StaticKey("sk-test"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +640,7 @@ func TestRememberIsGatedByApproval(t *testing.T) {
 		// 不该让模型自己决定。
 		ApprovalPolicy: protocol.ApprovalOnWrite,
 		MemoryFile:     memoryFile,
-	}, "sk-test")
+	}, StaticKey("sk-test"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +669,7 @@ func computerSession(t *testing.T, model *fakeModel, policy protocol.ApprovalPol
 		Workdir:           t.TempDir(),
 		ApprovalPolicy:    policy,
 		EnableComputerUse: true,
-	}, "sk-test")
+	}, StaticKey("sk-test"))
 	if err != nil {
 		t.Fatal(err)
 	}

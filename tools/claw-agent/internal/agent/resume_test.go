@@ -62,7 +62,7 @@ func TestResumeMountsMCPServersFromCurrentConfig(t *testing.T) {
 
 	// 存档里一个 MCP server 都没有。恢复时宿主带上当前配置。
 	url := fakeMCPOverHTTP(t, "hot_topics")
-	loaded, err := Load(ctx, db, "test", "sk-test", &protocol.SessionRefresh{
+	loaded, err := Load(ctx, db, "test", StaticKey("sk-test"), &protocol.SessionRefresh{
 		MCPServers:     map[string]protocol.MCPServerConfig{"aihot": {URL: url}},
 		ApprovalPolicy: protocol.ApprovalOnWrite,
 	})
@@ -99,7 +99,7 @@ func TestResumeRefreshesSystemPromptSoItListsTheNewTools(t *testing.T) {
 	}
 
 	url := fakeMCPOverHTTP(t, "hot_topics")
-	loaded, err := Load(ctx, db, "test", "sk-test", &protocol.SessionRefresh{
+	loaded, err := Load(ctx, db, "test", StaticKey("sk-test"), &protocol.SessionRefresh{
 		MCPServers: map[string]protocol.MCPServerConfig{"aihot": {URL: url}},
 	})
 	if err != nil {
@@ -134,7 +134,7 @@ func TestResumeWithoutRefreshKeepsTheArchivedConfig(t *testing.T) {
 	if err := session.Save(ctx, db); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := Load(ctx, db, "test", "sk-test", nil)
+	loaded, err := Load(ctx, db, "test", StaticKey("sk-test"), nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

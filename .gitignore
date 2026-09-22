@@ -3,9 +3,9 @@ uploads/*
 bin/aiclaw
 aiclaw.db
 docs/swagger.yaml
-server
+/server
 .gitignore
-server.exe
+/server.exe
 /main
 CHANGELOG.md
 .DS_Store

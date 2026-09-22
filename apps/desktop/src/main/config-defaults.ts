@@ -1,6 +1,3 @@
-import { homedir } from "node:os";
-import { join } from "node:path";
-
 import type { AppConfig } from "./config.js";
 
 /**
@@ -11,13 +8,8 @@ import type { AppConfig } from "./config.js";
  * `errors.ts` 与 `computer-keys.ts`。
  */
 
-/**
- * 模型端点有默认值，配置页上默认不显示；要改的人在「高级」里改。
- */
-export const DEFAULT_MODEL_BASE_URL = "https://api.openai.com/v1";
-
 export const DEFAULT_CONFIG: AppConfig = {
-  modelBaseUrl: DEFAULT_MODEL_BASE_URL,
+  providerId: 0,
   model: "",
   reasoningEffort: "medium",
   contextWindow: 0,
@@ -29,19 +21,17 @@ export const DEFAULT_CONFIG: AppConfig = {
 };
 
 /**
- * 把地址的空值折回默认值。
+ * 把旧配置文件里没有、或者被手改坏的字段钉回合法值。
  *
- * 展开默认值（`{ ...DEFAULT_CONFIG, ...raw }`）挡不住这件事：早于这个版本写下的
- * config.json 里这一项存的是空串，而空串会**盖掉**默认值——装机时看起来是默认的，
- * 老用户升级上来却是空的。清空输入框同理。地址不是可选项，空着的结果是每次请求
- * 都打到空地址上，而报错发生在上游、指不回这一格。
+ * 展开默认值（`{ ...DEFAULT_CONFIG, ...raw }`）能兜住「key 不存在」，
+ * 但兜不住显式写进去的 undefined/null 或类型不对的值（升级路径上出现过）。
  */
 export function normalizeConfig(config: AppConfig): AppConfig {
+  const providerId = Number(config.providerId);
   return {
     ...config,
-    modelBaseUrl: config.modelBaseUrl.trim() || DEFAULT_MODEL_BASE_URL,
-    // 老配置里没有这一项。展开默认值能兜住「key 不存在」，但兜不住
-    // 显式写进去的 undefined/null（升级路径上出现过），所以这里再钉一次：
+    // 没选模型服务就是 0；非数字（旧配置里根本没有这一项）同样当 0。
+    providerId: Number.isFinite(providerId) && providerId > 0 ? Math.trunc(providerId) : 0,
     // **只有明确的 false 才算关**，其余一律当开着。安全开关的缺省必须是开。
     sandboxCommands: config.sandboxCommands !== false,
   };

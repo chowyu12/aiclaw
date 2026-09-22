@@ -196,7 +196,7 @@ func newTestSession(t *testing.T, model *fakeModel, policy protocol.ApprovalPoli
 		Workdir:        workdir,
 		Instructions:   "你是测试助手。",
 		ApprovalPolicy: policy,
-	}, "sk-test")
+	}, StaticKey("sk-test"))
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
@@ -376,7 +376,7 @@ func TestInterruptEndsTurnWithMarker(t *testing.T) {
 	session, err := New(context.Background(), "test", protocol.SessionStartParams{
 		Model:   protocol.ModelConfig{BaseURL: blocking.URL, Model: "fake"},
 		Workdir: t.TempDir(),
-	}, "sk")
+	}, StaticKey("sk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +415,7 @@ func TestSaveAndLoadRestoresHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loaded, err := Load(ctx, db, "test", "sk-test", nil)
+	loaded, err := Load(ctx, db, "test", StaticKey("sk-test"), nil)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}

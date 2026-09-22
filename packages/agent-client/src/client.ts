@@ -9,6 +9,9 @@ import type {
   Item,
   MCPProbeResult,
   MCPServerConfig,
+  ProviderCreateParams,
+  ProviderUpdateParams,
+  ProviderView,
   SessionRefresh,
   SessionStartParams,
   SessionStartResult,
@@ -119,6 +122,39 @@ export class ClawAgentClient extends EventEmitter {
   mcpProbe(server: MCPServerConfig): Promise<MCPProbeResult> {
     this.assertReady();
     return this.transport.request<MCPProbeResult>("mcp/probe", { server });
+  }
+
+  // ---------- 模型服务 ----------
+  //
+  // 都是配置页上的同步操作。Key 从这里进（create / update），但永远不从这里出：
+  // 内核只回 apiKeySet。
+
+  async providerList(): Promise<ProviderView[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ providers: ProviderView[] }>("provider/list", {});
+    return result.providers ?? [];
+  }
+
+  providerCreate(params: ProviderCreateParams): Promise<ProviderView> {
+    this.assertReady();
+    return this.transport.request<ProviderView>("provider/create", params);
+  }
+
+  providerUpdate(params: ProviderUpdateParams): Promise<ProviderView> {
+    this.assertReady();
+    return this.transport.request<ProviderView>("provider/update", params);
+  }
+
+  providerDelete(id: number): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("provider/delete", { id });
+  }
+
+  /** 到该服务的端点拉一遍模型名。不落库，由界面决定要不要写进清单。 */
+  async providerModels(id: number): Promise<string[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ models: string[] }>("provider/models", { id });
+    return result.models ?? [];
   }
 
   async sessionList(): Promise<SessionSummary[]> {

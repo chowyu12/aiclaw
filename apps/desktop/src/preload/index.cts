@@ -12,10 +12,6 @@ const api = {
     read: () => ipcRenderer.invoke(IPC.configRead),
     write: (patch: unknown) => ipcRenderer.invoke(IPC.configWrite, patch),
   },
-  credentials: {
-    status: () => ipcRenderer.invoke(IPC.credentialStatus),
-    write: (patch: unknown) => ipcRenderer.invoke(IPC.credentialWrite, patch),
-  },
   data: {
     purgeAll: () => ipcRenderer.invoke(IPC.purgeAll),
   },
@@ -36,8 +32,13 @@ const api = {
     configure: (input: unknown) => ipcRenderer.invoke(IPC.sessionConfigure, input),
     assign: (input: unknown) => ipcRenderer.invoke(IPC.sessionAssign, input),
   },
-  models: {
-    list: (force?: boolean) => ipcRenderer.invoke(IPC.modelList, force),
+  providers: {
+    list: () => ipcRenderer.invoke(IPC.providerList),
+    create: (params: unknown) => ipcRenderer.invoke(IPC.providerCreate, params),
+    update: (params: unknown) => ipcRenderer.invoke(IPC.providerUpdate, params),
+    remove: (id: number) => ipcRenderer.invoke(IPC.providerDelete, id),
+    /** 到端点拉模型名。不落库。 */
+    models: (id: number) => ipcRenderer.invoke(IPC.providerModels, id),
   },
   mcp: {
     read: () => ipcRenderer.invoke(IPC.mcpRead),

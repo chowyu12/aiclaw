@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { actions, store } from "../store";
+import { actions, modelChoices, store } from "../store";
 import { describeError } from "../errors";
 import {
   classifyFile,
@@ -161,31 +161,24 @@ const policy = computed(() =>
   store.profiles.find((profile) => profile.id === store.config?.profile),
 );
 
-/** 当前模型在 airouter 上的档案，用来显示窗口大小与合规等级。 */
-const currentModel = computed(() => store.models.find((model) => model.id === store.model));
+/** 能选的模型：每个能用的模型服务下的每个模型。 */
+const choices = computed(() => modelChoices(store.providers));
 
 function openModelMenu(): void {
   modelOpen.value = !modelOpen.value;
-  // 第一次展开才去拉列表：开着应用不用模型的人不该为此打一次网络。
-  if (modelOpen.value && store.models.length === 0 && !store.modelsLoading) {
-    void actions.loadModels();
+  if (modelOpen.value && store.providers.length === 0 && !store.providersLoading) {
+    void actions.loadProviders();
   }
 }
 
-async function pickModel(id: string): Promise<void> {
+async function pickModel(providerId: number, id: string): Promise<void> {
   modelOpen.value = false;
-  await actions.switchModel(id);
+  await actions.switchModel(providerId, id);
 }
 
 async function pickPolicy(id: string): Promise<void> {
   policyOpen.value = false;
   await actions.saveConfig({ profile: id as "on-write" | "always" | "never" });
-}
-
-function formatWindow(tokens: number): string {
-  if (!tokens) return "窗口未知";
-  if (tokens >= 1000) return `${Math.round(tokens / 1000)}K 上下文`;
-  return `${tokens} 上下文`;
 }
 
 /** 按轮分组：一条提问 + 它触发的全部步骤 + 全部回答。 */
@@ -258,7 +251,7 @@ const toolCount = computed(() => store.sessionInfo?.tools.length ?? 0);
   <div class="chat">
     <div v-if="!configured" class="gate">
       <h2>先完成配置</h2>
-      <p>需要填模型端点、模型和 LLM Key。没有这些，本地运行时起不来。</p>
+      <p>到「模型服务」页添加一个端点、填上 Key、写上模型名，再回来选一个默认模型。</p>
     </div>
 
     <template v-else>
@@ -468,27 +461,24 @@ const toolCount = computed(() => store.sessionInfo?.tools.length ?? 0);
                   <div v-if="modelOpen" class="menu model-menu" @click.stop>
                     <div class="menu-head">
                       <span>模型</span>
-                      <button class="link" @click="actions.loadModels(true)">刷新</button>
+                      <button class="link" @click="actions.loadProviders()">刷新</button>
                     </div>
-                    <p v-if="store.modelsLoading" class="menu-note pad">正在从 airouter 拉取…</p>
-                    <p v-else-if="store.modelsError" class="menu-note pad warn">
-                      {{ store.modelsError }}
+                    <p v-if="store.providersLoading" class="menu-note pad">正在读取模型服务…</p>
+                    <p v-else-if="store.providersError" class="menu-note pad warn">
+                      {{ store.providersError }}
                     </p>
-                    <p v-else-if="store.models.length === 0" class="menu-note pad">
-                      airouter 没有返回可用模型。检查这把 Key 的模型白名单。
+                    <p v-else-if="choices.length === 0" class="menu-note pad">
+                      还没有能用的模型。到「模型服务」页添加端点、填 Key、写上模型名。
                     </p>
                     <button
-                      v-for="model in store.models"
-                      :key="model.id"
+                      v-for="choice in choices"
+                      :key="`${choice.providerId}/${choice.model}`"
                       class="menu-item"
-                      :class="{ picked: model.id === store.model }"
-                      @click="pickModel(model.id)"
+                      :class="{ picked: choice.providerId === store.providerId && choice.model === store.model }"
+                      @click="pickModel(choice.providerId, choice.model)"
                     >
-                      <span class="menu-name">{{ model.id }}</span>
-                      <span class="menu-note">
-                        {{ model.ownedBy }} · {{ formatWindow(model.contextWindow) }}
-                        <template v-if="model.securityLevel"> · {{ model.securityLevel }}</template>
-                      </span>
+                      <span class="menu-name">{{ choice.model }}</span>
+                      <span class="menu-note">{{ choice.providerName }}</span>
                     </button>
                   </div>
                 </div>

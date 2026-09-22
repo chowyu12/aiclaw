@@ -26,6 +26,11 @@ const (
 	MethodTurnInterrupt    = "turn/interrupt"
 	MethodApprovalRespond  = "approval/respond"
 	MethodMCPProbe         = "mcp/probe"
+	MethodProviderList     = "provider/list"
+	MethodProviderCreate   = "provider/create"
+	MethodProviderUpdate   = "provider/update"
+	MethodProviderDelete   = "provider/delete"
+	MethodProviderModels   = "provider/models"
 	MethodShutdown         = "shutdown"
 )
 
@@ -105,9 +110,12 @@ type InitializeResult struct {
 
 // ModelConfig 是打模型所需的全部配置。
 //
-// APIKey 不在这里——它只从进程环境变量来，不经过协议帧，
-// 免得凭据出现在宿主的日志或崩溃转储里。
+// APIKey 不在这里——它不经过协议帧，免得凭据出现在宿主的日志或崩溃转储里。
+// 填了 ProviderID 时，Key 与端点由内核按 id 到模型配置库里查（见 providers 包）；
+// 没填时退回进程环境变量 AICLAW_LLM_KEY 与这里的 BaseURL。
 type ModelConfig struct {
+	/** 模型服务的 id。填了它，BaseURL 以库里的为准，传来的会被盖掉。 */
+	ProviderID      int64   `json:"providerId,omitempty"`
 	BaseURL         string  `json:"baseUrl"`
 	Model           string  `json:"model"`
 	ReasoningEffort string  `json:"reasoningEffort,omitempty"`
@@ -117,10 +125,60 @@ type ModelConfig struct {
 	 * 模型的上下文窗口（token）。用于在撑满之前主动压缩历史。
 	 *
 	 * 不填也能跑：那种情况下只能等上游报「超出上下文」再被动压缩，
-	 * 代价是白花一次请求。airouter 不提供按模型查窗口的接口，
+	 * 代价是白花一次请求。端点一般不提供按模型查窗口的接口，
 	 * 所以这个值由宿主的模型配置给出。
 	 */
 	ContextWindow int `json:"contextWindow,omitempty"`
+}
+
+// ---------- 模型服务 ----------
+//
+// 一个模型服务是一个 OpenAI 兼容端点加它的 Key 与模型清单。会话按 id 选。
+// Key 只进库不出库：这里只有 APIKeySet 一位。
+
+type ProviderView struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	/** openai / qwen / kimi / openrouter / openai-compatible / claude / gemini */
+	Type string `json:"type"`
+	/** 空表示用该类型的默认端点。 */
+	BaseURL   string   `json:"baseUrl"`
+	APIKeySet bool     `json:"apiKeySet"`
+	Models    []string `json:"models"`
+	Enabled   bool     `json:"enabled"`
+}
+
+type ProviderListResult struct {
+	Providers []ProviderView `json:"providers"`
+}
+
+type ProviderCreateParams struct {
+	Name    string   `json:"name"`
+	Type    string   `json:"type,omitempty"`
+	BaseURL string   `json:"baseUrl,omitempty"`
+	APIKey  string   `json:"apiKey,omitempty"`
+	Models  []string `json:"models,omitempty"`
+	Enabled *bool    `json:"enabled,omitempty"`
+}
+
+// ProviderUpdateParams 里 nil 的字段不动。APIKey 指向空串表示清掉。
+type ProviderUpdateParams struct {
+	ID      int64    `json:"id"`
+	Name    *string  `json:"name,omitempty"`
+	Type    *string  `json:"type,omitempty"`
+	BaseURL *string  `json:"baseUrl,omitempty"`
+	APIKey  *string  `json:"apiKey,omitempty"`
+	Models  []string `json:"models,omitempty"`
+	Enabled *bool    `json:"enabled,omitempty"`
+}
+
+type ProviderIDParams struct {
+	ID int64 `json:"id"`
+}
+
+// ProviderModelsResult 是到端点 /models 拉到的模型名，不落库。
+type ProviderModelsResult struct {
+	Models []string `json:"models"`
 }
 
 // MCPServerConfig 是一个要挂载的 MCP server。
@@ -301,6 +359,8 @@ type SessionStartResult struct {
 	 * 会话记着自己的模型，顶部要显示的是这个而不是默认值。
 	 */
 	Model string `json:"model,omitempty"`
+	/** 会话用的模型服务 id；0 表示走环境变量的 Key。 */
+	ProviderID int64 `json:"providerId,omitempty"`
 	/** 本次会话挂上的技能名。 */
 	Skills []string `json:"skills,omitempty"`
 	/** 会话工作区。空串表示没设置——界面要如实显示这一点。 */

@@ -61,11 +61,29 @@ temperature, maxTokens, contextWindow}`，没有 Provider 概念；API Key **只
 AIClaw 的 `Provider` 是 SQLite 里的多条记录（`name/type/base_url/api_key/models[]/enabled`），
 thread 引用 `provider_id + model_name`。
 
-做法：**Provider 表保留，宿主做翻译**。用户在设置页管理多个 Provider，
-开会话时选中的 `provider + model` 被宿主翻译成一份 `ModelConfig`，
-API Key 在 spawn `claw-agent` 时经环境变量注入。
-`contextWindow` / `reasoningEffort` 是 claw-agent 多出来的字段，
-由 Provider 记录补充——这是升级而非妥协。
+做法：**Provider 表保留，内核直接读它**。`claw-agent` 多了一个 `providers` 包，
+用原来的 `gormstore` 打开 `~/.aiclaw/aiclaw.db`（旧版就在这个位置，升级上来
+配过的模型服务原样可用），并通过 `provider/list|create|update|delete|models`
+五个 JSON-RPC 方法暴露给宿主。`ModelConfig` 多一个 `providerId`：填了它，
+Key 与端点由内核按 id 到库里查——**Key 不经协议帧**，宿主只拿到 `apiKeySet`
+一位，比原设计「spawn 时经环境变量注入一把 Key」更进一步：多个 Provider
+各有各的 Key，会话之间切换不用重启内核。环境变量 `AICLAW_LLM_KEY` 保留为
+`providerId = 0` 时的兜底。
+
+**实现时的两处修正**：
+
+- 原计划让 `tools/claw-agent` 保持独立 Go 模块。实际合并进了根模块
+  `github.com/chowyu12/aiclaw`（`go 1.27`）：内核要 import `internal/store`
+  与 `internal/model`，单模块最直接；`modernc.org/sqlite` 与 `glebarez/sqlite`
+  同时在依赖里，都是纯 Go，`CGO_ENABLED=0` 交叉编译到 Windows 验证过。
+- Key 存在 SQLite 的 `providers.api_key` 列里，**明文**——这是 AIClaw 旧版的
+  做法，按「保留现在模型配置」的决定沿用。它与 upstream 「凭据只进钥匙串」
+  的规则相悖，记在这里：将来若要加密这一列，改 `providers` 包一处即可，
+  宿主与协议都不用动。
+
+宿主侧不再有 `credentials.bin` 与 `ModelCatalog`（那是打 airouter 的
+`/v1/model-profiles`）。模型清单是 Provider 记录里的字符串数组，用户手写
+或点「从端点拉取」并进去；上下文窗口由用户在配置页填。
 
 ### 2. 扩展模型：插件系统吃掉技能与 MCP 两页
 
@@ -125,7 +143,8 @@ upstream 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而�
    此时旧的 `electron/` 仍在跑，两套并存。
 2. **搬宿主与界面**：`apps/desktop` 进来，摘掉内部平台（`CapabilitiesView`、`catalog.ts`、
    `config.ts` 的内部平台分支）。此时新界面能起来但还没有插件/搜索引擎。
-3. **接模型配置**：Provider 表接进设置页，翻译成 `ModelConfig`，API Key 走环境变量。
+3. **接模型配置**：内核读 Provider 表并暴露 `provider/*` 方法；会话按 `providerId`
+   选模型服务，Key 在内核侧解析。新增「模型服务」页，配置页只留默认模型的选择。
 4. **接插件系统**：插件贡献的 MCP/技能喂进 `session/start`；技能页与 MCP 页重做。
 5. **接搜索引擎**：内置 MCP server，按配置挂载。
 6. **打包发布**：`@electron/packager` + 现有 GitHub Actions，删掉 `electron/`、`renderer/`、

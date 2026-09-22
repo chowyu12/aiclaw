@@ -10,6 +10,9 @@ import {
   type MCPProbeResult,
   type MCPServerConfig,
   type PendingApproval,
+  type ProviderCreateParams,
+  type ProviderUpdateParams,
+  type ProviderView,
   type SessionRefresh,
   type SessionStartParams,
   type SessionSummary,
@@ -17,7 +20,6 @@ import {
 import type { AppConfig, ConfigStore, McpServer } from "./config.js";
 import { ComputerController } from "./computer.js";
 import type { SkillManager } from "./skills.js";
-import type { ModelCatalog } from "./models.js";
 
 /**
  * 审批档位。**本版本不做 OS 级沙箱**（已确认的产品决定），
@@ -63,6 +65,8 @@ export interface SessionInfo {
   workspace: string;
   /** 这个会话当前用的模型。恢复旧会话时可能与配置页的默认值不同。 */
   model: string;
+  /** 模型所属的模型服务 id；0 表示走环境变量的 Key。 */
+  providerId: number;
   /** 本次会话挂上的技能名。 */
   skills: string[];
   /** 恢复旧会话时带回的时间线；新会话为空。 */
@@ -96,8 +100,6 @@ export class SessionManager extends EventEmitter {
   private readonly store: ConfigStore;
   /** 技能发现归它管——会话启动时问一次「现在有哪些启用的技能」。 */
   private readonly skills: SkillManager;
-  /** 查模型的上下文窗口用。恢复会话对齐端点时要它。 */
-  private readonly models: ModelCatalog;
   private readonly computer = new ComputerController();
   private readonly agentBin: string;
   /** 最近一段 stderr，失败时拼进错误信息，省得用户去翻日志。 */
@@ -107,11 +109,10 @@ export class SessionManager extends EventEmitter {
   /** 最近一次会话的工作区，诊断报告里要。 */
   private workspace = "";
 
-  constructor(store: ConfigStore, skills: SkillManager, models: ModelCatalog) {
+  constructor(store: ConfigStore, skills: SkillManager) {
     super();
     this.store = store;
     this.skills = skills;
-    this.models = models;
     this.agentBin = resolveBin("CLAW_AGENT_BIN", "claw-agent");
   }
 
@@ -121,18 +122,14 @@ export class SessionManager extends EventEmitter {
 
   async start(): Promise<void> {
     if (this.client) return;
-    const credentials = this.store.readCredentials();
 
     this.emit("status", "starting");
 
+    // 模型 Key 不经这里：内核按会话的 providerId 到 --app-db 那个库里查。
     const client = new ClawAgentClient({
       command: this.agentBin,
-      args: ["serve", `--data-home=${this.store.agentHome}`],
-      env: {
-        ...process.env,
-        // 凭据只走进程环境，不写任何配置文件、不经协议帧。
-        AICLAW_LLM_KEY: credentials.llmKey,
-      },
+      args: ["serve", `--data-home=${this.store.agentHome}`, `--app-db=${this.store.appDbPath}`],
+      env: { ...process.env },
     });
 
     client.on("notification", (n: AgentNotification) => this.emit("event", n.method, n.params));
@@ -177,36 +174,19 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * 重启运行时。改了凭据之后必须走一趟。
-   *
-   * **AICLAW_LLM_KEY 是在 start() 里注入子进程环境的**
-   * ——凭据只进环境不进文件，这是刻意的，但代价是改完之后正在跑的那个内核
-   * 仍然拿着旧值。不重启的话：换了 Key 继续聊会 401，而那个错来自上游、
-   * 看起来像模型服务坏了，没人会想到是本地没生效。
-   *
-   * 返回是否真的重启了（本来就没在跑就不用）。
-   */
-  async restartIfRunning(): Promise<boolean> {
-    if (!this.running) return false;
-    await this.stop();
-    await this.start();
-    return true;
-  }
-
-  /**
    * 开一个新会话，返回 sessionId 与挂载结果。
    *
-   * model 传了就用它，否则用配置页的默认模型——顶部切模型只改当前会话，
-   * 新会话回到默认值，这是刻意的：一次临时换模型不该悄悄变成长期设置。
+   * 模型用配置页的默认值——顶部切模型只改当前会话，新会话回到默认值，
+   * 这是刻意的：一次临时换模型不该悄悄变成长期设置。
    *
-   * workspace 同理，而且默认是**空的**：新会话不预设工作区，用户想好了再指。
+   * workspace 默认是**空的**：新会话不预设工作区，用户想好了再指。
    * 早先这里用一个全局工作目录，结果是所有会话共用一个目录，
    * 而用户真正想让 Agent 干活的地方在别处——他得先把文件搬进来。
    */
-  async startSession(model?: string, workspace?: string): Promise<SessionInfo> {
+  async startSession(workspace?: string): Promise<SessionInfo> {
     const client = this.requireClient();
     const config = this.store.readConfig();
-    const params = this.buildParams(config, model, workspace);
+    const params = this.buildParams(config, workspace);
     if (params.workdir) mkdirSync(params.workdir, { recursive: true });
     this.workspace = params.workdir ?? "";
     this.skills.setWorkspace(this.workspace);
@@ -218,6 +198,7 @@ export class SessionManager extends EventEmitter {
       mcpStatus: result.mcpStatus ?? {},
       workspace: result.workspace ?? "",
       model: params.model.model,
+      providerId: result.providerId ?? 0,
       skills: result.skills ?? [],
     };
   }
@@ -231,12 +212,9 @@ export class SessionManager extends EventEmitter {
   async resumeSession(sessionId: string): Promise<SessionInfo> {
     const client = this.requireClient();
     const result = await client.sessionResume(sessionId, this.buildRefresh());
-    // 恢复出来的会话用的是**存档里的**模型配置，包括当时的模型端点。
-    // 用户后来改了端点的话，点开旧会话仍然打旧地址——「配置改了没生效」。
-    // 端点属于基础设施而不是这一轮的选择，所以强制对齐到当前配置；
-    // 模型保留会话自己的（顶部切过模型的人不该被改回默认）。
+    // 端点与 Key 不用在这里对齐：会话记的是 providerId，内核恢复时按 id 到库里
+    // 取**当前**的端点与 Key。用户改了端点，旧会话点开就是新地址。
     this.mounts = result.mcpStatus ?? {};
-    await this.realignEndpoint(sessionId, result.model);
     // 技能发现要看这个会话的工作区（项目级 .claude/skills）。
     this.workspace = result.workspace ?? "";
     this.skills.setWorkspace(this.workspace);
@@ -246,53 +224,28 @@ export class SessionManager extends EventEmitter {
       mcpStatus: result.mcpStatus ?? {},
       workspace: result.workspace ?? "",
       model: result.model ?? this.store.readConfig().model,
+      providerId: result.providerId ?? 0,
       skills: result.skills ?? [],
       history: await client.sessionHistory(sessionId),
     };
   }
 
   /**
-   * 把恢复出来的会话对齐到当前配置的模型端点。
-   *
-   * 上下文窗口跟着模型走，所以从目录里按模型名查；查不到就用配置里的值，
-   * 再没有就传 0（未知）——内核那时退回「等上游报超窗再压缩」，能跑，只是
-   * 白花一次请求。这比把窗口张冠李戴要好。
-   */
-  private async realignEndpoint(sessionId: string, model?: string): Promise<void> {
-    const name = (model ?? "").trim();
-    if (!name) return;
-    const config = this.store.readConfig();
-    let window = 0;
-    try {
-      const known = (await this.models.list()).find((item) => item.id === name);
-      window = known?.contextWindow ?? 0;
-    } catch {
-      // 拉不到目录不该让恢复会话失败——那只是少一个窗口数字。
-    }
-    if (!window) window = name === config.model ? config.contextWindow : 0;
-    try {
-      await this.requireClient().sessionConfigure(sessionId, {
-        baseUrl: config.modelBaseUrl,
-        model: name,
-        reasoningEffort: config.reasoningEffort || undefined,
-        contextWindow: window || undefined,
-      });
-    } catch {
-      // 对齐失败也让会话打开：至少用户能看到历史，而不是点开一片空白。
-    }
-  }
-
-  /**
-   * 换当前会话的模型。
+   * 换当前会话的模型（可以连模型服务一起换）。
    *
    * 上下文窗口跟着一起下发：不同模型窗口差一个数量级，沿用上一个模型的值
-   * 会让内核要么过早压缩、要么撑爆窗口。目录里查不到就传 0（未知），
-   * 内核退回「等上游报错再压」。
+   * 会让内核要么过早压缩、要么撑爆窗口。不知道就传 0，内核退回「等上游报错再压」。
    */
-  async configureSession(sessionId: string, model: string, contextWindow: number): Promise<void> {
+  async configureSession(
+    sessionId: string,
+    providerId: number,
+    model: string,
+    contextWindow: number,
+  ): Promise<void> {
     const config = this.store.readConfig();
     await this.requireClient().sessionConfigure(sessionId, {
-      baseUrl: config.modelBaseUrl,
+      providerId: providerId || undefined,
+      baseUrl: "",
       model,
       reasoningEffort: config.reasoningEffort || undefined,
       contextWindow: contextWindow || undefined,
@@ -355,16 +308,14 @@ export class SessionManager extends EventEmitter {
   }
 
   /** 把应用配置翻译成会话配置。 */
-  private buildParams(
-    config: AppConfig,
-    modelOverride?: string,
-    workspace?: string,
-  ): SessionStartParams {
+  private buildParams(config: AppConfig, workspace?: string): SessionStartParams {
     const mcpServers = this.buildMcpServers();
     return {
       model: {
-        baseUrl: config.modelBaseUrl,
-        model: modelOverride || config.model,
+        // 端点与 Key 由内核按 providerId 查；这里不传 baseUrl。
+        providerId: config.providerId || undefined,
+        baseUrl: "",
+        model: config.model,
         reasoningEffort: config.reasoningEffort || undefined,
         contextWindow: config.contextWindow || undefined,
       },
@@ -422,6 +373,31 @@ export class SessionManager extends EventEmitter {
       codeMode: config.codeMode === true,
       approvalPolicy: config.profile,
     };
+  }
+
+  // ---------- 模型服务 ----------
+  //
+  // 配置页的增删改查直接透传给内核：库在内核那边打开着，宿主不碰 SQLite，
+  // Key 也就从来不经过宿主的内存。
+
+  listProviders(): Promise<ProviderView[]> {
+    return this.requireClient().providerList();
+  }
+
+  createProvider(params: ProviderCreateParams): Promise<ProviderView> {
+    return this.requireClient().providerCreate(params);
+  }
+
+  updateProvider(params: ProviderUpdateParams): Promise<ProviderView> {
+    return this.requireClient().providerUpdate(params);
+  }
+
+  async deleteProvider(id: number): Promise<void> {
+    await this.requireClient().providerDelete(id);
+  }
+
+  fetchProviderModels(id: number): Promise<string[]> {
+    return this.requireClient().providerModels(id);
   }
 
   /** 试连一个 MCP server 并列出它的工具。配置页用，与会话无关。 */

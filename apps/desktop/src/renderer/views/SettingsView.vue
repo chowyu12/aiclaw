@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { actions, store } from "../store";
+import { computed, ref } from "vue";
+import { actions, modelChoices, store } from "../store";
 
-const llmKey = ref("");
-/** 「高级」默认收起：端点与模型对绝大多数人都是默认值，不该占据视线。 */
-const advanced = ref(false);
 const modelPickerOpen = ref(false);
 const saving = ref(false);
 const purgeConfirm = ref(false);
@@ -40,35 +37,28 @@ async function saveField(patch: Record<string, unknown>): Promise<void> {
   }
 }
 
-async function saveKeys(): Promise<void> {
-  if (!llmKey.value) return;
-  await actions.saveCredentials({ llmKey: llmKey.value });
-  // 存完立刻清空输入框：不让凭据留在 DOM 里。
-  llmKey.value = "";
-}
-
 /**
- * 默认模型从端点的模型列表里挑。
+ * 默认模型从各模型服务的清单里挑，不手打。
  *
  * 手打模型名是这一页最容易出错的一格：名字写错了要等到第一次对话报 404 才知道，
- * 而那时错误来自上游、看起来像服务坏了。挑出来的同时把上下文窗口一起填上，
- * 省掉一个需要用户去查文档的数字。
+ * 而那时错误来自上游、看起来像服务坏了。清单在「模型服务」页维护。
  */
+const choices = computed(() => modelChoices(store.providers));
+const currentProvider = computed(() =>
+  store.providers.find((item) => item.id === store.config?.providerId),
+);
+
 function openModelPicker(): void {
   modelPickerOpen.value = !modelPickerOpen.value;
-  if (modelPickerOpen.value && store.models.length === 0 && !store.modelsLoading) {
-    void actions.loadModels();
+  if (modelPickerOpen.value && store.providers.length === 0 && !store.providersLoading) {
+    void actions.loadProviders();
   }
 }
 
-async function pickModel(id: string, contextWindow: number): Promise<void> {
+async function pickModel(providerId: number, id: string): Promise<void> {
   modelPickerOpen.value = false;
-  await saveField({ model: id, contextWindow });
-}
-
-function formatWindow(tokens: number): string {
-  if (!tokens) return "窗口未知";
-  return tokens >= 1000 ? `${Math.round(tokens / 1000)}K 上下文` : `${tokens} 上下文`;
+  // 换了模型窗口就不一样了，旧值不能沿用；用户知道的话在下面那格填。
+  await saveField({ providerId, model: id, contextWindow: 0 });
 }
 
 async function purge(): Promise<void> {
@@ -94,107 +84,83 @@ async function purge(): Promise<void> {
   <div class="settings" v-else>
     <section>
       <header>
-        <h2>凭据</h2>
-        <p class="sub">只存进系统钥匙串，不写配置文件、不进日志、不进诊断包。</p>
+        <h2>模型</h2>
+        <p class="sub">新会话默认用哪个模型。端点、Key 与模型清单在「模型服务」页管理。</p>
       </header>
+
+      <p v-if="choices.length === 0 && !store.providersLoading" class="note warn">
+        还没有能用的模型服务。到「模型服务」页添加一个端点、填上 Key、写上模型名，回来再选。
+        <button class="link" @click="actions.setView('providers')">去添加</button>
+      </p>
+
       <label>
-        <span>LLM Key<em v-if="store.credentials.llmKey">已配置</em></span>
-        <input v-model="llmKey" type="password" placeholder="留空表示不修改" />
-      </label>
-      <button class="primary" :disabled="!llmKey" @click="saveKeys()">
-        保存凭据
-      </button>
+        <span>默认模型</span>
+        <div class="picker">
+          <button class="field-button" @click="openModelPicker()">
+            <span v-if="store.config.model" class="picked-name">
+              {{ store.config.model }}
+              <em v-if="currentProvider"> · {{ currentProvider.name }}</em>
+            </span>
+            <span v-else class="placeholder">从已配置的模型服务里选一个</span>
+            <span class="chev">⌄</span>
+          </button>
 
-      <!-- 端点与模型收进「高级」：默认值对多数人就是对的，
-           摊在页面上只是让人怀疑自己是不是漏填了什么。 -->
-      <button class="disclosure" @click="advanced = !advanced">
-        <span class="caret" :class="{ open: advanced }">›</span>
-        高级
-        <span class="disclosure-note">模型端点、默认模型</span>
-      </button>
-
-      <div v-if="advanced" class="advanced">
-        <label>
-          <span>模型端点</span>
-          <input
-            :value="store.config.modelBaseUrl"
-            placeholder="https://api.openai.com/v1"
-            @change="saveField({ modelBaseUrl: ($event.target as HTMLInputElement).value })"
-          />
-          <span class="hint">OpenAI 兼容地址，填到 <code>/v1</code>。清空会退回默认值。</span>
-        </label>
-
-        <label>
-          <span>默认模型</span>
-          <div class="picker">
-            <button class="field-button" @click="openModelPicker()">
-              <span v-if="store.config.model" class="picked-name">{{ store.config.model }}</span>
-              <span v-else class="placeholder">从端点的模型列表里选一个</span>
-              <span class="chev">⌄</span>
-            </button>
-
-            <div v-if="modelPickerOpen" class="backdrop" @click="modelPickerOpen = false" />
-            <div v-if="modelPickerOpen" class="menu" @click.stop>
-              <div class="menu-head">
-                <span>airouter 上这把 Key 能调的模型</span>
-                <button class="link" @click="actions.loadModels(true)">刷新</button>
-              </div>
-              <p v-if="store.modelsLoading" class="menu-note">正在拉取…</p>
-              <p v-else-if="store.modelsError" class="menu-note warn">{{ store.modelsError }}</p>
-              <p v-else-if="store.models.length === 0" class="menu-note">
-                没有返回可用模型。先填好 LLM Key，再检查这把 Key 的模型白名单。
-              </p>
-              <button
-                v-for="model in store.models"
-                :key="model.id"
-                class="menu-item"
-                :class="{ picked: model.id === store.config.model }"
-                @click="pickModel(model.id, model.contextWindow)"
-              >
-                <span class="menu-name">{{ model.id }}</span>
-                <span class="menu-note">
-                  {{ model.ownedBy }} · {{ formatWindow(model.contextWindow) }}
-                  <template v-if="model.securityLevel"> · {{ model.securityLevel }}</template>
-                </span>
-              </button>
+          <div v-if="modelPickerOpen" class="backdrop" @click="modelPickerOpen = false" />
+          <div v-if="modelPickerOpen" class="menu">
+            <div class="menu-head">
+              <span>模型</span>
+              <button class="link" @click="actions.loadProviders()">刷新</button>
             </div>
-          </div>
-          <span class="hint">
-            没设过的话第一次启动会自动挑一个。新会话用它；对话框上方切模型只影响那一个会话。
-          </span>
-        </label>
-
-        <div class="pair">
-          <label>
-            <span>推理档位</span>
-            <select
-              :value="store.config.reasoningEffort"
-              @change="saveField({ reasoningEffort: ($event.target as HTMLSelectElement).value })"
+            <p v-if="store.providersLoading" class="menu-note">正在读取…</p>
+            <p v-else-if="store.providersError" class="menu-note warn">{{ store.providersError }}</p>
+            <p v-else-if="choices.length === 0" class="menu-note">没有能用的模型。</p>
+            <button
+              v-for="choice in choices"
+              :key="`${choice.providerId}/${choice.model}`"
+              class="menu-item"
+              :class="{ picked: choice.providerId === store.config.providerId && choice.model === store.config.model }"
+              @click="pickModel(choice.providerId, choice.model)"
             >
-              <option value="low">low</option>
-              <option value="medium">medium</option>
-              <option value="high">high</option>
-            </select>
-          </label>
-          <label>
-            <span>上下文窗口</span>
-            <input
-              type="number"
-              min="0"
-              step="1000"
-              placeholder="选模型时自动填"
-              :value="store.config.contextWindow || ''"
-              @change="
-                saveField({ contextWindow: Number(($event.target as HTMLInputElement).value) || 0 })
-              "
-            />
-          </label>
+              <span class="menu-name">{{ choice.model }}</span>
+              <span class="menu-note">{{ choice.providerName }}</span>
+            </button>
+          </div>
         </div>
-        <p class="note">
-          上下文窗口填了才能在撑满之前主动压缩历史；不填也能跑，只是要等上游报错再压，
-          白花一次请求。挑模型会自动带出这个值。
-        </p>
+        <span class="hint">
+          没设过的话第一次启动会自动挑一个。新会话用它；对话框上方切模型只影响那一个会话。
+        </span>
+      </label>
+
+      <div class="pair">
+        <label>
+          <span>推理档位</span>
+          <select
+            :value="store.config.reasoningEffort"
+            @change="saveField({ reasoningEffort: ($event.target as HTMLSelectElement).value })"
+          >
+            <option value="low">low</option>
+            <option value="medium">medium</option>
+            <option value="high">high</option>
+          </select>
+        </label>
+        <label>
+          <span>上下文窗口</span>
+          <input
+            type="number"
+            min="0"
+            step="1000"
+            placeholder="不知道就留空"
+            :value="store.config.contextWindow || ''"
+            @change="
+              saveField({ contextWindow: Number(($event.target as HTMLInputElement).value) || 0 })
+            "
+          />
+        </label>
       </div>
+      <p class="note">
+        上下文窗口填了才能在撑满之前主动压缩历史；不填也能跑，只是要等上游报错再压，
+        白花一次请求。
+      </p>
     </section>
 
     <section>
@@ -480,47 +446,6 @@ label em {
 
 /* ---------- 高级 ---------- */
 
-.disclosure {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  align-self: flex-start;
-  padding: 4px 0;
-  border: none;
-  background: none;
-  color: var(--ink-2);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.disclosure:hover {
-  color: var(--ink);
-}
-
-.caret {
-  display: inline-block;
-  color: var(--muted);
-  transition: transform 0.12s;
-}
-
-.caret.open {
-  transform: rotate(90deg);
-}
-
-.disclosure-note {
-  color: var(--muted);
-  font-weight: 400;
-}
-
-.advanced {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--rule);
-}
-
 /* ---------- 模型选择器 ---------- */
 
 .picker {
@@ -550,6 +475,12 @@ label em {
 .picked-name {
   font-family: var(--mono);
   font-size: 12.5px;
+}
+
+.picked-name em {
+  color: var(--muted);
+  font-style: normal;
+  font-family: inherit;
 }
 
 .placeholder {

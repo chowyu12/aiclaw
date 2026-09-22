@@ -67,8 +67,8 @@ type Session struct {
 	// 最后一个用完的会话负责真正关掉它——见 mcppool.go。
 	mcpKeys []string
 	llm     *llm.Client
-	// apiKey 留着是为了换模型端点时重建客户端。只在内存里，不进存档。
-	apiKey string
+	// keyFor 按模型配置给出 Key，换模型时重建客户端要它。只在内存里，不进存档。
+	keyFor KeyResolver
 
 	mu        sync.Mutex
 	turnCount int
@@ -131,11 +131,23 @@ func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 	}
 }
 
+// KeyResolver 按模型配置给出 API Key。
+//
+// 它还可以**改写** model.BaseURL：填了 ProviderID 时端点以模型配置库里的为准，
+// 传进来的值被盖掉。Key 只在这一步经手，不进存档、不进事件。
+type KeyResolver func(model *protocol.ModelConfig) (string, error)
+
+// StaticKey 是最简单的解析器：不管什么模型都用这一把 Key。给测试与
+// 只走环境变量的场景用。
+func StaticKey(key string) KeyResolver {
+	return func(*protocol.ModelConfig) (string, error) { return key, nil }
+}
+
 // New 按配置创建会话：建模型客户端、装内置工具、挂 MCP server。
 //
 // MCP server 挂载失败不让整个会话起不来——那个 server 的工具缺席，
 // 其余照常，失败原因放进 mcpStatus 让宿主展示。
-func New(ctx context.Context, id string, config protocol.SessionStartParams, apiKey string) (*Session, error) {
+func New(ctx context.Context, id string, config protocol.SessionStartParams, keyFor KeyResolver) (*Session, error) {
 	// 工作区可以没有：那时相对路径按主目录解析，写之前一律问一句。
 	// 早先这里是「没配工作目录就起不来」，而用户刚打开应用还没想好在哪儿干活，
 	// 却被一个配置项挡在门外。
@@ -148,6 +160,13 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, api
 		config.ApprovalPolicy = protocol.ApprovalOnWrite
 	}
 
+	if keyFor == nil {
+		keyFor = StaticKey("")
+	}
+	apiKey, err := keyFor(&config.Model)
+	if err != nil {
+		return nil, err
+	}
 	client, err := llm.New(config.Model.BaseURL, apiKey, 0)
 	if err != nil {
 		return nil, err
@@ -165,7 +184,7 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, api
 		config:     config,
 		registry:   registry,
 		llm:        client,
-		apiKey:     apiKey,
+		keyFor:     keyFor,
 		backoff:    backoffDelay,
 		mcpStatus:  map[string]string{},
 		mcpMounted: map[string]int{},
@@ -684,16 +703,21 @@ func (s *Session) Configure(model protocol.ModelConfig) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if strings.TrimSpace(model.BaseURL) == "" {
+	// 没说换哪个服务就沿用现在这个：顶部切模型只给了模型名。
+	if model.ProviderID == 0 && strings.TrimSpace(model.BaseURL) == "" {
+		model.ProviderID = s.config.Model.ProviderID
 		model.BaseURL = s.config.Model.BaseURL
 	}
-	if model.BaseURL != s.config.Model.BaseURL {
-		client, err := llm.New(model.BaseURL, s.apiKey, 0)
-		if err != nil {
-			return err
-		}
-		s.llm = client
+	// 每次都重建客户端：Key 与端点都可能已经变了，而 llm.New 只是构造，不连网。
+	apiKey, err := s.keyFor(&model)
+	if err != nil {
+		return err
 	}
+	client, err := llm.New(model.BaseURL, apiKey, 0)
+	if err != nil {
+		return err
+	}
+	s.llm = client
 	s.config.Model = model
 	// 换了模型窗口就不一样了，旧的用量读数不能再拿来判断要不要压缩。
 	s.lastInputTokens = 0
@@ -843,7 +867,8 @@ func (s *Session) Save(ctx context.Context, db *store.Store) error {
 func Load(
 	ctx context.Context,
 	db *store.Store,
-	id, apiKey string,
+	id string,
+	keyFor KeyResolver,
 	refresh *protocol.SessionRefresh,
 ) (*Session, error) {
 	record, err := db.Load(ctx, id)
@@ -856,7 +881,7 @@ func Load(
 	}
 	// 存档里的 MCP server、技能、记忆、computer use 开关是**建会话那一刻**的。
 	// 而应用一启动就接着上次的会话：不拿当前配置盖掉的话，用户后来加的 MCP
-	// server 和刚同步到的内部平台能力永远挂不上，表现就是「配了没用」，
+	// server 和新装的技能永远挂不上，表现就是「配了没用」，
 	// 而且他没有任何线索知道要去开个新会话。实际踩过。
 	// 工作目录与模型不在这里面：换工作目录会让历史里的文件路径对不上；
 	// 模型是会话自己的选择（端点由宿主用 session/configure 另行对齐）。
@@ -878,7 +903,7 @@ func Load(
 		}
 	}
 
-	session, err := New(ctx, record.ID, config, apiKey)
+	session, err := New(ctx, record.ID, config, keyFor)
 	if err != nil {
 		return nil, err
 	}

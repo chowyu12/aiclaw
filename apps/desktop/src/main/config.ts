@@ -1,4 +1,4 @@
-import { app, safeStorage } from "electron";
+import { app } from "electron";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -6,18 +6,16 @@ import { homedir } from "node:os";
 import { DEFAULT_CONFIG, normalizeConfig } from "./config-defaults.js";
 
 /**
- * 配置分两层落盘：
+ * config.json 只放非敏感配置，明文，用户可以直接看、直接改。
  *
- * - config.json     非敏感配置，明文，用户可以直接看、直接改；
- * - credentials.bin 凭据，safeStorage 加密（macOS Keychain / Windows DPAPI）。
- *
- * 分开放是刻意的：出问题时用户能把 config.json 发给别人看，
- * 而不用担心里面夹着模型 Key。诊断包同理——只带 config.json，绝不带 credentials.bin。
+ * 模型 Key 不在这里：它随模型服务存在 ~/.aiclaw/aiclaw.db（见 appDbPath），
+ * 由内核按 providerId 查用，不经协议帧。出问题时用户能把 config.json 发给
+ * 别人看，诊断包同理只带它。
  */
 
 export interface AppConfig {
-  /** OpenAI 兼容地址，形如 https://.../v1 */
-  modelBaseUrl: string;
+  /** 新会话默认用的模型服务 id（aiclaw.db 里 providers 表的主键）；0 表示没选。 */
+  providerId: number;
   model: string;
   reasoningEffort: string;
   /**
@@ -85,22 +83,13 @@ export interface SessionGroups {
   assignments: Record<string, string>;
 }
 
-export interface Credentials {
-  /** 模型 Key。只进加密存储，不写 config.json、不进日志、不进诊断包。 */
-  llmKey: string;
-}
-
-const EMPTY_CREDENTIALS: Credentials = { llmKey: "" };
-
 export class ConfigStore {
   private readonly dir: string;
   private readonly configPath: string;
-  private readonly credentialsPath: string;
 
   constructor(dir = app.getPath("userData")) {
     this.dir = dir;
     this.configPath = join(dir, "config.json");
-    this.credentialsPath = join(dir, "credentials.bin");
     mkdirSync(this.dir, { recursive: true });
   }
 
@@ -188,6 +177,17 @@ export class ConfigStore {
   }
 
   /**
+   * 模型服务配置库（SQLite）。
+   *
+   * 位置沿用 AIClaw 旧版的 ~/.aiclaw/aiclaw.db：用户升级上来，之前配好的
+   * 端点、Key、模型清单原样可用。读写都在内核那边（claw-agent 的 providers 包），
+   * 宿主只把路径传过去。
+   */
+  get appDbPath(): string {
+    return join(this.homeDir, "aiclaw.db");
+  }
+
+  /**
    * 把旧位置（userData 下）的技能与记忆搬到 ~/.aiclaw。
    *
    * 只在目标不存在时搬，**搬完不删原件**：万一搬错了还能翻回去，而且它们
@@ -262,35 +262,6 @@ export class ConfigStore {
     return this.writeGroups({ groups: current.groups, assignments });
   }
 
-  readCredentials(): Credentials {
-    if (!existsSync(this.credentialsPath)) return { ...EMPTY_CREDENTIALS };
-    if (!safeStorage.isEncryptionAvailable()) return { ...EMPTY_CREDENTIALS };
-    try {
-      const decrypted = safeStorage.decryptString(readFileSync(this.credentialsPath));
-      return { ...EMPTY_CREDENTIALS, ...(JSON.parse(decrypted) as Partial<Credentials>) };
-    } catch {
-      // 解不开通常意味着换了机器或系统钥匙串变了。当作未配置，让用户重填，
-      // 而不是抛异常把应用卡在启动阶段。
-      return { ...EMPTY_CREDENTIALS };
-    }
-  }
-
-  writeCredentials(patch: Partial<Credentials>): void {
-    if (!safeStorage.isEncryptionAvailable()) {
-      throw new Error(
-        "当前系统不支持安全存储，拒绝以明文保存凭据。请检查系统钥匙串是否可用。",
-      );
-    }
-    const next = { ...this.readCredentials(), ...patch };
-    writeFileSync(this.credentialsPath, safeStorage.encryptString(JSON.stringify(next)));
-  }
-
-  /** 凭据是否已配齐。UI 用它决定是否跳配置页。 */
-  credentialStatus(): { llmKey: boolean } {
-    const creds = this.readCredentials();
-    return { llmKey: creds.llmKey.length > 0 };
-  }
-
   /**
    * 清空全部本地数据。
    *
@@ -298,8 +269,10 @@ export class ConfigStore {
    * 这种让用户困惑的中间态。
    */
   purgeAll(): void {
-    rmSync(this.credentialsPath, { force: true });
+    // credentials.bin 是早期版本存模型 Key 的地方，清数据时顺手带走。
+    rmSync(join(this.dir, "credentials.bin"), { force: true });
     rmSync(this.configPath, { force: true });
+    rmSync(this.appDbPath, { force: true });
     rmSync(this.groupsPath, { force: true });
     rmSync(this.mcpPath, { force: true });
     rmSync(this.skillsDir, { recursive: true, force: true });

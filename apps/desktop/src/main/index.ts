@@ -4,7 +4,6 @@ import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { PendingApproval } from "@aiclaw/agent-client";
 import { ConfigStore, type McpServer } from "./config.js";
-import { ModelCatalog } from "./models.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
 import { Updater } from "./updater.js";
@@ -40,10 +39,9 @@ function applyAppIcon(): void {
 }
 
 const store = new ConfigStore();
-const models = new ModelCatalog(store);
 const skills = new SkillManager(store);
 // SessionManager 要问技能：会话启动时把当前启用的技能目录下发给内核。
-const sessions = new SessionManager(store, skills, models);
+const sessions = new SessionManager(store, skills);
 const updater = new Updater();
 // 内核 stderr 与宿主自己的关键事件都进这里，攒一小段供「诊断」页复制。
 const diagnostics = new DiagnosticsLog();
@@ -108,11 +106,8 @@ function push(channel: string, payload: unknown): void {
 
 function registerIpc(): void {
   ipcMain.handle(IPC.configRead, () => store.readConfig());
-  ipcMain.handle(IPC.configWrite, (_event, patch: Record<string, unknown>) => {
-    if ("modelBaseUrl" in patch) ModelCatalog.invalidate();
-    // 模型端点不用重启运行时——它是按会话下发的。
-    return store.writeConfig(patch);
-  });
+  // 改配置不用重启运行时：模型、审批档位这些都是按会话下发的。
+  ipcMain.handle(IPC.configWrite, (_event, patch: Record<string, unknown>) => store.writeConfig(patch));
   ipcMain.handle(IPC.updateCheck, () => updater.check());
   // 下载进度往渲染层推：没有进度的话，用户点完「升级」看到的是一个不动的
   // 按钮，几十秒后应用突然退出——那不是慢，是没有反馈，但感觉比慢更糟。
@@ -122,17 +117,6 @@ function registerIpc(): void {
   ipcMain.handle(IPC.updateInstall, () =>
     updater.install((received, total) => push(IPC.onUpdateProgress, { received, total })),
   );
-  ipcMain.handle(IPC.credentialStatus, () => store.credentialStatus());
-  ipcMain.handle(IPC.credentialWrite, async (_event, patch) => {
-    store.writeCredentials(patch);
-    // 换了 Key 能看到的模型就变了，缓存作废。
-    ModelCatalog.invalidate();
-    // **必须重启运行时。** Key 只在拉起 claw-agent 时注入进程环境，改完不重启
-    // 的话内核一直用旧的，下一句对话就是 401——而那个错来自上游，
-    // 看起来像模型服务坏了，没人会想到是本地没生效。
-    await sessions.restartIfRunning();
-    return store.credentialStatus();
-  });
   ipcMain.handle(IPC.purgeAll, async () => {
     await sessions.stop();
     store.purgeAll();
@@ -142,8 +126,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.runtimeStop, () => sessions.stop());
   ipcMain.handle(IPC.runtimeStatus, () => ({ state: sessions.running ? "ready" : "stopped" }));
 
-  ipcMain.handle(IPC.sessionStart, (_event, input?: { model?: string; workspace?: string }) =>
-    sessions.startSession(input?.model, input?.workspace),
+  ipcMain.handle(IPC.sessionStart, (_event, input?: { workspace?: string }) =>
+    sessions.startSession(input?.workspace),
   );
   ipcMain.handle(IPC.sessionResume, (_event, sessionId: string) => sessions.resumeSession(sessionId));
   ipcMain.handle(IPC.sessionSend, (_event, input) => sessions.sendTurn(input));
@@ -163,11 +147,15 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionDelete, (_event, sessionId: string) => sessions.deleteSession(sessionId));
   ipcMain.handle(
     IPC.sessionConfigure,
-    (_event, input: { sessionId: string; model: string; contextWindow: number }) =>
-      sessions.configureSession(input.sessionId, input.model, input.contextWindow),
+    (_event, input: { sessionId: string; providerId: number; model: string; contextWindow: number }) =>
+      sessions.configureSession(input.sessionId, input.providerId, input.model, input.contextWindow),
   );
 
-  ipcMain.handle(IPC.modelList, (_event, force?: boolean) => models.list(force === true));
+  ipcMain.handle(IPC.providerList, () => sessions.listProviders());
+  ipcMain.handle(IPC.providerCreate, (_event, params) => sessions.createProvider(params));
+  ipcMain.handle(IPC.providerUpdate, (_event, params) => sessions.updateProvider(params));
+  ipcMain.handle(IPC.providerDelete, (_event, id: number) => sessions.deleteProvider(id));
+  ipcMain.handle(IPC.providerModels, (_event, id: number) => sessions.fetchProviderModels(id));
 
   ipcMain.handle(IPC.mcpRead, () => store.readMcpServers());
   ipcMain.handle(IPC.mcpWrite, (_event, servers: McpServer[]) => store.writeMcpServers(servers));
@@ -184,7 +172,6 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.diagnosticsRead, () => {
     const config = store.readConfig();
-    const credentials = store.credentialStatus();
     return buildReport(
       {
         version: app.getVersion(),
@@ -196,16 +183,16 @@ function registerIpc(): void {
           日志: logFile.directory,
           应用数据: app.getPath("userData"),
           "技能与记忆": store.homeDir,
+          模型配置库: store.appDbPath,
           // 工作区是按会话来的，这里给的是当前那个会话的。
           当前会话工作区: sessions.currentWorkspace() || "（未设置）",
         },
         runtime: {
           状态: sessions.running ? "ready" : "stopped",
-          模型端点: config.modelBaseUrl,
+          // 只给 id：名字与端点在库里，Key 更不能出现在这儿。
+          模型服务: config.providerId ? `#${config.providerId}` : "（未选）",
           模型: config.model,
           审批档位: config.profile,
-          // 只说有没有，绝不放值。
-          "LLM Key": credentials.llmKey ? "已配置" : "未配置",
           computer_use: config.enableComputerUse ? "已开启" : "关闭",
         },
         mounts: sessions.lastMounts(),

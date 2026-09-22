@@ -8,6 +8,11 @@
 export type ApprovalPolicy = "on-write" | "always" | "never";
 
 export interface ModelConfig {
+  /**
+   * 模型服务的 id。填了它，Key 与端点由内核按 id 到模型配置库里查，
+   * baseUrl 传什么都会被库里的盖掉；不填则走进程环境变量的 Key 与这里的 baseUrl。
+   */
+  providerId?: number;
   baseUrl: string;
   model: string;
   reasoningEffort?: string;
@@ -114,6 +119,42 @@ export interface SessionRefresh {
 }
 
 /** 试连一个 MCP server 的结果。连不上不算错误，原因在 error 里。 */
+/**
+ * 一个模型服务：OpenAI 兼容端点 + Key + 模型清单。会话按 id 选。
+ * Key 只进库不出库——这里只有 apiKeySet 一位。
+ */
+export interface ProviderView {
+  id: number;
+  name: string;
+  /** openai / qwen / kimi / openrouter / openai-compatible / claude / gemini */
+  type: string;
+  /** 空表示用该类型的默认端点。 */
+  baseUrl: string;
+  apiKeySet: boolean;
+  models: string[];
+  enabled: boolean;
+}
+
+export interface ProviderCreateParams {
+  name: string;
+  type?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  models?: string[];
+  enabled?: boolean;
+}
+
+/** 没给的字段不动；apiKey 给空串表示清掉。 */
+export interface ProviderUpdateParams {
+  id: number;
+  name?: string;
+  type?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  models?: string[];
+  enabled?: boolean;
+}
+
 export interface MCPProbeResult {
   ok: boolean;
   error?: string;
@@ -128,6 +169,8 @@ export interface MCPToolInfo {
 }
 
 export interface SessionStartResult {
+  /** 会话用的模型服务 id；0 或缺省表示走环境变量的 Key。 */
+  providerId?: number;
   sessionId: string;
   tools: string[];
   mcpStatus?: Record<string, string>;
