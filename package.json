@@ -26,7 +26,7 @@
     "test:go": "go test ./tools/claw-agent/... ./internal/...",
     "smoke": "node --experimental-strip-types scripts/smoke-kernel.ts",
     "smoke:desktop": "electron scripts/smoke-desktop.cjs",
-    "test:renderer": "node --test --experimental-strip-types scripts/test-renderer.ts scripts/test-unzip.ts scripts/test-store-ipc.ts scripts/test-computer.ts scripts/test-config.ts scripts/test-turns.ts scripts/test-skill-roots.ts scripts/test-version.ts scripts/test-diagnostics.ts scripts/test-open-file.ts scripts/test-logfile.ts"
+    "test:renderer": "node --test --experimental-strip-types scripts/test-renderer.ts scripts/test-model-choices.ts scripts/test-unzip.ts scripts/test-store-ipc.ts scripts/test-computer.ts scripts/test-config.ts scripts/test-turns.ts scripts/test-skill-roots.ts scripts/test-version.ts scripts/test-diagnostics.ts scripts/test-open-file.ts scripts/test-logfile.ts"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",

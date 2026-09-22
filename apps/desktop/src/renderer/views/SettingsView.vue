@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { actions, modelChoices, store } from "../store";
+import { computed, nextTick, ref } from "vue";
+import { actions, filterChoices, modelChoices, store } from "../store";
 
 const modelPickerOpen = ref(false);
 const saving = ref(false);
@@ -43,16 +43,22 @@ async function saveField(patch: Record<string, unknown>): Promise<void> {
  * 手打模型名是这一页最容易出错的一格：名字写错了要等到第一次对话报 404 才知道，
  * 而那时错误来自上游、看起来像服务坏了。清单在「模型服务」页维护。
  */
-const choices = computed(() => modelChoices(store.providers));
+const allChoices = computed(() => modelChoices(store.providers));
+/** 搜索关键词。一个服务能列出上百个模型，翻找不现实。 */
+const modelSearch = ref("");
+const choices = computed(() => filterChoices(allChoices.value, modelSearch.value));
+const searchBox = ref<HTMLInputElement | null>(null);
 const currentProvider = computed(() =>
   store.providers.find((item) => item.id === store.config?.providerId),
 );
 
 function openModelPicker(): void {
   modelPickerOpen.value = !modelPickerOpen.value;
-  if (modelPickerOpen.value && store.providers.length === 0 && !store.providersLoading) {
+  if (!modelPickerOpen.value) return;
+  if (store.providers.length === 0 && !store.providersLoading) {
     void actions.loadProviders();
   }
+  void nextTick(() => searchBox.value?.select());
 }
 
 async function pickModel(providerId: number, id: string): Promise<void> {
@@ -111,12 +117,21 @@ async function purge(): Promise<void> {
           <div v-if="modelPickerOpen" class="backdrop" @click="modelPickerOpen = false" />
           <div v-if="modelPickerOpen" class="menu">
             <div class="menu-head">
-              <span>模型</span>
+              <span>模型<em v-if="modelSearch"> {{ choices.length }} / {{ allChoices.length }}</em></span>
               <button class="link" @click="actions.loadProviders()">刷新</button>
             </div>
+            <input
+              ref="searchBox"
+              v-model="modelSearch"
+              class="menu-search"
+              placeholder="搜索模型或服务名"
+              @keydown.enter="choices[0] && pickModel(choices[0].providerId, choices[0].model)"
+              @keydown.esc="modelPickerOpen = false"
+            />
             <p v-if="store.providersLoading" class="menu-note">正在读取…</p>
             <p v-else-if="store.providersError" class="menu-note warn">{{ store.providersError }}</p>
-            <p v-else-if="choices.length === 0" class="menu-note">没有能用的模型。</p>
+            <p v-else-if="allChoices.length === 0" class="menu-note">没有能用的模型。</p>
+            <p v-else-if="choices.length === 0" class="menu-note">没有匹配「{{ modelSearch }}」的模型。</p>
             <button
               v-for="choice in choices"
               :key="`${choice.providerId}/${choice.model}`"
@@ -518,6 +533,25 @@ label em {
   padding: 6px 9px 4px;
   color: var(--muted);
   font-size: 11px;
+}
+
+.menu-head em {
+  font-style: normal;
+}
+
+/* 搜索框不跟着列表滚：菜单里一滚就找不到输入框在哪儿了。 */
+.menu-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: calc(100% - 8px);
+  margin: 0 4px 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: inherit;
+  font-size: 12.5px;
 }
 
 .link {

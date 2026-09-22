@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { actions, modelChoices, store } from "../store";
+import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
 import {
   classifyFile,
@@ -162,13 +162,20 @@ const policy = computed(() =>
 );
 
 /** 能选的模型：每个能用的模型服务下的每个模型。 */
-const choices = computed(() => modelChoices(store.providers));
+const allChoices = computed(() => modelChoices(store.providers));
+/** 搜索关键词。一个服务能列出上百个模型，翻找不现实。 */
+const modelSearch = ref("");
+const choices = computed(() => filterChoices(allChoices.value, modelSearch.value));
+const searchBox = ref<HTMLInputElement | null>(null);
 
 function openModelMenu(): void {
   modelOpen.value = !modelOpen.value;
-  if (modelOpen.value && store.providers.length === 0 && !store.providersLoading) {
+  if (!modelOpen.value) return;
+  if (store.providers.length === 0 && !store.providersLoading) {
     void actions.loadProviders();
   }
+  // 打开就能直接打字。上一次的关键词留着：连着换两个同系列的模型时省一次输入。
+  void nextTick(() => searchBox.value?.select());
 }
 
 async function pickModel(providerId: number, id: string): Promise<void> {
@@ -468,15 +475,26 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                   </button>
                   <div v-if="modelOpen" class="menu model-menu" @click.stop>
                     <div class="menu-head">
-                      <span>模型</span>
+                      <span>模型<em v-if="modelSearch">{{ choices.length }} / {{ allChoices.length }}</em></span>
                       <button class="link" @click="actions.loadProviders()">刷新</button>
                     </div>
+                    <input
+                      ref="searchBox"
+                      v-model="modelSearch"
+                      class="menu-search"
+                      placeholder="搜索模型或服务名"
+                      @keydown.enter="choices[0] && pickModel(choices[0].providerId, choices[0].model)"
+                      @keydown.esc="modelOpen = false"
+                    />
                     <p v-if="store.providersLoading" class="menu-note pad">正在读取模型服务…</p>
                     <p v-else-if="store.providersError" class="menu-note pad warn">
                       {{ store.providersError }}
                     </p>
-                    <p v-else-if="choices.length === 0" class="menu-note pad">
+                    <p v-else-if="allChoices.length === 0" class="menu-note pad">
                       还没有能用的模型。到「模型服务」页添加端点、填 Key、写上模型名。
+                    </p>
+                    <p v-else-if="choices.length === 0" class="menu-note pad">
+                      没有匹配「{{ modelSearch }}」的模型。
                     </p>
                     <button
                       v-for="choice in choices"
@@ -1115,6 +1133,26 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
 .model-menu {
   right: 0;
   min-width: 300px;
+}
+
+/* 搜索框不跟着列表滚：菜单里一滚就找不到输入框在哪儿了。 */
+.menu-search {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  width: calc(100% - 12px);
+  margin: 0 6px 4px;
+  padding: 5px 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: inherit;
+  font-size: 12.5px;
+}
+
+.menu-head em {
+  font-style: normal;
+  margin-left: 6px;
 }
 
 .menu-head {

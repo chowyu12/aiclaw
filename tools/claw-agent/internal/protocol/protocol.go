@@ -514,6 +514,13 @@ type SessionStartParams struct {
 	 * 这是本应用里权限最大的一组工具，见 tools 包里 computer 的说明。
 	 */
 	EnableComputerUse bool `json:"enableComputerUse,omitempty"`
+	/**
+	 * 对话之外的角色模型（看图、听写、朗读、画图）。见 roles.go。
+	 * 没配的角色对应的工具不注册——模型看不到一个用不了的工具。
+	 */
+	Roles RoleModels `json:"roles,omitzero"`
+	/** 对话模型自己看得懂图。宿主按模型清单里的标记给出，决定要不要走视觉旁路。 */
+	ModelSeesImages bool `json:"modelSeesImages,omitempty"`
 }
 
 // SessionResumeParams 恢复一个会话。
@@ -540,6 +547,8 @@ type SessionRefresh struct {
 	DisableSandbox    bool                       `json:"disableSandbox"`
 	CodeMode          bool                       `json:"codeMode"`
 	ApprovalPolicy    ApprovalPolicy             `json:"approvalPolicy"`
+	Roles             RoleModels                 `json:"roles,omitzero"`
+	ModelSeesImages   bool                       `json:"modelSeesImages,omitempty"`
 }
 
 // SessionSearchParams 按关键词找会话。关键词为空时等于列全部。

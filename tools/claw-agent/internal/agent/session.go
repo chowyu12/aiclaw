@@ -130,6 +130,8 @@ func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 		DisableSandbox:    config.DisableSandbox,
 		CodeMode:          config.CodeMode,
 		ApprovalPolicy:    config.ApprovalPolicy,
+		Roles:             config.Roles,
+		ModelSeesImages:   config.ModelSeesImages,
 	}
 }
 
@@ -915,6 +917,8 @@ func Load(
 		config.EnableComputerUse = refresh.EnableComputerUse
 		config.DisableSandbox = refresh.DisableSandbox
 		config.CodeMode = refresh.CodeMode
+		config.Roles = refresh.Roles
+		config.ModelSeesImages = refresh.ModelSeesImages
 		if refresh.ApprovalPolicy != "" {
 			config.ApprovalPolicy = refresh.ApprovalPolicy
 		}

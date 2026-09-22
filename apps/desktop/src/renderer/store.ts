@@ -1,5 +1,6 @@
 import { reactive, readonly } from "vue";
 import { describeError } from "./errors";
+import { modelChoices, usable, type ModelChoice } from "./model-choices";
 import type {
   AgentEventPayload,
   AppConfigView,
@@ -416,41 +417,6 @@ export type { AppConfigView };
 
 export const store = readonly(state);
 
-/** 一个能选的模型：服务 + 模型名。 */
-export interface ModelChoice {
-  providerId: number;
-  providerName: string;
-  model: string;
-}
-
-/**
- * store 里那份是 readonly() 包过的深只读副本，模板上拿到的就是这个形状；
- * 参数按它来声明，免得每个调用方都要 cast。
- */
-type ProviderLike = {
-  readonly id: number;
-  readonly name: string;
-  readonly enabled: boolean;
-  readonly apiKeySet: boolean;
-  readonly models: readonly string[];
-};
-
-/** 能用的模型服务：启用了、配了 Key、清单里至少有一个模型。 */
-export function usable(provider: ProviderLike): boolean {
-  return provider.enabled && provider.apiKeySet && provider.models.length > 0;
-}
-
-/** 把全部能用的模型服务铺成一张可选清单，给对话页顶部与配置页的选择器用。 */
-export function modelChoices(providers: readonly ProviderLike[]): ModelChoice[] {
-  const choices: ModelChoice[] = [];
-  for (const provider of providers) {
-    if (!usable(provider)) continue;
-    for (const model of provider.models) {
-      choices.push({ providerId: provider.id, providerName: provider.name, model });
-    }
-  }
-  return choices;
-}
 
 export const actions = {
   /**
@@ -1160,3 +1126,6 @@ export const actions = {
     state.error = message;
   },
 };
+
+export { filterChoices, modelChoices, usable } from "./model-choices";
+export type { ModelChoice } from "./model-choices";
