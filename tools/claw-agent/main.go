@@ -2,6 +2,10 @@
 // 执行工具，通过 stdio JSON-RPC 由桌面宿主驱动。
 //
 //	claw-agent serve --data-home=<目录> --app-db=<aiclaw.db>
+//	claw-agent mcp-search --app-db=<aiclaw.db>
+//
+// 第二个是随内核分发的联网搜索 MCP server：宿主在有启用中的搜索引擎时把它挂进
+// 会话，内核像挂任何 stdio MCP server 一样把它拉起来。
 //
 // 模型服务（端点 + Key + 模型清单）存在 --app-db 指的 SQLite 库里，会话按
 // providerId 选用；Key 由内核在库里查，不经协议帧。
@@ -23,6 +27,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/searchmcp"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/server"
 )
 
@@ -42,6 +47,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "serve":
 		return runServe(args[1:])
+	case "mcp-search":
+		return runSearchMCP(args[1:])
 	case "version", "--version", "-v":
 		fmt.Println(version)
 		return nil
@@ -89,6 +96,18 @@ func runServe(args []string) error {
 	return srv.Serve(ctx, os.Stdin)
 }
 
+func runSearchMCP(args []string) error {
+	flags := flag.NewFlagSet("mcp-search", flag.ContinueOnError)
+	appDB := flags.String("app-db", server.DefaultAppDB(), "应用库（SQLite）路径")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if strings.TrimSpace(*appDB) == "" {
+		return fmt.Errorf("mcp-search 需要 --app-db")
+	}
+	return searchmcp.Serve(*appDB, version)
+}
+
 func usageError() error {
 	var builder strings.Builder
 	printUsage(&builder)
@@ -100,6 +119,7 @@ func printUsage(w interface{ Write([]byte) (int, error) }) {
 
 用法：
   claw-agent serve [--data-home=<目录>] [--app-db=<aiclaw.db>]
+  claw-agent mcp-search [--app-db=<aiclaw.db>]
   claw-agent version
 
 环境变量：

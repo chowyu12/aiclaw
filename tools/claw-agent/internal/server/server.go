@@ -25,6 +25,7 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/pluginhost"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/providers"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/searchengines"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 )
 
@@ -62,6 +63,7 @@ type Server struct {
 	appDB     *gormstore.GormStore
 	providers *providers.Store
 	plugins   *pluginhost.Service
+	search    *searchengines.Store
 
 	// 向宿主发出的请求，等它回。
 	outboundID      atomic.Int64
@@ -103,6 +105,7 @@ func New(options Options, out io.Writer) (*Server, error) {
 			return nil, err
 		}
 		server.providers = providers.New(server.appDB)
+		server.search = searchengines.New(server.appDB)
 		// 插件系统与通道。通道收到消息经 channelGateway 变成一轮，见 channel.go。
 		server.plugins, err = pluginhost.New(context.Background(), server.appDB,
 			filepath.Dir(options.AppDB), &channelGateway{server: server}, options.Logf)
@@ -207,6 +210,9 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		protocol.MethodChannelAuthorize, protocol.MethodChannelRevoke,
 		protocol.MethodWeChatLoginStart, protocol.MethodWeChatLoginPoll:
 		s.handlePlugin(ctx, f)
+	case protocol.MethodSearchList, protocol.MethodSearchCreate, protocol.MethodSearchUpdate,
+		protocol.MethodSearchDelete, protocol.MethodSearchTest:
+		s.handleSearch(ctx, f)
 	case protocol.MethodSessionSearch:
 		var params protocol.SessionSearchParams
 		// 参数解不出来就当空关键词：搜索框里打字很快，宁可回全部也不要报错。
@@ -491,6 +497,73 @@ func (s *Server) closeAll() {
 		if err := s.appDB.Close(); err != nil {
 			s.options.Logf("关闭应用库失败：%v", err)
 		}
+	}
+}
+
+// handleSearch 处理 search/* 五个方法。搜索引擎的增删改查与试搜。
+func (s *Server) handleSearch(ctx context.Context, f frame) {
+	if s.search == nil {
+		s.writeError(f.ID, codeInternal, "没有打开应用库（启动时未传 --app-db）")
+		return
+	}
+	switch f.Method {
+	case protocol.MethodSearchList:
+		list, err := s.search.List(ctx)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		s.writeResult(f.ID, map[string]any{"engines": list})
+	case protocol.MethodSearchCreate:
+		var params protocol.SearchEngineCreateParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		created, err := s.search.Create(ctx, params)
+		if err != nil {
+			s.writeError(f.ID, codeInvalidParams, err.Error())
+			return
+		}
+		s.writeResult(f.ID, created)
+	case protocol.MethodSearchUpdate:
+		var params protocol.SearchEngineUpdateParams
+		if err := json.Unmarshal(f.Params, &params); err != nil || params.ID == 0 {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		updated, err := s.search.Update(ctx, params)
+		if err != nil {
+			s.writeError(f.ID, codeInvalidParams, err.Error())
+			return
+		}
+		s.writeResult(f.ID, updated)
+	case protocol.MethodSearchDelete:
+		var params protocol.SearchEngineIDParams
+		if err := json.Unmarshal(f.Params, &params); err != nil || params.ID == 0 {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		if err := s.search.Delete(ctx, params.ID); err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodSearchTest:
+		var params protocol.SearchEngineTestParams
+		if err := json.Unmarshal(f.Params, &params); err != nil || params.ID == 0 {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		result, err := s.search.Test(ctx, params)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		if result.Results == nil {
+			result.Results = []protocol.SearchHit{}
+		}
+		s.writeResult(f.ID, result)
 	}
 }
 

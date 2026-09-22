@@ -28,6 +28,7 @@ const REQUIRED = [
   "profiles",
   "groups",
   "providers",
+  "search",
   "plugins",
   "channels",
   "wechat",

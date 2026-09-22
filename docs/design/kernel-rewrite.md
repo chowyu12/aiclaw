@@ -134,6 +134,14 @@ upstream 的 web search 在 `claw-mcp/internal/provider/websearch.go` 里，
 这样搜索能力走的是 claw-agent 已有的 MCP 通道，不用改内核的工具注册表；
 换引擎、关掉引擎都只是改会话配置。
 
+**实现时的落点**（第 5 步）：那个 MCP server 就是内核二进制自己——
+`claw-agent mcp-search --app-db=…`，用 `mark3labs/mcp-go` 在 stdio 上暴露一个
+只读的 `web_search` 工具，实现复用旧版的 `internal/tools/websearch`（Tavily /
+SerpAPI / 阿里云 IQS）。宿主在有「启用且配了 Key」的引擎时把它挂进会话并标
+`trusted`；每次调用重新读当前生效的引擎（列表里第一个启用的），换引擎不用重挂。
+配置走 `search/list|create|update|delete|test` 五个方法，新增「搜索引擎」页，
+带「试一下」真搜一次。
+
 ## 数据迁移
 
 v2.0.2 的用户库里有会话、Provider、插件、搜索引擎、记忆。两套 SQLite schema 不同。
@@ -168,7 +176,8 @@ upstream 的 `.gitlab-ci.yml`（11k 行）不迁移——它面向 GitLab，而�
    选模型服务，Key 在内核侧解析。新增「模型服务」页，配置页只留默认模型的选择。
 4. **接插件系统**：`pluginhost` 进内核，贡献并进 `session/start`；新增「插件」页
    （权限、配置、通道状态、外部会话放行、微信扫码），技能页与 MCP 页标出插件来源。
-5. **接搜索引擎**：内置 MCP server，按配置挂载。
+5. **接搜索引擎**：`claw-agent mcp-search` 内置 MCP server，有启用的引擎时挂载；
+   新增「搜索引擎」页。
 6. **打包发布**：`@electron/packager` + 现有 GitHub Actions，删掉 `electron/`、`renderer/`、
    `cmd/aiclaw-core`、`internal/core` 等被替换的部分。
 

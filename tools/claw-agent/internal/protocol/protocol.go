@@ -44,6 +44,11 @@ const (
 	MethodChannelRevoke    = "channel/revoke"
 	MethodWeChatLoginStart = "wechat/loginStart"
 	MethodWeChatLoginPoll  = "wechat/loginPoll"
+	MethodSearchList       = "search/list"
+	MethodSearchCreate     = "search/create"
+	MethodSearchUpdate     = "search/update"
+	MethodSearchDelete     = "search/delete"
+	MethodSearchTest       = "search/test"
 	MethodShutdown         = "shutdown"
 )
 
@@ -192,6 +197,61 @@ type ProviderIDParams struct {
 // ProviderModelsResult 是到端点 /models 拉到的模型名，不落库。
 type ProviderModelsResult struct {
 	Models []string `json:"models"`
+}
+
+// ---------- 搜索引擎 ----------
+//
+// 联网搜索引擎（Tavily / SerpAPI / 阿里云 IQS）各带 Key。搜索工具是随内核分发的
+// MCP server（`claw-agent mcp-search`），宿主在有启用中的引擎时挂进会话。
+
+type SearchEngineView struct {
+	ID int64 `json:"id"`
+	/** tavily / serpapi / aliyun-iqs */
+	Provider string `json:"provider"`
+	Name     string `json:"name"`
+	/** 空表示用该类型的默认端点。 */
+	BaseURL   string `json:"baseUrl"`
+	APIKeySet bool   `json:"apiKeySet"`
+	Enabled   bool   `json:"enabled"`
+}
+
+type SearchEngineCreateParams struct {
+	Provider string `json:"provider"`
+	Name     string `json:"name,omitempty"`
+	BaseURL  string `json:"baseUrl,omitempty"`
+	APIKey   string `json:"apiKey,omitempty"`
+	Enabled  bool   `json:"enabled,omitempty"`
+}
+
+// SearchEngineUpdateParams 里 nil 的字段不动。APIKey 指向空串表示清掉。
+type SearchEngineUpdateParams struct {
+	ID       int64   `json:"id"`
+	Provider *string `json:"provider,omitempty"`
+	Name     *string `json:"name,omitempty"`
+	BaseURL  *string `json:"baseUrl,omitempty"`
+	APIKey   *string `json:"apiKey,omitempty"`
+	Enabled  *bool   `json:"enabled,omitempty"`
+}
+
+type SearchEngineIDParams struct {
+	ID int64 `json:"id"`
+}
+
+// SearchEngineTestParams 用一个引擎真搜一次，配置页的「试一下」。
+type SearchEngineTestParams struct {
+	ID    int64  `json:"id"`
+	Query string `json:"query"`
+}
+
+type SearchHit struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Snippet string `json:"snippet"`
+}
+
+type SearchEngineTestResult struct {
+	Provider string      `json:"provider"`
+	Results  []SearchHit `json:"results"`
 }
 
 // ---------- 插件 ----------

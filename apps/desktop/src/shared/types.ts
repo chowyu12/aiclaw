@@ -84,6 +84,23 @@ export interface ProviderView {
   enabled: boolean;
 }
 
+/** 一个联网搜索引擎。与 agent-client 的 SearchEngineView 同形；Key 只报 apiKeySet。 */
+export interface SearchEngineView {
+  id: number;
+  /** tavily / serpapi / aliyun-iqs */
+  provider: string;
+  name: string;
+  baseUrl: string;
+  apiKeySet: boolean;
+  enabled: boolean;
+}
+
+export interface SearchHitView {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
 /** 一个插件。与 agent-client 的 PluginView 同形。 */
 export interface PluginView {
   uuid: string;

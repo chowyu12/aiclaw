@@ -19,6 +19,10 @@ import type {
   ProviderCreateParams,
   ProviderUpdateParams,
   ProviderView,
+  SearchEngineCreateParams,
+  SearchEngineTestResult,
+  SearchEngineUpdateParams,
+  SearchEngineView,
   WeChatLoginPollResult,
   WeChatLoginStartResult,
   SessionRefresh,
@@ -164,6 +168,35 @@ export class ClawAgentClient extends EventEmitter {
     this.assertReady();
     const result = await this.transport.request<{ models: string[] }>("provider/models", { id });
     return result.models ?? [];
+  }
+
+  // ---------- 搜索引擎 ----------
+
+  async searchList(): Promise<SearchEngineView[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ engines: SearchEngineView[] }>("search/list", {});
+    return result.engines ?? [];
+  }
+
+  searchCreate(params: SearchEngineCreateParams): Promise<SearchEngineView> {
+    this.assertReady();
+    return this.transport.request<SearchEngineView>("search/create", params);
+  }
+
+  searchUpdate(params: SearchEngineUpdateParams): Promise<SearchEngineView> {
+    this.assertReady();
+    return this.transport.request<SearchEngineView>("search/update", params);
+  }
+
+  searchDelete(id: number): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("search/delete", { id });
+  }
+
+  /** 用一个引擎真搜一次，配置页的「试一下」。 */
+  searchTest(id: number, query: string): Promise<SearchEngineTestResult> {
+    this.assertReady();
+    return this.transport.request<SearchEngineTestResult>("search/test", { id, query });
   }
 
   // ---------- 插件与通道 ----------

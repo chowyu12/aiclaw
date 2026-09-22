@@ -20,6 +20,10 @@ import {
   type ProviderCreateParams,
   type ProviderUpdateParams,
   type ProviderView,
+  type SearchEngineCreateParams,
+  type SearchEngineTestResult,
+  type SearchEngineUpdateParams,
+  type SearchEngineView,
   type SessionRefresh,
   type SessionStartParams,
   type SessionSummary,
@@ -324,7 +328,7 @@ export class SessionManager extends EventEmitter {
    */
   private async buildParams(config: AppConfig, workspace?: string): Promise<SessionStartParams> {
     const contributions = await this.contributions();
-    const mcpServers = this.buildMcpServers(contributions);
+    const mcpServers = await this.buildMcpServers(contributions);
     return {
       model: {
         // 端点与 Key 由内核按 providerId 查；这里不传 baseUrl。
@@ -371,10 +375,19 @@ export class SessionManager extends EventEmitter {
    *
    * 每次开会话都重新拼：用户在 MCP 页改完，下一次挂载就生效。
    */
-  private buildMcpServers(contributions: PluginContributions): Record<string, MCPServerConfig> {
+  private async buildMcpServers(contributions: PluginContributions): Promise<Record<string, MCPServerConfig>> {
     // 插件带的 server 先进：它们的代码随插件一起被用户装进来并启用了，
     // 但仍是第三方的——不标 trusted，照常走审批。
     const mcpServers: Record<string, MCPServerConfig> = { ...contributions.mcpServers };
+    // 联网搜索：有启用且配了 Key 的引擎就把内核自带的搜索 server 挂上。
+    // 它是我们自己的代码、而且只读，所以标 trusted——不然每查一次都弹一次框。
+    if (await this.searchEnabled()) {
+      mcpServers.web_search = {
+        command: this.agentBin,
+        args: ["mcp-search", `--app-db=${this.store.appDbPath}`],
+        trusted: true,
+      };
+    }
     // 名字会成为工具名前缀——撞名时内核会在挂载阶段报重复注册，比静默遮蔽好查。
     for (const server of this.store.readMcpServers()) {
       if (!server.enabled) continue;
@@ -400,7 +413,7 @@ export class SessionManager extends EventEmitter {
     const config = this.store.readConfig();
     const contributions = await this.contributions();
     return {
-      mcpServers: this.buildMcpServers(contributions),
+      mcpServers: await this.buildMcpServers(contributions),
       skillDirs: this.skills.enabledDirs(),
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
@@ -433,6 +446,39 @@ export class SessionManager extends EventEmitter {
 
   fetchProviderModels(id: number): Promise<string[]> {
     return this.requireClient().providerModels(id);
+  }
+
+  // ---------- 搜索引擎 ----------
+
+  listSearchEngines(): Promise<SearchEngineView[]> {
+    return this.requireClient().searchList();
+  }
+
+  createSearchEngine(params: SearchEngineCreateParams): Promise<SearchEngineView> {
+    return this.requireClient().searchCreate(params);
+  }
+
+  updateSearchEngine(params: SearchEngineUpdateParams): Promise<SearchEngineView> {
+    return this.requireClient().searchUpdate(params);
+  }
+
+  async deleteSearchEngine(id: number): Promise<void> {
+    await this.requireClient().searchDelete(id);
+  }
+
+  testSearchEngine(id: number, query: string): Promise<SearchEngineTestResult> {
+    return this.requireClient().searchTest(id, query);
+  }
+
+  /** 有没有一个启用且配了 Key 的引擎。拿不到就当没有——开会话不该因此失败。 */
+  private async searchEnabled(): Promise<boolean> {
+    try {
+      const engines = await this.requireClient().searchList();
+      return engines.some((engine) => engine.enabled && engine.apiKeySet);
+    } catch (error) {
+      this.emit("log", "app", `读取搜索引擎配置失败：${String(error)}`);
+      return false;
+    }
   }
 
   // ---------- 插件与通道 ----------

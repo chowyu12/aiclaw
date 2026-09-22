@@ -33,6 +33,12 @@ export const IPC = {
   providerDelete: "provider:delete",
   providerModels: "provider:models",
 
+  searchList: "search:list",
+  searchCreate: "search:create",
+  searchUpdate: "search:update",
+  searchDelete: "search:delete",
+  searchTest: "search:test",
+
   pluginList: "plugin:list",
   pluginInstall: "plugin:install",
   pluginToggle: "plugin:toggle",

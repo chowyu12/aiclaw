@@ -155,6 +155,51 @@ export interface ProviderUpdateParams {
   enabled?: boolean;
 }
 
+// ---------- 搜索引擎 ----------
+//
+// 联网搜索引擎各带 Key；搜索工具是随内核分发的 MCP server（claw-agent mcp-search），
+// 宿主在有启用中的引擎时挂进会话。
+
+export interface SearchEngineView {
+  id: number;
+  /** tavily / serpapi / aliyun-iqs */
+  provider: string;
+  name: string;
+  /** 空表示用该类型的默认端点。 */
+  baseUrl: string;
+  apiKeySet: boolean;
+  enabled: boolean;
+}
+
+export interface SearchEngineCreateParams {
+  provider: string;
+  name?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  enabled?: boolean;
+}
+
+/** 没给的字段不动；apiKey 给空串表示清掉。 */
+export interface SearchEngineUpdateParams {
+  id: number;
+  provider?: string;
+  name?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  enabled?: boolean;
+}
+
+export interface SearchHit {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export interface SearchEngineTestResult {
+  provider: string;
+  results: SearchHit[];
+}
+
 // ---------- 插件 ----------
 //
 // 插件是一个带 plugin.json 的目录，声明权限、配置项，以及贡献的技能、MCP server、

@@ -40,6 +40,14 @@ const api = {
     /** 到端点拉模型名。不落库。 */
     models: (id: number) => ipcRenderer.invoke(IPC.providerModels, id),
   },
+  search: {
+    list: () => ipcRenderer.invoke(IPC.searchList),
+    create: (params: unknown) => ipcRenderer.invoke(IPC.searchCreate, params),
+    update: (params: unknown) => ipcRenderer.invoke(IPC.searchUpdate, params),
+    remove: (id: number) => ipcRenderer.invoke(IPC.searchDelete, id),
+    /** 用一个引擎真搜一次。 */
+    test: (input: unknown) => ipcRenderer.invoke(IPC.searchTest, input),
+  },
   plugins: {
     list: () => ipcRenderer.invoke(IPC.pluginList),
     /** 从一个目录装插件。目录由 dialog.pickDirectory 选出来。 */

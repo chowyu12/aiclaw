@@ -13,6 +13,8 @@ import type {
   PluginContributionsView,
   PluginView,
   ProviderView,
+  SearchEngineView,
+  SearchHitView,
   SkillView,
   RuntimeStatus,
   SessionGroupsView,
@@ -64,7 +66,7 @@ export type TimelineEntry =
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "providers" | "plugins" | "mcp" | "skills" | "settings",
+  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
@@ -91,6 +93,10 @@ const state = reactive({
   providersError: "",
   mcpServers: [] as McpServerView[],
   skills: [] as SkillView[],
+  /** 联网搜索引擎。由内核从应用库读。 */
+  searchEngines: [] as SearchEngineView[],
+  searchLoading: false,
+  searchError: "",
   /** 插件清单与它们合起来贡献的东西。由内核从应用库读，要运行时起来之后才有。 */
   plugins: [] as PluginView[],
   pluginsLoading: false,
@@ -737,6 +743,54 @@ export const actions = {
     await window.aiclaw.skills.openDir();
   },
 
+  // ---------- 搜索引擎 ----------
+
+  async loadSearchEngines(): Promise<void> {
+    state.searchLoading = true;
+    state.searchError = "";
+    try {
+      state.searchEngines = (await window.aiclaw.search.list()) as SearchEngineView[];
+    } catch (error) {
+      state.searchError = describeError(error);
+    } finally {
+      state.searchLoading = false;
+    }
+  },
+
+  async createSearchEngine(params: {
+    provider: string;
+    name?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    enabled?: boolean;
+  }): Promise<SearchEngineView> {
+    const created = (await window.aiclaw.search.create(params)) as SearchEngineView;
+    await actions.loadSearchEngines();
+    return created;
+  },
+
+  /** 没给的字段不动；apiKey 给空串表示清掉。 */
+  async updateSearchEngine(params: {
+    id: number;
+    provider?: string;
+    name?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    enabled?: boolean;
+  }): Promise<void> {
+    const updated = (await window.aiclaw.search.update(params)) as SearchEngineView;
+    state.searchEngines = state.searchEngines.map((item) => (item.id === updated.id ? updated : item));
+  },
+
+  async deleteSearchEngine(id: number): Promise<void> {
+    await window.aiclaw.search.remove(id);
+    state.searchEngines = state.searchEngines.filter((item) => item.id !== id);
+  },
+
+  async testSearchEngine(id: number, query: string): Promise<{ provider: string; results: SearchHitView[] }> {
+    return (await window.aiclaw.search.test({ id, query })) as { provider: string; results: SearchHitView[] };
+  },
+
   // ---------- 插件与通道 ----------
 
   /** 插件清单、贡献、通道状态与授权一起刷：插件页要的就是这四样。 */
@@ -1068,7 +1122,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "providers" | "plugins" | "mcp" | "skills" | "settings"): void {
+  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings"): void {
     state.view = view;
   },
 

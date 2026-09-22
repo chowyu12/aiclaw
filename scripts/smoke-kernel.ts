@@ -100,6 +100,28 @@ async function main(): Promise<number> {
     record("不存在的模型服务开不了会话", missing.includes("999"), missing.slice(0, 80));
 
     record("通道与授权列表可读", (await client.channelStatus()).length === 0 && (await client.channelBindings()).length === 0);
+
+    // 搜索引擎：建一个、Key 不回传；再把内核自带的搜索 MCP server 挂进会话，
+    // 工具应当以 web_search__web_search 出现（挂载只列工具，不打网络）。
+    const engine = await client.searchCreate({ provider: "tavily", apiKey: "tvly-smoke", enabled: true });
+    const engines = await client.searchList();
+    record(
+      "搜索引擎写入并回读，Key 不回传",
+      engines.length === 1 && engines[0]!.apiKeySet && engines[0]!.enabled && !JSON.stringify(engines).includes("tvly-smoke"),
+      `${engine.name} (${engine.provider})`,
+    );
+    const withSearch = await client.sessionStart({
+      model: { providerId: provider.id, baseUrl: "", model: "m1" },
+      approvalPolicy: "never",
+      mcpServers: {
+        web_search: { command: bin, args: ["mcp-search", `--app-db=${join(root, "aiclaw.db")}`], trusted: true },
+      },
+    });
+    record(
+      "内置搜索 MCP server 能挂上",
+      withSearch.tools.includes("web_search__web_search"),
+      `mcpStatus=${JSON.stringify(withSearch.mcpStatus)}`,
+    );
   } catch (error) {
     record("unexpected", false, String(error));
   } finally {
