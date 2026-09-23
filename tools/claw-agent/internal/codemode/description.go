@@ -80,7 +80,9 @@ func Description(tools []Tool) string {
   能用的只有下面列出的工具与辅助函数。需要读写文件或执行命令时，用对应的工具。
 - 直接给 JavaScript 源码，不要包 markdown 代码围栏。
 - 所有工具挂在全局 tools 上，都返回 Promise：const r = await tools.某个工具({ ... })。
-  参数传一个对象。返回值是对象时可以直接取字段，否则是字符串。
+  参数传一个对象。
+- 返回值：工具输出是 JSON 就是对象/数组（直接 r.results），否则是字符串；String(r) 与
+  字符串拼接得到原始 JSON 文本，要 .slice 先 JSON.stringify(r)。run_command 返回字符串，没有 .stdout。
 - 名字放进变量时写 tools[名字]，**名字里不带 tools. 前缀**——下面列的是调用写法
   tools.某个工具(...)，其中工具名只是「某个工具」那一段。
 - 工具失败会抛异常，可以用 try/catch 接住并改用别的做法。

@@ -320,3 +320,30 @@ func TestTimersAreDocumentedAsAbsent(t *testing.T) {
 		t.Error("描述里要说明没有定时器")
 	}
 }
+
+// 工具返回 JSON 时脚本拿到对象；但 String(r) 不能是 "[object Object]"——
+// 两个真实会话里模型都在这里白跑了几轮。
+func TestJsonResultsStringifyToTheirSource(t *testing.T) {
+	tools := []Tool{
+		fakeTool("search", func(json.RawMessage) (string, error) {
+			return `{"results":[{"title":"甲"},{"title":"乙"}]}`, nil
+		}),
+		fakeTool("shell", func(json.RawMessage) (string, error) { return "plain output", nil }),
+	}
+	out, err := run(t, tools, `
+		const r = await tools.search({});
+		const s = await tools.shell({});
+		text(r.results.length);
+		text(String(r).slice(0, 12));
+		text(`+"`${r}`"+`.startsWith("{"));
+		text(JSON.stringify(r).includes("toString"));
+		text(typeof s + " " + s.length);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "2\n{\"results\":[\ntrue\nfalse\nstring 12"
+	if out != want {
+		t.Errorf("输出 = %q，想要 %q", out, want)
+	}
+}

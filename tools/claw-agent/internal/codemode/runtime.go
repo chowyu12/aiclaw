@@ -220,7 +220,7 @@ func (r *Runtime) install(
 				_ = reject(vm.ToValue(callErr.Error()))
 				return vm.ToValue(promise)
 			}
-			_ = resolve(vm.ToValue(decodeResult(result)))
+			_ = resolve(toolValue(vm, result))
 			return vm.ToValue(promise)
 		}))
 	}
@@ -285,6 +285,36 @@ func encodeArguments(vm *goja.Runtime, value goja.Value) (json.RawMessage, error
 		return nil, errors.New("工具参数必须是一个对象")
 	}
 	return encoded, nil
+}
+
+// toolValue 把工具返回的文本变成脚本里的值。
+//
+// 能解析成 JSON 的给对象（脚本可以直接 r.results），否则给字符串。这个分叉
+// 是必要的，但它让模型反复栽在一个地方：拿到对象之后写 String(r) 或 "…" + r，
+// 得到 "[object Object]"，再花两三轮才想明白。所以给出去的对象带一个不可枚举的
+// toString，返回原始 JSON 文本——String(r)、模板字符串、字符串拼接都得到能读的
+// 内容，而 JSON.stringify(r) 与取字段不受影响（toString 不可枚举，不会出现在序列化里）。
+func toolValue(vm *goja.Runtime, result string) goja.Value {
+	if _, isObject := decodeResult(result).(string); isObject {
+		return vm.ToValue(result)
+	}
+	raw := strings.TrimSpace(result)
+	// 用 VM 自己的 JSON.parse 建对象，而不是 vm.ToValue(map)：后者给出的是
+	// 包着 Go map 的代理对象，在它上面定义属性不生效。
+	parse, ok := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("parse"))
+	if !ok {
+		return vm.ToValue(decodeResult(result))
+	}
+	value, err := parse(goja.Undefined(), vm.ToValue(raw))
+	if err != nil {
+		return vm.ToValue(result)
+	}
+	if object, isObject := value.(*goja.Object); isObject {
+		_ = object.DefineDataProperty("toString",
+			vm.ToValue(func(goja.FunctionCall) goja.Value { return vm.ToValue(raw) }),
+			goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_TRUE)
+	}
+	return value
 }
 
 // decodeResult 尽量把工具返回的文本解析成对象，让脚本能直接取字段。
