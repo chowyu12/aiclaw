@@ -1190,3 +1190,38 @@ func TestTruncatedToolArgumentsAreCalledOut(t *testing.T) {
 		t.Error("应告诉模型怎么做：拆成几次调用")
 	}
 }
+
+// finish_reason=length 是截断的权威信号：有工具调用时最后那条不执行并说明原因，
+// 没有工具调用时给用户一条提示。
+func TestLengthFinishReasonIsSurfaced(t *testing.T) {
+	cutCall, _ := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{
+			"delta": map[string]any{"tool_calls": []any{map[string]any{
+				"index": 0, "id": "c1", "type": "function",
+				// 恰好是合法 JSON：光看结尾判不出截断，只有 finish_reason 知道。
+				"function": map[string]any{"name": "write_file", "arguments": `{"path":"a.txt","content":"半截"}`},
+			}}},
+			"finish_reason": "length",
+		}},
+	})
+	cutText, _ := json.Marshal(map[string]any{
+		"choices": []any{map[string]any{"delta": map[string]any{"content": "说到一半"}, "finish_reason": "length"}},
+	})
+	model := &fakeModel{script: []string{
+		"data: " + string(cutCall) + "\n\ndata: [DONE]\n\n",
+		"data: " + string(cutText) + "\n\ndata: [DONE]\n\n",
+	}}
+	session := newTestSession(t, model, protocol.ApprovalBypass)
+	emitter := &recordingEmitter{approve: true}
+	session.RunTurn(context.Background(), "t1", "写", nil, nil, emitter)
+
+	if !emitter.find(protocol.NotifyItemCompleted, "finish_reason=length") {
+		t.Error("被截断的工具调用应在结果里说明原因")
+	}
+	if _, err := os.Stat(filepath.Join(session.Workspace(), "a.txt")); err == nil {
+		t.Error("参数不完整的调用不该执行")
+	}
+	if !emitter.find(protocol.NotifyItemCompleted, "长度上限处被截断") {
+		t.Error("回答被截断时应给用户一条提示")
+	}
+}

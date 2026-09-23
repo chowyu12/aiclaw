@@ -225,6 +225,14 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			ToolCalls: response.ToolCalls,
 		})
 
+		// finish_reason=length 是「输出撞上长度上限」的权威信号，比看参数结尾准。
+		// 没有工具调用时是回答被截断，说给用户听；有工具调用时最后那条的参数
+		// 不完整，让它的结果说明原因——即便截断处恰好凑成了合法 JSON。
+		cut := response.FinishReason == "length"
+		if cut && len(response.ToolCalls) == 0 {
+			s.notify(emitter, turnID, "回答在模型的输出长度上限处被截断了，后面的内容没有生成。可以让它接着说，或把问题拆小。")
+		}
+
 		if len(response.ToolCalls) == 0 {
 			// 没有工具调用就是这一轮说完了——除非用户在期间又发了话，
 			// 那就接着跑，别让他等下一次回车。
@@ -234,9 +242,13 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			return total, nil
 		}
 
+		toolCtx := ctx
+		if cut {
+			toolCtx = context.WithValue(ctx, truncatedCallKey{}, response.ToolCalls[len(response.ToolCalls)-1].ID)
+		}
 		// 每个 tool_call 都必须有一条对应的结果消息，中断也不例外——
 		// 缺一条下一次请求就是 400。executeTools 因此保证返回等长的结果。
-		for _, result := range s.executeTools(ctx, turnID, response.ToolCalls, env, emitter, steps) {
+		for _, result := range s.executeTools(toolCtx, turnID, response.ToolCalls, env, emitter, steps) {
 			s.appendMessage(result)
 		}
 		// 工具产出的图片（截屏）作为紧随其后的一条 user 消息送进去。
@@ -577,11 +589,22 @@ func (s *Session) executeOne(
 	return llm.Message{Role: llm.RoleTool, ToolCallID: call.ID, Content: truncateForHistory(output)}
 }
 
+// truncatedCallKey 标记「这一批里哪条调用的参数被长度上限截断了」。
+// 用 context 传而不是挂在 Session 上：一批工具可能并发跑，字段会串。
+type truncatedCallKey struct{}
+
 func (s *Session) runTool(ctx context.Context, call llm.ToolCall, env *tools.Env) (string, error) {
 	// 取消之后仍然会走到这里（一批调用里排在后面的那些）。提前退出，
 	// 但仍旧返回一条结果，让历史保持完整。
 	if ctx.Err() != nil {
 		return "", errors.New("用户中断，这次调用未执行")
+	}
+	if id, _ := ctx.Value(truncatedCallKey{}).(string); id != "" && id == call.ID {
+		return "", fmt.Errorf(
+			"这次输出在第 %d 个字符处撞上了模型的长度上限（finish_reason=length），这条调用的参数不完整，没有执行。"+
+				"把这一步拆成几次调用：先产出一部分、用 store() 存着，或者让工具自己去读文件而不是把内容写进参数。",
+			len([]rune(call.Arguments)),
+		)
 	}
 	tool, ok := s.registry.Get(call.Name)
 	if !ok {
