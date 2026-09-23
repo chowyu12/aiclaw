@@ -887,6 +887,29 @@ func (e *emitter) RequestComputer(
 	return result, nil
 }
 
+// RequestBrowser 请宿主在浏览器窗口里做一步。
+//
+// 超时比屏幕操作长：打开一个网页要等它加载完，慢的站点十几秒是常态。
+func (e *emitter) RequestBrowser(
+	ctx context.Context,
+	params protocol.BrowserRequestParams,
+) (protocol.BrowserResult, error) {
+	actionCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	raw, err := e.server.requestHost(actionCtx, protocol.RequestBrowser, params)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return protocol.BrowserResult{}, errors.New("浏览器操作超时（90 秒）")
+		}
+		return protocol.BrowserResult{}, err
+	}
+	var result protocol.BrowserResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return protocol.BrowserResult{}, fmt.Errorf("浏览器操作回应格式不对：%w", err)
+	}
+	return result, nil
+}
+
 // ---------- 写出 ----------
 
 func (s *Server) writeResult(id json.RawMessage, result any) {

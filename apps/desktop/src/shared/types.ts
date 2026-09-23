@@ -266,4 +266,6 @@ export interface AppConfigView {
   sandboxCommands: boolean;
   /** 代码模式：把工具收进一个 exec 工具，模型写 JavaScript 调用。默认关。 */
   codeMode: boolean;
+  /** 浏览器工具：独立窗口，模型按元素编号操作。默认关。 */
+  browser: boolean;
 }

@@ -34,6 +34,7 @@ import {
 } from "@aiclaw/agent-client";
 import type { AppConfig, ConfigStore, McpServer } from "./config.js";
 import { ComputerController } from "./computer.js";
+import { AgentBrowser } from "./browser.js";
 import type { SkillManager } from "./skills.js";
 
 /**
@@ -124,6 +125,7 @@ export class SessionManager extends EventEmitter {
   /** 技能发现归它管——会话启动时问一次「现在有哪些启用的技能」。 */
   private readonly skills: SkillManager;
   private readonly computer = new ComputerController();
+  private readonly browser = new AgentBrowser();
   private readonly agentBin: string;
   /** 最近一段 stderr，失败时拼进错误信息，省得用户去翻日志。 */
   private lastStderr = "";
@@ -159,6 +161,14 @@ export class SessionManager extends EventEmitter {
     client.on("approval", (request) => this.emit("approval", request));
     // 屏幕操作在宿主这边做：截屏要走应用自己的屏幕录制授权，输入要按平台
     // 合成事件，而且只有宿主知道「最前面的应用是不是我自己」。
+    // 浏览器窗口是宿主的：加载、点、填、截图都在这边做，内核只发请求。
+    client.on("browser", async ({ request, respond, fail }) => {
+      try {
+        respond(await this.browser.perform(request));
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error));
+      }
+    });
     client.on("computer", async ({ request, respond, fail }) => {
       try {
         respond(await this.computer.perform(request));
@@ -365,6 +375,7 @@ export class SessionManager extends EventEmitter {
       skillDirs: this.skills.enabledDirs(),
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
+      enableBrowser: config.browser === true,
       roles: toRoles(config),
       modelSeesImages: await this.modelSeesImages(config),
     };
@@ -454,6 +465,7 @@ export class SessionManager extends EventEmitter {
       skillDirs: this.skills.enabledDirs(),
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
+      enableBrowser: config.browser === true,
       disableSandbox: config.sandboxCommands === false,
       codeMode: config.codeMode === true,
       approvalPolicy: config.profile,

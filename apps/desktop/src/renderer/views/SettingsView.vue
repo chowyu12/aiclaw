@@ -419,9 +419,23 @@ async function purge(): Promise<void> {
         脚本里的每次工具调用<strong>照常走审批</strong>，也照常受沙箱限制。
         开了之后，对话页顶部「工具」菜单里会显示实际省了多少。改动下一个会话生效。
       </p>
+      <label class="switch">
+        <input
+          type="checkbox"
+          :checked="store.config.browser"
+          @change="saveField({ browser: ($event.target as HTMLInputElement).checked })"
+        />
+        <span>浏览器：应用开一个独立的浏览器窗口，模型按元素编号打开、点、填、读</span>
+      </label>
+      <p class="note">
+        模型拿到的是页面上可交互元素的<strong>编号列表</strong>（链接、按钮、输入框），
+        按编号操作，不靠屏幕坐标——比截图便宜、比坐标可靠。窗口是可见的，登录、验证码
+        你随时能接手，登录态跨会话保留。<strong>打开网址会请你确认</strong>；页面里的点、填、滚不问，
+        严格档位下每一步都问。网页内容一律当作不可信的外部资料交给模型。改动下一个会话生效。
+      </p>
       <p class="note">
         computer use（截屏 + 鼠标键盘）是一个插件，开关在「插件」页：启用即授权，
-        那一页写着它能碰什么。
+        那一页写着它能碰什么。需要操作浏览器之外的应用时用它；只是上网的话浏览器工具更省更准。
       </p>
 
     </section>

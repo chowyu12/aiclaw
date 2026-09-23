@@ -207,3 +207,8 @@ func (e *channelEmitter) RequestApproval(context.Context, protocol.ApprovalReque
 func (e *channelEmitter) RequestComputer(context.Context, protocol.ComputerRequestParams) (protocol.ComputerResult, error) {
 	return protocol.ComputerResult{}, errors.New("通道会话不能操作屏幕")
 }
+
+// RequestBrowser 同理：浏览器窗口在桌面上，外部用户不该驾驭它。
+func (e *channelEmitter) RequestBrowser(context.Context, protocol.BrowserRequestParams) (protocol.BrowserResult, error) {
+	return protocol.BrowserResult{}, errors.New("通道会话不能操作浏览器")
+}

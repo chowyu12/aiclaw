@@ -74,7 +74,55 @@ const (
 	// 屏幕录制授权，比 shell 出去可靠），输入要按平台合成事件。内核这边只管
 	// 把工具调用翻译成请求。
 	RequestComputer = "computer/request"
+	// RequestBrowser 请宿主在应用自带的浏览器窗口里做一步：打开、点、填、读。
+	// 浏览器是宿主（Electron）的，内核只翻译工具调用。
+	RequestBrowser = "browser/request"
 )
+
+// BrowserAction 是一次浏览器操作。
+type BrowserAction string
+
+const (
+	BrowserNavigate   BrowserAction = "navigate"
+	BrowserSnapshot   BrowserAction = "snapshot"
+	BrowserClick      BrowserAction = "click"
+	BrowserType       BrowserAction = "type"
+	BrowserSelect     BrowserAction = "select"
+	BrowserScroll     BrowserAction = "scroll"
+	BrowserBack       BrowserAction = "back"
+	BrowserKey        BrowserAction = "key"
+	BrowserExtract    BrowserAction = "extract"
+	BrowserScreenshot BrowserAction = "screenshot"
+)
+
+type BrowserRequestParams struct {
+	SessionID string        `json:"sessionId"`
+	TurnID    string        `json:"turnId"`
+	Action    BrowserAction `json:"action"`
+	/** navigate 的网址。 */
+	URL string `json:"url,omitempty"`
+	/** click / type / select / scroll 的元素编号，来自快照。-1 表示没给。 */
+	Index int `json:"index"`
+	/** type 的文本。 */
+	Text string `json:"text,omitempty"`
+	/** type 填完是否按回车。 */
+	Submit bool `json:"submit,omitempty"`
+	/** select 的选项。 */
+	Value string `json:"value,omitempty"`
+	/** scroll 的纵向滚动量，正数向下。 */
+	DY int `json:"dy,omitempty"`
+	/** key 的按键名。 */
+	Keys string `json:"keys,omitempty"`
+}
+
+type BrowserResult struct {
+	/** 给模型看的文本：页面状态、编号列表或正文。 */
+	Text string `json:"text"`
+	/** 截图时的 PNG，base64。 */
+	ImageBase64 string `json:"imageBase64,omitempty"`
+	Width       int    `json:"width,omitempty"`
+	Height      int    `json:"height,omitempty"`
+}
 
 // ComputerAction 是一次屏幕操作。
 type ComputerAction string
@@ -534,6 +582,11 @@ type SessionStartParams struct {
 	 */
 	EnableComputerUse bool `json:"enableComputerUse,omitempty"`
 	/**
+	 * 是否启用浏览器工具：宿主开一个独立的浏览器窗口，模型按元素编号打开、点、填、读。
+	 * 默认关。它只能碰那一个窗口，比 computer use 的权限小得多，但打开网址仍要确认。
+	 */
+	EnableBrowser bool `json:"enableBrowser,omitempty"`
+	/**
 	 * 对话之外的角色模型（看图、听写、朗读、画图）。见 roles.go。
 	 * 没配的角色对应的工具不注册——模型看不到一个用不了的工具。
 	 */
@@ -563,6 +616,7 @@ type SessionRefresh struct {
 	SkillDirs         []string                   `json:"skillDirs"`
 	MemoryFile        string                     `json:"memoryFile"`
 	EnableComputerUse bool                       `json:"enableComputerUse"`
+	EnableBrowser     bool                       `json:"enableBrowser,omitempty"`
 	DisableSandbox    bool                       `json:"disableSandbox"`
 	CodeMode          bool                       `json:"codeMode"`
 	ApprovalPolicy    ApprovalPolicy             `json:"approvalPolicy"`

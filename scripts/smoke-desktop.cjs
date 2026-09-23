@@ -159,6 +159,49 @@ app.whenReady().then(async () => {
     size ? `${size.width}x${size.height}` : "读不出来——dock 里会是 Electron 原子图标",
   );
 
+  // 浏览器工具：真开一个窗口，对一个内嵌页面走 打开 → 快照 → 填字 → 点击 → 抽正文。
+  // 这条路上有 executeJavaScript、合成输入、分区、窗口生命周期四样只有在 Electron 里
+  // 才验得到的东西；内核那边的测试只能证明请求发出去了。
+  try {
+    const modulePath = path.join(DESKTOP, "dist", "main", "browser.js");
+    const { pathToFileURL } = require("url");
+    const { AgentBrowser } = await import(pathToFileURL(modulePath).href);
+    const browser = new AgentBrowser();
+    const page =
+      "data:text/html;charset=utf-8," +
+      encodeURIComponent(
+        "<title>冒烟页</title><input id=q placeholder=搜索词>" +
+          "<button onclick=\"document.getElementById('out').textContent='点了:'+document.getElementById('q').value\">搜索一下</button>" +
+          "<a href='#next'>下一页</a><main><p id=out></p><p>正文段落</p></main>",
+      );
+    const opened = await browser.perform({ action: "navigate", url: page });
+    check(
+      "浏览器：打开页面并给出编号列表",
+      /页面：冒烟页/.test(opened.text) && /\[1\] textbox "搜索词"/.test(opened.text) && /\[2\] button "搜索一下"/.test(opened.text) && /\[3\] link "下一页"/.test(opened.text),
+      opened.text.split("\n").slice(0, 8).join(" | "),
+    );
+    await browser.perform({ action: "type", index: 1, text: "abc" });
+    await browser.perform({ action: "click", index: 2 });
+    const extracted = await browser.perform({ action: "extract" });
+    check(
+      "浏览器：填字、点击后正文里有结果",
+      /点了:abc/.test(extracted.text) && /正文段落/.test(extracted.text),
+      extracted.text.replace(/\s+/g, " ").slice(0, 120),
+    );
+    const shot = await browser.perform({ action: "screenshot" });
+    check("浏览器：截图有数据", typeof shot.imageBase64 === "string" && shot.imageBase64.length > 100 && shot.width > 0);
+    let refused = "";
+    try {
+      await browser.perform({ action: "navigate", url: "file:///etc/hosts" });
+    } catch (error) {
+      refused = String(error && error.message ? error.message : error);
+    }
+    check("浏览器：拒绝 file: 网址", /只能打开 http/.test(refused), refused.slice(0, 60) || "没拒绝");
+    browser.close();
+  } catch (error) {
+    check("浏览器工具", false, String(error && error.stack ? error.stack : error).slice(0, 300));
+  }
+
   finish();
 
   // waitFor 轮询一个页面内表达式直到满足条件。bootstrap 是异步的，

@@ -33,6 +33,8 @@ import type {
   SessionHistoryResult,
   SessionSummary,
   TurnStartResult,
+  BrowserRequestParams,
+  BrowserResult,
 } from "./protocol.js";
 
 /** 待宿主决定的审批。id 用于回应。 */
@@ -40,6 +42,12 @@ import type {
 export interface PendingComputerAction {
   request: ComputerRequestParams;
   respond: (result: ComputerResult) => void;
+  fail: (message: string) => void;
+}
+
+export interface PendingBrowserAction {
+  request: BrowserRequestParams;
+  respond: (result: BrowserResult) => void;
   fail: (message: string) => void;
 }
 
@@ -51,6 +59,7 @@ export interface ClientEvents {
   notification: (notification: AgentNotification) => void;
   approval: (request: PendingApproval) => void;
   computer: (action: PendingComputerAction) => void;
+  browser: (action: PendingBrowserAction) => void;
   stderr: (chunk: string) => void;
   exit: (code: number | null) => void;
 }
@@ -85,6 +94,15 @@ export class ClawAgentClient extends EventEmitter {
         this.emit("computer", {
           request: params as ComputerRequestParams,
           respond: (result: ComputerResult) => this.transport.respond(id, result),
+          fail: (message: string) =>
+            this.transport.respondError(id, { code: -32000, message }),
+        });
+        return;
+      }
+      if (method === "browser/request") {
+        this.emit("browser", {
+          request: params as BrowserRequestParams,
+          respond: (result: BrowserResult) => this.transport.respond(id, result),
           fail: (message: string) =>
             this.transport.respondError(id, { code: -32000, message }),
         });

@@ -46,6 +46,8 @@ type Emitter interface {
 	) (protocol.ApprovalResponse, error)
 	// RequestComputer 请宿主代做一次屏幕操作。截屏与输入都只有宿主做得了。
 	RequestComputer(ctx context.Context, params protocol.ComputerRequestParams) (protocol.ComputerResult, error)
+	// RequestBrowser 请宿主在它的浏览器窗口里做一步。浏览器是宿主的。
+	RequestBrowser(ctx context.Context, params protocol.BrowserRequestParams) (protocol.BrowserResult, error)
 }
 
 // userInput 是一次用户输入：文字，可能还带着图片。
@@ -131,6 +133,7 @@ func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 		SkillDirs:         config.SkillDirs,
 		MemoryFile:        config.MemoryFile,
 		EnableComputerUse: config.EnableComputerUse,
+		EnableBrowser:     config.EnableBrowser,
 		DisableSandbox:    config.DisableSandbox,
 		CodeMode:          config.CodeMode,
 		ApprovalPolicy:    config.ApprovalPolicy,
@@ -214,6 +217,10 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	// 顺手写 tools.generate_image(...)，得到的是「没有这个工具」——实际踩过：
 	// 它随即去翻应用库找 Key 自己 curl。批量转写一堆录音也正需要在脚本里调。
 	if err := session.registerMediaTools(); err != nil {
+		return nil, err
+	}
+	// 浏览器工具同样收进 exec：翻十页搜索结果写成一段循环，比十次来回省得多。
+	if err := session.registerBrowserTools(); err != nil {
 		return nil, err
 	}
 
@@ -1024,6 +1031,7 @@ func Load(
 		config.SkillDirs = refresh.SkillDirs
 		config.MemoryFile = refresh.MemoryFile
 		config.EnableComputerUse = refresh.EnableComputerUse
+		config.EnableBrowser = refresh.EnableBrowser
 		config.DisableSandbox = refresh.DisableSandbox
 		config.CodeMode = refresh.CodeMode
 		config.Roles = refresh.Roles

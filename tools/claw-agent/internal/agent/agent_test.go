@@ -123,7 +123,10 @@ type recordingEmitter struct {
 	computerResult protocol.ComputerResult
 	computerOK     bool
 	// scope 让用例模拟「本次会话都允许」那一档。
-	scope protocol.ApprovalScope
+	scope         protocol.ApprovalScope
+	browser       []protocol.BrowserRequestParams
+	browserResult protocol.BrowserResult
+	browserOK     bool
 }
 
 func (e *recordingEmitter) Notify(method string, params any) {
@@ -157,6 +160,21 @@ func (e *recordingEmitter) RequestComputer(
 	e.mu.Unlock()
 	if !ok {
 		return protocol.ComputerResult{}, errors.New("测试没有预置屏幕操作结果")
+	}
+	return result, nil
+}
+
+// RequestBrowser 记下浏览器请求，按预设返回。
+func (e *recordingEmitter) RequestBrowser(
+	_ context.Context,
+	params protocol.BrowserRequestParams,
+) (protocol.BrowserResult, error) {
+	e.mu.Lock()
+	e.browser = append(e.browser, params)
+	result, ok := e.browserResult, e.browserOK
+	e.mu.Unlock()
+	if !ok {
+		return protocol.BrowserResult{}, errors.New("测试没有预置浏览器操作结果")
 	}
 	return result, nil
 }

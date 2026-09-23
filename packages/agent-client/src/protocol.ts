@@ -90,6 +90,8 @@ export interface SessionStartParams {
    * 开了之后模型能看见并操作**整个屏幕**，不只是工作目录。
    */
   enableComputerUse?: boolean;
+  /** 浏览器工具：宿主开一个独立窗口，模型按元素编号操作。默认关。 */
+  enableBrowser?: boolean;
   /**
    * 技能目录列表。每一项是一个技能自己的目录（里面直接放 SKILL.md），
    * 不是装着若干技能的根目录——技能散在好几个地方且结构各异，
@@ -118,6 +120,8 @@ export interface SessionRefresh {
   skillDirs: string[];
   memoryFile: string;
   enableComputerUse: boolean;
+  /** 浏览器工具：宿主开一个独立窗口，模型按元素编号操作。默认关。 */
+  enableBrowser?: boolean;
   disableSandbox: boolean;
   codeMode: boolean;
   approvalPolicy: ApprovalPolicy;
@@ -442,6 +446,37 @@ export interface ComputerResult {
   /** 截屏时的 PNG，base64。 */
   imageBase64?: string;
   /** 屏幕逻辑尺寸；模型要靠它把图上的位置换算成点击坐标。 */
+  width?: number;
+  height?: number;
+}
+
+/** 一次浏览器操作：宿主在自带的浏览器窗口里按元素编号做一步。 */
+export interface BrowserRequestParams {
+  sessionId: string;
+  turnId: string;
+  action:
+    | "navigate"
+    | "snapshot"
+    | "click"
+    | "type"
+    | "select"
+    | "scroll"
+    | "back"
+    | "key"
+    | "extract"
+    | "screenshot";
+  url?: string;
+  index?: number;
+  text?: string;
+  submit?: boolean;
+  value?: string;
+  dy?: number;
+  keys?: string;
+}
+
+export interface BrowserResult {
+  text: string;
+  imageBase64?: string;
   width?: number;
   height?: number;
 }

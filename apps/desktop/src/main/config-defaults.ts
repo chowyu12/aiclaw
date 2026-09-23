@@ -27,6 +27,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   retentionDays: 30,
   sandboxCommands: true,
   codeMode: false,
+  browser: false,
 };
 
 /** 补全四个角色，并把每个角色里不合法的 providerId 钉成 0。 */
@@ -65,5 +66,7 @@ export function normalizeConfig(config: AppConfig): AppConfig {
     providerId: Number.isFinite(providerId) && providerId > 0 ? Math.trunc(providerId) : 0,
     // **只有明确的 false 才算关**，其余一律当开着。安全开关的缺省必须是开。
     sandboxCommands: config.sandboxCommands !== false,
+    // 浏览器工具是后加的：旧配置里没有这一项，缺了当关。
+    browser: config.browser === true,
   };
 }

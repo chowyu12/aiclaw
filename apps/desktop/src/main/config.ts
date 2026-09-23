@@ -65,6 +65,12 @@ export interface AppConfig {
    * 代价是模型得会写对代码——所以交给用户按自己用的模型来定。
    */
   codeMode: boolean;
+  /**
+   * 浏览器工具：应用开一个独立的浏览器窗口，模型按元素编号打开、点、填、读。
+   *
+   * 默认关。它只碰那一个窗口（比 computer use 小得多），但打开网址仍要确认。
+   */
+  browser: boolean;
 }
 
 /** 用户自己配的 MCP server。 */
