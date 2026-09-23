@@ -64,9 +64,26 @@ const currentProvider = computed(() =>
   store.providers.find((item) => item.id === store.config?.providerId),
 );
 
-function openModelPicker(): void {
+/**
+ * 菜单往下还是往上弹。
+ *
+ * 菜单是绝对定位在按钮下面的，而配置页整页在滚动容器里：页面下半部的选择器
+ * （多模态那四个）往下弹会被容器底边裁掉，用户看到的是半截列表。按钮离窗口
+ * 底部不够放一份菜单、而上面够的时候，改成往上弹。
+ */
+const MENU_HEIGHT = 320;
+const menuUp = ref(false);
+function placeMenu(event: MouseEvent): void {
+  const button = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect();
+  if (!button) return;
+  const below = window.innerHeight - button.bottom;
+  menuUp.value = below < MENU_HEIGHT && button.top > below;
+}
+
+function openModelPicker(event: MouseEvent): void {
   modelPickerOpen.value = !modelPickerOpen.value;
   if (!modelPickerOpen.value) return;
+  placeMenu(event);
   if (store.providers.length === 0 && !store.providersLoading) {
     void actions.loadProviders();
   }
@@ -111,10 +128,12 @@ const rolePickerOpen = ref<ModelRole | "">("");
 const roleSearch = ref("");
 const roleSearchBox = ref<HTMLInputElement | null>(null);
 
-function openRolePicker(role: ModelRole): void {
+function openRolePicker(role: ModelRole, event: MouseEvent): void {
   rolePickerOpen.value = rolePickerOpen.value === role ? "" : role;
   roleSearch.value = "";
-  if (rolePickerOpen.value) void nextTick(() => roleSearchBox.value?.focus());
+  if (!rolePickerOpen.value) return;
+  placeMenu(event);
+  void nextTick(() => roleSearchBox.value?.focus());
 }
 
 /** 某个角色过滤后的候选。RoleCandidate 与 ModelChoice 同形，直接复用同一个过滤器。 */
@@ -186,7 +205,7 @@ async function purge(): Promise<void> {
       <div class="field">
         <span class="field-label">默认模型</span>
         <div class="picker">
-          <button class="field-button" @click="openModelPicker()">
+          <button class="field-button" @click="openModelPicker($event)">
             <span v-if="store.config.model" class="picked-name">
               {{ store.config.model }}
               <em v-if="currentProvider"> · {{ currentProvider.name }}</em>
@@ -196,7 +215,7 @@ async function purge(): Promise<void> {
           </button>
 
           <div v-if="modelPickerOpen" class="backdrop" @click="modelPickerOpen = false" />
-          <div v-if="modelPickerOpen" class="menu">
+          <div v-if="modelPickerOpen" class="menu" :class="{ up: menuUp }">
             <div class="menu-head">
               <span>模型<em v-if="modelSearch"> {{ choices.length }} / {{ allChoices.length }}</em></span>
               <button class="link" @click="actions.loadProviders()">刷新</button>
@@ -282,7 +301,7 @@ async function purge(): Promise<void> {
           <button
             class="field-button"
             :disabled="candidates[role].length === 0"
-            @click="openRolePicker(role)"
+            @click="openRolePicker(role, $event)"
           >
             <span v-if="rolePicked(role)" class="picked-name">
               {{ rolePicked(role)!.model }}<em> · {{ rolePicked(role)!.providerName }}</em>
@@ -294,7 +313,7 @@ async function purge(): Promise<void> {
           </button>
 
           <div v-if="rolePickerOpen === role" class="backdrop" @click="rolePickerOpen = ''" />
-          <div v-if="rolePickerOpen === role" class="menu">
+          <div v-if="rolePickerOpen === role" class="menu" :class="{ up: menuUp }">
             <div class="menu-head">
               <span>
                 {{ ROLE_LABELS[role] }}
@@ -679,6 +698,10 @@ label em {
   border-radius: var(--r-md);
   background: var(--surface);
   box-shadow: var(--shadow-3);
+}
+.menu.up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 
 .menu-head {
