@@ -351,12 +351,25 @@ func (s *Store) AutoMark(ctx context.Context, id int64) (protocol.ProviderAutoMa
 	}
 
 	entries := decodeModels(item.Models)
-	matched, unmatched := 0, 0
+	matched, unmatched, guessed := 0, 0, 0
 	updated := make([]string, 0, len(entries))
 	for _, entry := range entries {
 		parsed := protocol.ParseModelMark(entry)
 		found, ok := catalog.Lookup(parsed.Name)
 		if !ok {
+			// 两份表都没有的，按名字猜一把：厂商给专用模型起名很规矩，
+			// qwen3-tts-flash 就是朗读、qwen3-asr-flash 就是听写。实际发生过用户
+			// 手勾时把这两个勾反、连着三次选反角色的事。猜的只加不减，数量单独报。
+			if roles := GuessRolesByName(parsed.Name); len(roles) > 0 {
+				guessed++
+				for _, role := range roles {
+					if !hasRole(parsed.Roles, role) {
+						parsed.Roles = append(parsed.Roles, role)
+					}
+				}
+				updated = append(updated, protocol.FormatModelMark(parsed))
+				continue
+			}
 			unmatched++
 			updated = append(updated, entry)
 			continue
@@ -380,6 +393,6 @@ func (s *Store) AutoMark(ctx context.Context, id int64) (protocol.ProviderAutoMa
 	}
 	item.Models = encodeModels(updated)
 	return protocol.ProviderAutoMarkResult{
-		Provider: view(item), Matched: matched, Unmatched: unmatched, Note: catalog.Note,
+		Provider: view(item), Matched: matched, Unmatched: unmatched, Guessed: guessed, Note: catalog.Note,
 	}, nil
 }

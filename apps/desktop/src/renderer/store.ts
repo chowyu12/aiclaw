@@ -792,17 +792,20 @@ export const actions = {
   },
 
   /** 按 models.dev 自动标记能力。只加不减，结果直接落库。 */
-  async autoMarkProvider(id: number): Promise<{ matched: number; unmatched: number; note?: string }> {
+  async autoMarkProvider(
+    id: number,
+  ): Promise<{ matched: number; unmatched: number; guessed?: number; note?: string }> {
     const result = (await window.aiclaw.providers.autoMark(id)) as {
       provider: ProviderView;
       matched: number;
       unmatched: number;
+      guessed?: number;
       note?: string;
     };
     state.providers = state.providers.map((item) =>
       item.id === result.provider.id ? result.provider : item,
     );
-    return { matched: result.matched, unmatched: result.unmatched, note: result.note };
+    return { matched: result.matched, unmatched: result.unmatched, guessed: result.guessed, note: result.note };
   },
 
   /**

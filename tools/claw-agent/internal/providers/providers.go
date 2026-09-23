@@ -222,19 +222,82 @@ func view(item *model.Provider) protocol.ProviderView {
 //
 // 能力标记写成 `名字#vision,image` 附在名字后面，而不是换成对象数组：
 // 旧版写下的纯字符串照样读得出来（没有 `#` 就是只做对话），也不用动表结构。
+// encodeModels 把清单写成落库的形式：**按模型名去重**，同名的合并标记。
+//
+// 早先按整条字符串去重，`qwen-image-3.0#vision,image` 与从端点拉回来的
+// `qwen-image-3.0` 被当成两条，界面上同一个模型出现两次、勾选改到哪一行都说不清。
+// 合并规则与能力表相同：能力取并集、窗口取大、位置留在第一次出现的地方。
 func encodeModels(names []string) model.JSON {
-	clean := make([]string, 0, len(names))
-	seen := map[string]bool{}
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name == "" || seen[name] {
+	encoded, _ := json.Marshal(MergeModelEntries(names))
+	return model.JSON(encoded)
+}
+
+// MergeModelEntries 按模型名合并清单项。
+func MergeModelEntries(entries []string) []string {
+	order := make([]string, 0, len(entries))
+	merged := map[string]protocol.ParsedModel{}
+	for _, entry := range entries {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
 			continue
 		}
-		seen[name] = true
-		clean = append(clean, name)
+		parsed := protocol.ParseModelMark(entry)
+		key := strings.ToLower(parsed.Name)
+		if key == "" {
+			continue
+		}
+		existing, seen := merged[key]
+		if !seen {
+			order = append(order, key)
+			merged[key] = parsed
+			continue
+		}
+		for _, role := range parsed.Roles {
+			if !hasRole(existing.Roles, role) {
+				existing.Roles = append(existing.Roles, role)
+			}
+		}
+		if parsed.Context > existing.Context {
+			existing.Context = parsed.Context
+		}
+		merged[key] = existing
 	}
-	encoded, _ := json.Marshal(clean)
-	return model.JSON(encoded)
+	out := make([]string, 0, len(order))
+	for _, key := range order {
+		out = append(out, protocol.FormatModelMark(merged[key]))
+	}
+	return out
+}
+
+// GuessRolesByName 按模型名猜能力，只在两份能力表都没收这个模型时用。
+//
+// 只认最不会错的几个词：名字里带 tts/speech 的是朗读，asr/whisper/transcribe 是听写，
+// image/imagen/dall-e/flux/万相 是画图，-vl-/vision 是看图。「omni」这类什么都能的
+// 不猜——猜多了等于乱标。
+func GuessRolesByName(name string) []protocol.ModelRole {
+	lower := strings.ToLower(name)
+	if index := strings.LastIndex(lower, "/"); index >= 0 {
+		lower = lower[index+1:]
+	}
+	has := func(words ...string) bool {
+		for _, word := range words {
+			if strings.Contains(lower, word) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has("-tts", "tts-", "speech-0", "text-to-speech"):
+		return []protocol.ModelRole{protocol.RoleTTS}
+	case has("-asr", "asr-", "whisper", "transcribe", "speech-to-text"):
+		return []protocol.ModelRole{protocol.RoleSTT}
+	case has("-image", "image-", "imagen", "dall-e", "flux", "wan2", "stable-diffusion", "z-image"):
+		return []protocol.ModelRole{protocol.RoleImage}
+	case has("-vl-", "-vl", "vision"):
+		return []protocol.ModelRole{protocol.RoleVision}
+	}
+	return nil
 }
 
 func decodeModels(raw model.JSON) []string {

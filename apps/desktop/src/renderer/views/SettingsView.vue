@@ -106,13 +106,38 @@ const candidates = computed(() =>
     Record<ModelRole, ReturnType<typeof roleCandidates>>,
 );
 
-/** `providerId/model`，给 select 当值用。空串表示没配。 */
+/** 哪个角色的选择器开着；空串都收着。搜索词共用一个：同一时间只开一个。 */
+const rolePickerOpen = ref<ModelRole | "">("");
+const roleSearch = ref("");
+const roleSearchBox = ref<HTMLInputElement | null>(null);
+
+function openRolePicker(role: ModelRole): void {
+  rolePickerOpen.value = rolePickerOpen.value === role ? "" : role;
+  roleSearch.value = "";
+  if (rolePickerOpen.value) void nextTick(() => roleSearchBox.value?.focus());
+}
+
+/** 某个角色过滤后的候选。RoleCandidate 与 ModelChoice 同形，直接复用同一个过滤器。 */
+function roleChoices(role: ModelRole) {
+  return filterChoices(candidates.value[role], roleSearch.value);
+}
+
+/** 当前选中项的显示文字。 */
+function rolePicked(role: ModelRole): { model: string; providerName: string } | null {
+  const current = store.config?.roles?.[role];
+  if (!current?.providerId || !current.model) return null;
+  const provider = store.providers.find((item) => item.id === current.providerId);
+  return { model: current.model, providerName: provider?.name ?? `服务 ${current.providerId}` };
+}
+
+/** `providerId/model`，给选择器当值用。空串表示没配。 */
 function roleValue(role: ModelRole): string {
   const current = store.config?.roles?.[role];
   return current?.providerId && current.model ? `${current.providerId}/${current.model}` : "";
 }
 
 async function pickRole(role: ModelRole, value: string): Promise<void> {
+  rolePickerOpen.value = "";
   const [providerId, ...rest] = value.split("/");
   const next = {
     ...(store.config?.roles ?? {}),
@@ -249,26 +274,61 @@ async function purge(): Promise<void> {
         </p>
       </header>
 
-      <label v-for="role in MODEL_ROLES" :key="role">
-        <span>{{ ROLE_LABELS[role] }}</span>
-        <select
-          :value="roleValue(role)"
-          :disabled="candidates[role].length === 0"
-          @change="pickRole(role, ($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">
-            {{ candidates[role].length === 0 ? "没有标记为「" + ROLE_LABELS[role] + "」的模型" : "不使用" }}
-          </option>
-          <option
-            v-for="item in candidates[role]"
-            :key="`${item.providerId}/${item.model}`"
-            :value="`${item.providerId}/${item.model}`"
+      <!-- 与默认模型同一套可搜索的选择器：一个服务标了几十个能看图的模型，
+           原生 select 翻不动，也没法搜。 -->
+      <div v-for="role in MODEL_ROLES" :key="role" class="field">
+        <span class="field-label">{{ ROLE_LABELS[role] }}</span>
+        <div class="picker">
+          <button
+            class="field-button"
+            :disabled="candidates[role].length === 0"
+            @click="openRolePicker(role)"
           >
-            {{ item.model }} · {{ item.providerName }}{{ item.context ? ` · ${formatWindow(item.context)}` : "" }}
-          </option>
-        </select>
+            <span v-if="rolePicked(role)" class="picked-name">
+              {{ rolePicked(role)!.model }}<em> · {{ rolePicked(role)!.providerName }}</em>
+            </span>
+            <span v-else class="placeholder">
+              {{ candidates[role].length === 0 ? "没有标记为「" + ROLE_LABELS[role] + "」的模型" : "不使用" }}
+            </span>
+            <span class="chev">⌄</span>
+          </button>
+
+          <div v-if="rolePickerOpen === role" class="backdrop" @click="rolePickerOpen = ''" />
+          <div v-if="rolePickerOpen === role" class="menu">
+            <div class="menu-head">
+              <span>
+                {{ ROLE_LABELS[role] }}
+                <em v-if="roleSearch"> {{ roleChoices(role).length }} / {{ candidates[role].length }}</em>
+              </span>
+            </div>
+            <input
+              ref="roleSearchBox"
+              v-model="roleSearch"
+              class="menu-search"
+              placeholder="搜索模型或服务名"
+              @keydown.enter="roleChoices(role)[0] && pickRole(role, `${roleChoices(role)[0]!.providerId}/${roleChoices(role)[0]!.model}`)"
+              @keydown.esc="rolePickerOpen = ''"
+            />
+            <button class="menu-item" :class="{ picked: !roleValue(role) }" @click="pickRole(role, '')">
+              <span class="menu-name">不使用</span>
+            </button>
+            <p v-if="roleChoices(role).length === 0" class="menu-note">没有匹配「{{ roleSearch }}」的模型。</p>
+            <button
+              v-for="item in roleChoices(role)"
+              :key="`${item.providerId}/${item.model}`"
+              class="menu-item"
+              :class="{ picked: roleValue(role) === `${item.providerId}/${item.model}` }"
+              @click="pickRole(role, `${item.providerId}/${item.model}`)"
+            >
+              <span class="menu-name">{{ item.model }}</span>
+              <span class="menu-note">
+                {{ item.providerName }}<template v-if="item.context"> · {{ formatWindow(item.context) }}</template>
+              </span>
+            </button>
+          </div>
+        </div>
         <span class="hint">{{ ROLE_HINTS[role] }}</span>
-      </label>
+      </div>
 
       <p class="note">
         没配的角色对应的工具不会出现在会话里——给模型一个用不了的工具，它会调、

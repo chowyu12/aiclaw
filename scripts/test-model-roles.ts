@@ -3,6 +3,8 @@ import { test } from "node:test";
 
 import {
   formatModelMark,
+  guessRoleByName,
+  markConflict,
   modelHasRole,
   parseModelMark,
   roleCandidates,
@@ -100,4 +102,22 @@ test("候选带上窗口：选了之后那一格要能自动填", () => {
 
 test("没有模型担任某角色时是空，不做兜底", () => {
   assert.deepEqual(roleCandidates(providers, "stt"), []);
+});
+
+test("按名字猜角色：只认最不会错的几个词", () => {
+  assert.equal(guessRoleByName("qwen3-tts-flash"), "tts");
+  assert.equal(guessRoleByName("MiniMax/speech-02-hd"), "tts");
+  assert.equal(guessRoleByName("qwen3-asr-flash-2026-02-10"), "stt");
+  assert.equal(guessRoleByName("wan2.7-image"), "image");
+  assert.equal(guessRoleByName("qwen3-vl-plus"), "vision");
+  assert.equal(guessRoleByName("qwen3.5-omni-plus"), null);
+  assert.equal(guessRoleByName("deepseek-v4.1-flash"), null);
+});
+
+test("听写 / 朗读勾反了要当场提醒", () => {
+  assert.match(markConflict("qwen3-tts-flash#stt"), /像朗读/);
+  assert.match(markConflict("qwen3-asr-flash-2026-02-10#tts"), /像听写/);
+  assert.equal(markConflict("qwen3-tts-flash#tts"), "");
+  assert.equal(markConflict("qwen3-asr-flash#stt,tts"), "", "两个都勾的不算反");
+  assert.equal(markConflict("qwen3.5-omni-plus#stt,tts"), "", "名字看不出来的不提醒");
 });

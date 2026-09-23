@@ -123,3 +123,35 @@ export function roleCandidates(providers: readonly ProviderLike[], role: ModelRo
   }
   return found;
 }
+
+/**
+ * 按模型名猜它是干什么的。与内核的 GuessRolesByName 是同一套词表，这边只用来
+ * 提醒：用户手勾时把 asr 勾成朗读、tts 勾成听写，两格挨着、名字又长，实际连着
+ * 错了三次，而选反的角色一用就是一个莫名其妙的 400。
+ */
+export function guessRoleByName(model: string): ModelRole | null {
+  const lower = model.toLowerCase().split("/").pop() ?? "";
+  const has = (...words: string[]) => words.some((word) => lower.includes(word));
+  if (has("-tts", "tts-", "speech-0", "text-to-speech")) return "tts";
+  if (has("-asr", "asr-", "whisper", "transcribe", "speech-to-text")) return "stt";
+  if (has("-image", "image-", "imagen", "dall-e", "flux", "wan2", "stable-diffusion", "z-image")) return "image";
+  if (has("-vl-", "-vl", "vision")) return "vision";
+  return null;
+}
+
+/**
+ * 一条清单项的标记与它的名字有没有明显冲突。只管听写 / 朗读这一对：它们互斥，
+ * 而且是唯一会被勾反的一对——一个模型既能看图又能画图并不矛盾。
+ * 返回一句给人看的话，没冲突返回空串。
+ */
+export function markConflict(entry: string): string {
+  const parsed = parseModelMark(entry);
+  const guess = guessRoleByName(parsed.name);
+  if (guess === "tts" && parsed.roles.includes("stt") && !parsed.roles.includes("tts")) {
+    return "名字像朗读（TTS）模型，却勾了听写";
+  }
+  if (guess === "stt" && parsed.roles.includes("tts") && !parsed.roles.includes("stt")) {
+    return "名字像听写（ASR）模型，却勾了朗读";
+  }
+  return "";
+}

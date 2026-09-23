@@ -197,6 +197,8 @@ export interface ProviderAutoMarkResult {
   matched: number;
   /** 表里没有、要自己勾的模型数。 */
   unmatched: number;
+  /** 表里没有、按模型名猜出来的数量。 */
+  guessed?: number;
   /** 某份表没拉到时的说明；两份都齐时没有。 */
   note?: string;
 }

@@ -212,6 +212,8 @@ type ProviderAutoMarkResult struct {
 	Provider  ProviderView `json:"provider"`
 	Matched   int          `json:"matched"`
 	Unmatched int          `json:"unmatched"`
+	/** 表里没有、按模型名猜出来的数量。猜的只加不减。 */
+	Guessed int `json:"guessed,omitempty"`
 	/** 某份表没拉到时的说明；两份都齐时为空。 */
 	Note string `json:"note,omitempty"`
 }

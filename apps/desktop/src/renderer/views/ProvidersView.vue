@@ -8,6 +8,7 @@ import {
   formatModelMark,
   parseModelMark,
   type ModelRole,
+  markConflict,
 } from "../model-roles";
 
 /**
@@ -106,7 +107,10 @@ async function autoMark(provider: ProviderRow): Promise<void> {
 }
 
 const marking = reactive<
-  Record<number, { loading: boolean; matched?: number; unmatched?: number; note?: string; error?: string }>
+  Record<
+    number,
+    { loading: boolean; matched?: number; unmatched?: number; guessed?: number; note?: string; error?: string }
+  >
 >({});
 const saving = ref(false);
 /** 每个服务的 Key 输入框。存完立刻清空，不让凭据留在 DOM 里。 */
@@ -189,8 +193,16 @@ async function fetchModels(provider: ProviderRow): Promise<void> {
   fetches[provider.id] = { loading: true };
   try {
     const remote = await actions.fetchProviderModels(provider.id);
+    // 按模型名比，不按整条字符串：清单里的 `qwen-image-3.0#image` 与拉回来的
+    // `qwen-image-3.0` 是同一个模型，按字符串比会出现两行。
     const merged = [...provider.models];
-    for (const name of remote) if (!merged.includes(name)) merged.push(name);
+    const known = new Set(merged.map((entry) => parseModelMark(entry).name.toLowerCase()));
+    for (const name of remote) {
+      const key = parseModelMark(name).name.toLowerCase();
+      if (known.has(key)) continue;
+      known.add(key);
+      merged.push(name);
+    }
     await actions.updateProvider({ id: provider.id, models: merged });
     fetches[provider.id] = { loading: false, count: remote.length };
   } catch (error) {
@@ -351,6 +363,8 @@ function summary(provider: ProviderRow): string {
                 {{ ROLE_LABELS[role] }}
               </label>
               <button class="icon" title="从清单里移除" @click="removeModel(provider, entry)">×</button>
+              <!-- 勾反了当场说：选了这个角色一用就是一个莫名其妙的 400，那时已经离这里很远。 -->
+              <span v-if="markConflict(entry)" class="hint bad conflict">{{ markConflict(entry) }}</span>
             </div>
 
             <p v-if="hiddenCount(provider) > 0" class="hint">
@@ -379,7 +393,7 @@ function summary(provider: ProviderRow): string {
             </button>
             <span v-if="marking[provider.id]?.error" class="hint bad">{{ marking[provider.id]!.error }}</span>
             <span v-else-if="marking[provider.id]?.matched !== undefined" class="hint">
-              查到 {{ marking[provider.id]!.matched }} 个，另 {{ marking[provider.id]!.unmatched }} 个表里没有，要自己勾。
+              查到 {{ marking[provider.id]!.matched }} 个<template v-if="marking[provider.id]?.guessed">，{{ marking[provider.id]!.guessed }} 个表里没有、按名字猜的</template>，另 {{ marking[provider.id]!.unmatched }} 个表里没有，要自己勾。
               <!-- 两份表少拉到一份时说出来：结果不完整，用户该知道再点一次可能更全。 -->
               <template v-if="marking[provider.id]?.note">{{ marking[provider.id]!.note }}。</template>
             </span>
@@ -677,6 +691,11 @@ label > span em {
   color: var(--ink-2);
   white-space: nowrap;
   cursor: pointer;
+}
+
+.conflict {
+  flex-basis: 100%;
+  margin-left: 2px;
 }
 
 .cap input {
