@@ -111,10 +111,6 @@ func Description(tools []Tool) string {
 	builder.WriteString(fmt.Sprintf("可用工具（共 %d 个）：\n", len(sorted)))
 	for index, tool := range sorted {
 		if index >= maxDeclared {
-			builder.WriteString(fmt.Sprintf(
-				"…还有 %d 个没有列出签名，用 ALL_TOOLS 按名字或说明搜，再直接调用。\n",
-				len(sorted)-maxDeclared,
-			))
 			break
 		}
 		summary := firstLine(tool.Description)
@@ -124,7 +120,36 @@ func Description(tools []Tool) string {
 		}
 		builder.WriteString("\n")
 	}
+	if hidden := sorted[min(maxDeclared, len(sorted)):]; len(hidden) > 0 {
+		// 没列签名的那部分要**露出名字**，而且要匀着取样。模型不会去搜一个它不知道
+		// 存在的东西：只写「还有 101 个」，它就断定没有；而按字母序取前几个，看到的
+		// 全是同一个前缀（一串「企业 xx 查询」），另一头的整块工具照样看不见。
+		builder.WriteString(fmt.Sprintf(
+			"…还有 %d 个没有列出签名，比如 %s。用 ALL_TOOLS 按名字或说明搜到完整名字，再直接调用。\n",
+			len(hidden), strings.Join(sampleIdents(hidden, sampledHidden), "、"),
+		))
+	}
 	return builder.String()
+}
+
+// sampledHidden 是没列签名的工具里举几个名字。
+const sampledHidden = 10
+
+// sampleIdents 在一串排好序的工具里均匀取 n 个名字，首尾都取到。
+func sampleIdents(tools []Tool, n int) []string {
+	if len(tools) <= n {
+		names := make([]string, 0, len(tools))
+		for _, tool := range tools {
+			names = append(names, "tools."+tool.Ident)
+		}
+		return names
+	}
+	names := make([]string, 0, n)
+	for i := 0; i < n; i++ {
+		index := i * (len(tools) - 1) / (n - 1)
+		names = append(names, "tools."+tools[index].Ident)
+	}
+	return names
 }
 
 // firstLine 取描述的第一行并截断。

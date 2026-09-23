@@ -310,9 +310,11 @@ func toolValue(vm *goja.Runtime, result string) goja.Value {
 		return vm.ToValue(result)
 	}
 	if object, isObject := value.(*goja.Object); isObject {
+		// 参数顺序是 writable, configurable, enumerable——enumerable 必须是 FALSE，
+		// 否则 Object.keys(r) 里会冒出 toString，而模型常拿 keys 判断返回有哪些字段。
 		_ = object.DefineDataProperty("toString",
 			vm.ToValue(func(goja.FunctionCall) goja.Value { return vm.ToValue(raw) }),
-			goja.FLAG_FALSE, goja.FLAG_FALSE, goja.FLAG_TRUE)
+			goja.FLAG_FALSE, goja.FLAG_TRUE, goja.FLAG_FALSE)
 	}
 	return value
 }

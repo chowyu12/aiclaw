@@ -337,12 +337,13 @@ func TestJsonResultsStringifyToTheirSource(t *testing.T) {
 		text(String(r).slice(0, 12));
 		text(`+"`${r}`"+`.startsWith("{"));
 		text(JSON.stringify(r).includes("toString"));
+		text(Object.keys(r).join(","));
 		text(typeof s + " " + s.length);
 	`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "2\n{\"results\":[\ntrue\nfalse\nstring 12"
+	want := "2\n{\"results\":[\ntrue\nfalse\nresults\nstring 12"
 	if out != want {
 		t.Errorf("输出 = %q，想要 %q", out, want)
 	}

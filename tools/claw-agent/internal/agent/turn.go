@@ -593,7 +593,7 @@ func (s *Session) runTool(ctx context.Context, call llm.ToolCall, env *tools.Env
 	} else {
 		args = json.RawMessage(call.Arguments)
 		if !json.Valid(args) {
-			return "", errors.New("工具参数不是合法 JSON")
+			return "", errors.New(tools.ExplainBadArguments(call.Arguments, errors.New("json 解析失败")))
 		}
 	}
 	// 单个工具的墙钟上限。exec 有自己更短的超时，这里防的是没有自身上限的工具

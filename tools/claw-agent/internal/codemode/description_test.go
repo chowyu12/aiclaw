@@ -2,6 +2,8 @@ package codemode
 
 import (
 	"encoding/json"
+	"fmt"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -83,6 +85,34 @@ func TestManyToolsAreNotAllDeclared(t *testing.T) {
 		t.Errorf("描述本身太大了：%d 字节", len(text))
 	}
 	t.Logf("161 个工具的描述共 %d 字节（直挂约 110KB）", len(text))
+
+	// 没列签名的那部分要露出名字，而且要横跨整个字母表：模型不会去搜一个它
+	// 不知道存在的东西，只看得见一个角落等于其余的都不存在。
+	sorted := AssignIdentifiers(many)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Ident < sorted[j].Ident })
+	hidden := sorted[maxDeclared:]
+	first, last := hidden[0].Ident, hidden[len(hidden)-1].Ident
+	if !strings.Contains(text, "比如 tools."+first) || !strings.Contains(text, "tools."+last) {
+		t.Errorf("举例应覆盖到没列出部分的两头（%s … %s）：\n%s", first, last, text[len(text)-600:])
+	}
+}
+
+func TestSampleIdentsSpreadsEvenly(t *testing.T) {
+	many := make([]Tool, 0, 100)
+	for i := 0; i < 100; i++ {
+		many = append(many, Tool{Ident: fmt.Sprintf("t%03d", i)})
+	}
+	got := sampleIdents(many, 10)
+	if len(got) != 10 || got[0] != "tools.t000" || got[9] != "tools.t099" {
+		t.Errorf("首尾都要取到：%v", got)
+	}
+	if got[4] == got[5] {
+		t.Errorf("取样不该重复：%v", got)
+	}
+	few := sampleIdents(many[:3], 10)
+	if len(few) != 3 {
+		t.Errorf("不够 n 个就全列：%v", few)
+	}
 }
 
 func TestLongToolDescriptionsAreTrimmed(t *testing.T) {

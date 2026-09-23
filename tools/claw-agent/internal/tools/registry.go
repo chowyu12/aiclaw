@@ -266,9 +266,35 @@ func decodeArgs(raw json.RawMessage, out any) error {
 		raw = json.RawMessage(`{}`)
 	}
 	if err := json.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("参数不是合法 JSON 对象：%w", err)
+		return errors.New(ExplainBadArguments(string(raw), err))
 	}
 	return nil
+}
+
+// ExplainBadArguments 把「参数不是合法 JSON」说成模型能据以行动的话。
+//
+// 最常见的原因不是写错格式，而是**输出撞上上限被截断**：一万五千字符的参数
+// 停在一句话中间。只说「不是合法 JSON」，模型会去改 JSON 的写法，改几轮都
+// 没用；说出「断在第 N 个字符」，它才知道该把这一步拆小。判断很粗：合法的
+// 参数一定以 } 或 ] 收尾，不是的就当截断。
+func ExplainBadArguments(raw string, err error) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed != "" && !strings.HasSuffix(trimmed, "}") && !strings.HasSuffix(trimmed, "]") {
+		return fmt.Sprintf(
+			"工具参数在第 %d 个字符处被截断（结尾是 %q），多半是这次输出超出了长度上限。"+
+				"把这一步拆成几次调用：先产出一部分、用 store() 存着，或者让工具自己去读文件而不是把内容写进参数。",
+			len([]rune(trimmed)), tailRunes(trimmed, 12),
+		)
+	}
+	return fmt.Sprintf("参数不是合法 JSON 对象：%v", err)
+}
+
+func tailRunes(text string, n int) string {
+	runes := []rune(text)
+	if len(runes) <= n {
+		return text
+	}
+	return "…" + string(runes[len(runes)-n:])
 }
 
 func schema(properties map[string]any, required ...string) json.RawMessage {

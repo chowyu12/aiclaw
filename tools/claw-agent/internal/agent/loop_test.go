@@ -1171,3 +1171,22 @@ func TestLongSkillDescriptionsAreTruncatedInPrompt(t *testing.T) {
 		t.Errorf("截断了就要有省略号，让模型知道还有下文：%q", line)
 	}
 }
+
+// 输出撞上上限时工具参数会停在半句话里。错误要说「被截断」，不能只说「不是合法 JSON」——
+// 后者让模型去改写法，改几轮都没用。
+func TestTruncatedToolArgumentsAreCalledOut(t *testing.T) {
+	cut := `{"path":"out.txt","content":"第一段写到这里就被切掉了，后面还有很多`
+	model := &fakeModel{script: []string{
+		sseToolCalls([3]string{"c1", "write_file", cut}),
+		sseText("好。"),
+	}}
+	session := newTestSession(t, model, protocol.ApprovalBypass)
+	emitter := &recordingEmitter{approve: true}
+	session.RunTurn(context.Background(), "t1", "写文件", nil, nil, emitter)
+	if !emitter.find(protocol.NotifyItemCompleted, "被截断") {
+		t.Error("工具结果里应指出参数被截断")
+	}
+	if !emitter.find(protocol.NotifyItemCompleted, "拆成几次") {
+		t.Error("应告诉模型怎么做：拆成几次调用")
+	}
+}

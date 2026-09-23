@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -80,7 +81,7 @@ func (s *Session) installCodeMode() int {
 				Code string `json:"code"`
 			}
 			if err := json.Unmarshal(raw, &args); err != nil {
-				return "", fmt.Errorf("参数不是合法 JSON 对象：%w", err)
+				return "", errors.New(tools.ExplainBadArguments(string(raw), err))
 			}
 			if args.Code == "" {
 				return "", fmt.Errorf("code 不能为空")
