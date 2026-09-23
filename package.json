@@ -2,7 +2,7 @@
   "name": "aiclaw",
   "private": true,
   "type": "module",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "AIClaw：本地 Agent 桌面客户端（Electron 宿主 + Go 内核 claw-agent）",
   "repository": {
     "type": "git",
