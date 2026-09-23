@@ -68,7 +68,9 @@ make help     # 其余 target
 多模态角色真跑一遍用户会做的事，花钱也慢，只在发版前跑。
 
 数据目录：`~/.aiclaw/`（`aiclaw.db` 应用库、`plugins/` 插件、`skills/` 技能、
-`memory.md` 长期记忆）；会话库与界面配置在 Electron 的 userData 目录。
+`memory.md` 全局长期记忆）；会话库与界面配置在 Electron 的 userData 目录。
+记忆分两层：跟项目无关的进全局 `memory.md`，某个项目的约定与踩过的坑记在
+`<工作区>/.aiclaw/memory.md`，跟着仓库走，`remember` 工具有工作区时默认记这里。
 
 ## 打包与发布
 

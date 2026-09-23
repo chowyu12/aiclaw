@@ -577,14 +577,17 @@ func TestMemoryGoesIntoPromptAndRememberAppends(t *testing.T) {
 	}
 
 	model := &fakeModel{script: []string{
+		// 没写 scope：有工作区时默认记进工作区，项目的事不该污染全局。
 		sseToolCalls([3]string{"c1", "remember", `{"text":"这个项目的测试用 make check"}`}),
+		sseToolCalls([3]string{"c2", "remember", `{"text":"用户偏好中文回复","scope":"global"}`}),
 		sseText("记住了。"),
 	}}
 	server := httptest.NewServer(http.HandlerFunc(model.handler))
 	t.Cleanup(server.Close)
+	workdir := t.TempDir()
 	session, err := New(context.Background(), "test", protocol.SessionStartParams{
 		Model:          protocol.ModelConfig{BaseURL: server.URL, Model: "fake"},
-		Workdir:        t.TempDir(),
+		Workdir:        workdir,
 		ApprovalPolicy: protocol.ApprovalBypass,
 		MemoryFile:     memoryFile,
 	}, StaticKey("sk-test"))
@@ -606,29 +609,82 @@ func TestMemoryGoesIntoPromptAndRememberAppends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(saved), "make check") {
-		t.Errorf("remember 应当把新的一条落盘：%q", saved)
+	if strings.Contains(string(saved), "make check") {
+		t.Errorf("项目的事不该进全局记忆：%q", saved)
+	}
+	if !strings.Contains(string(saved), "用户偏好中文回复") {
+		t.Errorf("scope=global 的应落到全局文件：%q", saved)
 	}
 	// 旧的不能被覆盖掉。
 	if !strings.Contains(string(saved), "用户习惯用 Go") {
 		t.Errorf("追加不该抹掉已有记忆：%q", saved)
 	}
+	local, err := os.ReadFile(filepath.Join(workdir, ".aiclaw", "memory.md"))
+	if err != nil {
+		t.Fatalf("工作区记忆文件应当建出来：%v", err)
+	}
+	if !strings.Contains(string(local), "make check") {
+		t.Errorf("默认应记进工作区记忆：%q", local)
+	}
+	// 两层都要进提示词，且分得清。
+	if prompt := session.Memory(); !strings.Contains(prompt, "【本工作区的记忆】") || !strings.Contains(prompt, "make check") {
+		t.Errorf("提示词里应带上工作区记忆：%q", prompt)
+	}
 }
 
-func TestNoMemoryFileMeansNoRememberTool(t *testing.T) {
-	// 没配记忆文件时不该给模型一个写不进任何地方的工具。
-	session := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
+func TestWorkspaceMemoryFollowsTheWorkspace(t *testing.T) {
+	first, second := t.TempDir(), t.TempDir()
+	_ = os.MkdirAll(filepath.Join(second, ".aiclaw"), 0o755)
+	_ = os.WriteFile(filepath.Join(second, ".aiclaw", "memory.md"), []byte("- (2026-09-01) 这个项目用 pnpm\n"), 0o600)
+	model := &fakeModel{}
+	server := httptest.NewServer(http.HandlerFunc(model.handler))
+	t.Cleanup(server.Close)
+	session, err := New(context.Background(), "test", protocol.SessionStartParams{
+		Model: protocol.ModelConfig{BaseURL: server.URL, Model: "fake"}, Workdir: first,
+	}, StaticKey("sk-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(session.Close)
+	if strings.Contains(session.Memory(), "pnpm") {
+		t.Error("第一个工作区没有记忆，不该看到第二个的")
+	}
+	if err := session.SetWorkspace(second); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(session.Memory(), "pnpm") || !strings.Contains(session.messages[0].Content, "pnpm") {
+		t.Error("换到第二个工作区后，它的记忆应进提示词")
+	}
+}
+
+func TestNoMemoryTargetMeansNoRememberTool(t *testing.T) {
+	// 既没配全局记忆文件、也没有工作区时，不该给模型一个写不进任何地方的工具。
+	model := &fakeModel{}
+	server := httptest.NewServer(http.HandlerFunc(model.handler))
+	t.Cleanup(server.Close)
+	session, err := New(context.Background(), "test", protocol.SessionStartParams{
+		Model: protocol.ModelConfig{BaseURL: server.URL, Model: "fake"},
+	}, StaticKey("sk-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(session.Close)
 	for _, name := range session.Tools() {
 		if name == "remember" {
-			t.Fatal("没有记忆文件时不该注册 remember")
+			t.Fatal("没有任何记忆落点时不该注册 remember")
 		}
+	}
+	// 只有工作区也算有落点：项目的事有地方记。
+	withWorkdir := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
+	if !strings.Contains(strings.Join(withWorkdir.Tools(), ","), "remember") {
+		t.Error("有工作区时应注册 remember")
 	}
 }
 
 func TestRememberIsGatedByApproval(t *testing.T) {
 	memoryFile := filepath.Join(t.TempDir(), "memory.md")
 	model := &fakeModel{script: []string{
-		sseToolCalls([3]string{"c1", "remember", `{"text":"不该被写进去"}`}),
+		sseToolCalls([3]string{"c1", "remember", `{"text":"不该被写进去","scope":"global"}`}),
 		sseText("好的。"),
 	}}
 	server := httptest.NewServer(http.HandlerFunc(model.handler))
@@ -636,7 +692,7 @@ func TestRememberIsGatedByApproval(t *testing.T) {
 	session, err := New(context.Background(), "test", protocol.SessionStartParams{
 		Model:   protocol.ModelConfig{BaseURL: server.URL, Model: "fake"},
 		Workdir: t.TempDir(),
-		// on-write：写长期记忆要问。这条会一直跟着以后每个会话，
+		// on-write：写全局长期记忆要问。这条会一直跟着以后每个会话，
 		// 不该让模型自己决定。
 		ApprovalPolicy: protocol.ApprovalOnWrite,
 		MemoryFile:     memoryFile,

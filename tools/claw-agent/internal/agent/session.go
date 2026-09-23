@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -98,8 +99,11 @@ type Session struct {
 	// skills 是本次会话可用的技能。只把名字与说明放进提示词，
 	// 正文等模型调 load_skill 时才给——见 skills 包的说明。
 	skills []skills.Skill
-	// memory 是跨会话的长期记忆正文，起会话时读进来。
-	memory string
+	// globalMemory 是跨项目的长期记忆正文（用户偏好、通用约定），起会话时读进来。
+	globalMemory string
+	// workspaceMemory 是当前工作区自己的记忆（这个项目的约定、踩过的坑），
+	// 放在 <工作区>/.aiclaw/memory.md，换工作区就换一份。
+	workspaceMemory string
 	// shells 是这个会话的常驻 shell。会话结束时一并关掉——
 	// 留着的话，用户关了对话，几个 shell 还在后台跑着。
 	shells *tools.ShellPool
@@ -230,7 +234,7 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 
 	// 技能、记忆、computer use 都在系统提示词之前装好：提示词要列出它们。
 	session.loadSkills(config.SkillDirs)
-	session.loadMemory(config.MemoryFile)
+	session.loadMemory(config)
 	if err := session.registerComputerTools(); err != nil {
 		return nil, err
 	}
@@ -238,7 +242,7 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	// 系统提示词在工具挂载完之后再生成：它要列出实际可用的工具名与技能。
 	session.messages = append(session.messages, llm.Message{
 		Role:    llm.RoleSystem,
-		Content: buildSystemPrompt(config, registry, session.skills, session.memory),
+		Content: buildSystemPrompt(config, registry, session.skills, session.memoryText()),
 	})
 	session.applied = refreshOf(config)
 	return session, nil
@@ -304,56 +308,100 @@ func (s *Session) loadSkills(dirs []string) {
 	}
 }
 
-// loadMemory 读长期记忆并注册 remember 工具。
+// loadMemory 读两层长期记忆并注册 remember 工具。
 //
-// 记忆文件在工作目录之外（它跨项目），所以不能走内置文件工具——
-// 那些工具的路径一律收敛在工作目录内，这是没有沙箱之后仅剩的防护之一，
-// 不能为了记忆开个口子。于是给一个只能写这一个文件的专用工具。
-func (s *Session) loadMemory(path string) {
-	if strings.TrimSpace(path) == "" {
+// 记忆分两层，是因为实际用下来一层不够：模型把「某个项目的服务端会在任务结束后
+// 主动断连」这种细节记进了全局记忆，从此每个会话的提示词都带着一条与它无关的话。
+// 项目的事记在项目里（<工作区>/.aiclaw/memory.md，跟着仓库走，换项目就换一份）；
+// 只有真正跨项目的——用户偏好、通用约定——才进全局那份。
+//
+// 全局记忆文件在工作目录之外，不能走内置文件工具（那些工具的路径一律收敛在
+// 工作目录内，是没有沙箱之后仅剩的防护之一）。于是给一个只会写这两个文件的专用工具。
+func (s *Session) loadMemory(config protocol.SessionStartParams) {
+	s.globalMemory = s.loadMemoryFile(config.MemoryFile, "长期记忆")
+	s.workspaceMemory = s.loadMemoryFile(workspaceMemoryPath(config.Workdir), "工作区记忆")
+	// 两个落点都没有，就别给模型一个写不进任何地方的工具。
+	if strings.TrimSpace(config.MemoryFile) == "" && strings.TrimSpace(config.Workdir) == "" {
 		return
 	}
-	text, err := memory.Load(path)
-	if err != nil {
-		s.mcpStatus["长期记忆"] = err.Error()
-	}
-	s.memory = strings.TrimSpace(text)
 
 	if err := s.registry.Register(tools.Tool{
 		Name: "remember",
-		Description: "把一条需要**跨会话**记住的事实写进长期记忆：用户的偏好、" +
-			"项目的约定、踩过的坑。只写结论，一句话；这里放的不是日志也不是原始内容。" +
-			"当前记忆已经在系统提示词里，重复的不用再写。",
+		Description: "把一条需要**跨会话**记住的事实写进长期记忆。只写结论，一句话；" +
+			"这里放的不是日志也不是原始内容。当前记忆已经在系统提示词里，重复的不用再写。" +
+			"scope 选 workspace（默认，有工作区时）记这个项目的约定与踩过的坑；" +
+			"只有跟项目无关、以后每个会话都用得上的（用户偏好、通用习惯）才选 global。",
 		// 按 external 而不是 write。
 		//
 		// EffectWrite 在 on-write 档位下**不弹审批**，因为内置文件工具的路径
-		// 一律收敛在工作目录内，那种写是用户已经默许的。记忆文件不一样：
+		// 一律收敛在工作目录内，那种写是用户已经默许的。全局记忆文件不一样：
 		// 它在工作目录之外，而且会进入**以后每一个会话**的系统提示词——
 		// 一条写歪的记忆会长期影响模型的行为。这种代价该让用户看一眼。
+		// 工作区记忆就在工作区里，按写工作区文件的规矩走（见 handler）。
 		Effect: tools.EffectExternal,
 		Schema: rememberSchema(),
 		Handler: func(ctx context.Context, args json.RawMessage, env *tools.Env) (string, error) {
 			var input struct {
-				Text string `json:"text"`
+				Text  string `json:"text"`
+				Scope string `json:"scope"`
 			}
 			if err := json.Unmarshal(args, &input); err != nil {
 				return "", errors.New("参数不是合法 JSON 对象")
 			}
-			// 这里传的 Effect 才是决定档位的那个；Tool.Effect 只是元信息。
-			if err := env.RequestApproval(
-				ctx, tools.EffectExternal, protocol.ApprovalWrite,
-				"写入长期记忆", input.Text, "这条会在以后每个会话里都带上",
-			); err != nil {
-				return "", err
-			}
-			updated, err := memory.Append(path, input.Text)
-			if err != nil {
-				return "", err
-			}
 			s.mu.Lock()
-			s.memory = strings.TrimSpace(updated)
+			workdir := s.config.Workdir
 			s.mu.Unlock()
-			return "已记住。", nil
+
+			scope := strings.ToLower(strings.TrimSpace(input.Scope))
+			if scope == "" {
+				scope = "global"
+				if workdir != "" {
+					scope = "workspace"
+				}
+			}
+			switch scope {
+			case "workspace":
+				path := workspaceMemoryPath(workdir)
+				if path == "" {
+					return "", errors.New("这个会话没有设置工作区，没有地方放工作区记忆；跟项目无关的话用 scope=global")
+				}
+				// 落在工作区里：与写工作区文件同一档——on-write 不问，always 才问。
+				if err := env.RequestApproval(
+					ctx, tools.EffectWrite, protocol.ApprovalWrite,
+					"写入工作区记忆", input.Text, "记在 "+path,
+				); err != nil {
+					return "", err
+				}
+				updated, err := memory.Append(path, input.Text)
+				if err != nil {
+					return "", err
+				}
+				s.mu.Lock()
+				s.workspaceMemory = strings.TrimSpace(updated)
+				s.mu.Unlock()
+				return "已记进这个工作区的记忆。", nil
+			case "global":
+				if strings.TrimSpace(config.MemoryFile) == "" {
+					return "", errors.New("宿主没有配置全局记忆文件")
+				}
+				// 这里传的 Effect 才是决定档位的那个；Tool.Effect 只是元信息。
+				if err := env.RequestApproval(
+					ctx, tools.EffectExternal, protocol.ApprovalWrite,
+					"写入长期记忆", input.Text, "这条会在以后每个会话里都带上",
+				); err != nil {
+					return "", err
+				}
+				updated, err := memory.Append(config.MemoryFile, input.Text)
+				if err != nil {
+					return "", err
+				}
+				s.mu.Lock()
+				s.globalMemory = strings.TrimSpace(updated)
+				s.mu.Unlock()
+				return "已记住（全局）。", nil
+			default:
+				return "", fmt.Errorf("scope 只能是 workspace 或 global，给的是 %q", input.Scope)
+			}
 		},
 	}); err != nil {
 		s.mcpStatus["长期记忆"] = "注册失败：" + err.Error()
@@ -368,6 +416,11 @@ func rememberSchema() json.RawMessage {
 				"type":        "string",
 				"description": "要记住的一句话。写结论，不写过程。",
 			},
+			"scope": map[string]any{
+				"type":        "string",
+				"enum":        []string{"workspace", "global"},
+				"description": "workspace：这个项目的事（默认，有工作区时）；global：跟项目无关、每个会话都用得上的事。",
+			},
 		},
 		"required":             []string{"text"},
 		"additionalProperties": false,
@@ -378,11 +431,43 @@ func rememberSchema() json.RawMessage {
 	return encoded
 }
 
-// Memory 返回当前的长期记忆正文，起会话时回给宿主展示。
+// Memory 返回当前的长期记忆正文（全局 + 本工作区），起会话时回给宿主展示。
 func (s *Session) Memory() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.memory
+	return s.memoryText()
+}
+
+// memoryText 把两层记忆拼成进提示词的一段。调用方持锁或在构造期。
+func (s *Session) memoryText() string {
+	var parts []string
+	if s.globalMemory != "" {
+		parts = append(parts, s.globalMemory)
+	}
+	if s.workspaceMemory != "" {
+		parts = append(parts, "【本工作区的记忆】\n"+s.workspaceMemory)
+	}
+	return strings.Join(parts, "\n\n")
+}
+
+// workspaceMemoryPath 是某个工作区自己的记忆文件；没有工作区就没有。
+func workspaceMemoryPath(workdir string) string {
+	if strings.TrimSpace(workdir) == "" {
+		return ""
+	}
+	return filepath.Join(workdir, ".aiclaw", "memory.md")
+}
+
+// loadMemoryFile 读一份记忆文件，读不到时把原因记进状态栏。
+func (s *Session) loadMemoryFile(path, label string) string {
+	if path == "" {
+		return ""
+	}
+	text, err := memory.Load(path)
+	if err != nil {
+		s.mcpStatus[label] = err.Error()
+	}
+	return strings.TrimSpace(text)
 }
 
 func (s *Session) skillNames() string {
@@ -709,6 +794,8 @@ func (s *Session) SetWorkspace(workspace string) error {
 	defer s.mu.Unlock()
 	s.config.Workdir = trimmed
 	s.applied = refreshOf(s.config)
+	// 工作区记忆跟着工作区走：换了目录就换一份。
+	s.workspaceMemory = s.loadMemoryFile(workspaceMemoryPath(trimmed), "工作区记忆")
 	// **提示词要跟着改。** 它是建会话那一刻生成的，里面写着「这个会话没有设置
 	// 工作区、相对路径按主目录解析」——用户后来指了工作区，这段话就成了假的。
 	// 实测里模型照着它说「在主目录里建目录会被沙箱拦住」，然后发现东西其实
@@ -726,7 +813,7 @@ func (s *Session) refreshSystemPromptLocked() {
 	if len(s.messages) == 0 || s.messages[0].Role != llm.RoleSystem {
 		return
 	}
-	s.messages[0].Content = buildSystemPrompt(s.config, s.registry, s.skills, s.memory)
+	s.messages[0].Content = buildSystemPrompt(s.config, s.registry, s.skills, s.memoryText())
 }
 
 // Workspace 返回会话当前的工作区，空串表示没设置。
