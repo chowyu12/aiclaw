@@ -49,14 +49,15 @@ var dangerousCommands = []string{
 // 默认档位下普通命令不再逐条审批——每次 `ls`、`go test` 都弹框，只会把用户
 // 训练成闭眼点「允许」，那比少问一次危险。但有一类命令即使不在硬拒绝名单上，
 // 做错了也很难收回：删东西、提权、改系统设置、把网上的脚本直接喂给 shell、
-// 往外推代码。这些问一句。
+// 往外推代码。这些问一句。curl / wget 不在名单里整条拦，而是按「送数据出去 /
+// 落盘」判，见 transferRisk。
 //
 // 和硬拒绝名单一样，它是字符串匹配，**防的是「顺手写出来」，不防有意规避**。
 // 有意规避这一层挡不住——挡得住的只有沙箱，而这一版没有。
 var riskyCommands = []string{
 	"rm -r", "rm -f", "rmdir", "sudo ", "su ", "doas ",
 	"chmod ", "chown ", "chgrp ",
-	"curl ", "wget ", "nc ", "ssh ", "scp ", "rsync ",
+	"nc ", "ssh ", "scp ", "rsync ",
 	"git push", "git reset --hard", "git clean", "git checkout --",
 	"npm publish", "npm i -g", "npm install -g", "pip install", "brew install",
 	"docker ", "kubectl ", "launchctl", "defaults write", "killall", "pkill",
@@ -77,6 +78,52 @@ func riskyReason(command string) string {
 		if strings.Contains(normalized, pattern) {
 			return fmt.Sprintf("命令里有 %s", strings.TrimSpace(pattern))
 		}
+	}
+	return transferRisk(normalized)
+}
+
+// wgetToStdout 认出 wget 把内容写到标准输出的几种写法：-O-、-qO-、-O -、--output-document=-。
+// 命令已小写，所以 -O 在这里是 -o。
+func wgetToStdout(normalized string) bool {
+	for _, token := range strings.Fields(normalized) {
+		if token == "--output-document=-" || (strings.HasPrefix(token, "-") && !strings.HasPrefix(token, "--") && strings.HasSuffix(token, "o-")) {
+			return true
+		}
+	}
+	return strings.Contains(normalized, " -o - ") || strings.Contains(normalized, "--output-document -")
+}
+
+// transferRisk 判 curl / wget：**只读的 GET 不问，往外送数据或往盘上落文件才问。**
+//
+// 早先整个 curl 都在名单里，结果是无人值守会话里任何 curl 都失败，而同样的请求
+// 换成 python urllib 一路畅通——规则拦不住联网，只增加摩擦，模型还把它误判成
+// 「URL 里带 & 会被拦」。真正值得问的是两件事：把本机的东西送出去（-d/-F/-T/PUT/POST），
+// 以及把网上的东西落到盘上（-o/-O/--output/重定向）。
+func transferRisk(normalized string) string {
+	isCurl := strings.HasPrefix(normalized, "curl ") || strings.Contains(normalized, " curl ") ||
+		strings.Contains(normalized, ";curl ") || strings.Contains(normalized, "|curl ") || strings.Contains(normalized, "&&curl ")
+	isWget := strings.HasPrefix(normalized, "wget ") || strings.Contains(normalized, " wget ")
+	if !isCurl && !isWget {
+		return ""
+	}
+	sending := []string{" -d ", " --data", " -f ", " --form", " -t ", " --upload-file", " -x post", " -x put", " -x patch", " -x delete", " --post-data", " --post-file", " --method=post", " --method=put"}
+	for _, flag := range sending {
+		if strings.Contains(normalized+" ", flag) {
+			return "把数据发到外部地址"
+		}
+	}
+	saving := []string{" -o ", " --output", " --remote-name", " -j ", " --output-document"}
+	for _, flag := range saving {
+		if strings.Contains(normalized+" ", flag) {
+			return "把下载的内容写到磁盘"
+		}
+	}
+	if isWget && !wgetToStdout(normalized) {
+		// wget 默认就是落盘（不带 -O- 的话）。
+		return "wget 默认把下载的内容写到磁盘"
+	}
+	if strings.Contains(normalized, " > ") || strings.Contains(normalized, " >> ") {
+		return "把下载的内容写到磁盘"
 	}
 	return ""
 }

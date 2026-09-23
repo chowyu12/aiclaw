@@ -21,6 +21,12 @@ const (
 	// maxRestartAttempts stops an endlessly failing channel instead of
 	// reconnecting forever against, say, a revoked credential.
 	maxRestartAttempts = 8
+	// healthyRun is how long an attempt must have stayed connected for the
+	// failure that ends it to count as a fresh incident rather than the next
+	// step of an ongoing one. Without this a channel that reconnects fine
+	// after every network blip still burns through its attempts over days
+	// and ends up permanently failed.
+	healthyRun = 30 * time.Second
 )
 
 // Host supervises the long-running channels that enabled plugins contribute.
@@ -186,12 +192,24 @@ func (h *Host) supervise(ctx context.Context, wanted desiredChannel, holder *sta
 		// Configuration is re-read on every attempt so rotating a credential
 		// takes effect on the next reconnect instead of needing a restart.
 		values, err := h.config.Load(ctx, wanted.plugin.UUID)
+		started := time.Now()
 		if err == nil {
 			holder.set(func(s *ChannelStatus) {
 				s.State, s.StartedAt, s.LastError = ChannelRunning, time.Now(), ""
 				s.Attempts = attempt
 			})
+			if attempt > 0 {
+				h.log("channel %s/%s reconnecting (attempt %d)", wanted.plugin.Name, wanted.contribution.ID, attempt)
+			}
 			err = h.run(ctx, wanted, values)
+		}
+		ran := time.Since(started)
+		if err != nil && ran >= healthyRun && attempt > 0 {
+			// It was up for a while: this is a new incident, not the previous
+			// one continuing. Start the backoff over so a long-lived channel
+			// never exhausts its attempts through unrelated blips.
+			h.log("channel %s/%s ran %s before failing; resetting backoff", wanted.plugin.Name, wanted.contribution.ID, ran.Round(time.Second))
+			attempt, delay = 0, restartBaseDelay
 		}
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 			holder.set(func(s *ChannelStatus) { s.State = ChannelStopped })
@@ -203,7 +221,7 @@ func (h *Host) supervise(ctx context.Context, wanted desiredChannel, holder *sta
 			return
 		}
 		message := err.Error()
-		h.log("channel %s/%s failed: %v", wanted.plugin.Name, wanted.contribution.ID, err)
+		h.log("channel %s/%s failed after %s: %v", wanted.plugin.Name, wanted.contribution.ID, ran.Round(time.Second), err)
 		if attempt == maxRestartAttempts {
 			holder.set(func(s *ChannelStatus) {
 				s.State, s.LastError, s.Attempts = ChannelFailed, message, attempt

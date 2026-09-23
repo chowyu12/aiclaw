@@ -740,6 +740,14 @@ func buildSystemPrompt(
 	}
 	if registry.Len() > 0 {
 		fmt.Fprintf(&builder, "可用工具：%s。\n", strings.Join(registry.Names(), "、"))
+		if _, hasExec := registry.Get("exec"); hasExec {
+			// 恢复会话时可能是刚开的代码模式：历史里满是 run_command 之类的直接调用，
+			// 模型照着历史写，连报「没有这个工具」。这句话放在提示词里，比错误信息早一步。
+			builder.WriteString(
+				"其余工具（读写文件、执行命令、MCP 等）都收在 exec 里，在脚本里用 tools.名字() 调用；" +
+					"历史里若有直接调用它们的记录，现在那样调会报「没有这个工具」。\n",
+			)
+		}
 	}
 	// 技能只列名字与用途，正文等 load_skill 取——十几个技能的正文加起来
 	// 能有几万 token，每轮都带着走会把上下文挤没。

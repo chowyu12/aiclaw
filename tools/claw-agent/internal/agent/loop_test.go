@@ -1225,3 +1225,21 @@ func TestLengthFinishReasonIsSurfaced(t *testing.T) {
 		t.Error("回答被截断时应给用户一条提示")
 	}
 }
+
+// 代码模式下提示词要说清其余工具都在 exec 里：恢复会话时历史里满是直接调用，
+// 模型照着写会连报「没有这个工具」。
+func TestCodeModePromptExplainsWhereToolsWent(t *testing.T) {
+	model := &fakeModel{}
+	server := httptest.NewServer(http.HandlerFunc(model.handler))
+	t.Cleanup(server.Close)
+	session, err := New(context.Background(), "test", protocol.SessionStartParams{
+		Model: protocol.ModelConfig{BaseURL: server.URL, Model: "fake"}, Workdir: t.TempDir(), CodeMode: true,
+	}, StaticKey("sk-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(session.Close)
+	if !strings.Contains(session.messages[0].Content, "收在 exec 里") {
+		t.Errorf("提示词应说明工具收在 exec 里：%q", session.messages[0].Content)
+	}
+}

@@ -47,6 +47,13 @@ var protectedRelative = []string{
 	".config/gcloud",
 	".config/gh/hosts.yml",
 	"Library/Keychains",
+	// 各家 AI 编程工具的账号与凭据文件。模型在一个由外部用户驱动的会话里读过
+	// ~/.claude.json——里面是账号信息，同类文件里常有 token。
+	".claude.json",
+	".claude/.credentials.json",
+	".codex/auth.json",
+	".gemini/oauth_creds.json",
+	".cursor/auth.json",
 	"Library/Application Support/Google/Chrome/Default/Login Data",
 }
 
