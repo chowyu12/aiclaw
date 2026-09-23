@@ -204,14 +204,16 @@ type ProviderModelsResult struct {
 	Models []string `json:"models"`
 }
 
-// ProviderAutoMarkResult 是按 models.dev 自动标记能力的结果。
+// ProviderAutoMarkResult 是按公开能力表（models.dev + LiteLLM）自动标记能力的结果。
 //
-// 带上匹配与未匹配的数量：那份表未必收了用户用的每个模型，说清楚「有几个
+// 带上匹配与未匹配的数量：表未必收了用户用的每个模型，说清楚「有几个
 // 没查到」用户才知道剩下的要自己勾，而不是以为同步没生效。
 type ProviderAutoMarkResult struct {
 	Provider  ProviderView `json:"provider"`
 	Matched   int          `json:"matched"`
 	Unmatched int          `json:"unmatched"`
+	/** 某份表没拉到时的说明；两份都齐时为空。 */
+	Note string `json:"note,omitempty"`
 }
 
 // ---------- 搜索引擎 ----------

@@ -434,6 +434,39 @@ const scenarios: Scenario[] = [
     },
   },
   {
+    name: "标注：按两份公开能力表自动标记",
+    async run(ctx) {
+      // 建一个临时服务，清单里放几个两份表各自才有的模型，看标出来对不对。
+      // 这一条打的是 models.dev 与 LiteLLM，不打模型服务。
+      const provider = await ctx.client.providerCreate({
+        name: "场景-标注",
+        type: "openai-compatible",
+        baseUrl: "http://127.0.0.1:1/v1",
+        apiKey: "sk-scenario",
+        models: ["whisper-1", "gpt-4o-mini-tts", "dall-e-3", "qwen-image-3.0", "qwen3-vl-plus", "完全不存在的模型"],
+      });
+      const result = await ctx.client.providerAutoMark(provider.id);
+      if (result.note) throw new Error(`有一份表没拉到：${result.note}`);
+      const marks = new Map(result.provider.models.map((entry) => {
+        const [name, rest = ""] = entry.split("#");
+        return [name, rest.split("@")[0]!];
+      }));
+      const expect: Record<string, string> = {
+        "whisper-1": "stt", "gpt-4o-mini-tts": "tts", "dall-e-3": "image", "qwen3-vl-plus": "vision",
+      };
+      for (const [name, want] of Object.entries(expect)) {
+        if (marks.get(name) !== want) throw new Error(`${name} 标成了「${marks.get(name) ?? ""}」，应为 ${want}`);
+      }
+      // 画图模型接受图片输入是为了改图，不能因此被标成看图模型——上一版就是这么错的。
+      const qwenImage = marks.get("qwen-image-3.0") ?? "";
+      if (!qwenImage.includes("image") || qwenImage.includes("vision")) {
+        throw new Error(`qwen-image-3.0 标成了「${qwenImage}」，应为 image 且不含 vision`);
+      }
+      if (result.unmatched !== 1) throw new Error(`应有 1 个查不到，实际 ${result.unmatched}`);
+      return `查到 ${result.matched} 个，两份表都在`;
+    },
+  },
+  {
     name: "并发：两个会话同时跑互不串",
     async run(ctx) {
       const [a, b] = await Promise.all([openSession(ctx, "par-a"), openSession(ctx, "par-b")]);

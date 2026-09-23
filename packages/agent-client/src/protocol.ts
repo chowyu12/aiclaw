@@ -190,13 +190,15 @@ export interface RoleModels {
 // 联网搜索引擎各带 Key；搜索工具是随内核分发的 MCP server（claw-agent mcp-search），
 // 宿主在有启用中的引擎时挂进会话。
 
-/** 按 models.dev 自动标记能力的结果。 */
+/** 按公开能力表（models.dev + LiteLLM）自动标记能力的结果。 */
 export interface ProviderAutoMarkResult {
   provider: ProviderView;
-  /** 在那份表里查到的模型数。 */
+  /** 在表里查到的模型数。 */
   matched: number;
   /** 表里没有、要自己勾的模型数。 */
   unmatched: number;
+  /** 某份表没拉到时的说明；两份都齐时没有。 */
+  note?: string;
 }
 
 export interface SearchEngineView {

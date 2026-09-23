@@ -90,7 +90,7 @@ async function removeModel(provider: ProviderRow, entry: string): Promise<void> 
 }
 
 /**
- * 按 models.dev 自动标记能力。
+ * 按公开能力表（models.dev + LiteLLM）自动标记能力。
  *
  * 手动给上百个模型勾能力没人做得完，而没标的模型不会出现在角色候选里——
  * 功能配了等于没配。那份表只用来**加**标记，不会去掉手动勾过的。
@@ -106,7 +106,7 @@ async function autoMark(provider: ProviderRow): Promise<void> {
 }
 
 const marking = reactive<
-  Record<number, { loading: boolean; matched?: number; unmatched?: number; error?: string }>
+  Record<number, { loading: boolean; matched?: number; unmatched?: number; note?: string; error?: string }>
 >({});
 const saving = ref(false);
 /** 每个服务的 Key 输入框。存完立刻清空，不让凭据留在 DOM 里。 */
@@ -375,11 +375,13 @@ function summary(provider: ProviderRow): string {
               :disabled="provider.models.length === 0 || marking[provider.id]?.loading"
               @click="autoMark(provider)"
             >
-              {{ marking[provider.id]?.loading ? "查询中…" : "按 models.dev 标记能力" }}
+              {{ marking[provider.id]?.loading ? "查询中…" : "自动标记能力" }}
             </button>
             <span v-if="marking[provider.id]?.error" class="hint bad">{{ marking[provider.id]!.error }}</span>
             <span v-else-if="marking[provider.id]?.matched !== undefined" class="hint">
               查到 {{ marking[provider.id]!.matched }} 个，另 {{ marking[provider.id]!.unmatched }} 个表里没有，要自己勾。
+              <!-- 两份表少拉到一份时说出来：结果不完整，用户该知道再点一次可能更全。 -->
+              <template v-if="marking[provider.id]?.note">{{ marking[provider.id]!.note }}。</template>
             </span>
             <span v-if="fetches[provider.id]?.error" class="hint bad">{{ fetches[provider.id]?.error }}</span>
             <span v-else-if="fetches[provider.id]?.count !== undefined" class="hint">

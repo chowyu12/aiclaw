@@ -757,14 +757,12 @@ func (s *Server) handleProvider(ctx context.Context, f frame) {
 			s.writeError(f.ID, codeInvalidParams, "invalid params")
 			return
 		}
-		updated, matched, unmatched, err := s.providers.AutoMark(ctx, params.ID)
+		result, err := s.providers.AutoMark(ctx, params.ID)
 		if err != nil {
 			s.writeError(f.ID, codeInternal, err.Error())
 			return
 		}
-		s.writeResult(f.ID, protocol.ProviderAutoMarkResult{
-			Provider: updated, Matched: matched, Unmatched: unmatched,
-		})
+		s.writeResult(f.ID, result)
 	case protocol.MethodProviderModels:
 		var params protocol.ProviderIDParams
 		if err := json.Unmarshal(f.Params, &params); err != nil || params.ID == 0 {

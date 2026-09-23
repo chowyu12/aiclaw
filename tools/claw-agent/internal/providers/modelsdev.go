@@ -1,11 +1,13 @@
 package providers
 
-// 从 models.dev 同步模型能力。
+// 从 models.dev 与 LiteLLM 两份公开的能力表同步模型能力。
 //
 // **为什么要有这个。** 能力标记（看图 / 听写 / 朗读 / 画图）本来要用户逐个模型
 // 手动勾。一个网关列出上百个模型时这件事没人会做完，而没标的模型就不会出现在
 // 角色候选里——功能配了等于没配。models.dev 是一份公开、按 provider 归档的
-// 模型能力表（7000 多个模型），它的 modalities 字段正好对得上我们的四个角色。
+// 模型能力表（7000 多个模型），它的 modalities 字段正好对得上我们的四个角色；
+// LiteLLM 那份补上它缺的转写 / 朗读 / 生图模型，并用显式的 mode 纠正误标
+//（见 litellm.go）。两份都拉，取并集；只拉到一份也能用，结果里会说明。
 //
 // **它是外部数据，所以只做加法。** 同步只会给模型加上标记，不会去掉用户手动
 // 勾过的：那份表未必覆盖用户自建的端点，也未必跟得上新模型；而「我明明勾了，
@@ -41,6 +43,9 @@ type Entry struct {
 	Roles []protocol.ModelRole
 	// Context 是上下文窗口（token）。0 表示那份表没给。
 	Context int
+	// NonChat 表示有一份表明确说这不是聊天模型（生图、转写、朗读、向量……）。
+	// 这种模型不能当看图模型用，哪怕它接受图片输入（那是为了改图）。
+	NonChat bool
 }
 
 // Catalog 是按模型名索引的能力表。
@@ -48,6 +53,8 @@ type Catalog struct {
 	// byName 的键是**规范化后的模型名**：小写，带前缀与不带前缀的写法都收。
 	// 同名模型在不同网关下的条目取并集，见 add 的说明。
 	byName map[string]Entry
+	// Note 是这次拉取的说明：某份表没拉到时写在这里，让用户知道结果不完整。
+	Note string
 }
 
 var (
@@ -56,7 +63,10 @@ var (
 	cachedResult *Catalog
 )
 
-// FetchCatalog 取那份能力表，命中缓存时不打网络。
+// FetchCatalog 取两份能力表并合并，命中缓存时不打网络。
+//
+// 两份并行拉：各自几 MB、都在境外，串行要等两倍时间。一份失败不算失败——
+// 另一份照用，Note 里说明哪份没拉到；两份都失败才报错。
 func FetchCatalog(ctx context.Context) (*Catalog, error) {
 	catalogMu.Lock()
 	defer catalogMu.Unlock()
@@ -64,31 +74,93 @@ func FetchCatalog(ctx context.Context) (*Catalog, error) {
 		return cachedResult, nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	type fetched struct {
+		catalog *Catalog
+		err     error
+	}
+	results := make([]fetched, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		body, err := fetchFirst(ctx, "models.dev", []string{catalogURL})
+		if err == nil {
+			results[0].catalog, err = ParseCatalog(body)
+		}
+		results[0].err = err
+	}()
+	go func() {
+		defer wg.Done()
+		body, err := fetchFirst(ctx, "LiteLLM", liteLLMURLs)
+		if err == nil {
+			results[1].catalog, err = ParseLiteLLM(body)
+		}
+		results[1].err = err
+	}()
+	wg.Wait()
+
+	if results[0].err != nil && results[1].err != nil {
+		return nil, fmt.Errorf("两份能力表都没拉到：%v；%v", results[0].err, results[1].err)
+	}
+	merged := &Catalog{byName: map[string]Entry{}}
+	for _, result := range results {
+		if result.catalog != nil {
+			merged.merge(result.catalog)
+		}
+	}
+	switch {
+	case results[0].err != nil:
+		merged.Note = "models.dev 没拉到（" + results[0].err.Error() + "），只按 LiteLLM 标记了"
+	case results[1].err != nil:
+		merged.Note = "LiteLLM 没拉到（" + results[1].err.Error() + "），只按 models.dev 标记了"
+	}
+	// 只缓存两份都齐的结果：缺一份的结果缓存 6 小时，用户重试也拿不到全的。
+	if merged.Note == "" {
+		cachedResult, cachedAt = merged, time.Now()
+	}
+	return merged, nil
+}
+
+// fetchFirst 按顺序试几个地址，第一个成功的算数。
+func fetchFirst(ctx context.Context, source string, urls []string) ([]byte, error) {
+	var last error
+	for _, url := range urls {
+		body, err := fetchOne(ctx, url)
+		if err == nil {
+			return body, nil
+		}
+		last = err
+	}
+	return nil, fmt.Errorf("%s：%w", source, last)
+}
+
+func fetchOne(ctx context.Context, url string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, catalogURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("连接 models.dev 失败：%w", err)
+		return nil, fmt.Errorf("连接失败：%w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("models.dev 返回 %d", response.StatusCode)
+		return nil, fmt.Errorf("返回 %d", response.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxCatalogBytes))
 	if err != nil {
-		return nil, fmt.Errorf("读取 models.dev 失败：%w", err)
+		return nil, fmt.Errorf("读取失败：%w", err)
 	}
+	return body, nil
+}
 
-	catalog, err := ParseCatalog(body)
-	if err != nil {
-		return nil, err
+// merge 把另一份表并进来，规则与 addOne 相同。
+func (c *Catalog) merge(other *Catalog) {
+	for name, entry := range other.byName {
+		c.addOne(name, entry)
 	}
-	cachedResult, cachedAt = catalog, time.Now()
-	return catalog, nil
 }
 
 // catalogProvider 是那份表里的一个服务商。只取用得上的字段。
@@ -185,7 +257,24 @@ func (c *Catalog) addOne(name string, entry Entry) {
 	if entry.Context > existing.Context {
 		existing.Context = entry.Context
 	}
+	// 有一份表说它不是聊天模型，就不能当看图模型：画图模型接受图片是为了改图。
+	// 这条是「只加不减」原则的唯一例外，而且减的只是表与表之间推断出来的标记，
+	// 不碰用户手动勾的（那在 AutoMark 里，这里还没到）。
+	existing.NonChat = existing.NonChat || entry.NonChat
+	if existing.NonChat {
+		existing.Roles = withoutRole(existing.Roles, protocol.RoleVision)
+	}
 	c.byName[key] = existing
+}
+
+func withoutRole(list []protocol.ModelRole, drop protocol.ModelRole) []protocol.ModelRole {
+	kept := make([]protocol.ModelRole, 0, len(list))
+	for _, item := range list {
+		if item != drop {
+			kept = append(kept, item)
+		}
+	}
+	return kept
 }
 
 // Lookup 查一个模型名。查不到时第二个返回值是 false。
@@ -247,17 +336,18 @@ func hasRole(list []protocol.ModelRole, want protocol.ModelRole) bool {
 	return false
 }
 
-// AutoMark 按 models.dev 给一个服务的模型清单补上能力标记。
+// AutoMark 按两份能力表给一个服务的模型清单补上能力标记。
 //
-// 只加不减（见文件头）。返回更新后的视图、匹配上的模型数、以及表里没有的数。
-func (s *Store) AutoMark(ctx context.Context, id int64) (protocol.ProviderView, int, int, error) {
+// 只加不减（见文件头）。返回更新后的视图、匹配上与表里没有的模型数，以及
+// 拉取说明（某份表没拉到时非空）。
+func (s *Store) AutoMark(ctx context.Context, id int64) (protocol.ProviderAutoMarkResult, error) {
 	item, err := s.db.GetProvider(ctx, id)
 	if err != nil {
-		return protocol.ProviderView{}, 0, 0, fmt.Errorf("模型服务不存在（id=%d）：%w", id, err)
+		return protocol.ProviderAutoMarkResult{}, fmt.Errorf("模型服务不存在（id=%d）：%w", id, err)
 	}
 	catalog, err := FetchCatalog(ctx)
 	if err != nil {
-		return protocol.ProviderView{}, 0, 0, err
+		return protocol.ProviderAutoMarkResult{}, err
 	}
 
 	entries := decodeModels(item.Models)
@@ -286,8 +376,10 @@ func (s *Store) AutoMark(ctx context.Context, id int64) (protocol.ProviderView, 
 	}
 
 	if err := s.db.UpdateProvider(ctx, id, model.UpdateProviderReq{Models: encodeModels(updated)}); err != nil {
-		return protocol.ProviderView{}, 0, 0, err
+		return protocol.ProviderAutoMarkResult{}, err
 	}
 	item.Models = encodeModels(updated)
-	return view(item), matched, unmatched, nil
+	return protocol.ProviderAutoMarkResult{
+		Provider: view(item), Matched: matched, Unmatched: unmatched, Note: catalog.Note,
+	}, nil
 }
