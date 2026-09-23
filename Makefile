@@ -25,7 +25,7 @@ VITE_PORT ?= 5173
 GO_SOURCES := $(shell find $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg -name '*.go' -not -name '*_test.go' 2>/dev/null)
 
 .PHONY: help deps build build-go build-client build-desktop dev dev-ui \
-        test test-go test-renderer smoke smoke-desktop icon \
+        test test-go test-renderer smoke smoke-desktop scenarios icon \
         package package-mac package-mac-intel package-win package-linux install-mac \
         typecheck fmt fmt-check vet nocgo check doctor clean distclean
 
@@ -107,6 +107,12 @@ test-renderer: ## 纯函数测试（Markdown 渲染与转义、配置归一化�
 
 smoke: deps build-go build-client ## 内核冒烟：真拉起 claw-agent，走模型服务、插件、搜索引擎；不需要凭据
 	npm run smoke
+
+# 发布前跑，不进 check：它真打模型（十几次调用，画图朗读各一次），花钱也慢。
+# 用桌面应用「配置」页里的默认模型与多模态角色；凭据从 ~/.aiclaw/aiclaw.db 拷一份出来用，
+# 不碰原库。产物（会话、生成的图与音频）在 build/scenarios/<时间>/。
+scenarios: deps build-go build-client ## 发布前场景测试：真打模型，对话 / 文件 / 命令 / 审批 / 看图 / 画图 / 朗读 / 听写 / 搜索 / 并发
+	npm run scenarios
 
 # 这条要起 Electron，需要图形会话（Linux CI 上套 xvfb-run）。
 # 没有图形会话的环境用 SKIP_DESKTOP_SMOKE=1 跳过——但那样就漏掉了

@@ -60,8 +60,12 @@ docs/                设计文档；docs/agent-loop.md 改循环前必读
 ```bash
 make dev      # 编译并起应用
 make check    # 交付前全量预检：格式、vet、测试、类型、两套冒烟
+make scenarios # 发版前场景测试：真打模型，对话 / 文件 / 命令 / 审批 / 看图 / 画图 / 朗读 / 听写 / 搜索 / 并发
 make help     # 其余 target
 ```
+
+`make check` 不打模型，每次改动都跑；`make scenarios` 用「配置」页里的默认模型与
+多模态角色真跑一遍用户会做的事，花钱也慢，只在发版前跑。
 
 数据目录：`~/.aiclaw/`（`aiclaw.db` 应用库、`plugins/` 插件、`skills/` 技能、
 `memory.md` 长期记忆）；会话库与界面配置在 Electron 的 userData 目录。
