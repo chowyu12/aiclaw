@@ -101,6 +101,11 @@ const state = reactive({
    * 一次，而攒一份持久的「永远别提醒」名单只会让人忘了自己还在用旧版本。
    */
   updateDismissed: "",
+  /**
+   * 有一次重挂被推迟了：用户在轮次跑着的时候改了 MCP / 技能 / 插件配置。
+   * 跑着时不能卸会话（那一轮的事件会没有出口），轮次结束时补上这一次。
+   */
+  remountPending: false,
   updating: false,
   /** 正在后台下载新版本。 */
   updateDownloading: false,
@@ -177,7 +182,13 @@ export const actions = {
         state.error = label + applied.error;
       }
       // 标题与轮次数变了，侧边栏跟一下。
-      if (applied.method === "turn/completed") void actions.refreshSessions();
+      if (applied.method === "turn/completed") {
+        void actions.refreshSessions();
+        // 跑着时被推迟的重挂，现在补上（只补当前看着的会话；别的会话点开时自然会重挂）。
+        if (state.remountPending && applied.sessionId === state.sessionId) {
+          void actions.remountCurrentSession();
+        }
+      }
     });
     window.aiclaw.on.approval((payload) => {
       state.approvals.push(payload as ApprovalPayload);
@@ -402,7 +413,14 @@ export const actions = {
    * 用户只会得出「配了没用」。轮次正在跑时不动它：卸掉会让那一轮的事件没有出口。
    */
   async remountCurrentSession(): Promise<void> {
-    if (!state.sessionId || state.busy) return;
+    if (!state.sessionId) return;
+    if (state.busy) {
+      // 现在不能动，记下来，turn/completed 时补。不记的话用户会得出「配了没用」，
+      // 直到切一次会话才生效。
+      state.remountPending = true;
+      return;
+    }
+    state.remountPending = false;
     try {
       const info = (await window.aiclaw.session.resume(state.sessionId)) as SessionStartView;
       state.sessionInfo = info;
@@ -456,8 +474,13 @@ export const actions = {
 
   // ---------- 技能 ----------
 
+  /**
+   * 重扫技能目录。顺带把当前会话重挂一遍：用户往 ~/.aiclaw/skills 丢了一个新技能
+   * 之后点的就是这个刷新，只更新列表不重挂的话，列表里有、会话里没有。
+   */
   async refreshSkills(): Promise<void> {
     state.skills = (await window.aiclaw.skills.list()) as SkillView[];
+    await actions.remountCurrentSession();
   },
 
   async toggleSkill(id: string, enabled: boolean): Promise<void> {
