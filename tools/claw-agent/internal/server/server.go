@@ -351,6 +351,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInvalidParams, "invalid params")
 		return
 	}
+	pinChannelPolicy(params.SessionID, params.Refresh)
 	if existing := s.session(params.SessionID); existing != nil {
 		// 已经在内存里的会话，配置没变就直接回它现在的样子。
 		//
