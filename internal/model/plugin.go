@@ -31,12 +31,11 @@ type Plugin struct {
 
 // PluginConfig is one configuration value of an installed plugin.
 //
-// Secret values are stored the same way the application already stores
-// provider and search-engine credentials: in the local SQLite database under
-// the user's home directory, protected by the operating system account rather
-// than by application-level encryption. Secret only changes how the value is
-// handled — never returned to the UI, never logged, never placed in a rollout
-// or model context. See docs/design/plugin-system.md.
+// Secret values are stored the same way the application stores provider and
+// search-engine credentials: encrypted at rest in the local SQLite database
+// with the master key kept next to it (see internal/secrets). Secret also
+// changes how the value is handled — never returned to the UI, never logged,
+// never placed in a rollout or model context. See docs/design/plugin-system.md.
 type PluginConfig struct {
 	ID         int64     `json:"id" gorm:"primaryKey;autoIncrement"`
 	PluginUUID string    `json:"plugin_uuid" gorm:"size:36;not null;uniqueIndex:idx_plugin_config_key"`

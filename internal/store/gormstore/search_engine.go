@@ -22,6 +22,9 @@ func (s *GormStore) ListSearchEngineConfigs(ctx context.Context, q model.ListQue
 	if err := db.Order("id ASC").Offset(offset).Limit(limit).Find(&items).Error; err != nil {
 		return nil, 0, err
 	}
+	for _, item := range items {
+		item.APIKey = s.open(item.APIKey, "search_engine api_key")
+	}
 	return items, total, nil
 }
 
@@ -30,11 +33,18 @@ func (s *GormStore) GetSearchEngineConfig(ctx context.Context, id int64) (*model
 	if err := s.db.WithContext(ctx).First(&cfg, id).Error; err != nil {
 		return nil, notFound(err)
 	}
+	cfg.APIKey = s.open(cfg.APIKey, "search_engine api_key")
 	return &cfg, nil
 }
 
 func (s *GormStore) CreateSearchEngineConfig(ctx context.Context, cfg *model.SearchEngineConfig) error {
-	return s.db.WithContext(ctx).Create(cfg).Error
+	stored := *cfg
+	stored.APIKey = s.seal(cfg.APIKey)
+	if err := s.db.WithContext(ctx).Create(&stored).Error; err != nil {
+		return err
+	}
+	cfg.ID, cfg.CreatedAt, cfg.UpdatedAt = stored.ID, stored.CreatedAt, stored.UpdatedAt
+	return nil
 }
 
 func (s *GormStore) UpdateSearchEngineConfig(ctx context.Context, id int64, cfg *model.SearchEngineConfig) error {
@@ -42,7 +52,13 @@ func (s *GormStore) UpdateSearchEngineConfig(ctx context.Context, id int64, cfg 
 		return err
 	}
 	cfg.ID = id
-	return s.db.WithContext(ctx).Save(cfg).Error
+	stored := *cfg
+	stored.APIKey = s.seal(cfg.APIKey)
+	if err := s.db.WithContext(ctx).Save(&stored).Error; err != nil {
+		return err
+	}
+	cfg.UpdatedAt = stored.UpdatedAt
+	return nil
 }
 
 func (s *GormStore) DeleteSearchEngineConfig(ctx context.Context, id int64) error {

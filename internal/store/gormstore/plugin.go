@@ -72,14 +72,28 @@ func (s *GormStore) DeletePlugin(ctx context.Context, pluginUUID string) error {
 
 func (s *GormStore) ListPluginConfig(ctx context.Context, pluginUUID string) ([]model.PluginConfig, error) {
 	var items []model.PluginConfig
-	return items, s.db.WithContext(ctx).Where("plugin_uuid = ?", pluginUUID).Order("key ASC").Find(&items).Error
+	if err := s.db.WithContext(ctx).Where("plugin_uuid = ?", pluginUUID).Order("key ASC").Find(&items).Error; err != nil {
+		return nil, err
+	}
+	// 只有 secret 的值加密：普通配置（比如企业微信的 corp id）明文存着，
+	// 出问题时用 sqlite3 还能看一眼。
+	for index := range items {
+		if items[index].Secret {
+			items[index].Value = s.open(items[index].Value, "plugin_config "+items[index].Key)
+		}
+	}
+	return items, nil
 }
 
 func (s *GormStore) SetPluginConfig(ctx context.Context, item *model.PluginConfig) error {
+	stored := *item
+	if stored.Secret {
+		stored.Value = s.seal(item.Value)
+	}
 	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "plugin_uuid"}, {Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value", "secret", "updated_at"}),
-	}).Create(item).Error
+	}).Create(&stored).Error
 }
 
 func (s *GormStore) DeletePluginConfig(ctx context.Context, pluginUUID, key string) error {

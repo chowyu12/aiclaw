@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/appdb"
 )
 
 // appDBGuards 是应用库及其 SQLite 伴随文件。
@@ -14,12 +15,13 @@ import (
 // 自己 curl，Key 就此进了会话历史。内核自己知道库在哪，就该自己守。
 //
 // 伴随文件要单独列：沙箱的 subpath 规则对文件只匹配它本身，-wal 里同样有明文。
+// 密钥文件也在名单里：库里的凭据是用它加密的，两个都读到就等于明文。
 func appDBGuards(path string) []string {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return nil
 	}
-	return []string{path, path + "-wal", path + "-shm", path + "-journal"}
+	return []string{path, path + "-wal", path + "-shm", path + "-journal", appdb.KeyFile(path)}
 }
 
 // guard 给一个会话加上内核这边知道的敏感路径。每个建出来或恢复出来的会话都要过一遍。

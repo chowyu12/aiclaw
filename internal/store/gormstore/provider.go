@@ -7,7 +7,14 @@ import (
 )
 
 func (s *GormStore) CreateProvider(ctx context.Context, p *model.Provider) error {
-	return s.db.WithContext(ctx).Create(p).Error
+	// 落库的是密文；调用方手里的结构体保持明文，它接着还要用。
+	stored := *p
+	stored.APIKey = s.seal(p.APIKey)
+	if err := s.db.WithContext(ctx).Create(&stored).Error; err != nil {
+		return err
+	}
+	p.ID, p.CreatedAt, p.UpdatedAt = stored.ID, stored.CreatedAt, stored.UpdatedAt
+	return nil
 }
 
 func (s *GormStore) GetProvider(ctx context.Context, id int64) (*model.Provider, error) {
@@ -15,6 +22,7 @@ func (s *GormStore) GetProvider(ctx context.Context, id int64) (*model.Provider,
 	if err := s.db.WithContext(ctx).First(&p, id).Error; err != nil {
 		return nil, notFound(err)
 	}
+	p.APIKey = s.open(p.APIKey, "provider api_key")
 	return &p, nil
 }
 
@@ -33,6 +41,9 @@ func (s *GormStore) ListProviders(ctx context.Context, q model.ListQuery) ([]*mo
 	if err := db.Order("id DESC").Offset(offset).Limit(limit).Find(&items).Error; err != nil {
 		return nil, 0, err
 	}
+	for _, item := range items {
+		item.APIKey = s.open(item.APIKey, "provider api_key")
+	}
 	return items, total, nil
 }
 
@@ -48,7 +59,7 @@ func (s *GormStore) UpdateProvider(ctx context.Context, id int64, req model.Upda
 		updates["base_url"] = *req.BaseURL
 	}
 	if req.APIKey != nil {
-		updates["api_key"] = *req.APIKey
+		updates["api_key"] = s.seal(*req.APIKey)
 	}
 	if req.Models != nil {
 		updates["models"] = req.Models

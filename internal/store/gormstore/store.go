@@ -15,10 +15,14 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/internal/secrets"
 )
 
 type GormStore struct {
 	db *gorm.DB
+	// cipher 非空时凭据列（模型服务 / 搜索引擎的 Key、插件的 secret 配置）
+	// 写入加密、读出解密。见 secrets.go。
+	cipher *secrets.Cipher
 }
 
 func New(cfg config.DatabaseConfig) (*GormStore, error) {

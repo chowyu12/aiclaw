@@ -287,6 +287,8 @@ export class ConfigStore {
     rmSync(join(this.dir, "credentials.bin"), { force: true });
     rmSync(this.configPath, { force: true });
     rmSync(this.appDbPath, { force: true });
+    // 库里的凭据是用 secret.key 加密的；库没了它也没用，留着只是多一处要解释的东西。
+    rmSync(join(this.homeDir, "secret.key"), { force: true });
     rmSync(this.groupsPath, { force: true });
     rmSync(this.mcpPath, { force: true });
     rmSync(this.skillsDir, { recursive: true, force: true });
