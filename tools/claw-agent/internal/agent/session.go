@@ -101,6 +101,9 @@ type Session struct {
 	// skills 是本次会话可用的技能。只把名字与说明放进提示词，
 	// 正文等模型调 load_skill 时才给——见 skills 包的说明。
 	skills []skills.Skill
+	// mountMS 是这次建会话里挂 MCP 花的毫秒数。开会话慢时第一个要看的就是它——
+	// 远端 server 的握手是整段里唯一可能到秒级的部分。
+	mountMS int64
 	// globalMemory 是跨项目的长期记忆正文（用户偏好、通用约定），起会话时读进来。
 	globalMemory string
 	// workspaceMemory 是当前工作区自己的记忆（这个项目的约定、踩过的坑），
@@ -202,15 +205,9 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		shells:     tools.NewShellPool(),
 	}
 
-	// 按名字排序挂载，让工具在模型面前的顺序稳定可复现。
-	names := make([]string, 0, len(config.MCPServers))
-	for name := range config.MCPServers {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		session.mountMCP(ctx, name, config.MCPServers[name])
-	}
+	mountStarted := time.Now()
+	session.mountAllMCP(ctx, config.MCPServers)
+	session.mountMS = time.Since(mountStarted).Milliseconds()
 
 	// 多模态工具在代码模式**之前**注册，跟内置工具与 MCP 一起收进 exec。
 	// 放在后面它就成了一个游离在 exec 外面的顶层工具，而模型在代码模式下
@@ -438,6 +435,9 @@ func rememberSchema() json.RawMessage {
 	return encoded
 }
 
+// MountMS 是挂 MCP 花了多少毫秒。宿主把它记进日志。
+func (s *Session) MountMS() int64 { return s.mountMS }
+
 // Memory 返回当前的长期记忆正文（全局 + 本工作区），起会话时回给宿主展示。
 func (s *Session) Memory() string {
 	s.mu.Lock()
@@ -566,15 +566,57 @@ func registerBuiltins(registry *tools.Registry, enabled []string) error {
 	return nil
 }
 
-func (s *Session) mountMCP(ctx context.Context, name string, config protocol.MCPServerConfig) {
-	// 走连接池：同一份配置的 server 在会话之间共用，不然每开一个会话都要
-	// 把「库里有哪些 API、契约长什么样」向服务重问一遍（实测每个 server
-	// 十几次串行 HTTPS），切会话就卡在这儿。
-	client, key, err := mcpShared.acquire(ctx, name, config)
-	if err != nil {
-		s.mcpStatus[name] = "挂载失败：" + err.Error()
-		return
+// mountAllMCP 挂上全部 MCP server：**连接并发建，工具按名字顺序注册。**
+//
+// 为什么要并发：建连接是一次网络握手（initialize + tools/list），远端 server
+// 动辄几秒——实测一个公网 server 光 initialize 就 3 秒。串行挂三四个就是十秒
+// 起步的卡顿，而且**每次开会话、每次切会话都要再来一遍**（连接池只在 TTL 内
+// 帮得上忙）。这些握手互不依赖，本来就该一起发。
+//
+// 注册仍然串行且按名字排序：注册要动注册表、状态表、mcpKeys 这几处会话状态，
+// 并发写要加锁；而顺序还决定工具在模型面前的排列，乱了会让同一份配置每次开
+// 会话得到不同的工具顺序。慢的是握手，不是注册，所以并发那一半就够了。
+func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.MCPServerConfig) {
+	names := make([]string, 0, len(servers))
+	for name := range servers {
+		names = append(names, name)
 	}
+	sort.Strings(names)
+
+	type dialed struct {
+		client *mcpclient.Client
+		key    string
+		err    error
+	}
+	results := make([]dialed, len(names))
+	var wg sync.WaitGroup
+	for index, name := range names {
+		wg.Add(1)
+		go func(index int, name string) {
+			defer wg.Done()
+			client, key, err := mcpShared.acquire(ctx, name, servers[name])
+			results[index] = dialed{client: client, key: key, err: err}
+		}(index, name)
+	}
+	wg.Wait()
+
+	for index, name := range names {
+		result := results[index]
+		if result.err != nil {
+			s.mcpStatus[name] = "挂载失败：" + result.err.Error()
+			continue
+		}
+		s.mountMCP(name, servers[name], result.client, result.key)
+	}
+}
+
+// mountMCP 把一个已经连上的 server 的工具注册进来。调用方保证串行。
+func (s *Session) mountMCP(
+	name string,
+	config protocol.MCPServerConfig,
+	client *mcpclient.Client,
+	key string,
+) {
 
 	allow := map[string]bool{}
 	for _, toolName := range config.EnabledTools {

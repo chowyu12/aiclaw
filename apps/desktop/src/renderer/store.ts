@@ -106,6 +106,8 @@ const state = reactive({
    * 跑着时不能卸会话（那一轮的事件会没有出口），轮次结束时补上这一次。
    */
   remountPending: false,
+  /** 正在恢复中的会话 id；界面据此显示「载入中」而不是一片空白。 */
+  loadingSession: "",
   updating: false,
   /** 正在后台下载新版本。 */
   updateDownloading: false,
@@ -309,13 +311,27 @@ export const actions = {
   },
 
   /** 打开一个已有会话，连同它的历史一起还原。 */
+  /**
+   * 打开一个已有会话。
+   *
+   * **先切过去，再等数据。** 恢复要重挂 MCP，而远端 server 的握手可能要几秒；
+   * 早先整段 await 完才换界面，那几秒里点了没反应、也没有任何提示，看起来像卡死。
+   * 现在立刻切过去显示已有的记录（有活动记录就是它，没有就是空的加一个「载入中」），
+   * 历史回来了再填。慢是另一回事，把界面按住是错的。
+   */
   async openSession(sessionId: string): Promise<void> {
     state.view = "chat";
     if (sessionId === state.sessionId) return;
     state.error = "";
+    state.sessionId = sessionId;
+    // 这个会话还没有任何记录时先建一个空的：界面要有东西可渲染。
+    ensureLive(state.live, sessionId);
+    state.sessionInfo = null;
+    state.loadingSession = sessionId;
     try {
       const info = (await window.aiclaw.session.resume(sessionId)) as SessionStartView;
-      state.sessionId = info.sessionId;
+      // 等的这几秒里用户可能又切走了；切走了就别把结果盖到别人头上。
+      if (state.sessionId !== sessionId) return;
       state.sessionInfo = info;
       state.model = info.model;
       state.providerId = info.providerId;
@@ -326,7 +342,9 @@ export const actions = {
         state.live[sessionId] = newLive(restoreHistory(info.history ?? []));
       }
     } catch (error) {
-      state.error = `打开会话失败：${describeError(error)}`;
+      if (state.sessionId === sessionId) state.error = `打开会话失败：${describeError(error)}`;
+    } finally {
+      if (state.loadingSession === sessionId) state.loadingSession = "";
     }
   },
 

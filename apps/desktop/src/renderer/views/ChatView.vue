@@ -306,7 +306,12 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
 
       <template v-else>
         <div ref="scroller" class="stream">
-          <p v-if="store.timeline.length === 0" class="blank">
+          <!-- 切会话时先切过去、历史随后到：这几秒里要有话说，不能是「还没有内容」，
+               那句话在一个有几十条记录的会话上是假的。 -->
+          <p v-if="store.loadingSession === store.sessionId && store.timeline.length === 0" class="blank">
+            正在载入这个会话…
+          </p>
+          <p v-else-if="store.timeline.length === 0" class="blank">
             这个会话还没有内容。说点什么开始。
           </p>
 

@@ -321,11 +321,16 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 		return
 	}
 	id := fmt.Sprintf("s_%d", time.Now().UnixNano())
+	started := time.Now()
 	session, err := agent.New(ctx, id, params, s.keyFor)
 	if err != nil {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
 	}
+	// 开会话慢的时候，日志里以前只有「运行时 ready」，没有任何线索说慢在哪一段。
+	s.options.Logf("开会话 %s：挂 MCP %dms（%d 个）+ 其余 %dms = 共 %dms",
+		id, session.MountMS(), len(params.MCPServers),
+		time.Since(started).Milliseconds()-session.MountMS(), time.Since(started).Milliseconds())
 	s.guard(session)
 	s.sessMu.Lock()
 	s.sessions[id] = session
@@ -373,11 +378,15 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		}
 		s.dropSession(params.SessionID)
 	}
+	loadStarted := time.Now()
 	session, err := agent.Load(ctx, s.db, params.SessionID, s.keyFor, params.Refresh)
 	if err != nil {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
 	}
+	s.options.Logf("恢复会话 %s：挂 MCP %dms（%d 个）+ 其余 %dms = 共 %dms",
+		params.SessionID, session.MountMS(), len(refreshServers(params.Refresh)),
+		time.Since(loadStarted).Milliseconds()-session.MountMS(), time.Since(loadStarted).Milliseconds())
 	s.guard(session)
 	s.sessMu.Lock()
 	s.sessions[session.ID] = session
@@ -908,6 +917,14 @@ func (e *emitter) RequestBrowser(
 		return protocol.BrowserResult{}, fmt.Errorf("浏览器操作回应格式不对：%w", err)
 	}
 	return result, nil
+}
+
+// refreshServers 取 refresh 里的 MCP server，refresh 为空时给空表。只用于记日志。
+func refreshServers(refresh *protocol.SessionRefresh) map[string]protocol.MCPServerConfig {
+	if refresh == nil {
+		return nil
+	}
+	return refresh.MCPServers
 }
 
 // ---------- 写出 ----------

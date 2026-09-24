@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -161,4 +163,84 @@ func TestPoolDoesNotCacheFailures(t *testing.T) {
 	if size != 0 {
 		t.Errorf("失败的连接不该留在池里，实际还剩 %d 条", size)
 	}
+}
+
+// 握手要并发，不能一个接一个。
+//
+// 一个公网 MCP server 光 initialize 就要几秒，而每开一次会话、每切一次会话都要
+// 重来一遍（连接池只在 TTL 内帮得上忙）。三四个 server 串行起来就是十秒级的卡顿，
+// 而这些握手互不依赖。这条用「每个 server 各慢 300ms」来钉住：串行要 900ms 以上，
+// 并发在 600ms 以内。
+func TestMCPServersAreDialedConcurrently(t *testing.T) {
+	const servers = 3
+	const delay = 300 * time.Millisecond
+
+	config := map[string]protocol.MCPServerConfig{}
+	for index := range servers {
+		name := fmt.Sprintf("slow%d", index)
+		config[name] = protocol.MCPServerConfig{URL: slowMCP(t, name, delay)}
+	}
+
+	model := &fakeModel{}
+	upstream := httptest.NewServer(http.HandlerFunc(model.handler))
+	t.Cleanup(upstream.Close)
+
+	started := time.Now()
+	session, err := New(context.Background(), "test", protocol.SessionStartParams{
+		Model:      protocol.ModelConfig{BaseURL: upstream.URL, Model: "fake"},
+		Workdir:    t.TempDir(),
+		MCPServers: config,
+	}, StaticKey("sk-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(session.Close)
+	elapsed := time.Since(started)
+
+	if elapsed >= time.Duration(servers)*delay {
+		t.Errorf("挂载耗时 %v，看起来仍然是串行（串行约 %v）", elapsed, time.Duration(servers)*delay)
+	}
+	// 工具顺序仍要稳定：注册那一半是串行且按名字排的。
+	var mounted []string
+	for _, name := range session.Tools() {
+		if strings.HasPrefix(name, "slow") {
+			mounted = append(mounted, name)
+		}
+	}
+	want := []string{"slow0__tool_slow0", "slow1__tool_slow1", "slow2__tool_slow2"}
+	if !reflect.DeepEqual(mounted, want) {
+		t.Errorf("工具顺序应当稳定按名字排：%v", mounted)
+	}
+}
+
+// slowMCP 是一个每次回应前先睡一会儿的 MCP server。
+func slowMCP(t *testing.T, name string, delay time.Duration) string {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var message struct {
+			ID     *int64 `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&message)
+		if message.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		// 只在握手的第一步慢：模拟远端建连接的代价。
+		if message.Method == "initialize" {
+			time.Sleep(delay)
+		}
+		result := `{}`
+		switch message.Method {
+		case "initialize":
+			result = `{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"slow","version":"1"}}`
+		case "tools/list":
+			result = fmt.Sprintf(
+				`{"tools":[{"name":"tool_%s","description":"假的","inputSchema":{"type":"object"}}]}`, name)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":%s}`, *message.ID, result)
+	}))
+	t.Cleanup(server.Close)
+	return server.URL
 }
