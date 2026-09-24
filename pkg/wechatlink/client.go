@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -76,7 +77,7 @@ func NewClient(creds *Credentials, opts ...ClientOption) *Client {
 // BotID 返回当前 Bot ID。
 func (c *Client) BotID() string { return c.botID }
 
-// SendMessage 发送文本消息。
+// SendMessage 发送文本消息。clientID 留空时自动生成，见 SendMessageItems。
 func (c *Client) SendMessage(ctx context.Context, toUserID, contextToken, clientID, text string) error {
 	return c.SendMessageItems(ctx, toUserID, contextToken, clientID,
 		[]MessageItem{{Type: ItemTypeText, TextItem: &TextItem{Text: text}}},
@@ -87,6 +88,12 @@ func (c *Client) SendMessage(ctx context.Context, toUserID, contextToken, client
 func (c *Client) SendMessageItems(ctx context.Context, toUserID, contextToken, clientID string, items []MessageItem) error {
 	ctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
+	// **client_id 必须每条都不一样。** 它是这条消息的唯一标识，服务端拿它去重；
+	// 一直传空串，第一条之后的回复会被当成重复而丢掉——表现是助手在本机答完了，
+	// 手机上却一条都收不到，而且 sendmessage 仍然回 ret=0，没有任何错误可查。
+	if strings.TrimSpace(clientID) == "" {
+		clientID = newClientID()
+	}
 	var resp sendMessageResp
 	if err := c.doPost(ctx, "/ilink/bot/sendmessage", sendMessageReq{
 		Msg: sendMsg{
@@ -98,6 +105,7 @@ func (c *Client) SendMessageItems(ctx context.Context, toUserID, contextToken, c
 			ItemList:     items,
 			ContextToken: contextToken,
 		},
+		BaseInfo: baseInfo{ChannelVersion: protocolVersion},
 	}, &resp); err != nil {
 		return err
 	}
@@ -115,6 +123,7 @@ func (c *Client) SendTyping(ctx context.Context, userID, contextToken string) er
 	if err := c.doPost(cfgCtx, "/ilink/bot/getconfig", getConfigReq{
 		ILinkUserID:  userID,
 		ContextToken: contextToken,
+		BaseInfo:     baseInfo{ChannelVersion: protocolVersion},
 	}, &cfgResp); err != nil {
 		return fmt.Errorf("getconfig: %w", err)
 	}
@@ -128,6 +137,7 @@ func (c *Client) SendTyping(ctx context.Context, userID, contextToken string) er
 		ILinkUserID:  userID,
 		TypingTicket: cfgResp.TypingTicket,
 		Status:       TypingStatusTyping,
+		BaseInfo:     baseInfo{ChannelVersion: protocolVersion},
 	}, &typResp); err != nil {
 		return fmt.Errorf("sendtyping: %w", err)
 	}
@@ -187,6 +197,19 @@ func (c *Client) doPost(ctx context.Context, path string, body, result any) erro
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 	return json.Unmarshal(respBody, result)
+}
+
+// newClientID 造一条消息的唯一标识。
+//
+// 随机而不是自增：进程重启之后自增会从头开始，与服务端记着的旧 id 撞上，
+// 而撞上的后果与传空串一样——消息被当成重复丢掉。
+func newClientID() string {
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		// crypto/rand 失败只发生在系统随机源坏掉时；退回时间戳也好过传空串。
+		return fmt.Sprintf("aiclaw-%d", time.Now().UnixNano())
+	}
+	return "aiclaw-" + hex.EncodeToString(buf[:])
 }
 
 func generateUIN() string {
