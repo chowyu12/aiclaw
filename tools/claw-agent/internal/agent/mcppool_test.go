@@ -244,3 +244,39 @@ func slowMCP(t *testing.T, name string, delay time.Duration) string {
 	t.Cleanup(server.Close)
 	return server.URL
 }
+
+// 并发之后总耗时等于最慢的那一个，只报总数说不出是谁——实测出现过一次 14.7 秒
+// 而日志里无从归因。每个 server 的耗时要单独记下来，并按耗时倒序。
+func TestSlowServerIsNamed(t *testing.T) {
+	config := map[string]protocol.MCPServerConfig{
+		"fast": {URL: slowMCP(t, "fast", 0)},
+		"slow": {URL: slowMCP(t, "slow", 400*time.Millisecond)},
+	}
+	model := &fakeModel{}
+	upstream := httptest.NewServer(http.HandlerFunc(model.handler))
+	t.Cleanup(upstream.Close)
+
+	session, err := New(context.Background(), "test", protocol.SessionStartParams{
+		Model:      protocol.ModelConfig{BaseURL: upstream.URL, Model: "fake"},
+		Workdir:    t.TempDir(),
+		MCPServers: config,
+	}, StaticKey("sk-test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(session.Close)
+
+	dials := session.MCPDials()
+	if len(dials) != 2 {
+		t.Fatalf("两个 server 应各记一条：%+v", dials)
+	}
+	if dials[0].Name != "slow" {
+		t.Errorf("最慢的要排在最前面，方便一眼看出是谁：%+v", dials)
+	}
+	if dials[0].Took < 400*time.Millisecond {
+		t.Errorf("慢的那个耗时没记对：%v", dials[0].Took)
+	}
+	if dials[1].Took > dials[0].Took {
+		t.Errorf("应按耗时倒序：%+v", dials)
+	}
+}

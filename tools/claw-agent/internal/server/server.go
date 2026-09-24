@@ -328,8 +328,8 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 		return
 	}
 	// 开会话慢的时候，日志里以前只有「运行时 ready」，没有任何线索说慢在哪一段。
-	s.options.Logf("开会话 %s：挂 MCP %dms（%d 个）+ 其余 %dms = 共 %dms",
-		id, session.MountMS(), len(params.MCPServers),
+	s.options.Logf("开会话 %s：挂 MCP %dms（%s）+ 其余 %dms = 共 %dms",
+		id, session.MountMS(), describeDials(session.MCPDials()),
 		time.Since(started).Milliseconds()-session.MountMS(), time.Since(started).Milliseconds())
 	s.guard(session)
 	s.sessMu.Lock()
@@ -384,8 +384,8 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
 	}
-	s.options.Logf("恢复会话 %s：挂 MCP %dms（%d 个）+ 其余 %dms = 共 %dms",
-		params.SessionID, session.MountMS(), len(refreshServers(params.Refresh)),
+	s.options.Logf("恢复会话 %s：挂 MCP %dms（%s）+ 其余 %dms = 共 %dms",
+		params.SessionID, session.MountMS(), describeDials(session.MCPDials()),
 		time.Since(loadStarted).Milliseconds()-session.MountMS(), time.Since(loadStarted).Milliseconds())
 	s.guard(session)
 	s.sessMu.Lock()
@@ -919,12 +919,31 @@ func (e *emitter) RequestBrowser(
 	return result, nil
 }
 
-// refreshServers 取 refresh 里的 MCP server，refresh 为空时给空表。只用于记日志。
-func refreshServers(refresh *protocol.SessionRefresh) map[string]protocol.MCPServerConfig {
-	if refresh == nil {
-		return nil
+// describeDials 把各个 server 的耗时排成一行。
+//
+// 并发挂载之后总耗时等于最慢的那一个，只报「4 个」说不出是谁——实测出现过一次
+// 14.7 秒，而日志里没有任何线索指向具体哪个 server。列表已经按耗时倒序，
+// 第一个就是罪魁；快的那些折成一句，免得四个 server 写成一行长的。
+func describeDials(dials []agent.MCPDial) string {
+	if len(dials) == 0 {
+		return "0 个"
 	}
-	return refresh.MCPServers
+	parts := make([]string, 0, len(dials))
+	quick := 0
+	for _, dial := range dials {
+		switch {
+		case dial.Failed:
+			parts = append(parts, dial.Name+" 失败")
+		case dial.Took >= 200*time.Millisecond:
+			parts = append(parts, fmt.Sprintf("%s %dms", dial.Name, dial.Took.Milliseconds()))
+		default:
+			quick++
+		}
+	}
+	if quick > 0 {
+		parts = append(parts, fmt.Sprintf("另 %d 个均 <200ms", quick))
+	}
+	return fmt.Sprintf("%d 个：%s", len(dials), strings.Join(parts, "，"))
 }
 
 // ---------- 写出 ----------

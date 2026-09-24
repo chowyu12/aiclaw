@@ -104,6 +104,9 @@ type Session struct {
 	// mountMS 是这次建会话里挂 MCP 花的毫秒数。开会话慢时第一个要看的就是它——
 	// 远端 server 的握手是整段里唯一可能到秒级的部分。
 	mountMS int64
+	// mcpDials 是每个 server 各花了多久。并发之后总耗时等于最慢的那一个，
+	// 只有总数说不出是谁慢——实测出现过一次 14.7 秒而无从归因。
+	mcpDials []MCPDial
 	// globalMemory 是跨项目的长期记忆正文（用户偏好、通用约定），起会话时读进来。
 	globalMemory string
 	// workspaceMemory 是当前工作区自己的记忆（这个项目的约定、踩过的坑），
@@ -587,6 +590,7 @@ func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.M
 		client *mcpclient.Client
 		key    string
 		err    error
+		took   time.Duration
 	}
 	results := make([]dialed, len(names))
 	var wg sync.WaitGroup
@@ -594,20 +598,48 @@ func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.M
 		wg.Add(1)
 		go func(index int, name string) {
 			defer wg.Done()
+			started := time.Now()
 			client, key, err := mcpShared.acquire(ctx, name, servers[name])
-			results[index] = dialed{client: client, key: key, err: err}
+			results[index] = dialed{client: client, key: key, err: err, took: time.Since(started)}
 		}(index, name)
 	}
 	wg.Wait()
 
+	s.mcpDials = s.mcpDials[:0]
 	for index, name := range names {
 		result := results[index]
+		s.mcpDials = append(s.mcpDials, MCPDial{Name: name, Took: result.took, Failed: result.err != nil})
 		if result.err != nil {
 			s.mcpStatus[name] = "挂载失败：" + result.err.Error()
 			continue
 		}
+		// 慢的那个要在界面上说出来。并发之后总耗时等于最慢的那一个，用户看到
+		// 「开会话卡了十几秒」时，第一个该知道的就是卡在谁身上。
+		if result.took >= slowDial {
+			s.mcpStatus[name] = fmt.Sprintf("连接用了 %.1fs（慢）", result.took.Seconds())
+		}
 		s.mountMCP(name, servers[name], result.client, result.key)
 	}
+	// 按耗时倒序，日志里第一个就是罪魁。
+	sort.SliceStable(s.mcpDials, func(i, j int) bool { return s.mcpDials[i].Took > s.mcpDials[j].Took })
+}
+
+// slowDial 是「这个 server 慢得该说一声」的门槛。
+//
+// 本机 stdio server 是毫秒级，公网 server 正常几百毫秒；超过两秒就值得让用户看见，
+// 因为并发之后开会话要等的就是最慢的那一个。
+const slowDial = 2 * time.Second
+
+// MCPDial 是一次挂载里某个 server 花了多久。宿主把它记进日志。
+type MCPDial struct {
+	Name   string
+	Took   time.Duration
+	Failed bool
+}
+
+// MCPDials 返回这次挂载各个 server 的耗时，按耗时倒序。
+func (s *Session) MCPDials() []MCPDial {
+	return append([]MCPDial(nil), s.mcpDials...)
 }
 
 // mountMCP 把一个已经连上的 server 的工具注册进来。调用方保证串行。
