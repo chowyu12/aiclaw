@@ -1288,3 +1288,61 @@ func TestMessagesCarryTimestampsLiveAndInHistory(t *testing.T) {
 		t.Errorf("历史里的时间不对：user=%d agent=%d", historyUser, historyAgent)
 	}
 }
+
+// 对话模型看不了图时，图转成文字交给模型；但切回会话时还原出来的必须是用户
+// 发的那一版（原话加原图），而不是一大段转述。
+func TestHistoryRestoresWhatTheUserSentNotTheTranscript(t *testing.T) {
+	model := &fakeModel{script: []string{sseText("三张登机牌，国航 CA1234。"), sseText("是从北京飞的。")}}
+	session := newTestSession(t, model, protocol.ApprovalOnWrite)
+	session.config.Roles.Vision = protocol.RoleModel{ProviderID: 1, Model: "qwen3-vl-plus"}
+	baseURL := session.config.Model.BaseURL
+	session.keyFor = func(config *protocol.ModelConfig) (string, error) {
+		config.BaseURL = baseURL
+		return "sk-test", nil
+	}
+	image := []byte("\x89PNG\r\n\x1a\nfake")
+	emitter := &recordingEmitter{approve: true}
+	session.RunTurn(context.Background(), "t1", "是哪到哪", [][]byte{image}, nil, emitter)
+
+	if len(model.requests) < 2 {
+		t.Fatalf("应先打视觉模型再打对话模型，实际 %d 次", len(model.requests))
+	}
+	if chat, _ := json.Marshal(model.requests[1]); !strings.Contains(string(chat), "转述") {
+		t.Errorf("对话模型应看到转述：%s", chat)
+	}
+
+	var user *protocol.Item
+	history := session.History()
+	for index := range history {
+		if history[index].Kind == protocol.ItemUserMessage {
+			user = &history[index]
+		}
+	}
+	if user == nil {
+		t.Fatalf("历史里没有用户消息：%+v", history)
+	}
+	if user.Text != "是哪到哪" {
+		t.Errorf("还原的应是用户原话，实际：%q", user.Text)
+	}
+	if len(user.Images) != 1 || string(user.Images[0]) != string(image) {
+		t.Errorf("还原的应带着原图，实际 %d 张", len(user.Images))
+	}
+}
+
+// 截屏、中断标记、压缩摘要是以 user 消息送给模型的，但不是用户说的话，
+// 还原时不能变成一个用户气泡。
+func TestHistoryHidesSyntheticUserMessages(t *testing.T) {
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalOnWrite)
+	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: "截个图"})
+	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: "（上一步截屏的画面）", Shown: &llm.Shown{Hidden: true}})
+	session.recordInterruption()
+	var users []string
+	for _, item := range session.History() {
+		if item.Kind == protocol.ItemUserMessage {
+			users = append(users, item.Text)
+		}
+	}
+	if len(users) != 1 || users[0] != "截个图" {
+		t.Errorf("只该还原出用户真说的那一条，实际：%q", users)
+	}
+}

@@ -64,10 +64,8 @@ func (s *Session) RunTurn(
 
 	// 音频先转成文字：模型读不了音频，而用户发过来就是希望它「听」到。
 	// 转写接在正文后面，界面上的那条消息仍是用户原话。
-	if transcript := s.transcribeAttached(ctx, audioPaths); transcript != "" {
-		text += transcript
-	}
-	s.acceptUserInput(ctx, turnID, text, images, emitter)
+	transcript := s.transcribeAttached(ctx, audioPaths)
+	s.acceptUserInput(ctx, turnID, text, transcript, images, emitter)
 
 	usage, err := s.loop(ctx, turnID, emitter)
 
@@ -88,7 +86,11 @@ func (s *Session) RunTurn(
 // 对话模型不认图时，图先由视觉模型转成文字接在消息后面——时间线上仍然显示
 // 原图（用户发的就是图），进模型历史的是转述。不转的话那几张图要么被上游
 // 拒绝（一句看不懂的报错），要么被静默忽略（模型答非所问，而用户以为它看见了）。
-func (s *Session) acceptUserInput(ctx context.Context, turnID, text string, images [][]byte, emitter Emitter) {
+//
+// text 是用户原话，transcript 是附带音频的转写（没有就是空串）。两者分开传：
+// 界面上显示原话，进模型历史的是原话加转写与转述；存档里两份都留（Message.Shown），
+// 切回会话时还原的才是用户发的那一版。
+func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript string, images [][]byte, emitter Emitter) {
 	images = limitImages(images)
 	// 用户消息本身也是一个条目，让宿主的时间线和模型看到的历史一致。
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{
@@ -98,16 +100,17 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text string, imag
 			At: time.Now().UnixMilli(),
 		},
 	})
+	message := llm.Message{Role: llm.RoleUser, Content: text + transcript, Images: images}
 	if len(images) > 0 && !s.config.ModelSeesImages {
 		if described := s.describeImages(ctx, images); described != "" {
-			s.appendMessage(llm.Message{Role: llm.RoleUser, Content: text + described})
-			if s.Title == "" {
-				s.Title = firstLine(text, 40)
-			}
-			return
+			message.Content += described
+			message.Images = nil
 		}
 	}
-	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: text, Images: images})
+	if message.Content != text || len(message.Images) != len(images) {
+		message.Shown = &llm.Shown{Text: text, Images: images}
+	}
+	s.appendMessage(message)
 	if s.Title == "" {
 		s.Title = firstLine(text, 40)
 	}
@@ -175,7 +178,7 @@ func (s *Session) drainPending(ctx context.Context, turnID string, emitter Emitt
 	s.pending = nil
 	s.mu.Unlock()
 	for _, input := range queued {
-		s.acceptUserInput(ctx, turnID, input.text, input.images, emitter)
+		s.acceptUserInput(ctx, turnID, input.text, "", input.images, emitter)
 	}
 }
 
@@ -260,6 +263,7 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 				Role:    llm.RoleUser,
 				Content: "（上一步截屏的画面）",
 				Images:  images,
+				Shown:   &llm.Shown{Hidden: true},
 			})
 		}
 		if ctx.Err() != nil {
@@ -661,7 +665,9 @@ func (s *Session) recordInterruption() {
 		}
 	}
 	s.messages = append(s.messages, missing...)
-	s.messages = append(s.messages, llm.Message{Role: llm.RoleUser, Content: interruptMarker})
+	s.messages = append(s.messages, llm.Message{
+		Role: llm.RoleUser, Content: interruptMarker, Shown: &llm.Shown{Hidden: true},
+	})
 }
 
 func (s *Session) hasPending() bool {

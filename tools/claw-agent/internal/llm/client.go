@@ -54,6 +54,23 @@ type Message struct {
 	// At 是这条消息进历史的时间（Unix 毫秒）。只给界面显示用，不发给上游
 	//（线格式见 wireMessage）。旧存档里没有这一项，是 0，界面上就不显示时间。
 	At int64 `json:",omitempty"`
+	// Shown 是界面上这条消息的样子，只在它和发给模型的不一样时才有值；
+	// 也不发给上游。
+	//
+	// 不一样的情况：对话模型看不了图，图转成文字接在正文后面；音频的转写
+	// 接在正文后面；截屏、中断标记、压缩摘要以 user 消息送进去（那不是用户说的话）。
+	// 没有它，切回会话时还原出来的是给模型看的那一版：用户发的是一张图，
+	// 看到的却是一大段转述。
+	Shown *Shown `json:",omitempty"`
+}
+
+// Shown 见 Message.Shown。
+type Shown struct {
+	Text   string
+	Images [][]byte `json:",omitempty"`
+	// Hidden 表示这条不是用户说的（工具截屏的画面、中断标记、压缩摘要），
+	// 时间线上不显示。
+	Hidden bool `json:",omitempty"`
 }
 
 // Tool 是提供给模型的工具定义。Parameters 是 JSON Schema。

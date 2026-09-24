@@ -50,12 +50,20 @@ func (s *Session) History() []protocol.Item {
 			// 已经作为步骤挂在对应的 assistant 下面了，不再单独列一条。
 			continue
 		case llm.RoleUser:
+			// 有 Shown 的按用户发的那一版还原（见 llm.Message.Shown）。
+			text, images := message.Content, message.Images
+			if shown := message.Shown; shown != nil {
+				if shown.Hidden {
+					continue
+				}
+				text, images = shown.Text, shown.Images
+			}
 			seq, round = 0, 0
 			items = append(items, protocol.Item{
 				ID:     historyID("user", index),
 				Kind:   protocol.ItemUserMessage,
-				Text:   message.Content,
-				Images: message.Images,
+				Text:   text,
+				Images: images,
 				At:     message.At,
 			})
 		case llm.RoleAssistant:

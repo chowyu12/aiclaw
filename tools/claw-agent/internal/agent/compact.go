@@ -132,6 +132,7 @@ func buildCompactedHistory(history []llm.Message, summary string) []llm.Message 
 	return append(out, llm.Message{
 		Role:    llm.RoleUser,
 		Content: summaryPrefix + "\n\n" + summary,
+		Shown:   &llm.Shown{Hidden: true},
 	})
 }
 
