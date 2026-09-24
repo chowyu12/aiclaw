@@ -25,7 +25,12 @@ export type TimelineEntry =
    * images 用 readonly：store 外面拿到的是 readonly() 包过的深只读副本，
    * 声明成可变数组的话 `groupTurns(store.timeline)` 这类调用会类型不兼容。
    */
-  | { kind: "user"; id: string; text: string; images?: readonly string[] }
+  /**
+   * pending 标记「这条是本机发送时先垫上的回显」。内核随后会为同一条输入发来一个
+   * userMessage 事件，那时把这条认领掉（换成内核的 id），而不是再添一条。
+   * 通道会话（微信、企业微信）的消息不经过本机发送，没有回显可认领，直接追加。
+   */
+  | { kind: "user"; id: string; text: string; images?: readonly string[]; pending?: boolean }
   | { kind: "agent"; id: string; text: string; streaming: boolean }
   | {
       kind: "step";
@@ -104,6 +109,26 @@ function upsertAgent(record: LiveSession, itemId: string): TimelineEntry {
   return created;
 }
 
+/**
+ * 认领本机发送时垫的那条回显，认领不到就追加一条。
+ *
+ * 认领而不是「看见 userMessage 就跳过」：跳过对本机发送是对的，对通道会话就成了
+ * 「只有答案没有问题」。认领要同时比文字——用户在上一轮跑着的时候又发了一条时，
+ * 时间线上会同时有两条待认领的回显，只按顺序认会张冠李戴。
+ */
+function adoptOrAppendUser(record: LiveSession, id: string, text: string): void {
+  for (let index = record.timeline.length - 1; index >= 0; index--) {
+    const entry = record.timeline[index]!;
+    if (entry.kind !== "user" || !entry.pending) continue;
+    if (entry.text !== text) continue;
+    // 内核的 id 是权威的：恢复历史时用的也是它，换过来两边才对得上。
+    // 图片保留本机那份——它已经是能直接显示的 data URL。
+    record.timeline[index] = { ...entry, id, pending: undefined };
+    return;
+  }
+  record.timeline.push({ kind: "user", id, text });
+}
+
 function pushStep(
   record: LiveSession,
   id: string,
@@ -139,8 +164,7 @@ function numberOr(value: unknown): number | undefined {
 /**
  * claw-agent 事件 → 对应会话的状态。
  *
- * 事件模型是会话 → 轮次 → 条目三层；条目按 kind 分流进那个会话的时间线，
- * userMessage 忽略（发送时已经本地加过了，再加一次会重复）。
+ * 事件模型是会话 → 轮次 → 条目三层；条目按 kind 分流进那个会话的时间线。
  *
  * 没带 sessionId 的事件（旧内核、或 error 里省略了）算到 fallback 头上——
  * 那是界面当前看着的会话，也是早先唯一的归宿。
@@ -246,6 +270,13 @@ export function applyAgentEvent(
           // 推理正文用 completed 带的权威全文覆盖流式拼接的结果。
           if (typeof item.text === "string" && item.text) entry.detail = item.text;
           Object.assign(entry, stats);
+          return applied;
+        }
+        case "userMessage": {
+          // **通道会话全靠这一条。** 微信 / 企业微信的提问不经过本机发送，没有
+          // 回显可认领；不收下它，界面上就只有答案没有问题，要切走再切回来、
+          // 让内核历史补上才看得见。本机发的那条已经垫过回显，认领即可。
+          adoptOrAppendUser(record, id, typeof item.text === "string" ? item.text : "");
           return applied;
         }
         case "notice": {

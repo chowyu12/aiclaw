@@ -87,3 +87,52 @@ test("一个会话都没有时的事件不会炸也不会造出空记录", () =>
   assert.equal(applied.sessionId, "");
   assert.deepEqual(Object.keys(live), []);
 });
+
+test("通道会话的提问要实时出现，不必切走再切回来", () => {
+  const live = fresh();
+  // 微信来的消息：没有本机回显可认领，直接追加。
+  applyAgentEvent(
+    live,
+    event("item/completed", "C", { item: { id: "u1", kind: "userMessage", text: "你好" } }),
+    "C",
+  );
+  applyAgentEvent(
+    live,
+    event("item/completed", "C", { item: { id: "m1", kind: "agentMessage", text: "你好！" } }),
+    "C",
+  );
+  const kinds = live.C!.timeline.map((e) => e.kind);
+  assert.deepEqual(kinds, ["user", "agent"], "问题要排在答案前面");
+  const question = live.C!.timeline[0]!;
+  assert.equal(question.kind === "user" && question.text, "你好");
+});
+
+test("本机发送的回显被内核的 userMessage 认领，不会重复", () => {
+  const live = fresh();
+  const record = ensureLive(live, "S");
+  record.timeline.push({ kind: "user", id: "local-1", text: "帮我看看", pending: true });
+
+  applyAgentEvent(
+    live,
+    event("item/completed", "S", { item: { id: "kernel-1", kind: "userMessage", text: "帮我看看" } }),
+    "S",
+  );
+
+  assert.equal(record.timeline.length, 1, "不该多出一条");
+  const entry = record.timeline[0]!;
+  assert.equal(entry.id, "kernel-1", "要换成内核的 id，恢复历史时才对得上");
+  assert.equal(entry.kind === "user" && entry.pending, undefined, "认领之后不再是待认领");
+});
+
+test("排队的两条各认各的，不会张冠李戴", () => {
+  const live = fresh();
+  const record = ensureLive(live, "S");
+  record.timeline.push({ kind: "user", id: "local-1", text: "第一条", pending: true });
+  record.timeline.push({ kind: "user", id: "local-2", text: "第二条", pending: true });
+
+  applyAgentEvent(live, event("item/completed", "S", { item: { id: "k1", kind: "userMessage", text: "第一条" } }), "S");
+  applyAgentEvent(live, event("item/completed", "S", { item: { id: "k2", kind: "userMessage", text: "第二条" } }), "S");
+
+  assert.deepEqual(record.timeline.map((e) => e.id), ["k1", "k2"]);
+  assert.equal(record.timeline.length, 2, "两条回显认领两条事件，不该有第三条");
+});

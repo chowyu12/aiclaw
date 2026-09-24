@@ -181,6 +181,15 @@ export const actions = {
         const label = applied.sessionId === state.sessionId ? "" : `${sessionLabel(applied.sessionId)}：`;
         state.error = label + applied.error;
       }
+      // 没见过的会话开跑了，侧边栏要立刻有它：微信来一条消息就是一个新会话，
+      // 只在轮次结束时刷新的话，它要等答案生成完才出现在列表里。
+      if (
+        applied.method === "turn/started" &&
+        applied.sessionId &&
+        !state.sessions.some((session) => session.id === applied.sessionId)
+      ) {
+        void actions.refreshSessions();
+      }
       // 标题与轮次数变了，侧边栏跟一下。
       if (applied.method === "turn/completed") {
         void actions.refreshSessions();
@@ -888,6 +897,9 @@ export const actions = {
       id: `user-${Date.now()}`,
       text,
       images: images.map((data) => `data:image/jpeg;base64,${data}`),
+      // 内核随后会为这条输入发来 userMessage 事件；标记之后由它认领，
+      // 不标记的话通道会话与本机发送没法区分，二选一必错一头。
+      pending: true,
     });
     record.busy = true;
     try {
