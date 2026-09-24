@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } from "electron";
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -110,6 +110,14 @@ function registerIpc(): void {
   // 改配置不用重启运行时：模型、审批档位这些都是按会话下发的。
   ipcMain.handle(IPC.configWrite, (_event, patch: Record<string, unknown>) => store.writeConfig(patch));
   ipcMain.handle(IPC.appVersion, () => app.getVersion());
+  ipcMain.handle(IPC.clipboardWrite, (_event, text: unknown) => {
+    // 只收字符串，而且有上限：渲染层展示的是模型输出，不该借这个口子往剪贴板里
+    // 塞任意大小的东西。一段回答再长也到不了这个数。
+    if (typeof text !== "string") throw new Error("只能复制文本");
+    if (text.length > 2_000_000) throw new Error("内容太长，没有复制");
+    clipboard.writeText(text);
+    return true;
+  });
   ipcMain.handle(IPC.updateCheck, () => updater.check());
   // 下载进度往渲染层推：没有进度的话，用户点完「升级」看到的是一个不动的
   // 按钮，几十秒后应用突然退出——那不是慢，是没有反馈，但感觉比慢更糟。

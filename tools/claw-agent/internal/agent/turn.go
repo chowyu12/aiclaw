@@ -95,6 +95,7 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text string, imag
 		SessionID: s.ID, TurnID: turnID,
 		Item: protocol.Item{
 			ID: newID("user"), Kind: protocol.ItemUserMessage, Text: text, Images: images,
+			At: time.Now().UnixMilli(),
 		},
 	})
 	if len(images) > 0 && !s.config.ModelSeesImages {
@@ -414,7 +415,7 @@ func (s *Session) callModel(
 		ensureStarted()
 		emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{
 			SessionID: s.ID, TurnID: turnID,
-			Item: protocol.Item{ID: itemID, Kind: protocol.ItemAgentMessage, Text: text},
+			Item: protocol.Item{ID: itemID, Kind: protocol.ItemAgentMessage, Text: text, At: time.Now().UnixMilli()},
 		})
 	}
 
@@ -683,6 +684,11 @@ func (s *Session) llmTools() []llm.Tool {
 }
 
 func (s *Session) appendMessage(message llm.Message) {
+	// 在这一处统一打时间，而不是在各个调用点：进历史的路径有七八条（提问、
+	// 回答、工具结果、截屏回灌、压缩摘要），漏一处就有一类消息没有时间。
+	if message.At == 0 {
+		message.At = time.Now().UnixMilli()
+	}
 	s.mu.Lock()
 	s.messages = append(s.messages, message)
 	s.mu.Unlock()

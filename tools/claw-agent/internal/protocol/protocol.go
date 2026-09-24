@@ -750,6 +750,8 @@ const (
 type Item struct {
 	ID   string   `json:"id"`
 	Kind ItemKind `json:"kind"`
+	/** 用户消息与助手消息的时间（Unix 毫秒）。界面在消息下面显示；0 表示不知道（旧存档）。 */
+	At int64 `json:"at,omitempty"`
 	/** 文本类条目的正文。 */
 	Text string `json:"text,omitempty"`
 	/**

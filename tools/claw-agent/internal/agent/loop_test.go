@@ -1243,3 +1243,48 @@ func TestCodeModePromptExplainsWhereToolsWent(t *testing.T) {
 		t.Errorf("提示词应说明工具收在 exec 里：%q", session.messages[0].Content)
 	}
 }
+
+// 提问与回答都带时间：实时事件里有，存档恢复出来的历史里也有——
+// 界面在每条消息下面显示它，切走再切回来不能变成没有。
+func TestMessagesCarryTimestampsLiveAndInHistory(t *testing.T) {
+	before := time.Now().UnixMilli()
+	model := &fakeModel{script: []string{sseText("你好！")}}
+	session := newTestSession(t, model, protocol.ApprovalOnWrite)
+	emitter := &recordingEmitter{approve: true}
+	session.RunTurn(context.Background(), "t1", "hi", nil, nil, emitter)
+	after := time.Now().UnixMilli()
+
+	inRange := func(at int64) bool { return at >= before && at <= after }
+	var liveUser, liveAgent int64
+	for _, event := range emitter.events {
+		if !strings.HasPrefix(event, protocol.NotifyItemCompleted+" ") {
+			continue
+		}
+		var note protocol.ItemNotification
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(event, protocol.NotifyItemCompleted+" ")), &note); err != nil {
+			continue
+		}
+		switch note.Item.Kind {
+		case protocol.ItemUserMessage:
+			liveUser = note.Item.At
+		case protocol.ItemAgentMessage:
+			liveAgent = note.Item.At
+		}
+	}
+	if !inRange(liveUser) || !inRange(liveAgent) {
+		t.Errorf("实时事件的时间不对：user=%d agent=%d（应在 %d..%d）", liveUser, liveAgent, before, after)
+	}
+
+	var historyUser, historyAgent int64
+	for _, item := range session.History() {
+		switch item.Kind {
+		case protocol.ItemUserMessage:
+			historyUser = item.At
+		case protocol.ItemAgentMessage:
+			historyAgent = item.At
+		}
+	}
+	if !inRange(historyUser) || !inRange(historyAgent) {
+		t.Errorf("历史里的时间不对：user=%d agent=%d", historyUser, historyAgent)
+	}
+}

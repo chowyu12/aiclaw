@@ -919,6 +919,7 @@ export const actions = {
       // 内核随后会为这条输入发来 userMessage 事件；标记之后由它认领，
       // 不标记的话通道会话与本机发送没法区分，二选一必错一头。
       pending: true,
+      at: Date.now(),
     });
     record.busy = true;
     try {

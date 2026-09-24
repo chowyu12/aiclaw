@@ -136,3 +136,17 @@ test("排队的两条各认各的，不会张冠李戴", () => {
   assert.deepEqual(record.timeline.map((e) => e.id), ["k1", "k2"]);
   assert.equal(record.timeline.length, 2, "两条回显认领两条事件，不该有第三条");
 });
+
+test("消息带上时间：实时来的用内核的，认领回显时也换成内核的", () => {
+  const live = fresh();
+  applyAgentEvent(live, event("item/completed", "C", { item: { id: "u1", kind: "userMessage", text: "你好", at: 1000 } }), "C");
+  applyAgentEvent(live, event("item/completed", "C", { item: { id: "m1", kind: "agentMessage", text: "嗨", at: 2000 } }), "C");
+  const [question, answer] = live.C!.timeline;
+  assert.equal(question!.kind === "user" && question!.at, 1000);
+  assert.equal(answer!.kind === "agent" && answer!.at, 2000);
+
+  const record = ensureLive(live, "S");
+  record.timeline.push({ kind: "user", id: "local", text: "问", pending: true, at: 500 });
+  applyAgentEvent(live, event("item/completed", "S", { item: { id: "k", kind: "userMessage", text: "问", at: 510 } }), "S");
+  assert.equal(record.timeline[0]!.kind === "user" && record.timeline[0]!.at, 510);
+});

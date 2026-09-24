@@ -103,6 +103,9 @@ const api = {
     /** 把一段音频落到磁盘，返回路径；发消息时把路径交给内核转写。 */
     stage: (input: unknown) => ipcRenderer.invoke(IPC.audioStage, input),
   },
+  clipboard: {
+    write: (text: string) => ipcRenderer.invoke(IPC.clipboardWrite, text),
+  },
   update: {
     version: () => ipcRenderer.invoke(IPC.appVersion),
     check: () => ipcRenderer.invoke(IPC.updateCheck),

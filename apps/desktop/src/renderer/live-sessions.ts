@@ -30,8 +30,9 @@ export type TimelineEntry =
    * userMessage 事件，那时把这条认领掉（换成内核的 id），而不是再添一条。
    * 通道会话（微信、企业微信）的消息不经过本机发送，没有回显可认领，直接追加。
    */
-  | { kind: "user"; id: string; text: string; images?: readonly string[]; pending?: boolean }
-  | { kind: "agent"; id: string; text: string; streaming: boolean }
+  | { kind: "user"; id: string; text: string; images?: readonly string[]; pending?: boolean; at?: number }
+  /** at：消息的时间（Unix 毫秒）。旧存档里没有，界面上就不显示。 */
+  | { kind: "agent"; id: string; text: string; streaming: boolean; at?: number }
   | {
       kind: "step";
       id: string;
@@ -116,17 +117,18 @@ function upsertAgent(record: LiveSession, itemId: string): TimelineEntry {
  * 「只有答案没有问题」。认领要同时比文字——用户在上一轮跑着的时候又发了一条时，
  * 时间线上会同时有两条待认领的回显，只按顺序认会张冠李戴。
  */
-function adoptOrAppendUser(record: LiveSession, id: string, text: string): void {
+function adoptOrAppendUser(record: LiveSession, id: string, text: string, at?: number): void {
   for (let index = record.timeline.length - 1; index >= 0; index--) {
     const entry = record.timeline[index]!;
     if (entry.kind !== "user" || !entry.pending) continue;
     if (entry.text !== text) continue;
     // 内核的 id 是权威的：恢复历史时用的也是它，换过来两边才对得上。
     // 图片保留本机那份——它已经是能直接显示的 data URL。
-    record.timeline[index] = { ...entry, id, pending: undefined };
+    // 时间也换成内核的：它记的是进历史的时刻，恢复历史时显示的也是它。
+    record.timeline[index] = { ...entry, id, pending: undefined, at: at ?? entry.at };
     return;
   }
-  record.timeline.push({ kind: "user", id, text });
+  record.timeline.push({ kind: "user", id, text, at });
 }
 
 function pushStep(
@@ -231,6 +233,7 @@ export function applyAgentEvent(
           // 用完整文本覆盖增量拼接的结果：completed 带的是权威全文。
           if (typeof item.text === "string" && item.text) entry.text = item.text;
           entry.streaming = false;
+          entry.at = typeof item.at === "number" && item.at > 0 ? item.at : Date.now();
           return applied;
         }
         case "toolCall": {
@@ -276,7 +279,12 @@ export function applyAgentEvent(
           // **通道会话全靠这一条。** 微信 / 企业微信的提问不经过本机发送，没有
           // 回显可认领；不收下它，界面上就只有答案没有问题，要切走再切回来、
           // 让内核历史补上才看得见。本机发的那条已经垫过回显，认领即可。
-          adoptOrAppendUser(record, id, typeof item.text === "string" ? item.text : "");
+          adoptOrAppendUser(
+            record,
+            id,
+            typeof item.text === "string" ? item.text : "",
+            typeof item.at === "number" ? item.at : undefined,
+          );
           return applied;
         }
         case "notice": {
@@ -357,10 +365,11 @@ export function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
           // 恢复出来的是裸 base64，界面要的是能直接塞进 <img> 的 data URL。
           // 内核那边统一成 JPEG，所以这里也按 JPEG 拼。
           images: (item.images ?? []).map((data) => `data:image/jpeg;base64,${data}`),
+          at: item.at,
         });
         break;
       case "agentMessage":
-        entries.push({ kind: "agent", id: item.id, text: item.text ?? "", streaming: false });
+        entries.push({ kind: "agent", id: item.id, text: item.text ?? "", streaming: false, at: item.at });
         break;
       case "toolCall":
         entries.push({

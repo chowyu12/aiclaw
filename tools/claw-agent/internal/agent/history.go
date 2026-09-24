@@ -56,6 +56,7 @@ func (s *Session) History() []protocol.Item {
 				Kind:   protocol.ItemUserMessage,
 				Text:   message.Content,
 				Images: message.Images,
+				At:     message.At,
 			})
 		case llm.RoleAssistant:
 			// 采样步骤排在它引发的工具之前：那才是实际发生的顺序，
@@ -76,6 +77,7 @@ func (s *Session) History() []protocol.Item {
 					ID:   historyID("msg", index),
 					Kind: protocol.ItemAgentMessage,
 					Text: message.Content,
+					At:   message.At,
 				})
 			}
 			for callIndex, call := range message.ToolCalls {

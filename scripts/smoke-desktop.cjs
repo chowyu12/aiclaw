@@ -68,6 +68,7 @@ app.whenReady().then(async () => {
   // 应用一启动就拉运行时、列会话、读模型服务；这里都给空的。
   ipcMain.handle(IPC.runtimeStart, () => undefined);
   ipcMain.handle(IPC.appVersion, () => "0.0.0-smoke");
+  ipcMain.handle(IPC.clipboardWrite, () => true);
   ipcMain.handle(IPC.sessionList, () => []);
   ipcMain.handle(IPC.providerList, () => []);
   ipcMain.handle(IPC.profileList, () => [

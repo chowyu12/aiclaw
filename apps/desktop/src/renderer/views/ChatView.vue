@@ -15,6 +15,7 @@ import {
 } from "../attachments";
 import { groupTurns, stepsElapsed, type Turn } from "../turns";
 import { renderMarkdown } from "../markdown";
+import { answerText, answerTime, formatMessageTime, fullMessageTime } from "../message-meta";
 import StepsBlock from "./StepsBlock.vue";
 
 defineProps<{ configured: boolean }>();
@@ -209,6 +210,49 @@ async function pickPolicy(id: string): Promise<void> {
   await actions.saveConfig({ profile: id as "on-write" | "always" | "never" | "bypass" });
 }
 
+// ---------- 复制 ----------
+
+/** 刚复制过的那一条（key），按钮上显示「已复制」一会儿，让人知道点到了。 */
+const copiedKey = ref("");
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** 复制失败的那一条，按钮上显示「复制失败」。说不出失败的「已复制」比没有按钮更糟。 */
+const failedKey = ref("");
+
+async function copyText(key: string, text: string): Promise<void> {
+  if (!text) return;
+  let ok = false;
+  try {
+    // 主进程写系统剪贴板，不受窗口焦点影响；渲染层的剪贴板 API 只作后备。
+    ok = (await window.aiclaw.clipboard.write(text)) === true;
+  } catch {
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch {
+      ok = false;
+    }
+  }
+  copiedKey.value = ok ? key : "";
+  failedKey.value = ok ? "" : key;
+  clearTimeout(copiedTimer);
+  copiedTimer = setTimeout(() => {
+    copiedKey.value = "";
+    failedKey.value = "";
+  }, 1500);
+}
+
+function copyLabel(key: string): string {
+  if (copiedKey.value === key) return "已复制";
+  if (failedKey.value === key) return "复制失败";
+  return "复制";
+}
+
+/** 这一轮的回答说完了没有：还在流式输出的时候不给复制，复制到的是半句话。 */
+function answerDone(turn: Turn): boolean {
+  return turn.messages.length > 0 && turn.messages.every((message) => !message.streaming);
+}
+
 /** 按轮分组：一条提问 + 它触发的全部步骤 + 全部回答。 */
 const turns = computed<Turn[]>(() => groupTurns(store.timeline));
 
@@ -334,6 +378,20 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                 {{ turn.user.text }}
               </div>
             </div>
+            <!-- 时间与复制放在气泡外面一行：塞进气泡里会和正文挤在一起，
+                 而且用户复制的只是自己打的字，不该带上时间。 -->
+            <div v-if="turn.user" class="msg-meta user-meta">
+              <time v-if="turn.user.at" :title="fullMessageTime(turn.user.at)">
+                {{ formatMessageTime(turn.user.at) }}
+              </time>
+              <button
+                class="meta-copy"
+                :title="copiedKey === `u-${turn.key}` ? '已复制' : '复制这条消息'"
+                @click="copyText(`u-${turn.key}`, turn.user.text)"
+              >
+                {{ copyLabel(`u-${turn.key}`) }}
+              </button>
+            </div>
 
             <StepsBlock
               v-if="turn.steps.length > 0 && turn.key === runningKey"
@@ -348,6 +406,20 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                    这段 HTML 是 v-html 塞进来的，Vue 的事件绑定管不到它。 -->
               <div class="prose" @click="onProseClick" v-html="renderMarkdown(message.text)" />
               <span v-if="message.streaming" class="caret">▌</span>
+            </div>
+            <!-- 一轮一行，不是每截一行：一轮里模型会被采样好几次，回答散成几截，
+                 每截都挂一个复制按钮只会满屏按钮，而用户要的是整段回答。 -->
+            <div v-if="answerDone(turn)" class="msg-meta agent-meta">
+              <time v-if="answerTime(turn.messages)" :title="fullMessageTime(answerTime(turn.messages))">
+                {{ formatMessageTime(answerTime(turn.messages)) }}
+              </time>
+              <button
+                class="meta-copy"
+                :title="copiedKey === `a-${turn.key}` ? '已复制' : '复制这一轮的回答（Markdown 原文）'"
+                @click="copyText(`a-${turn.key}`, answerText(turn.messages))"
+              >
+                {{ copyLabel(`a-${turn.key}`) }}
+              </button>
             </div>
 
             <StepsBlock
@@ -644,6 +716,45 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
 
 .msg.agent {
   line-height: 1.75;
+}
+
+/* 消息下面那一行：时间与复制。平时淡，悬停这一轮时才清楚——一屏几十条消息，
+   每条下面都是一行显眼的按钮会盖过正文。 */
+.msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: var(--content-width);
+  margin: -14px auto 18px;
+  padding: 0 28px;
+  color: var(--muted);
+  font-size: 11px;
+  opacity: 0.55;
+  transition: opacity 0.12s;
+}
+
+.msg-meta:hover,
+.msg:hover + .msg-meta {
+  opacity: 1;
+}
+
+.user-meta {
+  justify-content: flex-end;
+}
+
+.meta-copy {
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.meta-copy:hover {
+  border-color: var(--rule-strong);
+  color: var(--ink);
 }
 
 .caret {

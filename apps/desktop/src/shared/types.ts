@@ -54,6 +54,8 @@ export interface SessionStartView {
 export interface HistoryItemView {
   id: string;
   kind: string;
+  /** 用户消息与助手消息的时间（Unix 毫秒）。 */
+  at?: number;
   text?: string;
   /** 用户消息带的图片，base64 的 JPEG。 */
   images?: string[];

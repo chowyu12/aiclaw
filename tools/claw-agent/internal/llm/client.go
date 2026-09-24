@@ -51,6 +51,9 @@ type Message struct {
 	// 没有地方放图。所以截屏这类工具的图是作为**紧随其后的一条 user 消息**
 	// 送进去的，不是塞在工具结果里。
 	Images [][]byte
+	// At 是这条消息进历史的时间（Unix 毫秒）。只给界面显示用，不发给上游
+	//（线格式见 wireMessage）。旧存档里没有这一项，是 0，界面上就不显示时间。
+	At int64 `json:",omitempty"`
 }
 
 // Tool 是提供给模型的工具定义。Parameters 是 JSON Schema。
