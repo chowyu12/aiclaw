@@ -410,9 +410,13 @@ export class SessionManager extends EventEmitter {
     try {
       const provider = (await this.listProviders()).find((item) => item.id === config.providerId);
       if (!provider) return true;
-      const entry = provider.models.find((item) => item.split("#")[0]!.trim() === config.model);
+      // 清单项形如 `名字#vision,image@200000`：窗口（@…）要先切掉再看标记。
+      // 早先没切，`deepseek-v4.1-flash#vision@1050000` 的标记读成了「vision@1050000」，
+      // 于是凡是写了窗口的模型都被当成不认图，每张图都白走一趟视觉旁路。
+      // 规则与内核 protocol.ParseModelMark、渲染层 parseModelMark 一致。
+      const entry = provider.models.find((item) => markedName(item) === config.model);
       if (entry === undefined) return true;
-      return entry.includes("#") && entry.split("#")[1]!.split(",").some((m) => m.trim() === "vision");
+      return markedRoles(entry).includes("vision");
     } catch {
       return true;
     }
@@ -654,6 +658,23 @@ function resolveBin(envVar: string, name: string): string {
     if (candidate && existsSync(candidate)) return candidate;
   }
   return exe;
+}
+
+/** 清单项里的模型名：去掉 `#标记` 与 `@窗口`。 */
+function markedName(entry: string): string {
+  return entry.split("@")[0]!.split("#")[0]!.trim();
+}
+
+/** 清单项里的能力标记。没有 `#` 就是只做对话。 */
+function markedRoles(entry: string): string[] {
+  const head = entry.split("@")[0]!;
+  const hash = head.indexOf("#");
+  if (hash < 0) return [];
+  return head
+    .slice(hash + 1)
+    .split(",")
+    .map((mark) => mark.trim().toLowerCase())
+    .filter(Boolean);
 }
 
 /**

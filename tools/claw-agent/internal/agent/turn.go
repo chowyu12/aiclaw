@@ -100,7 +100,13 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 			At: time.Now().UnixMilli(),
 		},
 	})
-	message := llm.Message{Role: llm.RoleUser, Content: text + transcript, Images: images}
+	content := text + transcript
+	if strings.TrimSpace(content) == "" && len(images) > 0 {
+		// 只发了图、没配文字：明说这是一条新消息。空着的话模型看到的是一条没有
+		// 正文的 user 消息，常常当成「继续」接着做上一件事（见 interruptMarker）。
+		content = fmt.Sprintf("（用户发来 %d 张图片，没有附文字。）", len(images))
+	}
+	message := llm.Message{Role: llm.RoleUser, Content: content, Images: images}
 	if len(images) > 0 && !s.config.ModelSeesImages {
 		if described := s.describeImages(ctx, images); described != "" {
 			message.Content += described

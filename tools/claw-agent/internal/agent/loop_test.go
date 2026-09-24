@@ -1376,3 +1376,49 @@ func TestSetMediaRolesEnablesVisionBypass(t *testing.T) {
 		t.Errorf("对话模型应只收到转述，不收到原图：%s", chat)
 	}
 }
+
+// 3.5.4 之前存下的中断标记、压缩摘要没有 Hidden 标记，还原时同样不能变成用户气泡。
+func TestHistoryHidesLegacySyntheticMessages(t *testing.T) {
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalOnWrite)
+	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: "打开 UU"})
+	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: "用户主动中断了上一轮。被中止的工具或命令可能已经部分执行过，继续之前请先确认当前的实际状态，不要假设它们没有生效。"})
+	session.appendMessage(llm.Message{Role: llm.RoleUser, Content: summaryPrefix + "\n\n摘要"})
+	var users []string
+	for _, item := range session.History() {
+		if item.Kind == protocol.ItemUserMessage {
+			users = append(users, item.Text)
+		}
+	}
+	if len(users) != 1 || users[0] != "打开 UU" {
+		t.Errorf("旧存档里的合成消息不该还原成用户气泡：%q", users)
+	}
+}
+
+// 中断之后只发一张图、不配文字：模型要知道这是一条新消息，而不是「继续」。
+// 实际发生过：模型接着做了被中断的任务，对那张图一个字没提。
+func TestImageOnlyMessageIsLabelledAsNew(t *testing.T) {
+	model := &fakeModel{script: []string{sseText("是一张支付截图。")}}
+	session := newTestSession(t, model, protocol.ApprovalOnWrite)
+	session.config.ModelSeesImages = true
+	session.recordInterruption()
+	image := []byte("\x89PNG\r\n\x1a\nfake")
+	session.RunTurn(context.Background(), "t1", "", [][]byte{image}, nil, &recordingEmitter{approve: true})
+
+	request, _ := json.Marshal(model.requests[0])
+	if !strings.Contains(string(request), "没有附文字") {
+		t.Errorf("只有图的消息应说明这是一条新消息：%s", request)
+	}
+	if !strings.Contains(string(request), "按新的要求来") {
+		t.Errorf("中断标记应说明换了事就按新的来：%s", request)
+	}
+	var user *protocol.Item
+	history := session.History()
+	for index := range history {
+		if history[index].Kind == protocol.ItemUserMessage {
+			user = &history[index]
+		}
+	}
+	if user == nil || user.Text != "" || len(user.Images) != 1 {
+		t.Errorf("界面上还原的应是用户发的那一版：一张图、没有文字，实际 %+v", user)
+	}
+}

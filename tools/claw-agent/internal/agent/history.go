@@ -57,6 +57,8 @@ func (s *Session) History() []protocol.Item {
 					continue
 				}
 				text, images = shown.Text, shown.Images
+			} else if legacySynthetic(message.Content) {
+				continue
 			}
 			seq, round = 0, 0
 			items = append(items, protocol.Item{
@@ -107,6 +109,15 @@ func (s *Session) History() []protocol.Item {
 		}
 	}
 	return items
+}
+
+// legacySynthetic 认出 Shown 出现之前存下的合成消息：中断标记、压缩摘要、截屏
+// 画面。它们以 user 消息送给模型，但不是用户说的；旧存档里没有 Hidden 标记，
+// 只能按开头认。中断标记改过措辞，所以按不变的第一句认。
+func legacySynthetic(content string) bool {
+	return strings.HasPrefix(content, "用户主动中断了上一轮。") ||
+		strings.HasPrefix(content, summaryPrefix) ||
+		content == "（上一步截屏的画面）"
 }
 
 // historyID 给还原出来的条目一个稳定 id。

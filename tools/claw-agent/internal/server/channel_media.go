@@ -71,8 +71,9 @@ func (g *channelGateway) applyMedia(ctx context.Context, session *agent.Session,
 }
 
 // modelSeesImages 看模型清单里的 #vision 标记，与桌面端 session.ts 的 modelSeesImages
-// 同一条规则：拿不到清单、清单里没有这个模型时按「看得懂」处理——宁可让不认图
-// 的模型报一次上游错误，也不要让认图的模型永远只读到二手描述。
+// 同一条规则：标了 vision 才算认图，没有标记就是只做对话；拿不到清单、清单里
+// 没有这个模型时按「看得懂」处理——宁可让不认图的模型报一次上游错误，也不要
+// 让认图的模型永远只读到二手描述。
 func (g *channelGateway) modelSeesImages(ctx context.Context, providerID int64, modelName string) bool {
 	s := g.server
 	if s.providers == nil || providerID == 0 {
@@ -91,10 +92,7 @@ func (g *channelGateway) modelSeesImages(ctx context.Context, providerID int64, 
 			if parsed.Name != strings.TrimSpace(modelName) {
 				continue
 			}
-			// 没写任何标记的旧清单项：不知道，按看得懂处理。
-			if !strings.Contains(entry, "#") {
-				return true
-			}
+			// 没有 # 的清单项就是只做对话（见 protocol.ProviderView.Models）。
 			for _, role := range parsed.Roles {
 				if role == protocol.RoleVision {
 					return true
