@@ -242,6 +242,11 @@ async function copyText(key: string, text: string): Promise<void> {
   }, 1500);
 }
 
+/** 刚复制完（或失败）的那一行保持显示一会儿：鼠标一移开就消失，用户看不到结果。 */
+function isMarked(key: string): boolean {
+  return copiedKey.value === key || failedKey.value === key;
+}
+
 function copyLabel(key: string): string {
   if (copiedKey.value === key) return "已复制";
   if (failedKey.value === key) return "复制失败";
@@ -365,7 +370,10 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
           <template v-for="turn in turns" :key="turn.key">
             <!-- 用户消息是纯文本气泡：他自己打的字，不该被 Markdown 重新解释
                  （写个 *星号* 不该变成斜体）。助手消息才渲染 Markdown。 -->
-            <div v-if="turn.user" class="msg user">
+            <!-- 提问与它下面那一行包在一起：鼠标在这块上面时才显示时间与复制
+                 （与 Codex / Claude 一样），平时整屏只有正文。 -->
+            <div v-if="turn.user" class="say">
+            <div class="msg user">
               <div class="bubble">
                 <div v-if="(turn.user.images ?? []).length > 0" class="shots">
                   <img
@@ -380,17 +388,24 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
             </div>
             <!-- 时间与复制放在气泡外面一行：塞进气泡里会和正文挤在一起，
                  而且用户复制的只是自己打的字，不该带上时间。 -->
-            <div v-if="turn.user" class="msg-meta user-meta">
+            <div class="msg-meta user-meta" :class="{ pinned: isMarked(`u-${turn.key}`) }">
+              <button
+                class="meta-copy"
+                :title="copyLabel(`u-${turn.key}`)"
+                :aria-label="copyLabel(`u-${turn.key}`)"
+                @click="copyText(`u-${turn.key}`, turn.user.text)"
+              >
+                <svg v-if="copiedKey === `u-${turn.key}`" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
+                <svg v-else-if="failedKey === `u-${turn.key}`" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
+                <svg v-else viewBox="0 0 16 16" aria-hidden="true">
+                  <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+                  <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
+                </svg>
+              </button>
               <time v-if="turn.user.at" :title="fullMessageTime(turn.user.at)">
                 {{ formatMessageTime(turn.user.at) }}
               </time>
-              <button
-                class="meta-copy"
-                :title="copiedKey === `u-${turn.key}` ? '已复制' : '复制这条消息'"
-                @click="copyText(`u-${turn.key}`, turn.user.text)"
-              >
-                {{ copyLabel(`u-${turn.key}`) }}
-              </button>
+            </div>
             </div>
 
             <StepsBlock
@@ -401,6 +416,8 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
               @toggle="toggleSteps(turn)"
             />
 
+            <!-- 一轮的回答与它下面那一行包在一起，理由同提问。 -->
+            <div v-if="turn.messages.length > 0" class="say">
             <div v-for="message in turn.messages" :key="message.id" class="msg agent">
               <!-- 文件名点了直接打开。用事件委托而不是给每个 code 绑监听：
                    这段 HTML 是 v-html 塞进来的，Vue 的事件绑定管不到它。 -->
@@ -409,17 +426,24 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
             </div>
             <!-- 一轮一行，不是每截一行：一轮里模型会被采样好几次，回答散成几截，
                  每截都挂一个复制按钮只会满屏按钮，而用户要的是整段回答。 -->
-            <div v-if="answerDone(turn)" class="msg-meta agent-meta">
+            <div v-if="answerDone(turn)" class="msg-meta agent-meta" :class="{ pinned: isMarked(`a-${turn.key}`) }">
+              <button
+                class="meta-copy"
+                :title="copiedKey === `a-${turn.key}` || failedKey === `a-${turn.key}` ? copyLabel(`a-${turn.key}`) : '复制回答（Markdown 原文）'"
+                :aria-label="copyLabel(`a-${turn.key}`)"
+                @click="copyText(`a-${turn.key}`, answerText(turn.messages))"
+              >
+                <svg v-if="copiedKey === `a-${turn.key}`" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
+                <svg v-else-if="failedKey === `a-${turn.key}`" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
+                <svg v-else viewBox="0 0 16 16" aria-hidden="true">
+                  <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+                  <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
+                </svg>
+              </button>
               <time v-if="answerTime(turn.messages)" :title="fullMessageTime(answerTime(turn.messages))">
                 {{ formatMessageTime(answerTime(turn.messages)) }}
               </time>
-              <button
-                class="meta-copy"
-                :title="copiedKey === `a-${turn.key}` ? '已复制' : '复制这一轮的回答（Markdown 原文）'"
-                @click="copyText(`a-${turn.key}`, answerText(turn.messages))"
-              >
-                {{ copyLabel(`a-${turn.key}`) }}
-              </button>
+            </div>
             </div>
 
             <StepsBlock
@@ -718,43 +742,60 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
   line-height: 1.75;
 }
 
-/* 消息下面那一行：时间与复制。平时淡，悬停这一轮时才清楚——一屏几十条消息，
-   每条下面都是一行显眼的按钮会盖过正文。 */
+/* 消息下面那一行：复制与时间。**鼠标移到这条消息上才出现**（与 Codex / Claude
+   一样）——一屏几十条消息，每条下面常驻一行按钮会盖过正文。用 opacity 而不是
+   display:none：位置先占好，出现时正文不会跳。键盘聚焦进来也显示。 */
 .msg-meta {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   max-width: var(--content-width);
-  margin: -14px auto 18px;
-  padding: 0 28px;
+  margin: -16px auto 14px;
+  padding: 0 24px;
   color: var(--muted);
   font-size: 11px;
-  opacity: 0.55;
+  opacity: 0;
   transition: opacity 0.12s;
 }
 
-.msg-meta:hover,
-.msg:hover + .msg-meta {
+.say:hover .msg-meta,
+.say:focus-within .msg-meta,
+.msg-meta.pinned {
   opacity: 1;
 }
 
+/* 提问靠右：复制按钮贴着气泡的右边缘，时间在它左边。 */
 .user-meta {
-  justify-content: flex-end;
+  flex-direction: row-reverse;
 }
 
 .meta-copy {
-  padding: 1px 6px;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
-  font-size: 11px;
   cursor: pointer;
 }
 
 .meta-copy:hover {
-  border-color: var(--rule-strong);
+  background: var(--active);
   color: var(--ink);
+}
+
+.meta-copy svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .caret {
