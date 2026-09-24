@@ -3,6 +3,7 @@ package wechatlink
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -97,40 +98,68 @@ func (m *Monitor) Run(ctx context.Context) error {
 				m.logger.Debug("跳过非用户消息 type=%d", raw.MessageType)
 				continue
 			}
-			text, images := extractContent(raw.ItemList)
-			if text == "" && len(images) == 0 {
-				m.logger.Debug("跳过没有文字与图片的消息")
+			message := extractContent(raw.ItemList)
+			if message.Text == "" && len(message.Images) == 0 && len(message.Files) == 0 {
+				m.logger.Debug("跳过没有内容的消息")
 				continue
 			}
-			m.handler(Message{
-				FromUserID:   raw.FromUserID,
-				Text:         text,
-				Images:       images,
-				ContextToken: raw.ContextToken,
-			})
+			message.FromUserID = raw.FromUserID
+			message.ContextToken = raw.ContextToken
+			m.handler(message)
 		}
 	}
 }
 
-func extractContent(items []MessageItem) (text string, images []ImageSource) {
-	for _, it := range items {
-		switch it.Type {
-		case ItemTypeText:
-			if it.TextItem != nil && it.TextItem.Text != "" {
-				text = it.TextItem.Text
+// extractContent 把一条消息的各项归一成文字、图片与文件。
+//
+// 多段文字按顺序连起来（旧写法只留最后一段）；引用的消息里的图片与文件也收进来：
+// 「引用一张图，问这是什么」是最常见的用法，丢了引用模型就只看到一句「这是什么」。
+func extractContent(items []MessageItem) Message {
+	var message Message
+	var texts []string
+	var walk func(items []MessageItem, quoted bool)
+	walk = func(items []MessageItem, quoted bool) {
+		for _, it := range items {
+			switch it.Type {
+			case ItemTypeText:
+				if it.TextItem != nil && strings.TrimSpace(it.TextItem.Text) != "" {
+					if quoted {
+						texts = append(texts, "（引用）"+it.TextItem.Text)
+					} else {
+						texts = append(texts, it.TextItem.Text)
+					}
+				}
+			case ItemTypeImage:
+				if it.ImageItem == nil {
+					continue
+				}
+				img := ImageSource{URL: it.ImageItem.URL, Media: it.ImageItem.Media, HexKey: it.ImageItem.AESKey}
+				if img.URL != "" || img.Media != nil {
+					message.Images = append(message.Images, img)
+				}
+			case ItemTypeVoice:
+				if it.VoiceItem == nil {
+					continue
+				}
+				if t := strings.TrimSpace(it.VoiceItem.Text); t != "" {
+					texts = append(texts, t)
+				} else {
+					texts = append(texts, "[一段语音，微信没有转出文字]")
+				}
+			case ItemTypeFile:
+				if it.FileItem != nil && it.FileItem.Media != nil {
+					message.Files = append(message.Files, FileSource{Name: it.FileItem.FileName, Media: it.FileItem.Media})
+				}
+			case ItemTypeVideo:
+				// 视频不下载：模型看不了视频，而一段视频动辄几十 MB。说一声，别让它以为什么都没发。
+				texts = append(texts, "[一段视频，暂不支持查看]")
 			}
-		case ItemTypeImage:
-			if it.ImageItem == nil {
-				continue
-			}
-			img := ImageSource{URL: it.ImageItem.URL}
-			if it.ImageItem.Media != nil {
-				img.Media = it.ImageItem.Media
-			}
-			if img.URL != "" || img.Media != nil {
-				images = append(images, img)
+			if it.RefMsg != nil && it.RefMsg.MessageItem != nil {
+				walk([]MessageItem{*it.RefMsg.MessageItem}, true)
 			}
 		}
 	}
-	return
+	walk(items, false)
+	message.Text = strings.Join(texts, "\n")
+	return message
 }

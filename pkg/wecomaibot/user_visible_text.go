@@ -4,7 +4,16 @@ import (
 	"strings"
 )
 
-// MixedToUserVisibleText 将图文混排转为发给模型的用户侧文本（正文 + `[图片] url` 行）。
+// MediaRef 是一个入站的加密媒体：下载链接五分钟内有效，要用它自带的 AESKey 解密。
+type MediaRef struct {
+	URL    string
+	AESKey string
+}
+
+// MixedToUserVisibleText 取图文混排里的文字部分。
+//
+// 图片不再写成「[图片] <url>」行：那个 url 是加密的临时链接，模型拿到它什么都
+// 做不了，却会以为自己「看过」这张图。图片单独下载解密后作为图片交给模型。
 func MixedToUserVisibleText(msg *MixedMessage) string {
 	if msg == nil {
 		return ""
@@ -12,48 +21,67 @@ func MixedToUserVisibleText(msg *MixedMessage) string {
 	var parts []string
 	for _, it := range msg.Mixed.MsgItem {
 		mt := strings.ToLower(strings.TrimSpace(it.MsgType))
-		switch mt {
-		case "text", "":
-			if it.Text != nil {
-				if t := strings.TrimSpace(it.Text.Content); t != "" {
-					parts = append(parts, t)
-				}
-			}
-		case "image":
-			if it.Image != nil {
-				if u := strings.TrimSpace(it.Image.URL); u != "" {
-					parts = append(parts, "[图片] "+u)
-				}
+		if (mt == "text" || mt == "") && it.Text != nil {
+			if t := strings.TrimSpace(it.Text.Content); t != "" {
+				parts = append(parts, t)
 			}
 		}
 	}
 	return strings.TrimSpace(strings.Join(parts, "\n"))
 }
 
-// CollectImageURLsFromMixed 提取混排中的图片 URL。
-func CollectImageURLsFromMixed(msg *MixedMessage) []string {
+// CollectImagesFromMixed 取图文混排里的图片。
+func CollectImagesFromMixed(msg *MixedMessage) []MediaRef {
 	if msg == nil {
 		return nil
 	}
-	var urls []string
+	var refs []MediaRef
 	for _, it := range msg.Mixed.MsgItem {
 		if strings.EqualFold(strings.TrimSpace(it.MsgType), "image") && it.Image != nil {
-			if u := strings.TrimSpace(it.Image.URL); u != "" {
-				urls = append(urls, u)
+			if ref, ok := imageRef(it.Image); ok {
+				refs = append(refs, ref)
 			}
 		}
 	}
-	return urls
+	return refs
 }
 
-// ImageToUserVisibleText 纯图片消息转用户侧文本。
-func ImageToUserVisibleText(msg *ImageMessage) string {
-	if msg == nil {
-		return ""
+func imageRef(image *ImageContent) (MediaRef, bool) {
+	if image == nil || strings.TrimSpace(image.URL) == "" {
+		return MediaRef{}, false
 	}
-	u := strings.TrimSpace(msg.Image.URL)
-	if u == "" {
-		return ""
+	return MediaRef{URL: strings.TrimSpace(image.URL), AESKey: strings.TrimSpace(image.AESKey)}, true
+}
+
+// quoteParts 取引用消息里的文字、图片与文件。用户常常引用一张图再问「这是什么」，
+// 丢了引用模型就只看到一句「这是什么」。
+func quoteParts(quote *QuoteContent) (text string, images []MediaRef, files []MediaRef) {
+	if quote == nil {
+		return "", nil, nil
 	}
-	return "[图片] " + u
+	switch strings.ToLower(strings.TrimSpace(quote.MsgType)) {
+	case "text":
+		if quote.Text != nil {
+			text = strings.TrimSpace(quote.Text.Content)
+		}
+	case "voice":
+		if quote.Voice != nil {
+			text = strings.TrimSpace(quote.Voice.Content)
+		}
+	case "image":
+		if ref, ok := imageRef(quote.Image); ok {
+			images = append(images, ref)
+		}
+	case "mixed":
+		if quote.Mixed != nil {
+			mixed := &MixedMessage{Mixed: *quote.Mixed}
+			text = MixedToUserVisibleText(mixed)
+			images = CollectImagesFromMixed(mixed)
+		}
+	case "file":
+		if quote.File != nil && strings.TrimSpace(quote.File.URL) != "" {
+			files = append(files, MediaRef{URL: strings.TrimSpace(quote.File.URL), AESKey: strings.TrimSpace(quote.File.AESKey)})
+		}
+	}
+	return text, images, files
 }

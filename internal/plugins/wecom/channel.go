@@ -37,6 +37,9 @@ const streamFlushRunes = 40
 type Channel struct {
 	// connect builds the transport; tests replace it.
 	connect func(botID, secret string) (transport, error)
+	// download fetches and decrypts an inbound image or file; tests replace
+	// it. Nil means the real endpoint.
+	download func(ctx context.Context, ref wecomaibot.MediaRef) ([]byte, string, error)
 }
 
 // transport is the part of the WeCom client this connector uses.
@@ -111,7 +114,7 @@ func (c *Channel) Run(ctx context.Context, deps pluginpkg.ChannelDeps) error {
 // serve runs one inbound message as a turn and reports the outcome back.
 func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, client transport, message *wecomaibot.NormalizedMessage) {
 	text := strings.TrimSpace(message.Text)
-	if text == "" {
+	if text == "" && len(message.Images) == 0 && len(message.Files) == 0 && message.Note == "" {
 		return
 	}
 	streamID := message.Base.MsgID
@@ -121,13 +124,15 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, client 
 	stream := newStreamer(client, message, streamID)
 	reply := connector.NewReply(stream.push)
 
-	err := deps.Gateway.Submit(ctx, deps.PluginUUID, pluginpkg.Inbound{
+	inbound := pluginpkg.Inbound{
 		ChannelID:   ChannelID,
 		ExternalKey: message.ThreadKey,
 		DisplayName: displayName(message),
 		SenderID:    message.SenderID,
 		Text:        text,
-	}, reply.Observe)
+	}
+	c.attachMedia(ctx, deps, message, &inbound)
+	err := deps.Gateway.Submit(ctx, deps.PluginUUID, inbound, reply.Observe)
 
 	switch {
 	case errors.Is(err, pluginpkg.ErrBindingNotAllowed):
@@ -141,6 +146,48 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, client 
 		stream.finish("这次没有得到可用的回复，请换个说法再试一次。")
 	default:
 		stream.finish(reply.Text())
+	}
+}
+
+// attachMedia downloads the message's images and files into the inbound.
+//
+// The links are encrypted and expire in five minutes, so they are fetched now
+// rather than handed to the model as text (which is what used to happen: the
+// model got "[图片] https://…" and could do nothing with it). A failed download
+// is said in the text, not dropped, so the answer does not pretend the
+// picture was seen.
+func (c *Channel) attachMedia(ctx context.Context, deps pluginpkg.ChannelDeps, message *wecomaibot.NormalizedMessage, inbound *pluginpkg.Inbound) {
+	download := c.download
+	if download == nil {
+		download = wecomaibot.DownloadMedia
+	}
+	var notes []string
+	if message.Note != "" {
+		notes = append(notes, message.Note)
+	}
+	for _, ref := range message.Images {
+		data, _, err := download(ctx, ref)
+		if err != nil {
+			deps.Log("wecom image download failed for %s: %v", message.ThreadKey, err)
+			notes = append(notes, "[用户发来一张图片，但下载失败了]")
+			continue
+		}
+		inbound.Images = append(inbound.Images, data)
+	}
+	for _, ref := range message.Files {
+		data, name, err := download(ctx, ref)
+		if err != nil {
+			deps.Log("wecom file download failed for %s: %v", message.ThreadKey, err)
+			notes = append(notes, "[用户发来一个文件，但下载失败了]")
+			continue
+		}
+		if strings.TrimSpace(name) == "" {
+			name = "file"
+		}
+		inbound.Files = append(inbound.Files, pluginpkg.InboundFile{Name: name, Data: data})
+	}
+	if len(notes) > 0 {
+		inbound.Text = strings.TrimSpace(inbound.Text + "\n" + strings.Join(notes, "\n"))
 	}
 }
 

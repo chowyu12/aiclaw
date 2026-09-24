@@ -108,7 +108,12 @@ function push(channel: string, payload: unknown): void {
 function registerIpc(): void {
   ipcMain.handle(IPC.configRead, () => store.readConfig());
   // 改配置不用重启运行时：模型、审批档位这些都是按会话下发的。
-  ipcMain.handle(IPC.configWrite, (_event, patch: Record<string, unknown>) => store.writeConfig(patch));
+  ipcMain.handle(IPC.configWrite, async (_event, patch: Record<string, unknown>) => {
+    const result = await store.writeConfig(patch);
+    // 通道会话（微信、企业微信）是内核自己建的，角色配置要推过去才用得上。
+    if ("roles" in patch) await sessions.syncChannelMedia();
+    return result;
+  });
   ipcMain.handle(IPC.appVersion, () => app.getVersion());
   ipcMain.handle(IPC.clipboardWrite, (_event, text: unknown) => {
     // 只收字符串，而且有上限：渲染层展示的是模型输出，不该借这个口子往剪贴板里

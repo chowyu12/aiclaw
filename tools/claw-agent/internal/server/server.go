@@ -65,6 +65,10 @@ type Server struct {
 	plugins   *pluginhost.Service
 	search    *searchengines.Store
 
+	// channelRoles 是宿主推来的角色配置，通道会话每轮开始前按它刷新（见 channel.go）。
+	channelMu    sync.Mutex
+	channelRoles protocol.RoleModels
+
 	// 向宿主发出的请求，等它回。
 	outboundID      atomic.Int64
 	outboundPending map[int64]chan json.RawMessage
@@ -195,6 +199,16 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 			DataHome: s.options.DataHome,
 			Tools:    []string{"read_file", "write_file", "edit_file", "list_dir", "search_files", "run_command"},
 		})
+	case protocol.MethodChannelMedia:
+		var params protocol.ChannelMediaParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		s.channelMu.Lock()
+		s.channelRoles = params.Roles
+		s.channelMu.Unlock()
+		s.writeResult(f.ID, map[string]any{})
 	case protocol.MethodSessionStart:
 		s.handleSessionStart(ctx, f)
 	case protocol.MethodSessionResume:

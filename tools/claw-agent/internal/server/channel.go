@@ -79,9 +79,15 @@ func (g *channelGateway) Submit(ctx context.Context, pluginUUID string, message 
 		return errors.New("上一条消息还在处理")
 	}
 
+	g.applyMedia(ctx, session, binding)
+	text, images, audioPaths := g.prepareAttachments(session.ID, message)
+	if strings.TrimSpace(text) == "" && len(images) == 0 && len(audioPaths) == 0 {
+		return errors.New("这条消息里没有能交给助手的内容")
+	}
+
 	turnID := fmt.Sprintf("t_%d", time.Now().UnixNano())
 	emitter := &channelEmitter{observe: observe, kinds: map[string]protocol.ItemKind{}}
-	session.RunTurn(ctx, turnID, message.Text, nil, nil, emitter)
+	session.RunTurn(ctx, turnID, text, images, audioPaths, emitter)
 	if err := session.Save(ctx, s.db); err != nil {
 		s.options.Logf("保存通道会话失败：%v", err)
 	}

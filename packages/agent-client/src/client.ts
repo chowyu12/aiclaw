@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { AgentTransport, type TransportOptions } from "./transport.js";
 import type {
   AgentNotification,
+  RoleModels,
   ApprovalRequestParams,
   ComputerRequestParams,
   ComputerResult,
@@ -289,6 +290,17 @@ export class ClawAgentClient extends EventEmitter {
   channelRevoke(key: ChannelBindingKey): Promise<unknown> {
     this.assertReady();
     return this.transport.request("channel/revoke", key);
+  }
+
+  /**
+   * 把角色配置推给内核，给通道会话（微信、企业微信）用。
+   *
+   * 那些会话是内核自己建的，拿不到这边的配置：不推的话用户发来的图没有视觉模型
+   * 转述、语音文件没有听写。启动后与每次保存设置后各推一次。
+   */
+  channelMedia(roles: RoleModels): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("channel/media", { roles });
   }
 
   wechatLoginStart(): Promise<WeChatLoginStartResult> {

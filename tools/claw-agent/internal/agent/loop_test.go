@@ -1346,3 +1346,33 @@ func TestHistoryHidesSyntheticUserMessages(t *testing.T) {
 		t.Errorf("只该还原出用户真说的那一条，实际：%q", users)
 	}
 }
+
+// 通道会话建出来时没有角色配置；SetMediaRoles 之后，图要走视觉旁路，系统
+// 提示词也要跟着说「你看不了图」。
+func TestSetMediaRolesEnablesVisionBypass(t *testing.T) {
+	model := &fakeModel{script: []string{sseText("一张登机牌。"), sseText("是国航的。")}}
+	session := newTestSession(t, model, protocol.ApprovalNever)
+	baseURL := session.config.Model.BaseURL
+	session.keyFor = func(config *protocol.ModelConfig) (string, error) {
+		config.BaseURL = baseURL
+		return "sk-test", nil
+	}
+	if strings.Contains(session.snapshotMessages()[0].Content, "你自己看不了图") {
+		t.Fatal("还没配视觉模型时不该这么说")
+	}
+	session.SetMediaRoles(protocol.RoleModel{ProviderID: 1, Model: "qwen3-vl-plus"}, protocol.RoleModel{}, false)
+	if !strings.Contains(session.snapshotMessages()[0].Content, "你自己看不了图") {
+		t.Error("换成不认图的模型后，系统提示词应跟着改")
+	}
+
+	session.RunTurn(context.Background(), "t1", "", [][]byte{[]byte("\x89PNG\r\n\x1a\nfake")}, nil, &recordingEmitter{approve: true})
+	if len(model.requests) != 2 {
+		t.Fatalf("应先打视觉模型再打对话模型，实际 %d 次", len(model.requests))
+	}
+	if first, _ := json.Marshal(model.requests[0]); !strings.Contains(string(first), "qwen3-vl-plus") {
+		t.Errorf("第一次应打视觉模型：%s", first)
+	}
+	if chat, _ := json.Marshal(model.requests[1]); strings.Contains(string(chat), "image_url") || !strings.Contains(string(chat), "转述") {
+		t.Errorf("对话模型应只收到转述，不收到原图：%s", chat)
+	}
+}

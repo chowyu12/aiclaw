@@ -2,29 +2,27 @@ package wecomaibot
 
 import "testing"
 
-func TestMixedToUserVisibleText(t *testing.T) {
+func TestMixedKeepsTextAndCollectsImagesSeparately(t *testing.T) {
 	msg := &MixedMessage{
 		Mixed: MixedContent{
 			MsgItem: []MixedMsgItem{
 				{MsgType: "text", Text: &TextContent{Content: "  hello  "}},
-				{MsgType: "image", Image: &ImageContent{URL: "https://example.com/a.png"}},
+				{MsgType: "image", Image: &ImageContent{URL: "https://example.com/a", AESKey: "k"}},
 			},
 		},
 	}
-	got := MixedToUserVisibleText(msg)
-	want := "hello\n[图片] https://example.com/a.png"
-	if got != want {
-		t.Fatalf("got %q want %q", got, want)
+	if got := MixedToUserVisibleText(msg); got != "hello" {
+		t.Fatalf("文字里不该再有加密链接：%q", got)
 	}
-	urls := CollectImageURLsFromMixed(msg)
-	if len(urls) != 1 || urls[0] != "https://example.com/a.png" {
-		t.Fatalf("urls=%v", urls)
+	refs := CollectImagesFromMixed(msg)
+	if len(refs) != 1 || refs[0].URL != "https://example.com/a" || refs[0].AESKey != "k" {
+		t.Fatalf("refs=%v", refs)
 	}
 }
 
-func TestImageToUserVisibleText(t *testing.T) {
-	msg := &ImageMessage{Image: ImageContent{URL: "https://x/y.jpg"}}
-	if got := ImageToUserVisibleText(msg); got != "[图片] https://x/y.jpg" {
-		t.Fatalf("got %q", got)
+func TestQuotedImageIsCollected(t *testing.T) {
+	text, images, _ := quoteParts(&QuoteContent{MsgType: "image", Image: &ImageContent{URL: "https://x/y", AESKey: "k"}})
+	if text != "" || len(images) != 1 {
+		t.Fatalf("text=%q images=%v", text, images)
 	}
 }

@@ -39,6 +39,10 @@ type Channel struct {
 	// moment it starts, and its first lines (handshake, credentials rejected)
 	// are exactly the ones worth having.
 	newSession func(credentials *wechatlink.Credentials, log func(string, ...any)) session
+	// downloadImage / downloadFile fetch and decrypt inbound media; tests
+	// replace them. Nil means the real CDN.
+	downloadImage func(ctx context.Context, image wechatlink.ImageSource) ([]byte, error)
+	downloadFile  func(ctx context.Context, file wechatlink.FileSource) ([]byte, error)
 }
 
 // session is the part of the WeChat client this connector uses.
@@ -76,8 +80,7 @@ func (c *Channel) Run(ctx context.Context, deps pluginpkg.ChannelDeps) error {
 	dispatcher := connector.NewDispatcher(maxConcurrentRun)
 	remote := c.newSession(credentials, deps.Log)
 	listenErr := remote.Listen(ctx, func(message wechatlink.Message) {
-		if strings.TrimSpace(message.Text) == "" {
-			// Image-only messages are not served yet; see the package notes.
+		if strings.TrimSpace(message.Text) == "" && len(message.Images) == 0 && len(message.Files) == 0 {
 			return
 		}
 		accepted := dispatcher.Submit(ctx, message.FromUserID, func(runCtx context.Context) {
@@ -105,15 +108,20 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, remote 
 	// working rather than silence.
 	_ = remote.SendTyping(ctx, message.FromUserID, message.ContextToken)
 
-	// This transport has no streaming reply, so only the final text is sent.
-	reply := connector.NewReply(nil)
-	err := deps.Gateway.Submit(ctx, deps.PluginUUID, pluginpkg.Inbound{
+	// Media is fetched here, on the turn's goroutine, not in the poll
+	// callback: a slow CDN download must not hold up other conversations.
+	inbound := pluginpkg.Inbound{
 		ChannelID:   ChannelID,
 		ExternalKey: message.FromUserID,
 		DisplayName: "微信 " + message.FromUserID,
 		SenderID:    message.FromUserID,
 		Text:        strings.TrimSpace(message.Text),
-	}, reply.Observe)
+	}
+	c.attachMedia(ctx, deps, message, &inbound)
+
+	// This transport has no streaming reply, so only the final text is sent.
+	reply := connector.NewReply(nil)
+	err := deps.Gateway.Submit(ctx, deps.PluginUUID, inbound, reply.Observe)
 
 	text := ""
 	switch {
@@ -131,6 +139,47 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, remote 
 	}
 	if sendErr := remote.SendText(ctx, message.FromUserID, message.ContextToken, text); sendErr != nil {
 		deps.Log("wechat reply failed for %s: %v", message.FromUserID, sendErr)
+	}
+}
+
+// attachMedia downloads the message's images and files into the inbound.
+//
+// A failed download is **said in the text**, not dropped: the sender sent a
+// picture and expects it to be looked at; silently dropping it gets an answer
+// to a question nobody asked, and neither side knows why.
+func (c *Channel) attachMedia(ctx context.Context, deps pluginpkg.ChannelDeps, message wechatlink.Message, inbound *pluginpkg.Inbound) {
+	downloadImage, downloadFile := c.downloadImage, c.downloadFile
+	if downloadImage == nil {
+		downloadImage = wechatlink.DownloadImage
+	}
+	if downloadFile == nil {
+		downloadFile = wechatlink.DownloadFile
+	}
+	var notes []string
+	for _, image := range message.Images {
+		data, err := downloadImage(ctx, image)
+		if err != nil {
+			deps.Log("wechat image download failed for %s: %v", message.FromUserID, err)
+			notes = append(notes, "[用户发来一张图片，但下载失败了]")
+			continue
+		}
+		inbound.Images = append(inbound.Images, data)
+	}
+	for _, file := range message.Files {
+		name := strings.TrimSpace(file.Name)
+		if name == "" {
+			name = "file"
+		}
+		data, err := downloadFile(ctx, file)
+		if err != nil {
+			deps.Log("wechat file download failed for %s: %v", message.FromUserID, err)
+			notes = append(notes, fmt.Sprintf("[用户发来文件 %s，但下载失败了]", name))
+			continue
+		}
+		inbound.Files = append(inbound.Files, pluginpkg.InboundFile{Name: name, Data: data})
+	}
+	if len(notes) > 0 {
+		inbound.Text = strings.TrimSpace(inbound.Text + "\n" + strings.Join(notes, "\n"))
 	}
 }
 

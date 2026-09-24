@@ -69,9 +69,11 @@ type TextContent struct {
 	Content string `json:"content"`
 }
 
-// ImageContent 图片（url 为 AES-256-CBC 加密的临时下载链接，密钥同回调 AESKey）。
+// ImageContent 图片（url 为 AES-256-CBC 加密的临时下载链接，五分钟内有效）。
 type ImageContent struct {
 	URL string `json:"url"`
+	// AESKey 是这个下载链接的解密密钥（base64 的 32 字节 AES-256 密钥），长连接模式下每条都有。
+	AESKey string `json:"aeskey,omitempty"`
 }
 
 // VoiceContent 语音（服务端已转文本）。
@@ -82,11 +84,15 @@ type VoiceContent struct {
 // FileContent 文件（url 为加密的临时下载链接）。
 type FileContent struct {
 	URL string `json:"url"`
+	// AESKey 是这个下载链接的解密密钥（base64 的 32 字节 AES-256 密钥），长连接模式下每条都有。
+	AESKey string `json:"aeskey,omitempty"`
 }
 
 // VideoContent 视频（url 为加密的临时下载链接）。
 type VideoContent struct {
 	URL string `json:"url"`
+	// AESKey 是这个下载链接的解密密钥（base64 的 32 字节 AES-256 密钥），长连接模式下每条都有。
+	AESKey string `json:"aeskey,omitempty"`
 }
 
 // StreamContent 流式消息刷新。

@@ -27,6 +27,19 @@ type Inbound struct {
 	Text string
 	// Attachments are UUIDs of files already downloaded into the file store.
 	Attachments []string
+	// Images are the decoded bytes of images the sender attached (JPEG/PNG/…).
+	// The channel downloads and decrypts them; the gateway scales them down and
+	// hands them to the turn, where a model that cannot see images gets a
+	// description from the vision model instead.
+	Images [][]byte
+	// Files are other attachments the sender sent, already downloaded.
+	Files []InboundFile
+}
+
+// InboundFile is one downloaded attachment.
+type InboundFile struct {
+	Name string
+	Data []byte
 }
 
 // Gateway turns an inbound message into a turn. It is implemented by the

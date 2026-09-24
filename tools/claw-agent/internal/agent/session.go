@@ -895,6 +895,24 @@ func (s *Session) SetWorkspace(workspace string) error {
 	return nil
 }
 
+// SetMediaRoles 换掉看图与听写两个角色，以及「对话模型自己认不认图」。
+//
+// 给通道会话用：那些会话是内核自己建的，建的时候没有角色配置，而角色又随用户
+// 在设置页里改。每轮开始前按宿主最新推来的配置刷一遍（见 server/channel.go）。
+// 只动这两个角色：它们是在轮次里现查的；画图与朗读是注册成工具的，而且产物
+// 回不到聊天窗口那一头，通道会话用不上。
+func (s *Session) SetMediaRoles(vision, stt protocol.RoleModel, seesImages bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.config.Roles.Vision == vision && s.config.Roles.STT == stt && s.config.ModelSeesImages == seesImages {
+		return
+	}
+	s.config.Roles.Vision = vision
+	s.config.Roles.STT = stt
+	s.config.ModelSeesImages = seesImages
+	s.refreshSystemPromptLocked()
+}
+
 // refreshSystemPromptLocked 用当前配置重新生成第一条系统提示词。调用方持锁。
 //
 // 只换第一条，历史一个字不动：那段话是「环境说明」，不是对话内容。

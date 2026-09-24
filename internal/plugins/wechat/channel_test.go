@@ -219,25 +219,49 @@ func TestFailedTurnStillAnswers(t *testing.T) {
 	}
 }
 
-// Image-only messages are not served yet, and must be ignored rather than
-// submitted as an empty turn.
-func TestMessagesWithoutTextAreIgnored(t *testing.T) {
+// Image-only and file-only messages reach the agent with their media
+// downloaded; a failed download is said in the text rather than dropped.
+func TestImagesAndFilesAreDownloadedAndSubmitted(t *testing.T) {
 	remote := newFakeSession()
-	gateway := &fakeGateway{}
-	cancel, done := runChannel(t, remote, gateway, signedIn())
+	gateway := &fakeGateway{events: []protocol.Event{{Kind: protocol.EventTurnCompleted, Output: "看到了"}}}
+	channel := &Channel{
+		newSession: func(*wechatlink.Credentials, func(string, ...any)) session { return remote },
+		downloadImage: func(_ context.Context, image wechatlink.ImageSource) ([]byte, error) {
+			if image.URL == "broken" {
+				return nil, errors.New("cdn 500")
+			}
+			return []byte("img:" + image.URL), nil
+		},
+		downloadFile: func(_ context.Context, file wechatlink.FileSource) ([]byte, error) {
+			return []byte("file:" + file.Name), nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- channel.Run(ctx, pluginpkg.ChannelDeps{
+			PluginUUID: "p1", Config: signedIn(), Gateway: gateway, Log: func(string, ...any) {},
+		})
+	}()
 	defer func() { cancel(); <-done }()
 
 	remote.deliver(wechatlink.Message{
 		FromUserID: "wxid_7",
-		Images:     []wechatlink.ImageSource{{URL: "https://example.invalid/a.png"}},
+		Images:     []wechatlink.ImageSource{{URL: "a"}, {URL: "broken"}},
+		Files:      []wechatlink.FileSource{{Name: "报告.pdf", Media: &wechatlink.MediaInfo{}}},
 	})
-	time.Sleep(50 * time.Millisecond)
-	if gateway.count() != 0 {
-		t.Fatal("an image-only message started a turn")
+	waitFor(t, func() bool { return gateway.count() == 1 }, "an image-only message did not start a turn")
+	got := gateway.submitted[0]
+	if len(got.Images) != 1 || string(got.Images[0]) != "img:a" {
+		t.Errorf("images = %q", got.Images)
 	}
-	if len(remote.replies()) != 0 {
-		t.Fatalf("an image-only message was answered: %+v", remote.replies())
+	if len(got.Files) != 1 || got.Files[0].Name != "报告.pdf" || string(got.Files[0].Data) != "file:报告.pdf" {
+		t.Errorf("files = %+v", got.Files)
 	}
+	if !strings.Contains(got.Text, "下载失败") {
+		t.Errorf("a failed download must be said in the text: %q", got.Text)
+	}
+	waitFor(t, func() bool { return len(remote.replies()) > 0 }, "no reply was sent")
 }
 
 // Cancelling must end Run so the host can stop the channel.

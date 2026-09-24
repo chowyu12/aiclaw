@@ -43,6 +43,7 @@ const (
 	MethodChannelBindings  = "channel/bindings"
 	MethodChannelAuthorize = "channel/authorize"
 	MethodChannelRevoke    = "channel/revoke"
+	MethodChannelMedia     = "channel/media"
 	MethodWeChatLoginStart = "wechat/loginStart"
 	MethodWeChatLoginPoll  = "wechat/loginPoll"
 	MethodSearchList       = "search/list"
@@ -593,6 +594,14 @@ type SessionStartParams struct {
 	Roles RoleModels `json:"roles,omitzero"`
 	/** 对话模型自己看得懂图。宿主按模型清单里的标记给出，决定要不要走视觉旁路。 */
 	ModelSeesImages bool `json:"modelSeesImages,omitempty"`
+}
+
+// ChannelMediaParams 是通道会话处理图片与语音要用的角色配置。
+//
+// 通道会话由内核自己建，拿不到宿主的配置；宿主在启动时和每次保存设置时推一份
+// 过来。没推之前通道会话不走视觉旁路——模型认图就直接看，不认图就只能说看不了。
+type ChannelMediaParams struct {
+	Roles RoleModels `json:"roles,omitzero"`
 }
 
 // SessionResumeParams 恢复一个会话。

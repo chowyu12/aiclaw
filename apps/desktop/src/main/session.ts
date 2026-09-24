@@ -193,10 +193,27 @@ export class SessionManager extends EventEmitter {
       await client.start();
       this.client = client;
       this.emit("status", "ready");
+      await this.syncChannelMedia();
     } catch (error) {
       await client.stop().catch(() => undefined);
       this.emit("status", "failed", `${String(error)}\n${this.lastStderr}`);
       throw error;
+    }
+  }
+
+  /**
+   * 把当前的角色配置推给内核，给通道会话用（见 agent-client 的 channelMedia）。
+   *
+   * 失败只记一笔：推不过去的后果是通道会话暂时用不上视觉旁路，不该连累启动
+   * 或者保存设置。
+   */
+  async syncChannelMedia(): Promise<void> {
+    const client = this.client;
+    if (!client) return;
+    try {
+      await client.channelMedia(toRoles(this.store.readConfig()));
+    } catch (error) {
+      this.emit("log", "kernel", `推送通道角色配置失败：${String(error)}\n`);
     }
   }
 
