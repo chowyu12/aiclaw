@@ -34,14 +34,19 @@ const (
 
 // Channel is the WeChat connector.
 type Channel struct {
-	// newSession builds the transport; tests replace it.
-	newSession func(credentials *wechatlink.Credentials) session
+	// newSession builds the transport; tests replace it. The logger goes in
+	// here rather than being attached later: the transport logs from the
+	// moment it starts, and its first lines (handshake, credentials rejected)
+	// are exactly the ones worth having.
+	newSession func(credentials *wechatlink.Credentials, log func(string, ...any)) session
 }
 
 // session is the part of the WeChat client this connector uses.
 type session interface {
-	// Listen blocks, delivering inbound messages until ctx ends.
-	Listen(ctx context.Context, handler func(wechatlink.Message))
+	// Listen blocks, delivering inbound messages until ctx ends or the
+	// transport gives up. It returns why it stopped: nil when ctx ended,
+	// otherwise the failure the supervisor should act on.
+	Listen(ctx context.Context, handler func(wechatlink.Message)) error
 	SendText(ctx context.Context, toUserID, contextToken, text string) error
 	SendTyping(ctx context.Context, toUserID, contextToken string) error
 }
@@ -69,8 +74,8 @@ func (c *Channel) Run(ctx context.Context, deps pluginpkg.ChannelDeps) error {
 	}
 
 	dispatcher := connector.NewDispatcher(maxConcurrentRun)
-	remote := c.newSession(credentials)
-	remote.Listen(ctx, func(message wechatlink.Message) {
+	remote := c.newSession(credentials, deps.Log)
+	listenErr := remote.Listen(ctx, func(message wechatlink.Message) {
 		if strings.TrimSpace(message.Text) == "" {
 			// Image-only messages are not served yet; see the package notes.
 			return
@@ -86,6 +91,11 @@ func (c *Channel) Run(ctx context.Context, deps pluginpkg.ChannelDeps) error {
 	dispatcher.Wait()
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if listenErr != nil {
+		// 凭据失效是这里最常见的原因，而它只有重新扫码才能修——把话说全，
+		// 用户在插件页看到的就是这一句。
+		return fmt.Errorf("微信长轮询中断（凭据可能已失效，重新扫码登录）：%w", listenErr)
 	}
 	return fmt.Errorf("wechat message loop stopped")
 }
@@ -125,15 +135,30 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, remote 
 }
 
 // dial builds the real transport.
-func dial(credentials *wechatlink.Credentials) session {
-	client := wechatlink.NewClient(credentials)
-	return &liveSession{client: client}
+//
+// **日志要接上。** 早先客户端与监听器都用的是空日志器，于是整条长轮询——握手、
+// 凭据被拒、退避重试——在应用日志里一个字都没有。企业微信那边失败会记一行，
+// 微信这边什么都没有，用户看到的就是「连上了但收不到消息」而无从排查。
+func dial(credentials *wechatlink.Credentials, log func(string, ...any)) session {
+	logger := wechatlink.NewLoggerFunc(func(level, format string, v ...any) {
+		// Debug 不进应用日志：一次握手一条就够了，每轮都记会把日志冲掉。
+		if level == "DEBUG" {
+			return
+		}
+		log("wechat ["+level+"] "+format, v...)
+	})
+	client := wechatlink.NewClient(credentials, wechatlink.WithLogger(logger))
+	return &liveSession{client: client, logger: logger}
 }
 
-type liveSession struct{ client *wechatlink.Client }
+type liveSession struct {
+	client *wechatlink.Client
+	logger wechatlink.Logger
+}
 
-func (s *liveSession) Listen(ctx context.Context, handler func(wechatlink.Message)) {
-	wechatlink.NewMonitor(s.client, wechatlink.MessageHandler(handler)).Run(ctx)
+func (s *liveSession) Listen(ctx context.Context, handler func(wechatlink.Message)) error {
+	return wechatlink.NewMonitor(s.client, wechatlink.MessageHandler(handler),
+		wechatlink.WithLogger(s.logger)).Run(ctx)
 }
 
 func (s *liveSession) SendText(ctx context.Context, toUserID, contextToken, text string) error {

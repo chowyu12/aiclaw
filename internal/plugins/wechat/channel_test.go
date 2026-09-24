@@ -2,6 +2,7 @@ package wechat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -21,18 +22,26 @@ type fakeSession struct {
 	typings int
 	handler func(wechatlink.Message)
 	ready   chan struct{}
+	// listenErr is what Listen returns instead of blocking: it stands for the
+	// transport giving up (an expired credential, typically).
+	listenErr error
 }
 
 func newFakeSession() *fakeSession {
 	return &fakeSession{ready: make(chan struct{})}
 }
 
-func (s *fakeSession) Listen(ctx context.Context, handler func(wechatlink.Message)) {
+func (s *fakeSession) Listen(ctx context.Context, handler func(wechatlink.Message)) error {
 	s.mu.Lock()
 	s.handler = handler
+	failure := s.listenErr
 	s.mu.Unlock()
 	close(s.ready)
+	if failure != nil {
+		return failure
+	}
 	<-ctx.Done()
+	return nil
 }
 
 func (s *fakeSession) SendText(_ context.Context, _, _, text string) error {
@@ -101,7 +110,7 @@ func signedIn() pluginpkg.Values {
 
 func runChannel(t *testing.T, remote *fakeSession, gateway *fakeGateway, config pluginpkg.Values) (context.CancelFunc, chan error) {
 	t.Helper()
-	channel := &Channel{newSession: func(*wechatlink.Credentials) session { return remote }}
+	channel := &Channel{newSession: func(*wechatlink.Credentials, func(string, ...any)) session { return remote }}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
@@ -128,7 +137,7 @@ func waitFor(t *testing.T, condition func() bool, message string) {
 // Signing in is what produces the credentials, so a channel without them must
 // not start polling.
 func TestRunRequiresSignIn(t *testing.T) {
-	channel := &Channel{newSession: func(*wechatlink.Credentials) session {
+	channel := &Channel{newSession: func(*wechatlink.Credentials, func(string, ...any)) session {
 		t.Fatal("the relay was contacted without credentials")
 		return nil
 	}}
@@ -244,5 +253,48 @@ func TestCancellationEndsTheRun(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancelling did not end the run")
+	}
+}
+
+// 长轮询连着失败之后，Run 要带着原因返回——通道主管据此重启或标记失败。
+// 早先监听循环永远重试：凭据失效时它一直转，Run 不返回，界面显示「运行中」
+// 而一条消息都收不到。
+func TestPersistentPollingFailureEndsTheRun(t *testing.T) {
+	remote := newFakeSession()
+	remote.listenErr = errors.New("getupdates ret=1002 errmsg=invalid token")
+	_, done := runChannel(t, remote, &fakeGateway{}, signedIn())
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("持续失败却报成功")
+		}
+		if !strings.Contains(err.Error(), "invalid token") {
+			t.Errorf("要带上上游的原因：%v", err)
+		}
+		if !strings.Contains(err.Error(), "重新扫码") {
+			t.Errorf("要说清怎么修：%v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("持续失败没有让 Run 返回")
+	}
+}
+
+// 真实传输要把日志接出去：整条长轮询此前在应用日志里一个字都没有。
+func TestDialWiresTheLogger(t *testing.T) {
+	var lines []string
+	remote := dial(&wechatlink.Credentials{BotToken: "t", ILinkBotID: "b"}, func(format string, args ...any) {
+		lines = append(lines, fmt.Sprintf(format, args...))
+	})
+	live, ok := remote.(*liveSession)
+	if !ok || live.logger == nil {
+		t.Fatal("真实会话应当带上日志器")
+	}
+	live.logger.Info("握手成功")
+	live.logger.Debug("每轮一条的细节")
+	if len(lines) != 1 || !strings.Contains(lines[0], "握手成功") || !strings.Contains(lines[0], "INFO") {
+		t.Errorf("Info 要进应用日志且带级别：%v", lines)
+	}
+	if len(lines) > 1 {
+		t.Errorf("Debug 不该进应用日志：%v", lines)
 	}
 }
