@@ -115,6 +115,10 @@ func loadOne(dir, fallbackName string) (Skill, error) {
 // 只认 name / description 两个键，值按纯字符串取。不引 YAML 库是因为这里
 // 需要的就是两个字符串，而引一个 YAML 解析器会顺带允许技能作者写进嵌套结构，
 // 然后我们要去定义那些结构的含义。
+//
+// 但**块标量要认**（`description: >` 或 `|` 后面跟若干缩进行）：说明写长了
+// 就得折行，而折行在 YAML 里只有这一种写法。不认的话取到的值是一个字符串 ">"，
+// 界面上显示成一个尖括号、模型也拿不到判断依据——Codex 那边的技能就这么写。
 func splitFrontmatter(source string) (map[string]string, string) {
 	meta := map[string]string{}
 	normalized := strings.ReplaceAll(source, "\r\n", "\n")
@@ -129,19 +133,99 @@ func splitFrontmatter(source string) (map[string]string, string) {
 	rest := normalized[4+end+4:]
 	rest = strings.TrimPrefix(rest, "\n")
 
-	for _, line := range strings.Split(block, "\n") {
-		key, value, found := strings.Cut(line, ":")
-		if !found {
+	lines := strings.Split(block, "\n")
+	for index := 0; index < len(lines); index++ {
+		key, value, found := strings.Cut(lines[index], ":")
+		if !found || strings.HasPrefix(lines[index], " ") || strings.HasPrefix(lines[index], "\t") {
+			// 缩进行是上一个键的续行，已经在下面一并吃掉了。
 			continue
 		}
 		key = strings.ToLower(strings.TrimSpace(key))
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `"'`)
-		if key == "name" || key == "description" {
-			meta[key] = value
+		if key != "name" && key != "description" {
+			continue
 		}
+		value = strings.TrimSpace(value)
+		if style, ok := blockStyle(value); ok {
+			var consumed int
+			value, consumed = readBlockScalar(lines[index+1:], style)
+			index += consumed
+		} else {
+			value = strings.Trim(value, `"'`)
+		}
+		meta[key] = value
 	}
 	return meta, rest
+}
+
+// blockStyle 认出块标量的引子：`>`、`|`，可带 chomping 指示符（-、+）与缩进数字。
+// 返回 folded 为真表示 `>`（折行成空格），假表示 `|`（保留换行）。
+func blockStyle(value string) (folded bool, ok bool) {
+	if value == "" || (value[0] != '>' && value[0] != '|') {
+		return false, false
+	}
+	// 引子后面只允许 chomping / 缩进指示符，别的说明这不是块标量
+	//（比如 `description: >>> 看这里` 这种把 > 当普通字符用的写法）。
+	for _, char := range value[1:] {
+		if char != '-' && char != '+' && (char < '0' || char > '9') {
+			return false, false
+		}
+	}
+	return value[0] == '>', true
+}
+
+// readBlockScalar 读块标量的正文：缩进的连续行。返回值与吃掉的行数。
+//
+// 折叠式（>）把换行折成空格，与 YAML 一致；字面式（|）保留换行。两者都按
+// 第一行的缩进量对齐，空行按段落分隔处理。
+func readBlockScalar(lines []string, folded bool) (string, int) {
+	indent := -1
+	var collected []string
+	consumed := 0
+	for _, line := range lines {
+		trimmed := strings.TrimLeft(line, " \t")
+		if trimmed == "" {
+			// 空行属于块的一部分（段落分隔），但块结束在它后面时也无害。
+			collected = append(collected, "")
+			consumed++
+			continue
+		}
+		width := len(line) - len(trimmed)
+		if width == 0 {
+			break // 回到顶格，块结束
+		}
+		if indent < 0 {
+			indent = width
+		}
+		if width < indent {
+			break
+		}
+		collected = append(collected, line[indent:])
+		consumed++
+	}
+	// 去掉块尾的空行，不然折叠出来会多一串空格。
+	for len(collected) > 0 && strings.TrimSpace(collected[len(collected)-1]) == "" {
+		collected = collected[:len(collected)-1]
+	}
+	if folded {
+		return strings.TrimSpace(foldLines(collected)), consumed
+	}
+	return strings.TrimRight(strings.Join(collected, "\n"), "\n"), consumed
+}
+
+// foldLines 按 YAML 折叠式的规则拼行：相邻的非空行用空格连起来，空行成为换行。
+func foldLines(lines []string) string {
+	var out strings.Builder
+	for index, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			out.WriteString("\n")
+			continue
+		}
+		if index > 0 && out.Len() > 0 && !strings.HasSuffix(out.String(), "\n") {
+			out.WriteString(" ")
+		}
+		out.WriteString(strings.TrimRight(line, " \t"))
+	}
+	return out.String()
 }
 
 func firstNonEmpty(values ...string) string {

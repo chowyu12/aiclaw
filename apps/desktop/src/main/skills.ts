@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import type { ConfigStore } from "./config.js";
 import { dedupeByName, discoverSkills, type FoundSkill } from "./skill-roots.js";
+import { parseFrontmatter } from "./skill-frontmatter.js";
 
 /**
  * 本地技能的管理：列出、启停、删除。
@@ -205,26 +206,3 @@ function safeRead(path: string): string {
   }
 }
 
-/**
- * 读 SKILL.md 开头的 frontmatter。
- *
- * 与 claw-agent 的 internal/skills 同一套规则——两边都只认 name 与 description。
- * 改一边要改另一边，否则列表里显示的名字会和模型看到的对不上。
- */
-function parseFrontmatter(source: string): { name: string; description: string } {
-  const normalized = source.replace(/\r\n/g, "\n");
-  const result = { name: "", description: "" };
-  if (!normalized.startsWith("---\n")) return result;
-  const end = normalized.indexOf("\n---", 4);
-  if (end < 0) return result;
-
-  for (const line of normalized.slice(4, end).split("\n")) {
-    const separator = line.indexOf(":");
-    if (separator < 0) continue;
-    const key = line.slice(0, separator).trim().toLowerCase();
-    const value = line.slice(separator + 1).trim().replace(/^["']|["']$/g, "");
-    if (key === "name") result.name = value;
-    else if (key === "description") result.description = value;
-  }
-  return result;
-}

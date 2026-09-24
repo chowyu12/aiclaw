@@ -203,3 +203,98 @@ func dirsIn(root string) []string {
 	}
 	return dirs
 }
+
+// YAML 块标量：说明写长了只能折行，而折行在 YAML 里就是 `>` 或 `|` 加缩进。
+// 不认的话取到的值是一个 ">"，界面上显示成一个尖括号，模型也拿不到判断依据。
+// Codex 装的技能就是这么写的，实际踩到过。
+func TestFoldedDescriptionIsRead(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := filepath.Join(dir, "storage-analyzer")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `---
+name: storage-analyzer
+description: >
+  macOS / Windows 只读存储分析助手。扫描整机磁盘占用，找出
+  占空间大户，把每一项分成三级并给出可执行处置方案。
+
+  使用：用户说"存储分析""磁盘满了"时。
+---
+
+# 正文
+第一段。
+`
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found, err := Load([]string{skillDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("应当发现一个技能：%+v", found)
+	}
+	skill := found[0]
+	if skill.Name != "storage-analyzer" {
+		t.Errorf("名字 = %q", skill.Name)
+	}
+	// 折叠式：相邻行用空格连起来，空行成为换行。
+	if !strings.Contains(skill.Description, "找出 占空间大户") {
+		t.Errorf("折行应当用空格连起来：%q", skill.Description)
+	}
+	if !strings.Contains(skill.Description, `用户说"存储分析"`) {
+		t.Errorf("后面几行也要收进来：%q", skill.Description)
+	}
+	if strings.HasPrefix(skill.Description, ">") || skill.Description == ">" {
+		t.Errorf("引子不该成为值：%q", skill.Description)
+	}
+	if !strings.Contains(skill.Body, "第一段") {
+		t.Errorf("正文要从 --- 之后开始：%q", skill.Body)
+	}
+}
+
+// 字面式（|）保留换行；chomping 指示符（>-、|-）也要认。
+func TestLiteralAndChompedBlockScalars(t *testing.T) {
+	cases := map[string]struct {
+		source string
+		want   string
+	}{
+		"字面式保留换行": {"description: |\n  第一行\n  第二行\n", "第一行\n第二行"},
+		"折叠式带 -":  {"description: >-\n  第一行\n  第二行\n", "第一行 第二行"},
+		"字面式带 -":  {"description: |-\n  只有一行\n", "只有一行"},
+	}
+	for name, testCase := range cases {
+		meta, _ := splitFrontmatter("---\n" + testCase.source + "---\n正文\n")
+		if meta["description"] != testCase.want {
+			t.Errorf("%s：得到 %q，想要 %q", name, meta["description"], testCase.want)
+		}
+	}
+}
+
+// 单行写法照旧，`>` 只有作为引子（后面没别的字）时才当块标量。
+func TestPlainDescriptionsStillWork(t *testing.T) {
+	cases := map[string]string{
+		`description: 一句话说明`:     "一句话说明",
+		`description: "带引号的说明"`:  "带引号的说明",
+		`description: 用 > 表示大于`:  "用 > 表示大于",
+		`description: >不是块标量的写法`: ">不是块标量的写法",
+	}
+	for source, want := range cases {
+		meta, _ := splitFrontmatter("---\nname: n\n" + source + "\n---\n正文\n")
+		if meta["description"] != want {
+			t.Errorf("%s：得到 %q，想要 %q", source, meta["description"], want)
+		}
+	}
+}
+
+// 块标量后面的键照常读到：块在回到顶格的那一行结束。
+func TestKeysAfterABlockScalarAreRead(t *testing.T) {
+	meta, _ := splitFrontmatter("---\ndescription: >\n  说明第一行\n  第二行\nname: 后写的名字\n---\n正文\n")
+	if meta["description"] != "说明第一行 第二行" {
+		t.Errorf("说明 = %q", meta["description"])
+	}
+	if meta["name"] != "后写的名字" {
+		t.Errorf("块后面的名字没读到：%q", meta["name"])
+	}
+}
