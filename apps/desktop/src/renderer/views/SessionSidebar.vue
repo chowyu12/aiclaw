@@ -108,6 +108,30 @@ async function moveTo(sessionId: string, groupId: string | null): Promise<void> 
   await actions.assignSession(sessionId, groupId);
 }
 
+/** 底部那个更新按钮上写什么；没有新版本时是空串，按钮不显示。 */
+const updateLabel = computed(() => {
+  const update = store.update;
+  if (!update?.hasUpdate) return "";
+  if (store.updating) return "正在更新…";
+  if (store.updateDownloading) {
+    return store.updateProgress >= 0 ? `下载 ${store.updateProgress}%` : "下载中…";
+  }
+  // 侧边栏只有两百来像素宽：按钮文字要短，版本号放在悬停说明里。
+  if (store.updateReady) return "重启更新";
+  return update.canInstall ? `更新到 ${update.latest}` : `新版 ${update.latest}`;
+});
+
+/** 悬停时的完整说明：按钮上只放得下几个字。 */
+const updateTitle = computed(() => {
+  const update = store.update;
+  if (!update?.hasUpdate) return "";
+  if (store.updateReady) return `新版本 ${update.latest} 已下载好，点一下替换并重启`;
+  if (store.updateDownloading) return `正在后台下载 ${update.latest}`;
+  return update.canInstall
+    ? `当前 ${update.current}，新版本 ${update.latest}：${update.installLabel}`
+    : `当前 ${update.current}，新版本 ${update.latest}：打开发布页下载`;
+});
+
 const runtimeLabel = computed(() => {
   switch (store.runtime.state) {
     case "ready":
@@ -300,7 +324,20 @@ function when(iso: string): string {
       <span class="status" :data-state="store.runtime.state">
         <span class="dot" />
         {{ runtimeLabel }}
+        <em v-if="store.appVersion" class="version">v{{ store.appVersion }}</em>
       </span>
+      <!-- 更新提示放在版本号旁边：一眼看到「我现在是几、有没有新的」，
+           而不是在对话区顶上横一条，挤着正在看的内容。 -->
+      <button
+        v-if="updateLabel"
+        class="update"
+        :class="{ ready: store.updateReady }"
+        :disabled="store.updating || store.updateDownloading"
+        :title="updateTitle"
+        @click="actions.installUpdate()"
+      >
+        {{ updateLabel }}
+      </button>
       <button
         class="icon gear"
         :class="{ on: store.view !== 'chat' }"
@@ -596,6 +633,40 @@ function when(iso: string): string {
   border-top: 1px solid var(--rule);
 }
 
+.version {
+  margin-left: 6px;
+  color: var(--muted);
+  font-style: normal;
+  font-size: 11px;
+}
+
+/* 更新按钮：小，但颜色要够让人注意到；下载好之后换成强调色。 */
+.update {
+  margin-left: auto;
+  margin-right: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 8px;
+  border: 1px solid var(--accent, #3b82f6);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent, #3b82f6);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.update.ready {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+
+.update:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
 .status {
   display: flex;
   align-items: center;
@@ -603,6 +674,8 @@ function when(iso: string): string {
   font-size: 11px;
   color: var(--muted);
   font-family: var(--mono);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .dot {

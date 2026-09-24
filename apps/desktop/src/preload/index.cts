@@ -104,6 +104,7 @@ const api = {
     stage: (input: unknown) => ipcRenderer.invoke(IPC.audioStage, input),
   },
   update: {
+    version: () => ipcRenderer.invoke(IPC.appVersion),
     check: () => ipcRenderer.invoke(IPC.updateCheck),
     install: () => ipcRenderer.invoke(IPC.updateInstall),
     prepare: () => ipcRenderer.invoke(IPC.updatePrepare),

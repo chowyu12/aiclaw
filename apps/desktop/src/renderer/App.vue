@@ -37,12 +37,6 @@ onMounted(() => {
   });
 });
 
-/** 有新版、而且用户没对这个版本说过「以后再说」。 */
-const updateReady = computed(
-  () =>
-    store.update?.hasUpdate === true &&
-    store.update.latest !== store.updateDismissed,
-);
 </script>
 
 <template>
@@ -57,40 +51,6 @@ const updateReady = computed(
         <button @click="actions.clearError()">知道了</button>
       </div>
 
-      <!-- 升级条。放在错误条下面：出错的时候那条更要紧。 -->
-      <div v-if="updateReady" class="update-bar">
-        <span>
-          <template v-if="store.updateReady">
-            新版本 <strong>{{ store.update?.latest }}</strong> 已下载好，重启即可更新
-          </template>
-          <template v-else-if="store.updateDownloading">
-            正在后台下载新版本 <strong>{{ store.update?.latest }}</strong>
-            <em v-if="store.updateProgress >= 0">（{{ store.updateProgress }}%）</em>
-          </template>
-          <template v-else>
-            有新版本 <strong>{{ store.update?.latest }}</strong>
-            <em>（当前 {{ store.update?.current }}）</em>
-          </template>
-        </span>
-        <button
-          v-if="store.update?.canInstall"
-          class="go"
-          :disabled="store.updating || store.updateDownloading"
-          @click="actions.installUpdate()"
-        >
-          {{
-            store.updating
-              ? "正在更新…"
-              : store.updateDownloading
-                ? "下载中…"
-                : store.updateReady
-                  ? "立即重启更新"
-                  : (store.update?.installLabel ?? "升级并重启")
-          }}
-        </button>
-        <button v-else class="go" @click="actions.installUpdate()">打开发布页</button>
-        <button @click="actions.dismissUpdate()">以后再说</button>
-      </div>
 
       <div class="content">
         <ChatView v-if="store.view === 'chat'" :configured="configured" />
@@ -129,48 +89,11 @@ const updateReady = computed(
   min-height: 0;
 }
 
-.update-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 16px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-size: 12.5px;
-  border-bottom: 1px solid var(--rule);
-}
 
-.update-bar span {
-  flex: 1;
-}
 
-.update-bar em {
-  font-style: normal;
-  color: var(--muted);
-}
 
-.update-bar button {
-  flex: 0 0 auto;
-  white-space: nowrap;
-  padding: 4px 11px;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--ink-2);
-  font-size: 12px;
-  cursor: pointer;
-}
 
-.update-bar button.go {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 500;
-}
 
-.update-bar button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
 
 .error-bar {
   display: flex;

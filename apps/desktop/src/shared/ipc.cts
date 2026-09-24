@@ -54,6 +54,8 @@ export const IPC = {
   wechatLoginStart: "wechat:loginStart",
   wechatLoginPoll: "wechat:loginPoll",
 
+  // 当前版本号。单独一个通道：检查更新要等网络，而版本号侧边栏一开就要显示。
+  appVersion: "app:version",
   updateCheck: "update:check",
   updateInstall: "update:install",
   updatePrepare: "update:prepare",

@@ -67,6 +67,7 @@ app.whenReady().then(async () => {
   }));
   // 应用一启动就拉运行时、列会话、读模型服务；这里都给空的。
   ipcMain.handle(IPC.runtimeStart, () => undefined);
+  ipcMain.handle(IPC.appVersion, () => "0.0.0-smoke");
   ipcMain.handle(IPC.sessionList, () => []);
   ipcMain.handle(IPC.providerList, () => []);
   ipcMain.handle(IPC.profileList, () => [
@@ -141,6 +142,14 @@ app.whenReady().then(async () => {
     typeof fields === "number" && fields > 0,
     fields ? `${fields} 个` : "一个都没有——配置页是空的",
   );
+
+  // 版本号在侧边栏底部：它走单独的 IPC 通道，preload 漏了它的话这里是空的。
+  const version = await waitFor(
+    win,
+    "document.querySelector('.foot .version') ? document.querySelector('.foot .version').innerText : ''",
+    (text) => typeof text === "string" && text.length > 0,
+  );
+  check("侧边栏底部显示版本号", version === "v0.0.0-smoke", version || "没有显示");
 
   const blocked = await win.webContents.executeJavaScript(
     "document.querySelector('.error-bar') ? document.querySelector('.error-bar').innerText : ''",

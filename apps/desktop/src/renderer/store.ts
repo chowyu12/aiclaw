@@ -96,11 +96,8 @@ const state = reactive({
   bindings: [] as ChannelBindingView[],
   /** 检查更新的结果。null 表示还没查过。 */
   update: null as UpdateStatusView | null,
-  /**
-   * 用户点过「以后再说」的版本号。**只记在内存里**——下次开应用会重新提醒
-   * 一次，而攒一份持久的「永远别提醒」名单只会让人忘了自己还在用旧版本。
-   */
-  updateDismissed: "",
+  /** 当前运行的版本号，侧边栏底部显示。启动时读一次。 */
+  appVersion: "",
   /**
    * 有一次重挂被推迟了：用户在轮次跑着的时候改了 MCP / 技能 / 插件配置。
    * 跑着时不能卸会话（那一轮的事件会没有出口），轮次结束时补上这一次。
@@ -175,6 +172,14 @@ export const actions = {
       state.error = `读取本地配置失败：${describeError(error)}`;
       return;
     }
+
+    // 版本号单独取、失败不报：它只是显示用，不该因为它让启动走进错误分支。
+    window.aiclaw.update
+      .version()
+      .then((version) => {
+        state.appVersion = String(version ?? "");
+      })
+      .catch(() => undefined);
 
     window.aiclaw.on.agentEvent((payload) => {
       const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId);
@@ -757,10 +762,6 @@ export const actions = {
       state.updating = false;
       state.error = `升级失败：${describeError(error)}`;
     }
-  },
-
-  dismissUpdate(): void {
-    state.updateDismissed = state.update?.latest ?? "";
   },
 
   // ---------- 模型服务 ----------

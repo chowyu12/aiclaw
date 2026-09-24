@@ -109,6 +109,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.configRead, () => store.readConfig());
   // 改配置不用重启运行时：模型、审批档位这些都是按会话下发的。
   ipcMain.handle(IPC.configWrite, (_event, patch: Record<string, unknown>) => store.writeConfig(patch));
+  ipcMain.handle(IPC.appVersion, () => app.getVersion());
   ipcMain.handle(IPC.updateCheck, () => updater.check());
   // 下载进度往渲染层推：没有进度的话，用户点完「升级」看到的是一个不动的
   // 按钮，几十秒后应用突然退出——那不是慢，是没有反馈，但感觉比慢更糟。
