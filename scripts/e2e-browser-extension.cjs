@@ -187,6 +187,23 @@ app.whenReady().then(async () => {
     const back = await agent.perform({ action: "back" });
     check("后退", /E2E 表单/.test(back.text), back.text.split("\n")[0]);
 
+    // 重新加载扩展（用户升级后点「重新加载」就是这样）：几个入口会同时去连。
+    // 早先它们并发建出两条连接、互相冲掉握手状态，一条超时被断开后扩展把好好的配对码
+    // 删了、转去配对，配对页一次次弹出来。现在应当：重新连上、不配对、码还在。
+    let pairedAgain = false;
+    const watcher = setInterval(() => {
+      if (bridge.status().pairing) pairedAgain = true;
+    }, 100);
+    await inExtensionPage("setTimeout(() => chrome.runtime.reload(), 100), true").catch(() => undefined);
+    await until("重新加载后扩展断开", async () => !bridge.connected, 10_000).catch(() => undefined);
+    await until("重新加载后扩展重新连上", async () => bridge.connected, 30_000).catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 12_000));
+    clearInterval(watcher);
+    check("重新加载扩展后自动重连", bridge.connected);
+    check("重新加载后不会冒出配对请求", !pairedAgain);
+    const kept = await inExtensionPage("chrome.storage.local.get('pairToken').then((v) => Boolean(v.pairToken))").catch(() => false);
+    check("重新加载后配对码还在", kept === true);
+
     exitCode = results.every((r) => r.ok) ? 0 : 1;
   } catch (error) {
     check("端到端", false, String(error && error.stack ? error.stack : error).slice(0, 400));

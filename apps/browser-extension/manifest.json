@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AIClaw 浏览器助手",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "让本机的 AIClaw 在后台标签页里替你浏览网页：用你已有的登录，不抢鼠标。只连本机的 AIClaw，需要配对码。",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4zSLYlc7n/0sbDZbOQS6fGzRKKiYzXScdnARdZdNCT39ORNJ6aI0qcf/HUDhc9HlOmLWr09ZMw4UQP3B8ffpjpFktwcwqFR0nMzb6bI0NfthMYeAATEgPhQ5HzRu8q+54+n6b25/dLW5AfYq5RzLQkpRjt6pzRFAJnrfTL++ffcKv3qlVRzIWaPmMAkDY9d2D6PEB4ocva+Hdmx1yX02g3OCCrvtT2rrq4q0Cp6X0v/Hs/EufOMQWOE8k5iEpduHH5l1ByDv04G1OO4Mfxd8QiiAFK1I7UGwgMwSSi0iMGDrdFxHhMP85eiTI4SXNB+VRgaJPCAaQ0B9eAJmvYlJjQIDAQAB",
   "minimum_chrome_version": "116",

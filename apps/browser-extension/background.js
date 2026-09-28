@@ -23,10 +23,15 @@ const IDLE_DETACH_MS = 60_000;
 const USER_CANCEL_COOLDOWN_MS = 5 * 60_000;
 const LOAD_TIMEOUT_MS = 30_000;
 
+/**
+ * 当前这条连接。握手状态（我们出的随机数、是否已验证）挂在连接自己身上，
+ * 不放成全局：早先是全局的，重新加载扩展时几个入口（安装事件、启动、闹钟）
+ * 同时连，后一条把前一条的状态冲掉，握手就乱了（实际发生过）。
+ */
 let socket = null;
-let authed = false;
-/** 这次连接里我们出的随机数，等对面拿它算证明。 */
-let clientNonce = "";
+let current = null;
+/** 正在建连接（读配对码是异步的）：挡住并发的第二次 connect()。 */
+let connecting = false;
 let reconnectTimer = null;
 /** 正在等用户在配对页上点「允许 / 拒绝」的那条连接与代码。 */
 let pairing = null;
@@ -65,52 +70,80 @@ async function pairingDeclined() {
  * 两边之间复制粘贴。
  */
 async function connect() {
+  // 先同步占位再 await：不然两次调用都会在「读配对码」那一步之前通过检查，建出两条连接。
+  if (connecting) return;
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
-  const pairToken = await token();
-  if (!pairToken && (await pairingDeclined())) {
-    await setStatus("unpaired", "你拒绝过配对。要连接 AIClaw，在这个弹窗里点「重新配对」。");
-    return;
-  }
-  let ws;
+  connecting = true;
   try {
-    ws = new WebSocket(`ws://127.0.0.1:${PORT}/extension`);
-  } catch (error) {
-    await setStatus("offline", String(error));
-    scheduleReconnect();
-    return;
+    const pairToken = await token();
+    if (!pairToken && (await pairingDeclined())) {
+      await setStatus("unpaired", "你拒绝过配对。要连接 AIClaw，在这个弹窗里点「重新配对」。");
+      return;
+    }
+    let ws;
+    try {
+      ws = new WebSocket(`ws://127.0.0.1:${PORT}/extension`);
+    } catch (error) {
+      await setStatus("offline", String(error));
+      scheduleReconnect();
+      return;
+    }
+    const conn = { ws, token: pairToken, nonce: "", authed: false, selfClosed: 0 };
+    socket = ws;
+    current = conn;
+    ws.onopen = () => {
+      void setStatus("connecting", pairToken ? "已连上，正在核对配对码…" : "已连上，等 AIClaw 发起配对…");
+    };
+    ws.onmessage = (event) => {
+      void onMessage(conn, event.data);
+    };
+    ws.onclose = (event) => {
+      if (socket === ws) {
+        socket = null;
+        current = null;
+      }
+      if (pairing && pairing.ws === ws) void endPairing("配对中途连接断开了，稍后会自动重试。");
+      void onClosed(conn.selfClosed || event.code, Boolean(pairToken), conn.selfClosed !== 0);
+    };
+    ws.onerror = () => {
+      // onclose 会紧跟着来，状态在那里写。
+    };
+  } finally {
+    connecting = false;
   }
-  socket = ws;
-  authed = false;
-  clientNonce = "";
-  ws.onopen = () => {
-    void setStatus("connecting", pairToken ? "已连上，正在核对配对码…" : "已连上，等 AIClaw 发起配对…");
-  };
-  ws.onmessage = (event) => {
-    void onMessage(ws, event.data, pairToken);
-  };
-  ws.onclose = (event) => {
-    if (socket === ws) socket = null;
-    authed = false;
-    if (pairing && pairing.ws === ws) void endPairing("配对中途连接断开了，稍后会自动重试。");
-    void onClosed(event.code, Boolean(pairToken));
-  };
-  ws.onerror = () => {
-    // onclose 会紧跟着来，状态在那里写。
-  };
 }
 
-async function onClosed(code, hadToken) {
+/** 扩展自己断开一条连接，并记下原因（onclose 里分得清是谁断的）。 */
+function closeConn(conn, code, reason) {
+  conn.selfClosed = code;
+  conn.ws.close(code, reason);
+}
+
+/**
+ * 断开之后怎么办。代码的含义（AIClaw 与扩展约定）：
+ *   4001 AIClaw 核对我们的证明没通过——配对码失效了（AIClaw 重新生成过）
+ *   4003 配对完成，用新码重连
+ *   4005 AIClaw 现在不接受配对
+ *   4006 配对过期或被新的请求顶掉
+ *   4007 握手超时（没来得及回话，不代表码不对）
+ *   4008 扩展核对 AIClaw 的证明没通过——对面可能不是你的 AIClaw
+ * **只有 AIClaw 明确说码不对（4001，且不是我们自己断的）才丢掉配对码。**早先握手超时
+ * 也用 4001，扩展因此把好好的码删了，转去配对，配对页一次次弹出来。
+ */
+async function onClosed(code, hadToken, bySelf) {
   if (code === 4003) {
-    // 配对完成：配对码已存好，马上用它重连。
     scheduleReconnect(200);
     return;
   }
-  if (code === 4001 && hadToken) {
-    // 配对码对不上（多半是 AIClaw 那边重新生成过）：丢掉旧的，下次连接走配对，
-    // 用户在配对页上点一下就好，不用再去复制粘贴。
+  if (code === 4001 && hadToken && !bySelf) {
     await chrome.storage.local.remove("pairToken");
     await setStatus("rejected", "配对码失效了（AIClaw 可能重新生成过），马上重新配对。");
     scheduleReconnect(1000);
+    return;
+  }
+  if (code === 4008) {
+    await setStatus("rejected", "连上的程序没能证明它是你的 AIClaw，已断开。确认 AIClaw 在运行，稍后会重试。");
+    scheduleReconnect(30_000);
     return;
   }
   if (code === 4006) {
@@ -161,18 +194,19 @@ function randomHex(bytes = 16) {
  * **确认在浏览器这边做**：没配对时扩展分不清对面是不是真的 AIClaw（AIClaw 没开时
  * 别的程序可以占住端口）。让用户对着两边的代码在浏览器里点「允许」，冒充者就骗不到。
  */
-async function onMessage(ws, raw, pairToken) {
+async function onMessage(conn, raw) {
+  const { ws, token: pairToken } = conn;
   let message;
   try {
     message = JSON.parse(raw);
   } catch {
     return;
   }
-  if (!authed) {
-    if (message.type === "challenge" && typeof message.nonce === "string" && !clientNonce) {
-      clientNonce = randomHex();
+  if (!conn.authed) {
+    if (message.type === "challenge" && typeof message.nonce === "string" && !conn.nonce) {
+      conn.nonce = randomHex();
       const identity = {
-        nonce: clientNonce,
+        nonce: conn.nonce,
         version: PROTOCOL_VERSION,
         extension: chrome.runtime.getManifest().version,
         userAgent: navigator.userAgent,
@@ -184,8 +218,8 @@ async function onMessage(ws, raw, pairToken) {
       ws.send(JSON.stringify({ type: "hello", ...identity, proof: await hmac(pairToken, "ext:" + message.nonce) }));
       return;
     }
-    if (message.type === "welcome" && pairToken && clientNonce && message.proof === (await hmac(pairToken, "app:" + clientNonce))) {
-      authed = true;
+    if (message.type === "welcome" && pairToken && conn.nonce && message.proof === (await hmac(pairToken, "app:" + conn.nonce))) {
+      conn.authed = true;
       await setStatus("connected", "已连上 AIClaw。");
       return;
     }
@@ -205,8 +239,8 @@ async function onMessage(ws, raw, pairToken) {
       ws.send(JSON.stringify({ type: "pong" }));
       return;
     }
-    // 其它任何东西（包括证明对不上）：断开，不回话。
-    ws.close(4001, "bad proof");
+    // 其它任何东西（包括 AIClaw 的证明对不上）：断开，不回话，也不丢自己的配对码。
+    closeConn(conn, 4008, "bad server proof");
     return;
   }
   if (message.type === "ping") {
@@ -279,6 +313,7 @@ chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     void chrome.storage.local.remove(["pairDeclinedAt", "pairToken"]).then(() => {
       socket?.close();
       socket = null;
+      current = null;
       scheduleReconnect(100);
     });
     reply({ ok: true });

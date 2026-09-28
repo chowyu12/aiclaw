@@ -334,8 +334,10 @@ export class ExtensionBridge extends EventEmitter {
     let pairingHere = false;
     const timer = setTimeout(() => {
       if (!authed && !pairingHere) {
+        // 用 4007 而不是 4001：4001 是「配对码不对」，扩展收到会丢掉自己的码转去配对。
+        // 早先超时也用 4001，扩展重新加载时一条慢了半拍的连接就把好好的码删了。
         this.log("浏览器扩展握手超时，断开");
-        connection.close(4001, "handshake timeout");
+        connection.close(4007, "handshake timeout");
       }
     }, HANDSHAKE_TIMEOUT_MS);
     connection.on("message", (text: string) => {
