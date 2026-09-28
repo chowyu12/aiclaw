@@ -17,6 +17,7 @@ import { groupTurns, stepsElapsed, type Turn } from "../turns";
 import { renderMarkdown } from "../markdown";
 import { answerText, answerTime, formatMessageTime, fullMessageTime } from "../message-meta";
 import StepsBlock from "./StepsBlock.vue";
+import QuestionCard from "./QuestionCard.vue";
 
 defineProps<{ configured: boolean }>();
 
@@ -213,6 +214,9 @@ async function pickPolicy(id: string): Promise<void> {
 // ---------- 复制 ----------
 
 /** 刚复制过的那一条（key），按钮上显示「已复制」一会儿，让人知道点到了。 */
+/** 当前会话里等着回答的问题。别的会话的问题在切过去时出现。 */
+const currentQuestions = computed(() => store.questions.filter((question) => question.sessionId === store.sessionId));
+
 const copiedKey = ref("");
 let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -465,6 +469,15 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
             v-if="modelOpen || policyOpen || statusOpen || workspaceOpen"
             class="backdrop"
             @click="modelOpen = policyOpen = statusOpen = workspaceOpen = false"
+          />
+
+          <!-- 模型在等你回答的问题（ask_user）。在输入框上方而不是弹窗：上面模型做到
+               哪一步还看得见；卡片有自己的输入框，不动你正在写的草稿。 -->
+          <QuestionCard
+            v-for="question in currentQuestions"
+            :key="question.id"
+            :question="question"
+            @answer="(answer) => actions.answerQuestion(question.id, answer)"
           />
 
           <div

@@ -36,6 +36,9 @@ import type {
   TurnStartResult,
   BrowserRequestParams,
   BrowserResult,
+  UsageSummary,
+  UserInputRequestParams,
+  UserInputResponse,
 } from "./protocol.js";
 
 /** 待宿主决定的审批。id 用于回应。 */
@@ -52,6 +55,14 @@ export interface PendingBrowserAction {
   fail: (message: string) => void;
 }
 
+/** 一个待用户回答的问题（ask_user）。回答或跳过都必须调 respond；宿主撑不住了调 fail。 */
+export interface PendingUserInput {
+  id: number | string;
+  request: UserInputRequestParams;
+  respond: (answer: UserInputResponse) => void;
+  fail: (message: string) => void;
+}
+
 export interface PendingApproval extends ApprovalRequestParams {
   id: number | string;
 }
@@ -61,6 +72,7 @@ export interface ClientEvents {
   approval: (request: PendingApproval) => void;
   computer: (action: PendingComputerAction) => void;
   browser: (action: PendingBrowserAction) => void;
+  userInput: (question: PendingUserInput) => void;
   stderr: (chunk: string) => void;
   exit: (code: number | null) => void;
 }
@@ -106,6 +118,15 @@ export class ClawAgentClient extends EventEmitter {
           respond: (result: BrowserResult) => this.transport.respond(id, result),
           fail: (message: string) =>
             this.transport.respondError(id, { code: -32000, message }),
+        });
+        return;
+      }
+      if (method === "userInput/request") {
+        this.emit("userInput", {
+          id,
+          request: params as UserInputRequestParams,
+          respond: (answer: UserInputResponse) => this.transport.respond(id, answer),
+          fail: (message: string) => this.transport.respondError(id, { code: -32000, message }),
         });
         return;
       }
@@ -298,6 +319,12 @@ export class ClawAgentClient extends EventEmitter {
    * 那些会话是内核自己建的，拿不到这边的配置：不推的话用户发来的图没有视觉模型
    * 转述、语音文件没有听写。启动后与每次保存设置后各推一次。
    */
+  /** 最近 days 天的用量汇总（设置 → 用量）。 */
+  usageSummary(days: number): Promise<UsageSummary> {
+    this.assertReady();
+    return this.transport.request("usage/summary", { days }) as Promise<UsageSummary>;
+  }
+
   channelMedia(roles: RoleModels): Promise<unknown> {
     this.assertReady();
     return this.transport.request("channel/media", { roles });

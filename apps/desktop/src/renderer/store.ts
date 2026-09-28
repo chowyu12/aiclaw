@@ -13,6 +13,8 @@ import type {
   AgentEventPayload,
   AppConfigView,
   ApprovalPayload,
+  QuestionAnswer,
+  QuestionPayload,
   ChannelBindingView,
   ChannelStatusView,
   McpProbeView,
@@ -41,7 +43,7 @@ const EMPTY_TIMELINE: TimelineEntry[] = [];
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings",
+  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
@@ -65,6 +67,8 @@ const state = reactive({
     return this.live[this.sessionId]?.busy ?? false;
   },
   approvals: [] as ApprovalPayload[],
+  /** 模型提的、还没回答的问题（ask_user）。按会话显示在对话里。 */
+  questions: [] as QuestionPayload[],
   config: null as AppConfigView | null,
   profiles: [] as { id: string; label: string; description: string }[],
   sessions: [] as SessionSummaryView[],
@@ -200,6 +204,8 @@ export const actions = {
       // 标题与轮次数变了，侧边栏跟一下。
       if (applied.method === "turn/completed") {
         void actions.refreshSessions();
+        // 一轮结束（完成、失败、中断），它没回答的问题就作废了：内核那边已经不等了。
+        state.questions = state.questions.filter((question) => question.sessionId !== applied.sessionId);
         // 跑着时被推迟的重挂，现在补上（只补当前看着的会话；别的会话点开时自然会重挂）。
         if (state.remountPending && applied.sessionId === state.sessionId) {
           void actions.remountCurrentSession();
@@ -210,6 +216,18 @@ export const actions = {
       const approval = payload as ApprovalPayload;
       if (!state.approvals.some((item) => item.id === approval.id)) state.approvals.push(approval);
     });
+    window.aiclaw.on.question((payload) => {
+      const question = payload as QuestionPayload;
+      if (!state.questions.some((item) => item.id === question.id)) state.questions.push(question);
+    });
+    void window.aiclaw.question
+      .pending()
+      .then((pending) => {
+        for (const question of pending as QuestionPayload[]) {
+          if (!state.questions.some((item) => item.id === question.id)) state.questions.push(question);
+        }
+      })
+      .catch(() => undefined);
     // 渲染进程是会被重新加载的（休眠后被系统回收，见主进程 render-process-gone）；
     // 那之前弹出、还没回应的审批只推过一次，要主动拉回来，不然那一轮一直卡着。
     void window.aiclaw.approval
@@ -955,6 +973,12 @@ export const actions = {
     if (state.sessionId) await window.aiclaw.session.interrupt(state.sessionId);
   },
 
+  /** 回答（或跳过）模型提的问题。 */
+  async answerQuestion(id: string, answer: QuestionAnswer): Promise<void> {
+    await window.aiclaw.question.respond(id, plain(answer));
+    state.questions = state.questions.filter((question) => question.id !== id);
+  },
+
   async respondApproval(
     id: string,
     approved: boolean,
@@ -965,7 +989,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings"): void {
+  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage"): void {
     state.view = view;
   },
 

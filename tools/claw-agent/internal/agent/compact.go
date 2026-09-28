@@ -3,7 +3,9 @@ package agent
 import (
 	"context"
 	"errors"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 	"strings"
+	"time"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
@@ -77,11 +79,18 @@ func (s *Session) compact(ctx context.Context, turnID string, emitter Emitter) e
 	request = append(request, llm.Message{Role: llm.RoleUser, Content: summarizationPrompt})
 
 	// 压缩这一次不给工具：要的是一段文字，给了工具反而可能又去读文件。
+	started := time.Now()
 	response, err := s.llm.Stream(ctx, llm.Request{
 		Model:     s.config.Model.Model,
 		Messages:  request,
 		MaxTokens: s.config.Model.MaxTokens,
 	}, nil)
+	// 压缩也花 token，而且往往是最贵的一次（整段历史都要读一遍）。
+	s.recordUsage(store.UsageEvent{
+		Kind: store.UsageModel, Model: s.config.Model.Model, Detail: "compact",
+		Input: response.Usage.InputTokens, Output: response.Usage.OutputTokens, Total: response.Usage.TotalTokens,
+		Failed: err != nil, DurationMS: time.Since(started).Milliseconds(),
+	})
 	if err != nil {
 		return err
 	}

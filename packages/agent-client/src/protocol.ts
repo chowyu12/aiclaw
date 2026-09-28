@@ -584,3 +584,53 @@ export type AgentNotification =
   | { method: "item/delta"; params: ItemDeltaNotification }
   | { method: "item/completed"; params: ItemNotification }
   | { method: "error"; params: { sessionId?: string; message: string } };
+
+// ---------- 向用户提问（ask_user） ----------
+
+export interface UserInputOption {
+  label: string;
+  /** 选项的补充说明。 */
+  description?: string;
+}
+
+/** 模型要问用户的一个问题。宿主显示成带选项的卡片。 */
+export interface UserInputRequestParams {
+  sessionId: string;
+  turnId: string;
+  question: string;
+  options?: UserInputOption[];
+  multiSelect?: boolean;
+}
+
+/** 用户的回答：选中的选项、自己写的，或者跳过。 */
+export interface UserInputResponse {
+  selected?: string[];
+  text?: string;
+  skipped?: boolean;
+}
+
+// ---------- 用量（设置 → 用量） ----------
+
+export interface UsageTotals {
+  input: number;
+  output: number;
+  total: number;
+  modelCalls: number;
+  modelFailed: number;
+  toolCalls: number;
+  toolFailed: number;
+  sessions: number;
+}
+
+export interface UsageSummary {
+  /** 统计起点（毫秒）。 */
+  since: number;
+  totals: UsageTotals;
+  days: { day: string; input: number; output: number; modelCalls: number; toolCalls: number }[];
+  models: { model: string; input: number; output: number; calls: number; failed: number }[];
+  tools: { tool: string; source: string; calls: number; failed: number; avgMs: number }[];
+  skills: { skill: string; uses: number }[];
+  sessions: { sessionId: string; title: string; total: number; calls: number }[];
+  /** 有记录以来最早的一条（毫秒）。0 表示还没有任何记录。 */
+  firstAt: number;
+}

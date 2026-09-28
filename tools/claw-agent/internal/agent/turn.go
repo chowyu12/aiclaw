@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 	"math/rand"
 	"os"
 	"sort"
@@ -515,6 +516,11 @@ func (s *Session) callModel(
 		thinking = time.Since(llmStart) - thinkStart
 	}
 	usage := response.Usage
+	s.recordUsage(store.UsageEvent{
+		Kind: store.UsageModel, Model: s.config.Model.Model,
+		Input: usage.InputTokens, Output: usage.OutputTokens, Total: usage.TotalTokens,
+		Failed: err != nil, DurationMS: time.Since(llmStart).Milliseconds(),
+	})
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{
 		SessionID: s.ID, TurnID: turnID,
 		Item: protocol.Item{
@@ -638,6 +644,7 @@ func (s *Session) executeOne(
 		item.ToolResult = output
 	}
 	item.DurationMS = time.Since(started).Milliseconds()
+	s.recordToolUsage(call.Name, []byte(call.Arguments), started, err != nil, "")
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
 
 	// 截断只作用于进历史的副本：界面上留的是工具实际返回的内容。
@@ -779,6 +786,8 @@ func summarizeCall(call llm.ToolCall) string {
 		return pick("path")
 	case "search_files":
 		return pick("pattern")
+	case "ask_user":
+		return "提问：" + firstLine(pick("question"), 100)
 	case "exec":
 		// 代码模式下参数是整段脚本。压成一行的话，步骤标题会变成一坨
 		// 带着 \n 的代码；只取第一行有内容的，完整脚本在展开的详情里。

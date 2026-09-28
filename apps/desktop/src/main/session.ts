@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 import {
   ClawAgentClient,
   type AgentNotification,
+  type PendingUserInput,
+  type UsageSummary,
   type ApprovalPolicy,
   type Item,
   type MCPProbeResult,
@@ -110,6 +112,8 @@ export interface SessionManagerEvents {
   log: (source: string, chunk: string) => void;
   /** 浏览器扩展的连接状态变了（连上、断开、端口被占）。 */
   browserBridge: (view: BrowserBridgeView) => void;
+  /** 模型向用户提了一个问题（ask_user），等回答。 */
+  userInput: (question: PendingUserInput) => void;
 }
 
 export declare interface SessionManager {
@@ -187,6 +191,7 @@ export class SessionManager extends EventEmitter {
 
     client.on("notification", (n: AgentNotification) => this.emit("event", n.method, n.params));
     client.on("approval", (request) => this.emit("approval", request));
+    client.on("userInput", (question) => this.emit("userInput", question));
     // 屏幕操作在宿主这边做：截屏要走应用自己的屏幕录制授权，输入要按平台
     // 合成事件，而且只有宿主知道「最前面的应用是不是我自己」。
     // 浏览器窗口是宿主的：加载、点、填、截图都在这边做，内核只发请求。
@@ -258,6 +263,11 @@ export class SessionManager extends EventEmitter {
     }
     if (!config.browserPairToken) this.store.writeConfig({ browserPairToken: newPairToken() });
     await this.bridge.start();
+  }
+
+  /** 最近 days 天的用量（设置 → 用量）。 */
+  usageSummary(days: number): Promise<UsageSummary> {
+    return this.requireClient().usageSummary(days);
   }
 
   /** 换一个配对码：旧的立刻作废，已连上的扩展断开，要在扩展里重新填。 */

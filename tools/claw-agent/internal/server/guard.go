@@ -26,9 +26,15 @@ func appDBGuards(path string) []string {
 }
 
 // guard 给一个会话加上内核这边知道的敏感路径。每个建出来或恢复出来的会话都要过一遍。
+//
+// 用量记录也在这里接上：这是所有会话（桌面、通道、恢复出来的）都必经的一处，
+// 接在别处总会漏掉一种。
 func (s *Server) guard(session *agent.Session) {
 	session.Guard(appDBGuards(s.options.AppDB)...)
 	session.Guard(s.options.ProtectedPaths...)
+	if s.db != nil {
+		session.SetUsageSink(s.db.RecordUsage)
+	}
 }
 
 // pinChannelPolicy 让通道会话的审批档位不随宿主的 refresh 变。

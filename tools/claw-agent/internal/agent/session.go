@@ -48,6 +48,8 @@ type Emitter interface {
 	RequestComputer(ctx context.Context, params protocol.ComputerRequestParams) (protocol.ComputerResult, error)
 	// RequestBrowser 请宿主在它的浏览器窗口里做一步。浏览器是宿主的。
 	RequestBrowser(ctx context.Context, params protocol.BrowserRequestParams) (protocol.BrowserResult, error)
+	// RequestUserInput 请用户回答一个问题（ask_user），阻塞直到用户回答或跳过。
+	RequestUserInput(ctx context.Context, params protocol.UserInputRequestParams) (protocol.UserInputResponse, error)
 }
 
 // userInput 是一次用户输入：文字，可能还带着图片。
@@ -117,6 +119,9 @@ type Session struct {
 	shells *tools.ShellPool
 	// codeModeTokens 是代码模式换掉工具清单前后的 token 估算，给状态栏用。
 	codeModeTokens [2]int
+	// usage 收用量记录（每次打模型、每次调工具一条），给设置页的「用量」。
+	// 由 server 在建出 / 恢复会话后接上；nil 表示不记（测试）。
+	usage func(store.UsageEvent)
 	// mcpMounted 记每个 server 挂了几个工具，好在代码模式装完之后
 	// 把那几行状态重写一遍——见 foldStatusIntoExec。
 	mcpMounted map[string]int
@@ -243,6 +248,10 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	session.loadSkills(config.SkillDirs)
 	session.loadMemory(config)
 	if err := session.registerComputerTools(); err != nil {
+		return nil, err
+	}
+	// 向用户提问同样留在 exec 外面：在脚本里停下来等人没有意义。
+	if err := session.registerAskTool(); err != nil {
 		return nil, err
 	}
 
@@ -911,6 +920,44 @@ func (s *Session) SetMediaRoles(vision, stt protocol.RoleModel, seesImages bool)
 	s.config.Roles.STT = stt
 	s.config.ModelSeesImages = seesImages
 	s.refreshSystemPromptLocked()
+}
+
+// SetUsageSink 接上用量记录。
+func (s *Session) SetUsageSink(sink func(store.UsageEvent)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usage = sink
+}
+
+func (s *Session) recordUsage(event store.UsageEvent) {
+	s.mu.Lock()
+	sink := s.usage
+	s.mu.Unlock()
+	if sink == nil {
+		return
+	}
+	event.SessionID = s.ID
+	sink(event)
+}
+
+// recordToolUsage 记一次工具调用。via 是「exec」时表示它是代码模式脚本里调的。
+func (s *Session) recordToolUsage(name string, arguments []byte, started time.Time, failed bool, via string) {
+	source := store.ToolSource(name)
+	if via != "" {
+		source = via + ":" + source
+	}
+	detail := ""
+	if name == "load_skill" {
+		var input struct {
+			Name string `json:"name"`
+		}
+		_ = json.Unmarshal(arguments, &input)
+		detail = strings.TrimSpace(input.Name)
+	}
+	s.recordUsage(store.UsageEvent{
+		Kind: store.UsageTool, Tool: name, Source: source, Detail: detail,
+		Failed: failed, DurationMS: time.Since(started).Milliseconds(),
+	})
 }
 
 // refreshSystemPromptLocked 用当前配置重新生成第一条系统提示词。调用方持锁。

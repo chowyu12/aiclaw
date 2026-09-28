@@ -58,6 +58,8 @@ type Summary struct {
 
 type Store struct {
 	db *sql.DB
+	// usage 是用量记录的后台写入队列（见 usage.go）。
+	usage *usageWriter
 }
 
 const schema = `
@@ -99,10 +101,20 @@ func Open(dataHome string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("初始化会话库失败：%w", err)
 	}
-	return &Store{db: db}, nil
+	if err := ensureUsageSchema(context.Background(), db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	store := &Store{db: db}
+	store.startUsageWriter()
+	return store, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+// Close 先把还在队列里的用量记录写完，再关库。
+func (s *Store) Close() error {
+	s.flushUsage()
+	return s.db.Close()
+}
 
 // Save 写入或覆盖一个会话。
 func (s *Store) Save(ctx context.Context, session Session) error {

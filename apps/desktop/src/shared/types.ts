@@ -276,6 +276,46 @@ export interface AppConfigView {
   browserPairToken: string;
 }
 
+/** 模型向用户提的一个问题（ask_user），对话里显示成一张带选项的卡片。 */
+export interface QuestionPayload {
+  id: string;
+  sessionId: string;
+  turnId: string;
+  question: string;
+  options: { label: string; description?: string }[];
+  multiSelect: boolean;
+  /** 提问的时间（毫秒）。 */
+  at: number;
+}
+
+/** 用户对一个问题的回答。 */
+export interface QuestionAnswer {
+  selected?: string[];
+  text?: string;
+  skipped?: boolean;
+}
+
+/** 设置 → 用量。形状与内核 store.UsageSummary 一致。 */
+export interface UsageSummaryView {
+  since: number;
+  totals: {
+    input: number;
+    output: number;
+    total: number;
+    modelCalls: number;
+    modelFailed: number;
+    toolCalls: number;
+    toolFailed: number;
+    sessions: number;
+  };
+  days: { day: string; input: number; output: number; modelCalls: number; toolCalls: number }[];
+  models: { model: string; input: number; output: number; calls: number; failed: number }[];
+  tools: { tool: string; source: string; calls: number; failed: number; avgMs: number }[];
+  skills: { skill: string; uses: number }[];
+  sessions: { sessionId: string; title: string; total: number; calls: number }[];
+  firstAt: number;
+}
+
 /** 浏览器扩展的连接状态，设置页显示。 */
 export interface BrowserBridgeView {
   listening: boolean;

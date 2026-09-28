@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/codemode"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
@@ -49,7 +50,11 @@ func (s *Session) installCodeMode() int {
 				if !ok {
 					return "", fmt.Errorf("内部错误：脚本里拿不到执行环境")
 				}
-				return tool.Handler(ctx, arguments, env)
+				// 脚本里调的工具也记一笔用量：不记的话开了代码模式的会话，统计里全是 exec。
+				started := time.Now()
+				output, err := tool.Handler(ctx, arguments, env)
+				s.recordToolUsage(tool.Name, arguments, started, err != nil, "exec")
+				return output, err
 			},
 		})
 	}

@@ -9,6 +9,7 @@
  *   npm run build && npm run smoke
  */
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ClawAgentClient } from "../packages/agent-client/dist/index.js";
@@ -150,6 +151,69 @@ async function main(): Promise<number> {
       withSearch.tools.includes("web_search__web_search"),
       `mcpStatus=${JSON.stringify(withSearch.mcpStatus)}`,
     );
+
+    // 向用户提问（ask_user）与用量：一个本机的假模型服务先调 ask_user，
+    // 拿到工具结果后把它原样说出来——走的是真的内核、真的客户端、真的协议帧。
+    const fake = createServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        const messages = (JSON.parse(body) as { messages: { role: string; content?: unknown }[] }).messages;
+        const toolResult = messages.find((message) => message.role === "tool");
+        response.writeHead(200, { "Content-Type": "text/event-stream" });
+        const usage = `data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}\n\n`;
+        if (!toolResult) {
+          const call = {
+            choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", type: "function",
+              function: { name: "ask_user", arguments: JSON.stringify({ question: "删哪些？", options: [{ label: "日志" }, { label: "缓存" }] }) } }] } }],
+          };
+          response.end(`data: ${JSON.stringify(call)}\n\n${usage}data: [DONE]\n\n`);
+          return;
+        }
+        const text = { choices: [{ delta: { content: `收到：${String(toolResult.content)}` } }] };
+        response.end(`data: ${JSON.stringify(text)}\n\n${usage}data: [DONE]\n\n`);
+      });
+    });
+    await new Promise<void>((done) => fake.listen(0, "127.0.0.1", () => done()));
+    const fakePort = (fake.address() as { port: number }).port;
+    try {
+      const asker = await client.providerCreate({
+        name: "假模型", type: "openai-compatible", baseUrl: `http://127.0.0.1:${fakePort}/v1`, apiKey: "sk-fake", models: ["fake"],
+      });
+      const session = await client.sessionStart({ model: { providerId: asker.id, baseUrl: "", model: "fake" }, approvalPolicy: "on-write" });
+      let asked = "";
+      client.on("userInput", (question) => {
+        asked = question.request.question;
+        question.respond({ selected: ["缓存"], text: "别动 Downloads" });
+      });
+      let answer = "";
+      const finished = new Promise<void>((done) => {
+        client.on("notification", (note) => {
+          const params = note.params as { sessionId?: string; item?: { kind?: string; text?: string } };
+          if (params.sessionId !== session.sessionId) return;
+          if (note.method === "item/completed" && params.item?.kind === "agentMessage") answer = params.item.text ?? "";
+          if (note.method === "turn/completed") done();
+        });
+      });
+      await client.turnStart(session.sessionId, "清理磁盘");
+      await Promise.race([finished, new Promise((_, fail) => setTimeout(() => fail(new Error("这一轮 15 秒没跑完")), 15_000))]);
+      record("ask_user：问题到了宿主", asked === "删哪些？", asked || "没收到提问");
+      record(
+        "ask_user：回答回到模型，这一轮接着跑完",
+        answer.includes("用户选了：缓存") && answer.includes("别动 Downloads"),
+        answer.slice(0, 80),
+      );
+      // 用量记录是后台写的（每秒一批）：等它落盘。
+      await new Promise((done) => setTimeout(done, 1500));
+      const usage = await client.usageSummary(1);
+      record(
+        "用量：这一轮的模型调用、token 与 ask_user 都记下了",
+        usage.totals.modelCalls >= 2 && usage.totals.total >= 36 && usage.tools.some((tool) => tool.tool === "ask_user") && usage.days.length === 1,
+        `模型 ${usage.totals.modelCalls} 次，token ${usage.totals.total}，工具 ${usage.tools.map((t) => t.tool).join("、")}`,
+      );
+    } finally {
+      fake.close();
+    }
   } catch (error) {
     record("unexpected", false, String(error));
   } finally {

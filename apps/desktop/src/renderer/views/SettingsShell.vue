@@ -6,6 +6,7 @@ import PluginsView from "./PluginsView.vue";
 import SearchEnginesView from "./SearchEnginesView.vue";
 import McpView from "./McpView.vue";
 import SkillsView from "./SkillsView.vue";
+import UsageView from "./UsageView.vue";
 
 /**
  * 设置几页的路由。
@@ -23,4 +24,5 @@ import SkillsView from "./SkillsView.vue";
   <PluginsView v-else-if="store.view === 'plugins'" />
   <McpView v-else-if="store.view === 'mcp'" />
   <SkillsView v-else-if="store.view === 'skills'" />
+  <UsageView v-else-if="store.view === 'usage'" />
 </template>

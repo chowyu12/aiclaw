@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 	"os"
 	"path/filepath"
 	"strings"
@@ -263,7 +264,13 @@ func (s *Session) describeImages(ctx context.Context, images [][]byte) string {
 		Images: images,
 	}}
 	// 不流式往外发：这段转述是给模型看的中间结果，不该出现在用户的时间线上。
+	started := time.Now()
 	response, err := client.Stream(ctx, llm.Request{Model: role.Model, Messages: messages}, nil)
+	s.recordUsage(store.UsageEvent{
+		Kind: store.UsageModel, Model: role.Model, Detail: "vision",
+		Input: response.Usage.InputTokens, Output: response.Usage.OutputTokens, Total: response.Usage.TotalTokens,
+		Failed: err != nil, DurationMS: time.Since(started).Milliseconds(),
+	})
 	if err != nil {
 		return fmt.Sprintf("\n\n[附带了 %d 张图，但转述失败：%v]", len(images), err)
 	}

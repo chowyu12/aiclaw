@@ -19,12 +19,18 @@ const NAV = [
   { id: "plugins", label: "插件", note: "computer use、微信、企业微信，以及从目录装的" },
   { id: "mcp", label: "MCP", note: "第三方 MCP server，stdio 或 HTTP" },
   { id: "skills", label: "技能", note: "本地 SKILL.md，也认 Claude Code / Codex 的" },
+  { id: "usage", label: "用量", note: "token、模型调用、工具与技能" },
 ] as const;
 
 /**
  * 搜索关键词。防抖 200ms 再打内核——每个按键都查一次的话，
  * 打「销售」两个字期间会发出四五次请求，而结果只有最后一次有用。
  */
+/** 这个会话里有没有等你回答的问题。 */
+function waiting(sessionId: string): boolean {
+  return store.questions.some((question) => question.sessionId === sessionId);
+}
+
 const keyword = ref("");
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 watch(keyword, (value) => {
@@ -215,7 +221,8 @@ function when(iso: string): string {
       >
         <div class="item-main">
           <div class="title">
-            <span v-if="store.live[session.id]?.busy" class="running" title="正在执行"></span>
+            <span v-if="waiting(session.id)" class="asking" title="模型在等你回答一个问题">待回答</span>
+            <span v-else-if="store.live[session.id]?.busy" class="running" title="正在执行"></span>
             {{ session.title || "未命名会话" }}
           </div>
           <!-- 命中片段是搜索结果里最有用的一行：一列「未命名会话」挑不出来，
@@ -280,7 +287,8 @@ function when(iso: string): string {
           <div class="item-main">
             <div class="title">
               <!-- 后台还在跑的会话点亮一个点：切走之后它没停，用户得看得见它在哪。 -->
-              <span v-if="store.live[session.id]?.busy" class="running" title="正在执行"></span>
+              <span v-if="waiting(session.id)" class="asking" title="模型在等你回答一个问题">待回答</span>
+            <span v-else-if="store.live[session.id]?.busy" class="running" title="正在执行"></span>
               {{ session.title || "未命名会话" }}
             </div>
             <div class="meta">
@@ -567,6 +575,18 @@ function when(iso: string): string {
   background: var(--accent, #3b82f6);
   vertical-align: 1px;
   animation: breathe 1.4s ease-in-out infinite;
+}
+
+/* 模型在等你回答问题（ask_user）的会话：比「正在执行」更要紧，替换掉那个点。 */
+.asking {
+  flex: 0 0 auto;
+  margin-right: 5px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 10.5px;
+  line-height: 16px;
 }
 
 @keyframes breathe {

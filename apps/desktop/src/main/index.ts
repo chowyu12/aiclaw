@@ -2,7 +2,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } fr
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import type { PendingApproval } from "@aiclaw/agent-client";
+import type { PendingApproval, PendingUserInput } from "@aiclaw/agent-client";
 import { ConfigStore, type McpServer } from "./config.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
@@ -12,7 +12,7 @@ import { LogFile } from "./logfile.js";
 import { openFromChat } from "./open-file.js";
 import { readMedia, stageAudio } from "./media-files.js";
 import { IPC } from "../shared/ipc.cjs";
-import type { ApprovalPayload } from "../shared/types.js";
+import type { ApprovalPayload, QuestionAnswer, QuestionPayload } from "../shared/types.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -59,6 +59,8 @@ let mainWindow: BrowserWindow | null = null;
 const pendingApprovals = new Map<string, PendingApproval>();
 /** 同一批审批推给渲染层的样子。渲染进程重新加载后按它补发（见 approvalPending）。 */
 const pendingPayloads = new Map<string, ApprovalPayload>();
+/** 模型提的、用户还没回答的问题（ask_user）。与审批同一套：回应句柄留在主进程。 */
+const pendingQuestions = new Map<string, { question: PendingUserInput; payload: QuestionPayload }>();
 
 function logApp(line: string): void {
   diagnostics.push("app", line);
@@ -370,6 +372,23 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(IPC.approvalPending, () => [...pendingPayloads.values()]);
+  ipcMain.handle(IPC.questionPending, () => [...pendingQuestions.values()].map((entry) => entry.payload));
+  ipcMain.handle(IPC.questionRespond, (_event, payload: { id: string; answer: QuestionAnswer }) => {
+    const entry = pendingQuestions.get(payload.id);
+    // 这一轮已经结束或被中断：内核那边不等了，静默返回。
+    if (!entry) return false;
+    pendingQuestions.delete(payload.id);
+    const answer = payload.answer ?? {};
+    entry.question.respond({
+      selected: Array.isArray(answer.selected) ? answer.selected.filter((item) => typeof item === "string").slice(0, 10) : [],
+      text: typeof answer.text === "string" ? answer.text.slice(0, 4000) : "",
+      skipped: answer.skipped === true,
+    });
+    return true;
+  });
+  ipcMain.handle(IPC.usageSummary, (_event, days: unknown) =>
+    sessions.usageSummary(typeof days === "number" && days > 0 ? Math.min(Math.trunc(days), 366) : 30),
+  );
 
   ipcMain.handle(IPC.pickDirectory, async () => {
     if (!mainWindow) return null;
@@ -391,6 +410,9 @@ sessions.on("event", (method, params) => {
         pendingApprovals.delete(id);
         pendingPayloads.delete(id);
       }
+    }
+    for (const [id, entry] of pendingQuestions) {
+      if (entry.payload.sessionId === sessionId) pendingQuestions.delete(id);
     }
   }
   push(IPC.onAgentEvent, { method, params });
@@ -415,12 +437,27 @@ sessions.on("approval", (request) => {
 
 sessions.on("browserBridge", (view) => push(IPC.onBrowserBridge, view));
 
+sessions.on("userInput", (question) => {
+  const payload: QuestionPayload = {
+    id: String(question.id),
+    sessionId: question.request.sessionId,
+    turnId: question.request.turnId,
+    question: question.request.question,
+    options: question.request.options ?? [],
+    multiSelect: question.request.multiSelect === true,
+    at: Date.now(),
+  };
+  pendingQuestions.set(payload.id, { question, payload });
+  push(IPC.onQuestion, payload);
+});
+
 sessions.on("status", (state, detail) => {
   logApp(`运行时 ${state}${detail ? `：${detail}` : ""}`);
   // 运行时停了，所有待回应的审批都作废。
   if (state !== "ready" && state !== "starting") {
     pendingApprovals.clear();
     pendingPayloads.clear();
+    pendingQuestions.clear();
   }
   push(IPC.onRuntimeStatus, { state, detail });
 });

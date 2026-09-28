@@ -92,6 +92,9 @@ export const IPC = {
 
   approvalRespond: "approval:respond",
   approvalPending: "approval:pending",
+  questionRespond: "question:respond",
+  questionPending: "question:pending",
+  usageSummary: "usage:summary",
   pickDirectory: "dialog:pickDirectory",
 
   /** 主进程 → 渲染层的推送通道。 */
@@ -99,5 +102,6 @@ export const IPC = {
   onApproval: "push:approval",
   onRuntimeStatus: "push:runtimeStatus",
   onBrowserBridge: "push:browserBridge",
+  onQuestion: "push:question",
   onUpdateProgress: "push:updateProgress",
 } as const;

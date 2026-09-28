@@ -2,8 +2,13 @@ export { AgentTransport } from "./transport.js";
 export type { TransportOptions, RpcError, JsonValue } from "./transport.js";
 export { ClawAgentClient } from "./client.js";
 export { MODEL_ROLES } from "./protocol.js";
-export type { PendingApproval, ClientEvents } from "./client.js";
+export type { PendingApproval, PendingUserInput, ClientEvents } from "./client.js";
 export type {
+  UsageSummary,
+  UsageTotals,
+  UserInputOption,
+  UserInputRequestParams,
+  UserInputResponse,
   AgentNotification,
   ApprovalKind,
   ApprovalPolicy,

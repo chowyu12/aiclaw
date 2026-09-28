@@ -113,6 +113,15 @@ const api = {
     install: () => ipcRenderer.invoke(IPC.updateInstall),
     prepare: () => ipcRenderer.invoke(IPC.updatePrepare),
   },
+  /** 模型提的问题（ask_user）：回答、跳过，以及渲染进程重新加载后拉回还没回答的。 */
+  question: {
+    respond: (id: string, answer: unknown) => ipcRenderer.invoke(IPC.questionRespond, { id, answer }),
+    pending: () => ipcRenderer.invoke(IPC.questionPending),
+  },
+  /** 用量（设置 → 用量）。 */
+  usage: {
+    summary: (days: number) => ipcRenderer.invoke(IPC.usageSummary, days),
+  },
   /** 与用户浏览器里「AIClaw 浏览器助手」扩展的连接（设置 → 浏览器）。 */
   browserBridge: {
     status: () => ipcRenderer.invoke(IPC.browserBridgeStatus),
@@ -140,6 +149,11 @@ const api = {
       const listener = (_event: unknown, payload: unknown) => handler(payload);
       ipcRenderer.on(IPC.onApproval, listener);
       return () => ipcRenderer.off(IPC.onApproval, listener);
+    },
+    question: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => handler(payload);
+      ipcRenderer.on(IPC.onQuestion, listener);
+      return () => ipcRenderer.off(IPC.onQuestion, listener);
     },
     browserBridge: (handler: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => handler(payload);

@@ -44,6 +44,7 @@ const (
 	MethodChannelAuthorize = "channel/authorize"
 	MethodChannelRevoke    = "channel/revoke"
 	MethodChannelMedia     = "channel/media"
+	MethodUsageSummary     = "usage/summary"
 	MethodWeChatLoginStart = "wechat/loginStart"
 	MethodWeChatLoginPoll  = "wechat/loginPoll"
 	MethodSearchList       = "search/list"
@@ -78,7 +79,37 @@ const (
 	// RequestBrowser 请宿主在应用自带的浏览器窗口里做一步：打开、点、填、读。
 	// 浏览器是宿主（Electron）的，内核只翻译工具调用。
 	RequestBrowser = "browser/request"
+	// RequestUserInput 请用户回答模型提的一个问题（ask_user 工具）。宿主在对话里
+	// 显示一张带选项的卡片，用户选了、写了或跳过之后回应。
+	RequestUserInput = "userInput/request"
 )
+
+// UserInputOption 是问题的一个选项。
+type UserInputOption struct {
+	Label string `json:"label"`
+	/** 选项的补充说明，卡片上以小字显示。 */
+	Description string `json:"description,omitempty"`
+}
+
+// UserInputRequestParams 是模型要问用户的一个问题。
+type UserInputRequestParams struct {
+	SessionID string            `json:"sessionId"`
+	TurnID    string            `json:"turnId"`
+	Question  string            `json:"question"`
+	Options   []UserInputOption `json:"options,omitempty"`
+	/** 可以选多个。 */
+	MultiSelect bool `json:"multiSelect,omitempty"`
+}
+
+// UserInputResponse 是用户的回答。
+type UserInputResponse struct {
+	/** 选中的选项（label）。 */
+	Selected []string `json:"selected,omitempty"`
+	/** 用户自己写的回答。 */
+	Text string `json:"text,omitempty"`
+	/** 用户跳过了这个问题。 */
+	Skipped bool `json:"skipped,omitempty"`
+}
 
 // BrowserAction 是一次浏览器操作。
 type BrowserAction string
@@ -600,6 +631,11 @@ type SessionStartParams struct {
 	Roles RoleModels `json:"roles,omitzero"`
 	/** 对话模型自己看得懂图。宿主按模型清单里的标记给出，决定要不要走视觉旁路。 */
 	ModelSeesImages bool `json:"modelSeesImages,omitempty"`
+}
+
+// UsageSummaryParams 查最近多少天的用量（设置页「用量」）。结果的形状见 store.UsageSummary。
+type UsageSummaryParams struct {
+	Days int `json:"days"`
 }
 
 // ChannelMediaParams 是通道会话处理图片与语音要用的角色配置。

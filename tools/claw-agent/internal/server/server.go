@@ -199,6 +199,25 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 			DataHome: s.options.DataHome,
 			Tools:    []string{"read_file", "write_file", "edit_file", "list_dir", "search_files", "run_command"},
 		})
+	case protocol.MethodUsageSummary:
+		var params protocol.UsageSummaryParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		days := params.Days
+		if days <= 0 || days > 366 {
+			days = 30
+		}
+		// 「最近 N 天」从 N-1 天前的零点算起，含今天：选 7 天看到的就是 7 根柱子。
+		now := time.Now()
+		start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 0, -(days - 1))
+		summary, err := s.db.Usage(ctx, start, time.Local)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		s.writeResult(f.ID, summary)
 	case protocol.MethodChannelMedia:
 		var params protocol.ChannelMediaParams
 		if err := json.Unmarshal(f.Params, &params); err != nil {
@@ -931,6 +950,29 @@ func (e *emitter) RequestBrowser(
 		return protocol.BrowserResult{}, fmt.Errorf("浏览器操作回应格式不对：%w", err)
 	}
 	return result, nil
+}
+
+// RequestUserInput 请用户回答模型提的一个问题。
+//
+// 等的是人，与审批同一个上限：用户离开了、宿主崩了，轮次也得能收尾。
+func (e *emitter) RequestUserInput(
+	ctx context.Context,
+	params protocol.UserInputRequestParams,
+) (protocol.UserInputResponse, error) {
+	askCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	raw, err := e.server.requestHost(askCtx, protocol.RequestUserInput, params)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return protocol.UserInputResponse{}, errors.New("等了 30 分钟用户没有回答")
+		}
+		return protocol.UserInputResponse{}, err
+	}
+	var response protocol.UserInputResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return protocol.UserInputResponse{}, fmt.Errorf("回答的格式不对：%w", err)
+	}
+	return response, nil
 }
 
 // describeDials 把各个 server 的耗时排成一行。

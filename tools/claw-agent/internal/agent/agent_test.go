@@ -127,6 +127,9 @@ type recordingEmitter struct {
 	browser       []protocol.BrowserRequestParams
 	browserResult protocol.BrowserResult
 	browserOK     bool
+	// questions 是 ask_user 问过的；answer 是预置的回答（nil 表示不回答，报错）。
+	questions []protocol.UserInputRequestParams
+	answer    *protocol.UserInputResponse
 }
 
 func (e *recordingEmitter) Notify(method string, params any) {
@@ -177,6 +180,20 @@ func (e *recordingEmitter) RequestBrowser(
 		return protocol.BrowserResult{}, errors.New("测试没有预置浏览器操作结果")
 	}
 	return result, nil
+}
+
+// RequestUserInput 记下提问，按预设回答。
+func (e *recordingEmitter) RequestUserInput(
+	_ context.Context,
+	params protocol.UserInputRequestParams,
+) (protocol.UserInputResponse, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.questions = append(e.questions, params)
+	if e.answer == nil {
+		return protocol.UserInputResponse{}, errors.New("测试没有预置回答")
+	}
+	return *e.answer, nil
 }
 
 func (e *recordingEmitter) methods() []string {

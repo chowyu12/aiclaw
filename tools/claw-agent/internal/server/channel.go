@@ -214,6 +214,12 @@ func (e *channelEmitter) RequestComputer(context.Context, protocol.ComputerReque
 	return protocol.ComputerResult{}, errors.New("通道会话不能操作屏幕")
 }
 
+// RequestUserInput 同理：通道那一头看不到选项卡片。正常到不了这里（通道会话是
+// 无人值守档位，不注册 ask_user），万一到了就让模型把问题写进回复里问。
+func (e *channelEmitter) RequestUserInput(context.Context, protocol.UserInputRequestParams) (protocol.UserInputResponse, error) {
+	return protocol.UserInputResponse{}, errors.New("这个会话里没有人能点选项卡片；把问题直接写在回复里问对方")
+}
+
 // RequestBrowser 同理：浏览器窗口在桌面上，外部用户不该驾驭它。
 func (e *channelEmitter) RequestBrowser(context.Context, protocol.BrowserRequestParams) (protocol.BrowserResult, error) {
 	return protocol.BrowserResult{}, errors.New("通道会话不能操作浏览器")
