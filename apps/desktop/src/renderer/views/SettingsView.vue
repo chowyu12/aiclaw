@@ -480,7 +480,7 @@ async function purge(): Promise<void> {
           :checked="store.config.browser"
           @change="saveField({ browser: ($event.target as HTMLInputElement).checked })"
         />
-        <span>浏览器：模型按元素编号打开网页、点、填、读</span>
+        <span>浏览器：模型按元素编号打开网页、点、填、读（勾上后可以选用你自己的 Chrome / Edge）</span>
       </label>
       <div v-if="store.config.browser" class="field backend">
         <span class="field-label">在哪儿打开网页</span>
