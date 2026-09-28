@@ -1,8 +1,12 @@
 import { EventEmitter } from "node:events";
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { clipboard, shell } from "electron";
 import {
   ClawAgentClient,
   type AgentNotification,
@@ -152,6 +156,7 @@ export class SessionManager extends EventEmitter {
     this.skills = skills;
     this.bridge = new ExtensionBridge(() => this.store.readConfig().browserPairToken);
     this.bridge.on("status", () => this.emit("browserBridge", this.browserBridge()));
+    this.bridge.on("log", (line: string) => this.emit("log", "app", `${line}\n`));
     this.browser = new AgentBrowser(() => this.store.readConfig().browserBackend, this.bridge);
     this.agentBin = resolveBin("CLAW_AGENT_BIN", "claw-agent");
   }
@@ -287,7 +292,27 @@ export class SessionManager extends EventEmitter {
       browser: status.connected ? browserName(status.connected.userAgent) : "",
       extensionVersion: status.connected?.extension ?? "",
       extensionDir: extensionDir(),
+      pairingCode: status.pairing?.code ?? "",
+      browsers: installedBrowsers().map(({ id, name }) => ({ id, name })),
     };
+  }
+
+  /**
+   * 引导安装扩展：用选中的浏览器打开它的扩展管理页，在访达里显示扩展目录，并把目录
+   * 路径放进剪贴板——「加载已解压的扩展程序」的选择框里 Cmd+Shift+G 粘贴就到了，
+   * 不用在 .app 里一层层点（选择框默认进不了 .app 内部）。
+   */
+  async openExtensionPage(browserId: string): Promise<void> {
+    const browser = installedBrowsers().find((item) => item.id === browserId);
+    if (!browser) throw new Error("没找到这个浏览器");
+    const dir = extensionDir();
+    clipboard.writeText(dir);
+    await shell.openPath(dir);
+    // 经 `open -a` 交给系统启动服务：浏览器在跑就在它里面开一个标签页，没跑就先启动它。
+    await run("open", ["-a", browser.app, browser.extensionsPage]).catch(async () => {
+      // 有的浏览器不接受从外面打开内部页：至少把它带到前台，用户自己在地址栏输入。
+      await run("open", ["-a", browser.app]).catch(() => undefined);
+    });
   }
 
   async stop(): Promise<void> {
@@ -731,6 +756,37 @@ function resolveBin(envVar: string, name: string): string {
     if (candidate && existsSync(candidate)) return candidate;
   }
   return exe;
+}
+
+const run = promisify(execFile);
+
+interface KnownBrowser {
+  id: string;
+  name: string;
+  /** .app 的完整路径。 */
+  app: string;
+  /** 扩展管理页。 */
+  extensionsPage: string;
+}
+
+const BROWSER_CANDIDATES: (Omit<KnownBrowser, "app"> & { bundle: string })[] = [
+  { id: "edge", name: "Microsoft Edge", bundle: "Microsoft Edge.app", extensionsPage: "edge://extensions" },
+  { id: "chrome", name: "Chrome", bundle: "Google Chrome.app", extensionsPage: "chrome://extensions" },
+  { id: "brave", name: "Brave", bundle: "Brave Browser.app", extensionsPage: "brave://extensions" },
+  { id: "arc", name: "Arc", bundle: "Arc.app", extensionsPage: "chrome://extensions" },
+  { id: "chromium", name: "Chromium", bundle: "Chromium.app", extensionsPage: "chrome://extensions" },
+];
+
+/** 本机装了哪些能装这个扩展的浏览器。目前只认 macOS 的位置；别的平台返回空，设置页给通用说明。 */
+function installedBrowsers(): KnownBrowser[] {
+  if (process.platform !== "darwin") return [];
+  const roots = ["/Applications", join(homedir(), "Applications")];
+  const found: KnownBrowser[] = [];
+  for (const candidate of BROWSER_CANDIDATES) {
+    const app = roots.map((root) => join(root, candidate.bundle)).find((path) => existsSync(path));
+    if (app) found.push({ id: candidate.id, name: candidate.name, app, extensionsPage: candidate.extensionsPage });
+  }
+  return found;
 }
 
 /** 配对码：24 个字符，够随机，又能整段复制粘贴。 */

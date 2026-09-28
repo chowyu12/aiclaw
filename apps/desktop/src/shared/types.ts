@@ -326,4 +326,8 @@ export interface BrowserBridgeView {
   extensionVersion: string;
   /** 扩展目录：用户在 chrome://extensions 里「加载已解压的扩展程序」选它。 */
   extensionDir: string;
+  /** 正在配对时两边显示的四位代码；不在配对是空串。 */
+  pairingCode: string;
+  /** 本机装了的、能装这个扩展的浏览器（设置页据此给「在 X 中打开扩展页」按钮）。 */
+  browsers: { id: string; name: string }[];
 }

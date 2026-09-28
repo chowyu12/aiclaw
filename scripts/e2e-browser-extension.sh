@@ -18,7 +18,12 @@ fi
 if [ -z "$browser" ]; then echo "没有找到 Chrome / Edge / Chromium，跳过"; exit 0; fi
 
 profile="$(mktemp -d -t aiclaw-e2e-browser)"
-extension="$PWD/apps/browser-extension"
+# 扩展复制一份、换一个端口：本机正在用的 AIClaw 开了「我的浏览器」时占着 17891，
+# 测试不能去连它。manifest 里的 key 不变，所以扩展 ID 不变，Origin 校验照样生效。
+port=27999
+extension="$profile/extension"
+cp -R "$PWD/apps/browser-extension" "$extension"
+sed -i '' "s/^const PORT = 17891;/const PORT = $port;/" "$extension/background.js"
 "$browser" --user-data-dir="$profile" --load-extension="$extension" \
   --disable-extensions-except="$extension" --remote-debugging-port=9339 \
   --no-first-run --no-default-browser-check about:blank >"$profile/browser.log" 2>&1 &
@@ -32,4 +37,4 @@ for _ in $(seq 1 40); do
 done
 
 electron="$(node -e 'console.log(require("electron"))')"
-"$electron" scripts/e2e-browser-extension.cjs 2>&1 | grep -vE '^\[[0-9]+:[0-9]+/' || true
+AICLAW_BRIDGE_PORT=$port "$electron" scripts/e2e-browser-extension.cjs 2>&1 | grep -vE '^\[[0-9]+:[0-9]+/' || true

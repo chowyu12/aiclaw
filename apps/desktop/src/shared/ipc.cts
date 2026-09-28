@@ -59,6 +59,7 @@ export const IPC = {
   browserBridgeStatus: "browserBridge:status",
   browserBridgeRepair: "browserBridge:repair",
   browserBridgeReveal: "browserBridge:reveal",
+  browserBridgeOpenPage: "browserBridge:openPage",
   // 写系统剪贴板。走主进程而不是渲染层的 navigator.clipboard：后者要求窗口
   // 在前台，不满足时它会失败，而 execCommand 兜底会静默失败——按钮上写着「已复制」，
   // 剪贴板里却什么都没有。

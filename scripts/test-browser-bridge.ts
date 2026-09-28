@@ -167,3 +167,69 @@ test("帧编解码：客户端的帧必须带掩码", () => {
   assert.equal(frame.payload.toString(), "你好");
   assert.equal(decodeFrame(masked.subarray(0, 4)), null, "数据不够时等下一块");
 });
+
+/** 没有配对码的扩展：来连就进入配对。 */
+function pairingClient(port: number) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}/extension`, { headers: { Origin: ORIGIN } } as unknown as string[]);
+  const received: Record<string, unknown>[] = [];
+  const closed = new Promise<number>((resolve) => {
+    ws.onclose = (event) => resolve(event.code);
+  });
+  ws.onmessage = (event) => {
+    const message = JSON.parse(String(event.data)) as Record<string, unknown>;
+    received.push(message);
+    if (message.type === "challenge") ws.send(JSON.stringify({ type: "pair", nonce: "n", userAgent: "TestBrowser/1", extension: "1.0.0" }));
+  };
+  return { ws, received, closed };
+}
+
+test("配对：扩展拿到四位代码，设置页显示同一个；用户在浏览器里点允许后把配对码交过去", async () => {
+  await withBridge(async (bridge, port) => {
+    const client = pairingClient(port);
+    await until(() => client.received.some((m) => m.type === "pairOffer"));
+    const offer = client.received.find((m) => m.type === "pairOffer")!;
+    assert.match(String(offer.code), /^\d{4}$/);
+    assert.equal(bridge.status().pairing?.code, offer.code, "设置页要显示同一个代码");
+    assert.equal(bridge.connected, false, "配对完成之前不算连上");
+
+    client.ws.send(JSON.stringify({ type: "pairAccept" }));
+    assert.equal(await client.closed, 4003, "配好后以 4003 关掉，让扩展用配对码重连");
+    const paired = client.received.find((m) => m.type === "paired");
+    assert.equal(paired?.token, TOKEN);
+    await until(() => bridge.status().pairing === null);
+  });
+});
+
+test("配对：用户在浏览器里拒绝，就不给配对码", async () => {
+  await withBridge(async (bridge, port) => {
+    const client = pairingClient(port);
+    await until(() => bridge.status().pairing !== null);
+    client.ws.send(JSON.stringify({ type: "pairReject" }));
+    await client.closed;
+    assert.equal(client.received.some((m) => m.type === "paired"), false);
+    assert.equal(bridge.status().pairing, null);
+  });
+});
+
+test("配对：没有「用我的浏览器」（没生成配对码）时不接受配对", async () => {
+  const port = nextPort++;
+  const bridge = new ExtensionBridge(() => "", port, ORIGIN);
+  await bridge.start();
+  try {
+    const client = pairingClient(port);
+    assert.equal(await client.closed, 4005);
+    assert.equal(client.received.some((m) => m.type === "pairOffer"), false);
+  } finally {
+    bridge.stop();
+  }
+});
+
+test("握手失败会记日志：不然「装好了却连不上」无从查起", async () => {
+  await withBridge(async (bridge, port) => {
+    const lines: string[] = [];
+    bridge.on("log", (line: string) => lines.push(line));
+    const impostor = extension(port, { token: "guessed" });
+    await impostor.closed;
+    await until(() => lines.some((line) => line.includes("配对码对不上")));
+  });
+});

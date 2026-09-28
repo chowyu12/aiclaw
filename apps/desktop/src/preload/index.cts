@@ -129,6 +129,8 @@ const api = {
     repair: () => ipcRenderer.invoke(IPC.browserBridgeRepair),
     /** 在访达 / 资源管理器里打开扩展目录。 */
     reveal: () => ipcRenderer.invoke(IPC.browserBridgeReveal),
+    /** 用某个浏览器打开它的扩展管理页，同时显示扩展目录、把路径放进剪贴板。 */
+    openPage: (browserId: string) => ipcRenderer.invoke(IPC.browserBridgeOpenPage, browserId),
   },
   approval: {
     /** 还在等回应的审批。渲染进程重新加载后用它补回来，推送只会来一次。 */

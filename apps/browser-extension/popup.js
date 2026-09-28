@@ -4,6 +4,7 @@ const LABELS = {
   offline: "没连上",
   rejected: "配对码不对",
   unpaired: "还没配对",
+  pairing: "等你在配对页上确认",
 };
 
 async function render() {
@@ -20,6 +21,11 @@ document.getElementById("save").addEventListener("click", async () => {
   if (!value) return;
   await chrome.storage.local.set({ pairToken: value });
   document.getElementById("token").value = "";
+  setTimeout(render, 800);
+});
+
+document.getElementById("repair").addEventListener("click", async () => {
+  await chrome.runtime.sendMessage({ type: "repair" });
   setTimeout(render, 800);
 });
 

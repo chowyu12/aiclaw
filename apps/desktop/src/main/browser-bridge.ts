@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Duplex } from "node:stream";
@@ -33,6 +33,8 @@ const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
 const HEARTBEAT_MS = 20_000;
 const REQUEST_TIMEOUT_MS = 45_000;
 const HANDSHAKE_TIMEOUT_MS = 10_000;
+/** 配对页开着等用户点「允许」的上限。 */
+const PAIR_TIMEOUT_MS = 3 * 60_000;
 
 export interface BridgeStatus {
   listening: boolean;
@@ -41,6 +43,8 @@ export interface BridgeStatus {
   error?: string;
   /** 已认证的扩展。没连上是 null。 */
   connected: { userAgent: string; extension: string } | null;
+  /** 正在配对：浏览器那边开着配对页，等用户核对这个代码后点「允许」。 */
+  pairing: { code: string; userAgent: string } | null;
 }
 
 interface Pending {
@@ -211,6 +215,8 @@ export class ExtensionBridge extends EventEmitter {
   private nextId = 1;
   private readonly pending = new Map<number, Pending>();
   private heartbeat: NodeJS.Timeout | null = null;
+  /** 正在配对的那条连接（浏览器那边开着配对页）。同一时间只有一个。 */
+  private pairingWith: { connection: Connection; code: string; userAgent: string; timer: NodeJS.Timeout } | null = null;
   private readonly pairToken: () => string;
   private readonly port: number;
   private readonly origin: string;
@@ -232,6 +238,7 @@ export class ExtensionBridge extends EventEmitter {
       port: this.port,
       error: this.error || undefined,
       connected: this.peer ? { userAgent: this.peer.userAgent, extension: this.peer.extension } : null,
+      pairing: this.pairingWith ? { code: this.pairingWith.code, userAgent: this.pairingWith.userAgent } : null,
     };
   }
 
@@ -267,6 +274,11 @@ export class ExtensionBridge extends EventEmitter {
   }
 
   stop(): void {
+    if (this.pairingWith) {
+      clearTimeout(this.pairingWith.timer);
+      this.pairingWith.connection.close(1001, "shutting down");
+      this.pairingWith = null;
+    }
     if (this.heartbeat) clearInterval(this.heartbeat);
     this.heartbeat = null;
     this.peer?.connection.close(1001, "shutting down");
@@ -319,8 +331,12 @@ export class ExtensionBridge extends EventEmitter {
   private handshake(connection: Connection): void {
     const nonce = randomBytes(16).toString("hex");
     let authed = false;
+    let pairingHere = false;
     const timer = setTimeout(() => {
-      if (!authed) connection.close(4001, "handshake timeout");
+      if (!authed && !pairingHere) {
+        this.log("浏览器扩展握手超时，断开");
+        connection.close(4001, "handshake timeout");
+      }
     }, HANDSHAKE_TIMEOUT_MS);
     connection.on("message", (text: string) => {
       let message: Record<string, unknown>;
@@ -329,39 +345,111 @@ export class ExtensionBridge extends EventEmitter {
       } catch {
         return;
       }
-      if (!authed) {
-        const token = this.pairToken();
-        if (
-          !token ||
-          message.type !== "hello" ||
-          typeof message.nonce !== "string" ||
-          !sameHex(message.proof, hmacHex(token, "ext:" + nonce))
-        ) {
-          connection.close(4001, "bad proof");
-          return;
-        }
-        authed = true;
-        clearTimeout(timer);
-        connection.send(JSON.stringify({ type: "welcome", proof: hmacHex(token, "app:" + message.nonce) }));
-        this.adopt({
-          connection,
-          userAgent: String(message.userAgent ?? ""),
-          extension: String(message.extension ?? ""),
-          lastPong: Date.now(),
-        });
+      if (authed) {
+        this.onPeerMessage(connection, message);
         return;
       }
-      this.onPeerMessage(connection, message);
+      if (message.type === "pong") return;
+      if (message.type === "pair" && !pairingHere) {
+        clearTimeout(timer);
+        pairingHere = true;
+        this.offerPairing(connection, String(message.userAgent ?? ""));
+        return;
+      }
+      if (pairingHere && (message.type === "pairAccept" || message.type === "pairReject")) {
+        this.finishPairing(connection, message.type === "pairAccept");
+        return;
+      }
+      const token = this.pairToken();
+      if (
+        !token ||
+        message.type !== "hello" ||
+        typeof message.nonce !== "string" ||
+        !sameHex(message.proof, hmacHex(token, "ext:" + nonce))
+      ) {
+        // 记下来：不记的话「扩展装好了却连不上」无从查起。多半是配对码对不上
+        //（AIClaw 这边重新生成过）——扩展收到 4001 会丢掉旧码、自动重新配对。
+        this.log(`浏览器扩展握手失败：${message.type === "hello" ? "配对码对不上" : `收到的是 ${String(message.type)}`}`);
+        connection.close(4001, "bad proof");
+        return;
+      }
+      authed = true;
+      clearTimeout(timer);
+      connection.send(JSON.stringify({ type: "welcome", proof: hmacHex(token, "app:" + message.nonce) }));
+      this.adopt({
+        connection,
+        userAgent: String(message.userAgent ?? ""),
+        extension: String(message.extension ?? ""),
+        lastPong: Date.now(),
+      });
+      this.log(`浏览器扩展已连上（扩展 ${String(message.extension ?? "")}）`);
     });
     connection.on("close", () => {
       clearTimeout(timer);
+      if (this.pairingWith?.connection === connection) {
+        clearTimeout(this.pairingWith.timer);
+        this.pairingWith = null;
+        this.emit("status");
+      }
       if (this.peer?.connection === connection) {
         this.peer = null;
         this.failAll("浏览器扩展断开了");
+        this.log("浏览器扩展断开了");
         this.emit("status");
       }
     });
     connection.send(JSON.stringify({ type: "challenge", nonce }));
+  }
+
+  /**
+   * 没有配对码的扩展来连：给它一个四位代码，它会在浏览器里开配对页让用户核对后点「允许」。
+   *
+   * 确认在浏览器那边做，不在这里：没配对的扩展分不清对面是不是真的 AIClaw，
+   * 只有让用户在浏览器里对着两边的代码点，冒充 AIClaw 的程序才骗不到它。
+   * 设置页同时显示这个代码。同一时间只配一个：新的来了，旧的作废。
+   */
+  private offerPairing(connection: Connection, userAgent: string): void {
+    if (!this.pairToken()) {
+      connection.close(4005, "not pairing");
+      return;
+    }
+    if (this.pairingWith) {
+      clearTimeout(this.pairingWith.timer);
+      this.pairingWith.connection.close(4006, "superseded");
+    }
+    const code = String(randomInt(1000, 10_000));
+    const timer = setTimeout(() => {
+      if (this.pairingWith?.connection === connection) {
+        this.log("浏览器扩展配对超时（3 分钟没人确认）");
+        connection.close(4006, "pair timeout");
+      }
+    }, PAIR_TIMEOUT_MS);
+    this.pairingWith = { connection, code, userAgent, timer };
+    connection.send(JSON.stringify({ type: "pairOffer", code }));
+    this.log(`浏览器扩展请求配对，代码 ${code}：等用户在浏览器的配对页上确认`);
+    this.emit("status");
+  }
+
+  private finishPairing(connection: Connection, accepted: boolean): void {
+    const pending = this.pairingWith;
+    if (pending?.connection !== connection) return;
+    clearTimeout(pending.timer);
+    this.pairingWith = null;
+    if (accepted) {
+      // 用户在浏览器里核对过代码、点了允许：把配对码交给它，关掉这条连接，
+      // 让它立刻用配对码重连——之后走的仍是不传码的挑战-应答。
+      connection.send(JSON.stringify({ type: "paired", token: this.pairToken() }));
+      connection.close(4003, "paired");
+      this.log("浏览器扩展配对成功");
+    } else {
+      connection.close(1000, "declined");
+      this.log("用户在浏览器里拒绝了配对");
+    }
+    this.emit("status");
+  }
+
+  private log(line: string): void {
+    this.emit("log", line);
   }
 
   /**
@@ -396,6 +484,8 @@ export class ExtensionBridge extends EventEmitter {
 
   /** 心跳：让扩展的后台脚本保持醒着，也发现悄悄断掉的连接。 */
   private beat(): void {
+    // 配对页开着等用户点的时候也要心跳：不然一两分钟里扩展的后台脚本就被浏览器收掉了。
+    this.pairingWith?.connection.send(JSON.stringify({ type: "ping" }));
     const peer = this.peer;
     if (!peer) return;
     if (Date.now() - peer.lastPong > HEARTBEAT_MS * 3) {

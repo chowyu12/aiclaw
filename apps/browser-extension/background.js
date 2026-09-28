@@ -28,11 +28,17 @@ let authed = false;
 /** 这次连接里我们出的随机数，等对面拿它算证明。 */
 let clientNonce = "";
 let reconnectTimer = null;
+/** 正在等用户在配对页上点「允许 / 拒绝」的那条连接与代码。 */
+let pairing = null;
+/** 配对页配出来的配对码是扩展自己存的：存的那一下不该当成「用户换了码」去断开重连。 */
+let storingOwnToken = false;
 /** tabId -> 最后一次使用的时间。 */
 const attached = new Map();
 /** 用户手动取消调试的时间：tabId -> 时间戳。 */
 const canceled = new Map();
 let groupId = null;
+/** 用户在配对页上点了「拒绝」之后，多久之内不再自己弹配对页（弹窗里点「重新配对」可以提前）。 */
+const PAIR_DECLINE_COOLDOWN_MS = 10 * 60_000;
 
 // ---------- 连接 ----------
 
@@ -47,11 +53,22 @@ async function setStatus(status, detail = "") {
   chrome.action.setBadgeBackgroundColor({ color: status === "connected" ? "#2f7d5b" : "#b35c00" });
 }
 
+/** 用户最近拒绝过配对，还在冷却期内。 */
+async function pairingDeclined() {
+  const { pairDeclinedAt } = await chrome.storage.local.get("pairDeclinedAt");
+  return typeof pairDeclinedAt === "number" && Date.now() - pairDeclinedAt < PAIR_DECLINE_COOLDOWN_MS;
+}
+
+/**
+ * 连 AIClaw。有配对码就走挑战-应答；**没有就进配对模式**：AIClaw 回一个四位代码，
+ * 扩展打开配对页让用户核对后点「允许」，AIClaw 再把配对码交过来。用户不用在
+ * 两边之间复制粘贴。
+ */
 async function connect() {
   if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
   const pairToken = await token();
-  if (!pairToken) {
-    await setStatus("unpaired", "还没有配对：在 AIClaw 的设置页复制配对码，粘到这个扩展的弹窗里。");
+  if (!pairToken && (await pairingDeclined())) {
+    await setStatus("unpaired", "你拒绝过配对。要连接 AIClaw，在这个弹窗里点「重新配对」。");
     return;
   }
   let ws;
@@ -66,7 +83,7 @@ async function connect() {
   authed = false;
   clientNonce = "";
   ws.onopen = () => {
-    void setStatus("connecting", "已连上，正在核对配对码…");
+    void setStatus("connecting", pairToken ? "已连上，正在核对配对码…" : "已连上，等 AIClaw 发起配对…");
   };
   ws.onmessage = (event) => {
     void onMessage(ws, event.data, pairToken);
@@ -74,23 +91,48 @@ async function connect() {
   ws.onclose = (event) => {
     if (socket === ws) socket = null;
     authed = false;
-    void setStatus(
-      event.code === 4001 ? "rejected" : "offline",
-      event.code === 4001 ? "配对码不对：在 AIClaw 的设置页重新复制一次。" : "AIClaw 没在运行，或者没开「用我的浏览器」。",
-    );
-    scheduleReconnect();
+    if (pairing && pairing.ws === ws) void endPairing("配对中途连接断开了，稍后会自动重试。");
+    void onClosed(event.code, Boolean(pairToken));
   };
   ws.onerror = () => {
     // onclose 会紧跟着来，状态在那里写。
   };
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
+async function onClosed(code, hadToken) {
+  if (code === 4003) {
+    // 配对完成：配对码已存好，马上用它重连。
+    scheduleReconnect(200);
+    return;
+  }
+  if (code === 4001 && hadToken) {
+    // 配对码对不上（多半是 AIClaw 那边重新生成过）：丢掉旧的，下次连接走配对，
+    // 用户在配对页上点一下就好，不用再去复制粘贴。
+    await chrome.storage.local.remove("pairToken");
+    await setStatus("rejected", "配对码失效了（AIClaw 可能重新生成过），马上重新配对。");
+    scheduleReconnect(1000);
+    return;
+  }
+  if (code === 4006) {
+    // 配对超时（3 分钟没人点）或被新的配对请求顶掉：稍后重新发起即可。
+    await setStatus("unpaired", "配对请求过期了，稍后会重新弹出配对页。");
+    scheduleReconnect(30_000);
+    return;
+  }
+  if (code === 4005) {
+    await setStatus("unpaired", "AIClaw 现在不接受配对：在它的「设置 → 配置 → 浏览器」里选「我的浏览器」。");
+  } else {
+    await setStatus("offline", "AIClaw 没在运行，或者没开「用我的浏览器」。");
+  }
+  scheduleReconnect();
+}
+
+function scheduleReconnect(delay = 5_000) {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     void connect();
-  }, 5_000);
+  }, delay);
 }
 
 async function hmac(secret, text) {
@@ -109,6 +151,15 @@ function randomHex(bytes = 16) {
  *   扩展 → AIClaw  { type: "hello", nonce: B, proof: HMAC(码, "ext:" + A), ... }
  *   AIClaw → 扩展  { type: "welcome", proof: HMAC(码, "app:" + B) }
  * 扩展核对 welcome 里的证明之前，不执行任何命令。
+ *
+ * 配对（还没有配对码时）：
+ *   扩展 → AIClaw  { type: "pair", ... }
+ *   AIClaw → 扩展  { type: "pairOffer", code: "4821" }     两边都显示这个代码
+ *   扩展 → AIClaw  { type: "pairAccept" | "pairReject" }    用户在配对页上点的
+ *   AIClaw → 扩展  { type: "paired", token }，然后以 4003 关掉；扩展存好码、马上重连
+ *
+ * **确认在浏览器这边做**：没配对时扩展分不清对面是不是真的 AIClaw（AIClaw 没开时
+ * 别的程序可以占住端口）。让用户对着两边的代码在浏览器里点「允许」，冒充者就骗不到。
  */
 async function onMessage(ws, raw, pairToken) {
   let message;
@@ -120,21 +171,38 @@ async function onMessage(ws, raw, pairToken) {
   if (!authed) {
     if (message.type === "challenge" && typeof message.nonce === "string" && !clientNonce) {
       clientNonce = randomHex();
-      ws.send(
-        JSON.stringify({
-          type: "hello",
-          nonce: clientNonce,
-          proof: await hmac(pairToken, "ext:" + message.nonce),
-          version: PROTOCOL_VERSION,
-          extension: chrome.runtime.getManifest().version,
-          userAgent: navigator.userAgent,
-        }),
-      );
+      const identity = {
+        nonce: clientNonce,
+        version: PROTOCOL_VERSION,
+        extension: chrome.runtime.getManifest().version,
+        userAgent: navigator.userAgent,
+      };
+      if (!pairToken) {
+        ws.send(JSON.stringify({ type: "pair", ...identity }));
+        return;
+      }
+      ws.send(JSON.stringify({ type: "hello", ...identity, proof: await hmac(pairToken, "ext:" + message.nonce) }));
       return;
     }
-    if (message.type === "welcome" && clientNonce && message.proof === (await hmac(pairToken, "app:" + clientNonce))) {
+    if (message.type === "welcome" && pairToken && clientNonce && message.proof === (await hmac(pairToken, "app:" + clientNonce))) {
       authed = true;
       await setStatus("connected", "已连上 AIClaw。");
+      return;
+    }
+    if (message.type === "pairOffer" && !pairToken && /^\d{4}$/.test(String(message.code))) {
+      await startPairing(ws, String(message.code));
+      return;
+    }
+    if (message.type === "paired" && !pairToken && pairing?.ws === ws && pairing.accepted && typeof message.token === "string") {
+      storingOwnToken = true;
+      await chrome.storage.local.set({ pairToken: message.token.trim() });
+      await chrome.storage.local.remove("pairDeclinedAt");
+      await endPairing("配对好了，正在连接 AIClaw…");
+      return;
+    }
+    if (message.type === "ping") {
+      // 配对期间也有心跳：等用户点按钮可能要一两分钟，不能让后台脚本睡过去。
+      ws.send(JSON.stringify({ type: "pong" }));
       return;
     }
     // 其它任何东西（包括证明对不上）：断开，不回话。
@@ -154,6 +222,70 @@ async function onMessage(ws, raw, pairToken) {
     ws.send(JSON.stringify({ id: message.id, ok: false, error: error instanceof Error ? error.message : String(error) }));
   }
 }
+
+// ---------- 配对页 ----------
+
+async function startPairing(ws, code) {
+  pairing = { ws, code, accepted: false, tabId: null };
+  await chrome.storage.session.set({ pairCode: code });
+  await setStatus("pairing", `AIClaw 请求连接，代码 ${code}：在打开的配对页上核对后点「允许」。`);
+  const url = chrome.runtime.getURL("pair.html");
+  // 已经开着配对页就切过去，不重复开。
+  const existing = (await chrome.tabs.query({ url })).at(0);
+  if (existing?.id !== undefined) {
+    await chrome.tabs.update(existing.id, { active: true });
+    await chrome.tabs.reload(existing.id);
+    pairing.tabId = existing.id;
+  } else {
+    const tab = await chrome.tabs.create({ url, active: true });
+    pairing.tabId = tab.id ?? null;
+  }
+}
+
+async function endPairing(detail) {
+  const current = pairing;
+  pairing = null;
+  await chrome.storage.session.remove("pairCode");
+  if (detail) await setStatus("connecting", detail);
+  if (current?.tabId !== null && current?.tabId !== undefined) {
+    // 配对页自己会显示结果再关掉；这里只在它没关时兜底。
+    setTimeout(() => chrome.tabs.remove(current.tabId).catch(() => {}), 2500);
+  }
+}
+
+// 配对页上的「允许 / 拒绝」，以及弹窗里的「重新配对」。
+chrome.runtime.onMessage.addListener((message, _sender, reply) => {
+  if (message?.type === "pairDecision") {
+    const current = pairing;
+    if (!current || current.ws.readyState !== WebSocket.OPEN) {
+      reply({ ok: false, error: "配对请求已经失效，AIClaw 会重新发起。" });
+      return false;
+    }
+    if (message.allow) {
+      current.accepted = true;
+      current.ws.send(JSON.stringify({ type: "pairAccept" }));
+      reply({ ok: true });
+    } else {
+      current.ws.send(JSON.stringify({ type: "pairReject" }));
+      void chrome.storage.local.set({ pairDeclinedAt: Date.now() });
+      void endPairing("");
+      void setStatus("unpaired", "你拒绝了配对。要连接 AIClaw，在这个弹窗里点「重新配对」。");
+      current.ws.close(1000, "declined");
+      reply({ ok: true });
+    }
+    return false;
+  }
+  if (message?.type === "repair") {
+    void chrome.storage.local.remove(["pairDeclinedAt", "pairToken"]).then(() => {
+      socket?.close();
+      socket = null;
+      scheduleReconnect(100);
+    });
+    reply({ ok: true });
+    return false;
+  }
+  return false;
+});
 
 // ---------- 操作 ----------
 
@@ -336,10 +468,15 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onStartup.addListener(() => void connect());
 chrome.runtime.onInstalled.addListener(() => void connect());
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.pairToken) {
+  // 用户在弹窗里手动粘了新的配对码：断开重连。配对页配出来的那次不用这里管（4003 会重连）。
+  if (area === "local" && changes.pairToken && storingOwnToken) {
+    storingOwnToken = false;
+    return;
+  }
+  if (area === "local" && changes.pairToken?.newValue) {
     socket?.close();
     socket = null;
-    void connect();
+    scheduleReconnect(100);
   }
 });
 

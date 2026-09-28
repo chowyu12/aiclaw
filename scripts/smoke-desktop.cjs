@@ -71,6 +71,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.clipboardWrite, () => true);
   ipcMain.handle(IPC.browserBridgeStatus, () => ({
     listening: false, port: 17891, browser: "", extensionVersion: "", extensionDir: "/tmp/browser-extension",
+    pairingCode: "", browsers: [],
   }));
   // 渲染进程重新加载之前弹出、还没回应的审批：页面起来后要主动拉回来。
   ipcMain.handle(IPC.approvalPending, () => [

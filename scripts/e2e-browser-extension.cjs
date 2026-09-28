@@ -2,7 +2,8 @@
  * 「用我的浏览器」端到端：真的浏览器 + 真的扩展 + 真的 AgentBrowser。
  *
  * 由 scripts/e2e-browser-extension.sh 另起一个**临时配置**的 Chrome / Edge（不碰用户
- * 自己的配置与登录），加载 apps/browser-extension；这里经远程调试口把配对码写进扩展，然后用
+ * 自己的配置与登录），加载 apps/browser-extension；扩展自己来连、弹出配对页，这里经远程
+ * 调试口核对代码、点「允许」（与用户做的一样），然后用
  * 编译好的 AgentBrowser（「extension」后端）对一个本机测试页走一遍：打开 → 快照 →
  * 填字提交 → 抽正文 → 截图 → 列标签页，并核对 agent 的标签页是在后台开的。
  *
@@ -95,6 +96,27 @@ async function inExtensionPage(expression) {
   }
 }
 
+/** 在一个已经开着的页面（配对页）里执行一段脚本。 */
+async function inTarget(target, expression) {
+  const ws = new WebSocket(target.webSocketDebuggerUrl);
+  await new Promise((resolve, reject) => {
+    ws.onopen = resolve;
+    ws.onerror = reject;
+  });
+  const reply = new Promise((resolve) => {
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.id === 1) resolve(message);
+    };
+  });
+  // 页面可能还没加载完：等 #code 出来再执行。
+  await new Promise((resolve) => setTimeout(resolve, 800));
+  ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, returnByValue: true } }));
+  const message = await reply;
+  ws.close();
+  return message.result?.result?.value;
+}
+
 async function until(label, condition, ms = 20_000) {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -108,7 +130,7 @@ async function until(label, condition, ms = 20_000) {
 app.whenReady().then(async () => {
   const { ExtensionBridge } = await import(path.join(DIST, "browser-bridge.js"));
   const { AgentBrowser } = await import(path.join(DIST, "browser.js"));
-  const bridge = new ExtensionBridge(() => TOKEN);
+  const bridge = new ExtensionBridge(() => TOKEN, Number(process.env.AICLAW_BRIDGE_PORT) || 17891);
   await bridge.start();
   check("桥接开始监听", bridge.status().listening, bridge.status().error || "");
   const agent = new AgentBrowser(() => "extension", bridge);
@@ -127,7 +149,14 @@ app.whenReady().then(async () => {
     });
     check("扩展已加载，ID 与 manifest 的 key 对得上", Boolean(workers));
 
-    await inExtensionPage(`chrome.storage.local.set({ pairToken: ${JSON.stringify(TOKEN)} }).then(() => true)`);
+    // 配对：不预先写配对码。扩展自己来连，浏览器里弹出配对页；核对代码后在页面上点「允许」。
+    const pairPage = await until("浏览器弹出配对页", async () => {
+      const targets = await json(`http://127.0.0.1:${DEBUG_PORT}/json/list`);
+      return targets.find((t) => t.url.includes("doofgbncfflbmekanpfocimbideeiadd/pair.html"));
+    }, 30_000);
+    const shown = await inTarget(pairPage, "document.getElementById('code').textContent");
+    check("配对页上的代码与 AIClaw 显示的一致", shown === bridge.status().pairing?.code, `页面 ${shown}，AIClaw ${bridge.status().pairing?.code}`);
+    await inTarget(pairPage, "document.getElementById('allow').click(), true");
     await until("扩展连上 AIClaw", async () => bridge.connected).catch(async (error) => {
       // 连不上时把扩展自己记的状态带出来，不然只知道「没连上」。
       const status = await inExtensionPage("chrome.storage.session.get(null)").catch(() => null);

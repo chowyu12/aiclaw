@@ -155,6 +155,9 @@ function registerIpc(): void {
   ipcMain.handle(IPC.appVersion, () => app.getVersion());
   ipcMain.handle(IPC.browserBridgeStatus, () => sessions.browserBridge());
   ipcMain.handle(IPC.browserBridgeRepair, () => sessions.regeneratePairToken());
+  ipcMain.handle(IPC.browserBridgeOpenPage, (_event, browserId: unknown) =>
+    sessions.openExtensionPage(typeof browserId === "string" ? browserId : ""),
+  );
   ipcMain.handle(IPC.browserBridgeReveal, async () => {
     const dir = sessions.browserBridge().extensionDir;
     const failure = await shell.openPath(dir);

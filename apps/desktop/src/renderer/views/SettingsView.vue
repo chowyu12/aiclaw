@@ -57,8 +57,9 @@ const bridgeLine = computed(() => {
   if (!view) return "";
   if (view.error) return view.error;
   if (view.browser) return `已连上 ${view.browser}（扩展 ${view.extensionVersion}）`;
+  if (view.pairingCode) return "正在配对：到浏览器里核对代码后点「允许」";
   if (!view.listening) return "还没开始监听";
-  return "等扩展连上来：装好扩展、填上配对码后几秒内会连上";
+  return "等扩展连上来：装好扩展后几秒内浏览器会弹出配对页";
 });
 
 async function useBackend(backend: "builtin" | "extension"): Promise<void> {
@@ -80,6 +81,14 @@ async function repairToken(): Promise<void> {
     await actions.reloadConfig();
   } catch (error) {
     actions.showError(`重新生成失败：${describeError(error)}`);
+  }
+}
+
+async function openInBrowser(browserId: string): Promise<void> {
+  try {
+    await window.aiclaw.browserBridge.openPage(browserId);
+  } catch (error) {
+    actions.showError(`打不开扩展页：${describeError(error)}`);
   }
 }
 
@@ -506,27 +515,43 @@ async function purge(): Promise<void> {
           <p class="bridge-status" :class="{ ok: bridge?.browser, bad: bridge?.error }">
             <span class="dot" />{{ bridgeLine }}
           </p>
-          <ol class="steps">
-            <li>
-              在浏览器地址栏打开 <code>chrome://extensions</code>（Edge 是 <code>edge://extensions</code>），
-              打开右上角的「开发者模式」。
-            </li>
-            <li>
-              点「加载已解压的扩展程序」，选这个目录：
-              <button class="link" @click="revealExtension">在访达中显示</button>
-              <code class="path">{{ bridge?.extensionDir }}</code>
-            </li>
-            <li>
-              点浏览器工具栏上的 AIClaw 图标，把配对码粘进去：
-              <span class="row token">
-                <code>{{ store.config.browserPairToken ? "•".repeat(12) : "（保存后生成）" }}</code>
-                <button :disabled="!store.config.browserPairToken" @click="copyToken">
-                  {{ tokenCopied ? "已复制" : "复制配对码" }}
-                </button>
-                <button :disabled="!store.config.browserPairToken" @click="repairToken">重新生成</button>
-              </span>
-            </li>
-          </ol>
+          <!-- 配对进行中：浏览器那边开着配对页，两边显示同一个代码。 -->
+          <div v-if="bridge?.pairingCode" class="pairing">
+            <span class="pair-code">{{ bridge.pairingCode }}</span>
+            <span>浏览器里弹出了配对页：核对上面的代码一致，在<strong>浏览器里</strong>点「允许」。</span>
+          </div>
+          <template v-else-if="!bridge?.browser">
+            <p class="guide-lead">还没连上。第一次用要在浏览器里装一次扩展（装好后会自动弹出配对页，不用复制配对码）：</p>
+            <div v-if="bridge?.browsers?.length" class="row open-buttons">
+              <button v-for="item in bridge?.browsers ?? []" :key="item.id" @click="openInBrowser(item.id)">
+                在 {{ item.name }} 中打开扩展页
+              </button>
+            </div>
+            <ol class="steps">
+              <li>
+                在扩展页打开右上角（Edge 在左侧）的「开发者模式」，点「加载已解压的扩展程序」。
+                <span v-if="bridge?.browsers?.length">上面的按钮已经打开了扩展页和扩展目录，并把目录路径复制好了：</span>
+              </li>
+              <li>
+                在选择框里按 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>，粘贴路径、回车，再点「选择」。
+                <code class="path">{{ bridge?.extensionDir }}</code>
+              </li>
+              <li>几秒后浏览器会弹出配对页，核对代码后点「允许」就连上了。</li>
+            </ol>
+            <details class="manual">
+              <summary>配对页没弹出来？手动填配对码</summary>
+              <p>
+                点浏览器工具栏上的 AIClaw 图标（没看到就在拼图图标里把它固定出来），把配对码粘进去保存：
+                <span class="row token">
+                  <code>{{ store.config.browserPairToken ? "•".repeat(12) : "（保存后生成）" }}</code>
+                  <button :disabled="!store.config.browserPairToken" @click="copyToken">
+                    {{ tokenCopied ? "已复制" : "复制配对码" }}
+                  </button>
+                  <button :disabled="!store.config.browserPairToken" @click="repairToken">重新生成</button>
+                </span>
+              </p>
+            </details>
+          </template>
           <p class="note">
             AIClaw 只在它自己开的后台标签页（「AIClaw」标签组）里操作，不切换你正在看的页面；
             要它接管你已经打开的页面，在对话里说，它会先请你确认。操作期间浏览器顶部会显示「正在调试此浏览器」，
@@ -767,6 +792,59 @@ label em {
 
 .bridge-status.bad .dot {
   background: var(--danger);
+}
+
+.pairing {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--ok-soft);
+  color: var(--ink);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+.pair-code {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: 4px;
+  color: var(--ok);
+}
+
+.guide-lead {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.open-buttons {
+  flex-wrap: wrap;
+}
+
+.manual {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.manual summary {
+  cursor: pointer;
+}
+
+.manual p {
+  margin: 6px 0 0;
+  line-height: 1.8;
+}
+
+kbd {
+  padding: 0 4px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .steps {

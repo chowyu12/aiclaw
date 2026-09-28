@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>连接 AIClaw</title>
+    <style>
+      body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; color: #1f2a24; background: #f4f7f4; }
+      .card { width: 420px; padding: 28px 30px; border: 1px solid #d6dfd9; border-radius: 14px; background: #fff; box-shadow: 0 8px 30px rgba(31, 42, 36, 0.08); }
+      h1 { margin: 0 0 6px; font-size: 18px; }
+      .lead { margin: 0 0 18px; color: #5b6660; font-size: 13px; }
+      .code { margin: 0 0 6px; font: 600 40px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 10px; text-align: center; color: #2f7d5b; }
+      .code-hint { margin: 0 0 18px; color: #5b6660; font-size: 12.5px; text-align: center; }
+      ul { margin: 0 0 20px; padding-left: 18px; color: #3d4842; font-size: 12.5px; }
+      .actions { display: flex; gap: 10px; justify-content: flex-end; }
+      button { padding: 7px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+      .reject { border: 1px solid #cfd8d2; background: #fff; color: #3d4842; }
+      .allow { border: 1px solid #2f7d5b; background: #2f7d5b; color: #fff; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .result { margin: 14px 0 0; font-size: 13px; text-align: center; }
+      .result.ok { color: #2f7d5b; }
+      .result.bad { color: #b3261e; }
+      .warn { margin: 0 0 16px; padding: 8px 10px; border-radius: 8px; background: #fff6e6; color: #8a5a00; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>本机的 AIClaw 请求连接这个浏览器</h1>
+      <p class="lead">核对下面的代码与 AIClaw「设置 → 配置 → 浏览器」里显示的一致，再点「允许」。</p>
+      <p id="code" class="code">····</p>
+      <p class="code-hint">两边的代码一样，才是你自己的 AIClaw</p>
+      <p class="warn">只在你<strong>刚刚</strong>在 AIClaw 里开启了「我的浏览器」时才允许。你没做这件事却看到这个页面，点「拒绝」。</p>
+      <ul>
+        <li>允许后，AIClaw 可以在它自己开的后台标签页（「AIClaw」标签组）里、用你的登录打开网页、点击、填写。</li>
+        <li>要它操作你已经打开的页面，它会先在 AIClaw 里请你确认。</li>
+        <li>操作时浏览器顶部会显示「正在调试此浏览器」，点「取消」就能让它立刻停手。</li>
+      </ul>
+      <div class="actions">
+        <button id="reject" class="reject">拒绝</button>
+        <button id="allow" class="allow">允许</button>
+      </div>
+      <p id="result" class="result"></p>
+    </div>
+    <script src="pair.js" type="module"></script>
+  </body>
+</html>
