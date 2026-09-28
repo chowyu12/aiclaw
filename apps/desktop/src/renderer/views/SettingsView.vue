@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import type { BrowserBridgeView } from "../../shared/types";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
 import {
@@ -34,6 +35,60 @@ async function copyReport(): Promise<void> {
   await navigator.clipboard.writeText(report.value);
   copied.value = true;
   setTimeout(() => (copied.value = false), 1500);
+}
+
+// ---------- 用我的浏览器（扩展） ----------
+
+const bridge = ref<BrowserBridgeView | null>(null);
+const tokenCopied = ref(false);
+let stopBridge: (() => void) | null = null;
+
+onMounted(async () => {
+  stopBridge = window.aiclaw.on.browserBridge((view) => {
+    bridge.value = view as BrowserBridgeView;
+  });
+  bridge.value = ((await window.aiclaw.browserBridge.status().catch(() => null)) as BrowserBridgeView | null);
+});
+onUnmounted(() => stopBridge?.());
+
+/** 连接状态那一行。 */
+const bridgeLine = computed(() => {
+  const view = bridge.value;
+  if (!view) return "";
+  if (view.error) return view.error;
+  if (view.browser) return `已连上 ${view.browser}（扩展 ${view.extensionVersion}）`;
+  if (!view.listening) return "还没开始监听";
+  return "等扩展连上来：装好扩展、填上配对码后几秒内会连上";
+});
+
+async function useBackend(backend: "builtin" | "extension"): Promise<void> {
+  await saveField({ browserBackend: backend });
+  bridge.value = (await window.aiclaw.browserBridge.status()) as BrowserBridgeView;
+}
+
+async function copyToken(): Promise<void> {
+  const token = store.config?.browserPairToken ?? "";
+  if (!token) return;
+  const ok = (await window.aiclaw.clipboard.write(token)) === true;
+  tokenCopied.value = ok;
+  if (ok) setTimeout(() => (tokenCopied.value = false), 1500);
+}
+
+async function repairToken(): Promise<void> {
+  try {
+    await window.aiclaw.browserBridge.repair();
+    await actions.reloadConfig();
+  } catch (error) {
+    actions.showError(`重新生成失败：${describeError(error)}`);
+  }
+}
+
+async function revealExtension(): Promise<void> {
+  try {
+    await window.aiclaw.browserBridge.reveal();
+  } catch (error) {
+    actions.showError(describeError(error));
+  }
 }
 
 async function saveField(patch: Record<string, unknown>): Promise<void> {
@@ -425,8 +480,61 @@ async function purge(): Promise<void> {
           :checked="store.config.browser"
           @change="saveField({ browser: ($event.target as HTMLInputElement).checked })"
         />
-        <span>浏览器：应用开一个独立的浏览器窗口，模型按元素编号打开、点、填、读</span>
+        <span>浏览器：模型按元素编号打开网页、点、填、读</span>
       </label>
+      <div v-if="store.config.browser" class="field backend">
+        <span class="field-label">在哪儿打开网页</span>
+        <label class="switch">
+          <input
+            type="radio"
+            name="browser-backend"
+            :checked="store.config.browserBackend !== 'extension'"
+            @change="useBackend('builtin')"
+          />
+          <span>AIClaw 自带的浏览器窗口（独立的登录，窗口可见）</span>
+        </label>
+        <label class="switch">
+          <input
+            type="radio"
+            name="browser-backend"
+            :checked="store.config.browserBackend === 'extension'"
+            @change="useBackend('extension')"
+          />
+          <span>我的浏览器（Chrome / Edge）：在后台标签页里操作，用我已有的登录，不抢鼠标</span>
+        </label>
+        <template v-if="store.config.browserBackend === 'extension'">
+          <p class="bridge-status" :class="{ ok: bridge?.browser, bad: bridge?.error }">
+            <span class="dot" />{{ bridgeLine }}
+          </p>
+          <ol class="steps">
+            <li>
+              在浏览器地址栏打开 <code>chrome://extensions</code>（Edge 是 <code>edge://extensions</code>），
+              打开右上角的「开发者模式」。
+            </li>
+            <li>
+              点「加载已解压的扩展程序」，选这个目录：
+              <button class="link" @click="revealExtension">在访达中显示</button>
+              <code class="path">{{ bridge?.extensionDir }}</code>
+            </li>
+            <li>
+              点浏览器工具栏上的 AIClaw 图标，把配对码粘进去：
+              <span class="row token">
+                <code>{{ store.config.browserPairToken ? "•".repeat(12) : "（保存后生成）" }}</code>
+                <button :disabled="!store.config.browserPairToken" @click="copyToken">
+                  {{ tokenCopied ? "已复制" : "复制配对码" }}
+                </button>
+                <button :disabled="!store.config.browserPairToken" @click="repairToken">重新生成</button>
+              </span>
+            </li>
+          </ol>
+          <p class="note">
+            AIClaw 只在它自己开的后台标签页（「AIClaw」标签组）里操作，不切换你正在看的页面；
+            要它接管你已经打开的页面，在对话里说，它会先请你确认。操作期间浏览器顶部会显示「正在调试此浏览器」，
+            点「取消」就能让它立刻停手；空闲一分钟后提示条自己消失。
+            <strong>配对码等于这个浏览器的钥匙</strong>：别发给别人；重新生成后旧码立刻作废。
+          </p>
+        </template>
+      </div>
       <p class="note">
         模型拿到的是页面上可交互元素的<strong>编号列表</strong>（链接、按钮、输入框），
         按编号操作，不靠屏幕坐标——比截图便宜、比坐标可靠。窗口是可见的，登录、验证码
@@ -619,6 +727,80 @@ label em {
 .row button {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.backend {
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  gap: 8px;
+}
+
+.bridge-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.bridge-status .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.bridge-status.ok {
+  color: var(--ok);
+}
+
+.bridge-status.ok .dot {
+  background: var(--ok);
+}
+
+.bridge-status.bad {
+  color: var(--danger);
+}
+
+.bridge-status.bad .dot {
+  background: var(--danger);
+}
+
+.steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--ink-2);
+}
+
+.steps .path {
+  display: block;
+  word-break: break-all;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.steps .token {
+  display: inline-flex;
+  margin-left: 4px;
+}
+
+.steps button {
+  font-size: 11.5px;
+  padding: 2px 8px;
+}
+
+.link {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent, var(--ok));
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .note {

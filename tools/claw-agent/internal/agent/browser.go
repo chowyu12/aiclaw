@@ -12,7 +12,11 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
 
-// 浏览器：让模型驾驭一个真正的浏览器窗口——按元素编号点、填、选，而不是按屏幕坐标。
+// 浏览器：让模型驾驭一个真正的浏览器——按元素编号点、填、选，而不是按屏幕坐标。
+//
+// 浏览器有两种（宿主按设置选，内核不知道也不必知道）：AIClaw 自带的窗口，或者用户
+// 自己的 Chrome / Edge（经「AIClaw 浏览器助手」扩展，在后台标签页里、用用户的登录态，
+// 不抢鼠标）。后一种多了 browser_tabs / browser_use_tab：接管用户已经打开的页面。
 //
 // 这组工具对应的是 browser-use 那类框架的核心：把页面上**可交互的元素编号**
 // （DOM indexing）交给模型，模型说「点 12 号」而不是「点 (412, 388)」。与 computer use
@@ -47,8 +51,9 @@ func (s *Session) registerBrowserTools() error {
 	specs := []spec{
 		{
 			name: "browser_navigate",
-			description: "在浏览器窗口里打开一个网址（http/https），加载完返回页面标题与可交互元素的编号列表。" +
-				"之后用 browser_click / browser_type 按编号操作。",
+			description: "在浏览器里打开一个网址（http/https），加载完返回页面标题与可交互元素的编号列表。" +
+				"之后用 browser_click / browser_type 按编号操作。用的是用户自己的浏览器时，页面开在 AIClaw 的后台标签页里，" +
+				"不切换用户正在看的页面。",
 			schema: schemaOf(map[string]any{
 				"url": map[string]any{"type": "string", "description": "完整网址，带 https://"},
 			}, "url"),
@@ -198,8 +203,41 @@ func (s *Session) registerBrowserTools() error {
 			},
 		},
 		{
+			name: "browser_tabs",
+			description: "列出用户浏览器里打开着的网页标签页（编号、标题、网址，标出用户正在看的那个）。" +
+				"用户说「就在我现在这个页面上」「我开着的那个表单」时，先用它找到那个标签页，再 browser_use_tab。",
+			schema: emptySchema(),
+			effect: tools.EffectRead,
+			build: func(json.RawMessage) (protocol.BrowserRequestParams, error) {
+				return protocol.BrowserRequestParams{Action: protocol.BrowserTabs}, nil
+			},
+		},
+		{
+			name: "browser_use_tab",
+			description: "接管用户浏览器里一个已经打开的标签页，之后的快照、点击、输入都作用在它上面。" +
+				"那是用户自己的页面、带着他的登录，只在用户明确要你操作它时用；平时打开网址用 browser_navigate，" +
+				"它会在 AIClaw 自己的后台标签页里开，不打扰用户。",
+			schema: schemaOf(map[string]any{
+				"tabId": map[string]any{"type": "integer", "description": "browser_tabs 列出的编号"},
+			}, "tabId"),
+			// 接管的是用户自己的页面（带着他的登录）：与打开网址一样，每次都问。
+			effect: tools.EffectExternal,
+			build: func(raw json.RawMessage) (protocol.BrowserRequestParams, error) {
+				var args struct {
+					TabID *int `json:"tabId"`
+				}
+				if err := json.Unmarshal(raw, &args); err != nil {
+					return protocol.BrowserRequestParams{}, errors.New("参数不是合法 JSON 对象")
+				}
+				if args.TabID == nil || *args.TabID <= 0 {
+					return protocol.BrowserRequestParams{}, errors.New("必须给出 browser_tabs 列出的 tabId")
+				}
+				return protocol.BrowserRequestParams{Action: protocol.BrowserUseTab, TabID: *args.TabID, Index: -1}, nil
+			},
+		},
+		{
 			name:        "browser_screenshot",
-			description: "把浏览器窗口当前画面截图给你看。编号列表看不出布局、图表、验证码时用；平时用 browser_snapshot 更省。",
+			description: "把浏览器当前页面截图给你看。编号列表看不出布局、图表、验证码时用；平时用 browser_snapshot 更省。",
 			schema:      emptySchema(),
 			effect:      tools.EffectRead,
 			build: func(json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -245,7 +283,7 @@ func (s *Session) runBrowserAction(
 	if err := env.RequestApproval(
 		ctx, effect, protocol.ApprovalTool,
 		"浏览器 "+string(request.Action), describeBrowserAction(request),
-		"在应用自带的浏览器窗口里操作",
+		browserApprovalReason(request),
 	); err != nil {
 		return "", err
 	}
@@ -266,6 +304,13 @@ func (s *Session) runBrowserAction(
 	return result.Text, nil
 }
 
+func browserApprovalReason(request protocol.BrowserRequestParams) string {
+	if request.Action == protocol.BrowserUseTab {
+		return "接管的是你自己打开的页面：之后的点击、输入都作用在它上面，用的是你的登录"
+	}
+	return "在浏览器里操作（设置 → 浏览器里选的那个：AIClaw 自带的窗口，或你自己的浏览器）"
+}
+
 func describeBrowserAction(request protocol.BrowserRequestParams) string {
 	switch request.Action {
 	case protocol.BrowserNavigate:
@@ -283,6 +328,8 @@ func describeBrowserAction(request protocol.BrowserRequestParams) string {
 		return fmt.Sprintf("滚动 %d 像素", request.DY)
 	case protocol.BrowserKey:
 		return "按键：" + request.Keys
+	case protocol.BrowserUseTab:
+		return fmt.Sprintf("接管你浏览器里的标签页 %d", request.TabID)
 	default:
 		return string(request.Action)
 	}

@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +36,9 @@ import {
 import type { AppConfig, ConfigStore, McpServer } from "./config.js";
 import { ComputerController } from "./computer.js";
 import { AgentBrowser } from "./browser.js";
+import { ExtensionBridge } from "./browser-bridge.js";
+import { browserName } from "./browser-cdp.js";
+import type { BrowserBridgeView } from "../shared/types.js";
 import type { SkillManager } from "./skills.js";
 
 /**
@@ -104,6 +108,8 @@ export interface SessionManagerEvents {
   status: (status: "starting" | "ready" | "stopped" | "failed", detail?: string) => void;
   /** 一段要进诊断日志的输出。source 是 kernel / app。 */
   log: (source: string, chunk: string) => void;
+  /** 浏览器扩展的连接状态变了（连上、断开、端口被占）。 */
+  browserBridge: (view: BrowserBridgeView) => void;
 }
 
 export declare interface SessionManager {
@@ -125,7 +131,9 @@ export class SessionManager extends EventEmitter {
   /** 技能发现归它管——会话启动时问一次「现在有哪些启用的技能」。 */
   private readonly skills: SkillManager;
   private readonly computer = new ComputerController();
-  private readonly browser = new AgentBrowser();
+  /** 与用户浏览器里「AIClaw 浏览器助手」扩展的连接。只在选了「用我的浏览器」时监听。 */
+  private readonly bridge: ExtensionBridge;
+  private readonly browser: AgentBrowser;
   private readonly agentBin: string;
   /** 最近一段 stderr，失败时拼进错误信息，省得用户去翻日志。 */
   private lastStderr = "";
@@ -138,6 +146,9 @@ export class SessionManager extends EventEmitter {
     super();
     this.store = store;
     this.skills = skills;
+    this.bridge = new ExtensionBridge(() => this.store.readConfig().browserPairToken);
+    this.bridge.on("status", () => this.emit("browserBridge", this.browserBridge()));
+    this.browser = new AgentBrowser(() => this.store.readConfig().browserBackend, this.bridge);
     this.agentBin = resolveBin("CLAW_AGENT_BIN", "claw-agent");
   }
 
@@ -232,6 +243,41 @@ export class SessionManager extends EventEmitter {
     } catch (error) {
       this.emit("log", "kernel", `推送通道角色配置失败：${String(error)}\n`);
     }
+  }
+
+  /**
+   * 按配置启停与浏览器扩展的连接：开了浏览器工具、选了「用我的浏览器」才监听。
+   * 第一次选时生成配对码。启动时与每次保存设置后调。
+   */
+  async syncBrowserBridge(): Promise<void> {
+    const config = this.store.readConfig();
+    if (!config.browser || config.browserBackend !== "extension") {
+      this.bridge.stop();
+      this.emit("browserBridge", this.browserBridge());
+      return;
+    }
+    if (!config.browserPairToken) this.store.writeConfig({ browserPairToken: newPairToken() });
+    await this.bridge.start();
+  }
+
+  /** 换一个配对码：旧的立刻作废，已连上的扩展断开，要在扩展里重新填。 */
+  regeneratePairToken(): string {
+    const token = newPairToken();
+    this.store.writeConfig({ browserPairToken: token });
+    this.bridge.disconnect();
+    return token;
+  }
+
+  browserBridge(): BrowserBridgeView {
+    const status = this.bridge.status();
+    return {
+      listening: status.listening,
+      port: status.port,
+      error: status.error,
+      browser: status.connected ? browserName(status.connected.userAgent) : "",
+      extensionVersion: status.connected?.extension ?? "",
+      extensionDir: extensionDir(),
+    };
   }
 
   async stop(): Promise<void> {
@@ -675,6 +721,27 @@ function resolveBin(envVar: string, name: string): string {
     if (candidate && existsSync(candidate)) return candidate;
   }
   return exe;
+}
+
+/** 配对码：24 个字符，够随机，又能整段复制粘贴。 */
+function newPairToken(): string {
+  return randomBytes(18).toString("base64url");
+}
+
+/**
+ * 浏览器扩展的目录：打包后在 Resources/browser-extension，开发时在仓库的
+ * apps/browser-extension。用户在 chrome://extensions 里「加载已解压的扩展程序」选它。
+ */
+export function extensionDir(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    join(process.resourcesPath ?? "", "browser-extension"),
+    resolve(here, "../../../browser-extension"),
+  ];
+  for (const candidate of candidates) {
+    if (candidate && existsSync(join(candidate, "manifest.json"))) return candidate;
+  }
+  return candidates[1]!;
 }
 
 /** 清单项里的模型名：去掉 `#标记` 与 `@窗口`。 */

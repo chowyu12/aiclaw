@@ -56,6 +56,9 @@ export const IPC = {
 
   // 当前版本号。单独一个通道：检查更新要等网络，而版本号侧边栏一开就要显示。
   appVersion: "app:version",
+  browserBridgeStatus: "browserBridge:status",
+  browserBridgeRepair: "browserBridge:repair",
+  browserBridgeReveal: "browserBridge:reveal",
   // 写系统剪贴板。走主进程而不是渲染层的 navigator.clipboard：后者要求窗口
   // 在前台，不满足时它会失败，而 execCommand 兜底会静默失败——按钮上写着「已复制」，
   // 剪贴板里却什么都没有。
@@ -95,5 +98,6 @@ export const IPC = {
   onAgentEvent: "push:agentEvent",
   onApproval: "push:approval",
   onRuntimeStatus: "push:runtimeStatus",
+  onBrowserBridge: "push:browserBridge",
   onUpdateProgress: "push:updateProgress",
 } as const;

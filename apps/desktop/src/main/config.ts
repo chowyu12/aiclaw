@@ -71,6 +71,13 @@ export interface AppConfig {
    * 默认关。它只碰那一个窗口（比 computer use 小得多），但打开网址仍要确认。
    */
   browser: boolean;
+  /**
+   * 浏览器工具在哪儿干活：AIClaw 自己的窗口（builtin），或者用户自己的 Chrome / Edge
+   *（extension，经「AIClaw 浏览器助手」扩展，在后台标签页里、用用户的登录态）。
+   */
+  browserBackend: "builtin" | "extension";
+  /** 与浏览器扩展配对的密钥。第一次选「用我的浏览器」时生成；空表示还没生成。 */
+  browserPairToken: string;
 }
 
 /** 用户自己配的 MCP server。 */

@@ -236,6 +236,11 @@ export const actions = {
     });
   },
 
+  /** 重读配置：主进程自己改了配置（比如重新生成了浏览器配对码）之后调。 */
+  async reloadConfig(): Promise<void> {
+    state.config = (await window.aiclaw.config.read()) as AppConfigView;
+  },
+
   async saveConfig(patch: Partial<AppConfigView>): Promise<void> {
     // 必须过 plain()：patch 里的嵌套对象（角色模型那一组）常常是从 store 里
     // 读出来再改的，而 store 是 readonly() 包过的——那些值是 Proxy，

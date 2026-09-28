@@ -270,4 +270,20 @@ export interface AppConfigView {
   codeMode: boolean;
   /** 浏览器工具：独立窗口，模型按元素编号操作。默认关。 */
   browser: boolean;
+  /** 浏览器工具在哪儿干活：自带窗口，或用户自己的浏览器（经扩展）。 */
+  browserBackend: "builtin" | "extension";
+  /** 与浏览器扩展配对的密钥。设置页显示给用户复制。 */
+  browserPairToken: string;
+}
+
+/** 浏览器扩展的连接状态，设置页显示。 */
+export interface BrowserBridgeView {
+  listening: boolean;
+  port: number;
+  error?: string;
+  /** 连上的浏览器（Chrome / Microsoft Edge …）。没连上是空串。 */
+  browser: string;
+  extensionVersion: string;
+  /** 扩展目录：用户在 chrome://extensions 里「加载已解压的扩展程序」选它。 */
+  extensionDir: string;
 }

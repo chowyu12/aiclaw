@@ -223,7 +223,9 @@ async function main() {
     // 而 extraResource 本来就在 asar 外面；关掉 asar 让排障时能直接看目录。
     // 代价是文件多一些，对内部分发无所谓。
     asar: false,
-    extraResource: goBinaries(),
+    // 浏览器扩展原样放进 Resources/browser-extension：用户在 chrome://extensions 里
+    // 「加载已解压的扩展程序」选它（设置 → 浏览器里有按钮直接打开这个目录）。
+    extraResource: [...goBinaries(), join(REPO, "apps", "browser-extension")],
     appCopyright: "AIClaw contributors",
     // macOS 这边**没有签名**：签名与公证都只能在 macOS 上做，而这条流水线
     // 跑在 Linux。用户第一次打开要右键「打开」，或者

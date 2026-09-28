@@ -147,9 +147,18 @@ function registerIpc(): void {
     const result = await store.writeConfig(patch);
     // 通道会话（微信、企业微信）是内核自己建的，角色配置要推过去才用得上。
     if ("roles" in patch) await sessions.syncChannelMedia();
+    if ("browser" in patch || "browserBackend" in patch) await sessions.syncBrowserBridge();
     return result;
   });
   ipcMain.handle(IPC.appVersion, () => app.getVersion());
+  ipcMain.handle(IPC.browserBridgeStatus, () => sessions.browserBridge());
+  ipcMain.handle(IPC.browserBridgeRepair, () => sessions.regeneratePairToken());
+  ipcMain.handle(IPC.browserBridgeReveal, async () => {
+    const dir = sessions.browserBridge().extensionDir;
+    const failure = await shell.openPath(dir);
+    if (failure) throw new Error(`打不开扩展目录 ${dir}：${failure}`);
+    return dir;
+  });
   ipcMain.handle(IPC.clipboardWrite, (_event, text: unknown) => {
     // 只收字符串，而且有上限：渲染层展示的是模型输出，不该借这个口子往剪贴板里
     // 塞任意大小的东西。一段回答再长也到不了这个数。
@@ -398,6 +407,8 @@ sessions.on("approval", (request) => {
   push(IPC.onApproval, payload);
 });
 
+sessions.on("browserBridge", (view) => push(IPC.onBrowserBridge, view));
+
 sessions.on("status", (state, detail) => {
   logApp(`运行时 ${state}${detail ? `：${detail}` : ""}`);
   // 运行时停了，所有待回应的审批都作废。
@@ -425,6 +436,7 @@ if (!app.requestSingleInstanceLock()) {
     store.migrateHomeData();
     registerIpc();
     createWindow();
+    void sessions.syncBrowserBridge();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });

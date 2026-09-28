@@ -184,3 +184,38 @@ export function formatExtract(url: string, text: string): string {
   const head = `正文（${url}${clipped ? `，只给前 ${MAX_EXTRACT_CHARS} 字符，共 ${text.length}` : ""}）：`;
   return [head, UNTRUSTED_OPEN, body || "（页面没有可读的正文）", UNTRUSTED_CLOSE].join("\n");
 }
+
+export interface TabInfo {
+  tabId: number;
+  title: string;
+  url: string;
+  /** 用户正在看的那个。 */
+  active: boolean;
+  /** AIClaw 自己开的（在「AIClaw」标签组里）。 */
+  agent: boolean;
+}
+
+/**
+ * 标签页列表写给模型看。标题是网页自己写的，同样包进不可信边界。
+ * current 是现在正在操作的那个标签页。
+ */
+export function formatTabs(tabs: TabInfo[], current: number | null): string {
+  if (tabs.length === 0) return "浏览器里没有打开的网页标签页。";
+  const lines = [
+    `浏览器里有 ${tabs.length} 个网页标签页。要在其中一个上操作，用 browser_use_tab 给它的编号；` +
+      "打开新网址用 browser_navigate（会在 AIClaw 自己的后台标签页里开，不打扰用户）。",
+    UNTRUSTED_OPEN,
+  ];
+  for (const tab of tabs.slice(0, 60)) {
+    const marks = [
+      tab.tabId === current ? "正在操作" : "",
+      tab.active ? "用户正在看" : "",
+      tab.agent ? "AIClaw 开的" : "",
+    ].filter(Boolean);
+    const title = tab.title.replace(/\s+/g, " ").slice(0, 80) || "（无标题）";
+    lines.push(`[${tab.tabId}] ${title} — ${tab.url.slice(0, 160)}${marks.length ? `（${marks.join("，")}）` : ""}`);
+  }
+  if (tabs.length > 60) lines.push(`……还有 ${tabs.length - 60} 个没列出`);
+  lines.push(UNTRUSTED_CLOSE);
+  return lines.join("\n");
+}

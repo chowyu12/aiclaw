@@ -94,6 +94,10 @@ const (
 	BrowserKey        BrowserAction = "key"
 	BrowserExtract    BrowserAction = "extract"
 	BrowserScreenshot BrowserAction = "screenshot"
+	// BrowserTabs 列出用户浏览器里的网页标签页（只在「用我的浏览器」模式下有意义）。
+	BrowserTabs BrowserAction = "tabs"
+	// BrowserUseTab 接管用户浏览器里一个已经打开的标签页。
+	BrowserUseTab BrowserAction = "use_tab"
 )
 
 type BrowserRequestParams struct {
@@ -114,6 +118,8 @@ type BrowserRequestParams struct {
 	DY int `json:"dy,omitempty"`
 	/** key 的按键名。 */
 	Keys string `json:"keys,omitempty"`
+	/** use_tab 的标签页编号，来自 tabs。 */
+	TabID int `json:"tabId,omitempty"`
 }
 
 type BrowserResult struct {

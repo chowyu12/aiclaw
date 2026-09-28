@@ -464,7 +464,9 @@ export interface BrowserRequestParams {
     | "back"
     | "key"
     | "extract"
-    | "screenshot";
+    | "screenshot"
+    | "tabs"
+    | "use_tab";
   url?: string;
   index?: number;
   text?: string;
@@ -472,6 +474,8 @@ export interface BrowserRequestParams {
   value?: string;
   dy?: number;
   keys?: string;
+  /** use_tab 的标签页编号，来自 tabs。 */
+  tabId?: number;
 }
 
 export interface BrowserResult {

@@ -105,3 +105,27 @@ func TestBrowserScreenshotAttachesImage(t *testing.T) {
 		t.Error("截图应作为图片进下一次请求")
 	}
 }
+
+// 列标签页只是看，不问；接管用户自己打开的标签页（带着他的登录）与打开网址一样要问，
+// 而且问的时候说清楚接管的是哪一个。
+func TestUseTabAsksButListingTabsDoesNot(t *testing.T) {
+	model := &fakeModel{script: []string{
+		sseToolCalls([3]string{"c1", "browser_tabs", `{}`}),
+		sseToolCalls([3]string{"c2", "browser_use_tab", `{"tabId":42}`}),
+		sseText("好。"),
+	}}
+	session := browserSession(t, model, protocol.ApprovalOnWrite, true)
+	emitter := &recordingEmitter{approve: true, browserOK: true, browserResult: protocol.BrowserResult{Text: "[42] 表单"}}
+	session.RunTurn(context.Background(), "t1", "就在我开着的那个表单上填", nil, nil, emitter)
+
+	if len(emitter.approvals) != 1 || !strings.Contains(emitter.approvals[0].Detail, "42") {
+		t.Errorf("只为接管标签页问一次，且带上编号：%+v", emitter.approvals)
+	}
+	if len(emitter.approvals) == 1 && !strings.Contains(emitter.approvals[0].Reason, "你的登录") {
+		t.Errorf("确认时要说清楚接管的是用户自己的页面：%q", emitter.approvals[0].Reason)
+	}
+	if len(emitter.browser) != 2 || emitter.browser[0].Action != protocol.BrowserTabs ||
+		emitter.browser[1].Action != protocol.BrowserUseTab || emitter.browser[1].TabID != 42 {
+		t.Errorf("两步都应到宿主，并带上 tabId：%+v", emitter.browser)
+	}
+}

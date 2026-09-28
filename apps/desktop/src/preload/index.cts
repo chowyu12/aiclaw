@@ -112,6 +112,14 @@ const api = {
     install: () => ipcRenderer.invoke(IPC.updateInstall),
     prepare: () => ipcRenderer.invoke(IPC.updatePrepare),
   },
+  /** 与用户浏览器里「AIClaw 浏览器助手」扩展的连接（设置 → 浏览器）。 */
+  browserBridge: {
+    status: () => ipcRenderer.invoke(IPC.browserBridgeStatus),
+    /** 换一个配对码，返回新码。 */
+    repair: () => ipcRenderer.invoke(IPC.browserBridgeRepair),
+    /** 在访达 / 资源管理器里打开扩展目录。 */
+    reveal: () => ipcRenderer.invoke(IPC.browserBridgeReveal),
+  },
   approval: {
     /** 还在等回应的审批。渲染进程重新加载后用它补回来，推送只会来一次。 */
     pending: () => ipcRenderer.invoke(IPC.approvalPending),
@@ -131,6 +139,11 @@ const api = {
       const listener = (_event: unknown, payload: unknown) => handler(payload);
       ipcRenderer.on(IPC.onApproval, listener);
       return () => ipcRenderer.off(IPC.onApproval, listener);
+    },
+    browserBridge: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => handler(payload);
+      ipcRenderer.on(IPC.onBrowserBridge, listener);
+      return () => ipcRenderer.off(IPC.onBrowserBridge, listener);
     },
     runtimeStatus: (handler: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => handler(payload);

@@ -69,6 +69,9 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.runtimeStart, () => undefined);
   ipcMain.handle(IPC.appVersion, () => "0.0.0-smoke");
   ipcMain.handle(IPC.clipboardWrite, () => true);
+  ipcMain.handle(IPC.browserBridgeStatus, () => ({
+    listening: false, port: 17891, browser: "", extensionVersion: "", extensionDir: "/tmp/browser-extension",
+  }));
   // 渲染进程重新加载之前弹出、还没回应的审批：页面起来后要主动拉回来。
   ipcMain.handle(IPC.approvalPending, () => [
     { id: "smoke-1", sessionId: "s_smoke", kind: "command", title: "运行命令", detail: "ls", cwd: "/tmp" },

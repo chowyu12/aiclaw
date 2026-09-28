@@ -25,7 +25,7 @@ VITE_PORT ?= 5173
 GO_SOURCES := $(shell find $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg -name '*.go' -not -name '*_test.go' 2>/dev/null)
 
 .PHONY: help deps build build-go build-client build-desktop dev dev-ui \
-        test test-go test-renderer smoke smoke-desktop scenarios icon \
+        test test-go test-renderer smoke smoke-desktop scenarios smoke-browser icon \
         package package-mac package-mac-intel package-win package-linux install-mac \
         typecheck fmt fmt-check vet nocgo check doctor clean distclean
 
@@ -123,6 +123,9 @@ ifdef SKIP_DESKTOP_SMOKE
 else
 	npm run smoke:desktop
 endif
+
+smoke-browser: deps build-desktop ## 「用我的浏览器」端到端：临时配置的 Chrome/Edge + 扩展 + AgentBrowser（发版前手动跑，要图形会话）
+	./scripts/e2e-browser-extension.sh
 
 icon: deps ## 从品牌标识重新生成应用图标（产物要提交）
 	npx electron scripts/make-icon.cjs

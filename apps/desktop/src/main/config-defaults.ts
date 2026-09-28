@@ -28,6 +28,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   sandboxCommands: true,
   codeMode: false,
   browser: false,
+  browserBackend: "builtin",
+  browserPairToken: "",
 };
 
 /** 补全四个角色，并把每个角色里不合法的 providerId 钉成 0。 */
@@ -68,5 +70,7 @@ export function normalizeConfig(config: AppConfig): AppConfig {
     sandboxCommands: config.sandboxCommands !== false,
     // 浏览器工具是后加的：旧配置里没有这一项，缺了当关。
     browser: config.browser === true,
+    browserBackend: config.browserBackend === "extension" ? "extension" : "builtin",
+    browserPairToken: typeof config.browserPairToken === "string" ? config.browserPairToken : "",
   };
 }
