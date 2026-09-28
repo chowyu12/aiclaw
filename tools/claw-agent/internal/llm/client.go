@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -315,25 +316,59 @@ func (c *Client) Stream(
 
 func readErrorBody(resp *http.Response) *Error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
 	var envelope struct {
 		Error struct {
 			Message string `json:"message"`
+			// code / type 是机器可读的原因（insufficient_quota 之类），比 message 稳。
+			Code any    `json:"code"`
+			Type string `json:"type"`
 		} `json:"error"`
 		Message string `json:"message"`
+		Code    any    `json:"code"`
 	}
 	if json.Unmarshal(raw, &envelope) == nil {
+		code := strings.TrimSpace(fmt.Sprint(firstNonNil(envelope.Error.Code, envelope.Code)) + " " + envelope.Error.Type)
 		if envelope.Error.Message != "" {
-			return &Error{Status: resp.StatusCode, Message: envelope.Error.Message}
+			return &Error{Status: resp.StatusCode, Message: envelope.Error.Message, Code: code, RetryAfter: retryAfter}
 		}
 		if envelope.Message != "" {
-			return &Error{Status: resp.StatusCode, Message: envelope.Message}
+			return &Error{Status: resp.StatusCode, Message: envelope.Message, Code: code, RetryAfter: retryAfter}
 		}
 	}
 	snippet := strings.TrimSpace(string(raw))
 	if len(snippet) > 400 {
 		snippet = snippet[:400] + "…"
 	}
-	return &Error{Status: resp.StatusCode, Message: snippet}
+	return &Error{Status: resp.StatusCode, Message: snippet, RetryAfter: retryAfter}
+}
+
+func firstNonNil(values ...any) any {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return ""
+}
+
+// parseRetryAfter 读 Retry-After：秒数或 HTTP 日期（RFC 9110 两种都允许）。
+// 没给、给错、已经过期都返回 0，调用方退回自己的退避。
+func parseRetryAfter(header string, now time.Time) time.Duration {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseFloat(header, 64); err == nil {
+		if seconds <= 0 {
+			return 0
+		}
+		return time.Duration(seconds * float64(time.Second))
+	}
+	if at, err := http.ParseTime(header); err == nil && at.After(now) {
+		return at.Sub(now)
+	}
+	return 0
 }
 
 // toolCallAccumulator 负责把分片的 tool_calls 拼回完整调用。

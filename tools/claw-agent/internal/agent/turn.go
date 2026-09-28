@@ -65,6 +65,9 @@ func (s *Session) RunTurn(
 	// 音频先转成文字：模型读不了音频，而用户发过来就是希望它「听」到。
 	// 转写接在正文后面，界面上的那条消息仍是用户原话。
 	transcript := s.transcribeAttached(ctx, audioPaths)
+	// 上一轮被中断时排着队的输入还在 pending 里：先放它们，再放这一条——历史里的
+	// 先后要和用户发送的先后一致（早先它们会被插到这一条后面）。
+	s.drainPending(ctx, turnID, emitter)
 	s.acceptUserInput(ctx, turnID, text, transcript, images, emitter)
 
 	usage, err := s.loop(ctx, turnID, emitter)
@@ -225,7 +228,12 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 
 		response, err := s.sample(ctx, turnID, emitter, &total, steps, iteration+1)
 		if err != nil {
-			// 采样失败时历史里没留下半截 assistant 消息，原样重发即可。
+			// 最后一次采样断在半截（用户中断、重试用尽）：已经给用户看过的那段正文
+			// 记进历史——模型下一轮知道自己说到哪了，切回会话也还在。工具调用不记：
+			// 断在半截的调用没有结果，记了下一次请求就是 400。与 Codex 0.156 同一个修复。
+			if partial := strings.TrimSpace(response.Content); partial != "" {
+				s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: response.Content})
+			}
 			return total, err
 		}
 
@@ -338,19 +346,51 @@ func (s *Session) sample(
 				return response, err
 			}
 			continue
+		case isAPIErr && apiErr.RejectsReasoningEffort() && s.dropReasoningEffort():
+			// 不认推理档位的上游（非推理模型、Azure）：去掉它重发一次，这个会话之后都不带。
+			// 不算一次重试——请求本身变了，不是在赌网络。
+			s.notify(emitter, turnID, "这个模型不支持推理档位参数，已去掉后重试。")
+			continue
 		case isAPIErr && !apiErr.Retryable():
 			return response, err
 		case attempt > maxModelRetries:
 			return response, err
 		}
 
+		delay := s.backoff(attempt)
+		// 上游说了多久之后再试（Retry-After）就听它的：按自己的退避提前重试，
+		// 只会再撞一次限流、白白用掉一次重试机会。封顶两分钟，免得一轮卡死。
+		if isAPIErr && apiErr.RetryAfter > delay {
+			delay = min(apiErr.RetryAfter, maxRetryAfter)
+		}
 		s.notify(emitter, turnID, fmt.Sprintf(
-			"模型调用失败，正在重试（%d/%d）：%s", attempt, maxModelRetries, err.Error(),
+			"模型调用失败，%s后重试（%d/%d）：%s", humanDelay(delay), attempt, maxModelRetries, err.Error(),
 		))
-		if werr := sleepCtx(ctx, s.backoff(attempt)); werr != nil {
+		if werr := sleepCtx(ctx, delay); werr != nil {
 			return response, werr
 		}
 	}
+}
+
+// maxRetryAfter 是听从上游 Retry-After 的上限。
+const maxRetryAfter = 2 * time.Minute
+
+func humanDelay(d time.Duration) string {
+	if d < time.Second {
+		return "马上"
+	}
+	return fmt.Sprintf(" %d 秒", int(d.Round(time.Second)/time.Second))
+}
+
+// dropReasoningEffort 去掉这个会话的推理档位。已经没有了返回 false（再失败就不是它的事）。
+func (s *Session) dropReasoningEffort() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.config.Model.ReasoningEffort == "" {
+		return false
+	}
+	s.config.Model.ReasoningEffort = ""
+	return true
 }
 
 // backoffDelay 是第 n 次重试前等待的时长：1s、2s、4s、8s，封顶 30s，带抖动。
@@ -502,6 +542,10 @@ func (s *Session) callModel(
 		// 一个新条目，用户看到的顺序是「半截 → 重试提示 → 完整回答」。
 		if started {
 			completeMessage(streamed.String())
+			// 把已经流出来的正文带回去：这一次如果就是最后一次（用户中断、重试用尽），
+			// 调用方要把它记进历史，不然界面上看得见的半截回答，模型下一轮不知道
+			// 自己说过、切回会话也看不到了。重试成功的话调用方不会用它。
+			response.Content = streamed.String()
 		}
 		return response, err
 	}

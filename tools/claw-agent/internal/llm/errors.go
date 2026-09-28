@@ -3,6 +3,7 @@ package llm
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // Error 是一次模型调用的失败，带上重试与压缩需要的分类信息。
@@ -17,6 +18,10 @@ type Error struct {
 	Message string
 	// Err 是底层错误（网络错误、读流错误），可能为 nil。
 	Err error
+	// Code 是上游给的机器可读原因（error.code / error.type，如 insufficient_quota），可能为空。
+	Code string
+	// RetryAfter 是上游在 Retry-After 里说的「多久之后再试」。0 表示没说。
+	RetryAfter time.Duration
 }
 
 func (e *Error) Error() string {
@@ -34,6 +39,10 @@ func (e *Error) Unwrap() error { return e.Err }
 // 过一会儿重试有意义；参数错、鉴权失败、超出上下文窗口，重试只是把同一个
 // 错误再收一遍，还要多花一次额度。
 func (e *Error) Retryable() bool {
+	// 额度用完、欠费：也常以 429 返回，但重试只会白等十几秒再收一遍同样的错。
+	if e.QuotaExhausted() {
+		return false
+	}
 	switch {
 	case e.Status == 0:
 		// 没走到响应：连接失败或流中断，重连有意义。
@@ -65,6 +74,55 @@ var contextWindowMarkers = []string{
 	"上下文长度",
 	"上下文过长",
 	"输入过长",
+}
+
+// quotaMarkers 是「额度用完 / 欠费」的说法。与限流（稍后再试就好）不同，这一类要用户去充值。
+var quotaMarkers = []string{
+	"insufficient_quota",
+	"exceeded your current quota",
+	"credit_balance_exhausted",
+	"spend_limit_exceeded",
+	"billing_hard_limit",
+	"insufficient balance",
+	"insufficient_balance",
+	"arrearage",
+	"余额不足",
+	"欠费",
+	"额度已用完",
+}
+
+// QuotaExhausted 报告这次失败是不是额度用完或欠费（重试没用）。
+func (e *Error) QuotaExhausted() bool {
+	lowered := strings.ToLower(e.Code + " " + e.Message)
+	for _, marker := range quotaMarkers {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// RejectsReasoningEffort 报告上游是不是因为不认 reasoning_effort 参数而拒绝了请求。
+//
+// 非推理模型（gpt-4o 这一类）与 Azure 会直接 400：Unsupported parameter:
+// 'reasoning_effort'。桌面端默认给每个模型都带推理档位，不认的上游就一轮都跑不起来。
+func (e *Error) RejectsReasoningEffort() bool {
+	if e.Status != 400 && e.Status != 422 {
+		return false
+	}
+	lowered := strings.ToLower(e.Message)
+	if strings.Contains(lowered, "reasoning_effort") || strings.Contains(lowered, "reasoning effort") {
+		return true
+	}
+	if !strings.Contains(lowered, "reasoning") {
+		return false
+	}
+	for _, marker := range []string{"not support", "unsupported", "unrecognized", "unknown", "invalid", "不支持"} {
+		if strings.Contains(lowered, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // ContextWindowExceeded 报告这次失败是不是「历史塞不下了」。

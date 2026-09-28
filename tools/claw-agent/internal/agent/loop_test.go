@@ -1422,3 +1422,76 @@ func TestImageOnlyMessageIsLabelledAsNew(t *testing.T) {
 		t.Errorf("界面上还原的应是用户发的那一版：一张图、没有文字，实际 %+v", user)
 	}
 }
+
+// 非推理模型、Azure 会因为 reasoning_effort 直接 400：去掉它重发一次，而且之后都不带。
+func TestReasoningEffortIsDroppedWhenRejected(t *testing.T) {
+	model := &fakeModel{script: []string{
+		"!400 Unsupported parameter: 'reasoning_effort' is not supported with this model.",
+		sseText("好的。"),
+		sseText("第二轮。"),
+	}}
+	session := newTestSession(t, model, protocol.ApprovalOnWrite)
+	session.config.Model.ReasoningEffort = "medium"
+	emitter := &recordingEmitter{approve: true}
+	session.RunTurn(context.Background(), "t1", "hi", nil, nil, emitter)
+	session.RunTurn(context.Background(), "t2", "再来", nil, nil, emitter)
+
+	if len(model.requests) != 3 {
+		t.Fatalf("应是 被拒 → 去掉重发 → 第二轮，实际 %d 次", len(model.requests))
+	}
+	if model.requests[0]["reasoning_effort"] != "medium" {
+		t.Errorf("第一次应带着推理档位：%v", model.requests[0]["reasoning_effort"])
+	}
+	for _, index := range []int{1, 2} {
+		if _, present := model.requests[index]["reasoning_effort"]; present {
+			t.Errorf("第 %d 次请求不该再带 reasoning_effort", index+1)
+		}
+	}
+	if !emitter.find(protocol.NotifyItemCompleted, "好的。") {
+		t.Error("去掉参数之后这一轮应正常完成")
+	}
+}
+
+// 流断在半截、重试也用完了：已经给用户看过的那段正文要留在历史里——
+// 模型下一轮知道自己说到哪，切回会话也还在（Codex 0.156 同一个修复）。
+func TestPartialAnswerIsKeptWhenTheStreamFailsForGood(t *testing.T) {
+	chunk, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "北京到上海的航班"}}}})
+	broken := "data: " + string(chunk) + "\n\ndata: {\"error\":{\"message\":\"upstream reset\"}}\n\n"
+	script := make([]string, 0, maxModelRetries+1)
+	for i := 0; i <= maxModelRetries; i++ {
+		script = append(script, broken)
+	}
+	model := &fakeModel{script: script}
+	session := newTestSession(t, model, protocol.ApprovalOnWrite)
+	session.RunTurn(context.Background(), "t1", "航班", nil, nil, &recordingEmitter{approve: true})
+
+	var agent []string
+	for _, item := range session.History() {
+		if item.Kind == protocol.ItemAgentMessage {
+			agent = append(agent, item.Text)
+		}
+	}
+	if len(agent) != 1 || agent[0] != "北京到上海的航班" {
+		t.Errorf("最后一次的半截回答应进历史（只一条，不是每次重试一条）：%q", agent)
+	}
+}
+
+// 上一轮中断时排着队的输入，下一轮要排在新消息前面——与用户发送的先后一致。
+func TestQueuedInputKeepsItsOrderAfterAnInterrupt(t *testing.T) {
+	model := &fakeModel{script: []string{sseText("好。")}}
+	session := newTestSession(t, model, protocol.ApprovalOnWrite)
+	session.mu.Lock()
+	session.pending = append(session.pending, userInput{text: "先说的"})
+	session.mu.Unlock()
+	session.RunTurn(context.Background(), "t1", "后说的", nil, nil, &recordingEmitter{approve: true})
+
+	var users []string
+	for _, item := range session.History() {
+		if item.Kind == protocol.ItemUserMessage {
+			users = append(users, item.Text)
+		}
+	}
+	if strings.Join(users, "|") != "先说的|后说的" {
+		t.Errorf("顺序应与发送顺序一致：%q", users)
+	}
+}
