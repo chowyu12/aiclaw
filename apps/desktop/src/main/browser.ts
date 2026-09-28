@@ -419,7 +419,13 @@ class WindowDriver implements PageDriver {
   }
 
   async screenshot(): Promise<{ base64: string; width: number; height: number }> {
-    const image = await this.ensure().webContents.capturePage();
+    // 页面刚加载完时合成器可能还没出第一帧，capturePage 拿到的是空图（CI 的虚拟显示上
+    // 常见，实际使用中也会碰到）。空的就等一下再截，最多三次。
+    let image = await this.ensure().webContents.capturePage();
+    for (let attempt = 0; attempt < 3 && image.isEmpty(); attempt++) {
+      await sleep(300);
+      image = await this.ensure().webContents.capturePage();
+    }
     const { width, height } = image.getSize();
     return { base64: image.toPNG().toString("base64"), width, height };
   }
