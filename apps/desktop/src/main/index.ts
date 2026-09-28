@@ -159,12 +159,18 @@ function registerIpc(): void {
     if (failure) throw new Error(`打不开扩展目录 ${dir}：${failure}`);
     return dir;
   });
-  ipcMain.handle(IPC.clipboardWrite, (_event, text: unknown) => {
+  ipcMain.handle(IPC.clipboardWrite, (_event, text: unknown, html?: unknown) => {
     // 只收字符串，而且有上限：渲染层展示的是模型输出，不该借这个口子往剪贴板里
     // 塞任意大小的东西。一段回答再长也到不了这个数。
     if (typeof text !== "string") throw new Error("只能复制文本");
     if (text.length > 2_000_000) throw new Error("内容太长，没有复制");
-    clipboard.writeText(text);
+    // 同时放一份 HTML：粘进 Word、飞书、邮件这类富文本应用时保留标题、列表、表格；
+    // 粘进纯文本的地方拿到的仍是 Markdown 原文（与 Codex 0.154 同一个改进）。
+    if (typeof html === "string" && html && html.length <= 4_000_000) {
+      clipboard.write({ text, html });
+    } else {
+      clipboard.writeText(text);
+    }
     return true;
   });
   ipcMain.handle(IPC.updateCheck, () => updater.check());

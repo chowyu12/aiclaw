@@ -219,12 +219,12 @@ let copiedTimer: ReturnType<typeof setTimeout> | undefined;
 /** 复制失败的那一条，按钮上显示「复制失败」。说不出失败的「已复制」比没有按钮更糟。 */
 const failedKey = ref("");
 
-async function copyText(key: string, text: string): Promise<void> {
+async function copyText(key: string, text: string, html?: string): Promise<void> {
   if (!text) return;
   let ok = false;
   try {
     // 主进程写系统剪贴板，不受窗口焦点影响；渲染层的剪贴板 API 只作后备。
-    ok = (await window.aiclaw.clipboard.write(text)) === true;
+    ok = (await window.aiclaw.clipboard.write(text, html)) === true;
   } catch {
     try {
       await navigator.clipboard.writeText(text);
@@ -431,7 +431,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                 class="meta-copy"
                 :title="copiedKey === `a-${turn.key}` || failedKey === `a-${turn.key}` ? copyLabel(`a-${turn.key}`) : '复制回答（Markdown 原文）'"
                 :aria-label="copyLabel(`a-${turn.key}`)"
-                @click="copyText(`a-${turn.key}`, answerText(turn.messages))"
+                @click="copyText(`a-${turn.key}`, answerText(turn.messages), renderMarkdown(answerText(turn.messages)))"
               >
                 <svg v-if="copiedKey === `a-${turn.key}`" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
                 <svg v-else-if="failedKey === `a-${turn.key}`" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>

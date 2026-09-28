@@ -104,7 +104,8 @@ const api = {
     stage: (input: unknown) => ipcRenderer.invoke(IPC.audioStage, input),
   },
   clipboard: {
-    write: (text: string) => ipcRenderer.invoke(IPC.clipboardWrite, text),
+    /** html 可选：给了就同时放一份富文本，粘进 Word、飞书之类的应用时保留格式。 */
+    write: (text: string, html?: string) => ipcRenderer.invoke(IPC.clipboardWrite, text, html),
   },
   update: {
     version: () => ipcRenderer.invoke(IPC.appVersion),
