@@ -145,9 +145,26 @@ export class SessionManager extends EventEmitter {
     return this.client?.running ?? false;
   }
 
-  async start(): Promise<void> {
-    if (this.client) return;
+  /**
+   * 拉起内核。已经在跑就直接返回；**正在拉的时候再调，等的是同一次**。
+   *
+   * this.client 要等内核握手完才赋值，早先只看它：启动那几秒里渲染层重新加载
+   * 又调一次 start()，就会再起一个内核——两个进程开同一个会话库，各自连一遍
+   * 微信和企业微信。
+   */
+  start(): Promise<void> {
+    if (this.client) return Promise.resolve();
+    if (!this.starting) {
+      this.starting = this.launch().finally(() => {
+        this.starting = null;
+      });
+    }
+    return this.starting;
+  }
 
+  private starting: Promise<void> | null = null;
+
+  private async launch(): Promise<void> {
     this.emit("status", "starting");
 
     // 模型 Key 不经这里：内核按会话的 providerId 到 --app-db 那个库里查。

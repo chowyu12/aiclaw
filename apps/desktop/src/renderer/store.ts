@@ -207,8 +207,19 @@ export const actions = {
       }
     });
     window.aiclaw.on.approval((payload) => {
-      state.approvals.push(payload as ApprovalPayload);
+      const approval = payload as ApprovalPayload;
+      if (!state.approvals.some((item) => item.id === approval.id)) state.approvals.push(approval);
     });
+    // 渲染进程是会被重新加载的（休眠后被系统回收，见主进程 render-process-gone）；
+    // 那之前弹出、还没回应的审批只推过一次，要主动拉回来，不然那一轮一直卡着。
+    void window.aiclaw.approval
+      .pending()
+      .then((pending) => {
+        for (const approval of pending as ApprovalPayload[]) {
+          if (!state.approvals.some((item) => item.id === approval.id)) state.approvals.push(approval);
+        }
+      })
+      .catch(() => undefined);
     window.aiclaw.on.runtimeStatus((payload) => {
       state.runtime = payload as RuntimeStatus;
       // 运行时一停，内存里跑着的轮次全没了；不清的话「正在执行」会一直亮着。

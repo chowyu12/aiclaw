@@ -69,6 +69,10 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.runtimeStart, () => undefined);
   ipcMain.handle(IPC.appVersion, () => "0.0.0-smoke");
   ipcMain.handle(IPC.clipboardWrite, () => true);
+  // 渲染进程重新加载之前弹出、还没回应的审批：页面起来后要主动拉回来。
+  ipcMain.handle(IPC.approvalPending, () => [
+    { id: "smoke-1", sessionId: "s_smoke", kind: "command", title: "运行命令", detail: "ls", cwd: "/tmp" },
+  ]);
   ipcMain.handle(IPC.sessionList, () => []);
   ipcMain.handle(IPC.providerList, () => []);
   ipcMain.handle(IPC.profileList, () => [
@@ -156,6 +160,13 @@ app.whenReady().then(async () => {
     "document.querySelector('.error-bar') ? document.querySelector('.error-bar').innerText : ''",
   );
   check("没有启动期错误条", !blocked, blocked || "无");
+
+  const approval = await waitFor(
+    win,
+    "document.querySelector('[role=dialog] .detail') ? document.querySelector('[role=dialog] .detail').innerText : ''",
+    (text) => text === "ls",
+  );
+  check("重新加载后补回待回应的审批", approval === "ls", approval || "审批框没出现——那一轮会一直卡着");
 
   // 应用图标：主进程按 dist/main 的相对路径去找它，路径写错的表现是 dock 里
   // 挂着 Electron 自带的原子图标，而**没有任何报错**——和 preload 那一类

@@ -57,6 +57,13 @@ sessions.on("log", (source: string, chunk: string) => {
 let mainWindow: BrowserWindow | null = null;
 /** 待回应的审批。渲染层只拿到 id，真正的回应句柄留在主进程。 */
 const pendingApprovals = new Map<string, PendingApproval>();
+/** 同一批审批推给渲染层的样子。渲染进程重新加载后按它补发（见 approvalPending）。 */
+const pendingPayloads = new Map<string, ApprovalPayload>();
+
+function logApp(line: string): void {
+  diagnostics.push("app", line);
+  logFile.append("app", line);
+}
 
 function createWindow(): void {
   mainWindow = new BrowserWindow({
@@ -90,12 +97,40 @@ function createWindow(): void {
     void shell.openExternal(url);
   });
 
-  const devServer = process.env.VITE_DEV_SERVER_URL;
-  if (devServer) {
-    void mainWindow.loadURL(devServer);
-  } else {
-    void mainWindow.loadFile(join(here, "../renderer/index.html"));
-  }
+  const window = mainWindow;
+  const load = (): void => {
+    const devServer = process.env.VITE_DEV_SERVER_URL;
+    if (devServer) {
+      void window.loadURL(devServer);
+    } else {
+      void window.loadFile(join(here, "../renderer/index.html"));
+    }
+  };
+  load();
+
+  // 渲染进程没了就重新加载页面。**实际会发生**：电脑休眠几天，系统把渲染进程
+  // 回收掉，Electron 不会自己重建，窗口就一直白着，只能退出重开。内核与会话
+  // 都在主进程这边活着，重新加载之后渲染层照常 runtime.start()（内核已在跑就
+  // 直接返回）、重新拉会话列表与待回应的审批，接着用。
+  // 一分钟内连着没了三次就不再拉：那是页面自己起不来，拉了也是白转圈。
+  const gone: number[] = [];
+  window.webContents.on("render-process-gone", (_event, details) => {
+    logApp(`渲染进程退出：${details.reason}（exitCode ${details.exitCode}）`);
+    if (details.reason === "clean-exit" || window.isDestroyed()) return;
+    const now = Date.now();
+    while (gone.length > 0 && now - gone[0]! > 60_000) gone.shift();
+    if (gone.length >= 3) {
+      logApp("渲染进程一分钟内退出了 3 次，不再自动重新加载");
+      return;
+    }
+    gone.push(now);
+    // **不能在这个回调里同步 load()**：那会在 Chromium 还没拆完旧渲染进程时给
+    // webContents 重复挂观察者，撞上它的断言（Observers can only be added once!），
+    // 整个主进程连同内核一起崩掉——实测过。推到回调之外再加载。
+    setTimeout(() => {
+      if (!window.isDestroyed()) load();
+    }, 500);
+  });
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -313,10 +348,13 @@ function registerIpc(): void {
         return false;
       }
       pendingApprovals.delete(payload.id);
+      pendingPayloads.delete(payload.id);
       sessions.approve(request, payload.approved, payload.scope);
       return true;
     },
   );
+
+  ipcMain.handle(IPC.approvalPending, () => [...pendingPayloads.values()]);
 
   ipcMain.handle(IPC.pickDirectory, async () => {
     if (!mainWindow) return null;
@@ -328,7 +366,20 @@ function registerIpc(): void {
   });
 }
 
-sessions.on("event", (method, params) => push(IPC.onAgentEvent, { method, params }));
+sessions.on("event", (method, params) => {
+  // 一轮结束（完成、失败、中断）时，它还没回应的审批就作废了：内核那边已经
+  // 不等了。不清的话渲染层重新加载后会把它们当成待办再弹一遍。
+  if (method === "turn/completed") {
+    const sessionId = (params as { sessionId?: string } | undefined)?.sessionId;
+    for (const [id, request] of pendingApprovals) {
+      if (request.sessionId === sessionId) {
+        pendingApprovals.delete(id);
+        pendingPayloads.delete(id);
+      }
+    }
+  }
+  push(IPC.onAgentEvent, { method, params });
+});
 
 sessions.on("approval", (request) => {
   const key = String(request.id);
@@ -343,13 +394,17 @@ sessions.on("approval", (request) => {
     reason: request.reason,
     scopePath: request.scopePath,
   };
+  pendingPayloads.set(key, payload);
   push(IPC.onApproval, payload);
 });
 
 sessions.on("status", (state, detail) => {
-  const line = `运行时 ${state}${detail ? `：${detail}` : ""}`;
-  diagnostics.push("app", line);
-  logFile.append("app", line);
+  logApp(`运行时 ${state}${detail ? `：${detail}` : ""}`);
+  // 运行时停了，所有待回应的审批都作废。
+  if (state !== "ready" && state !== "starting") {
+    pendingApprovals.clear();
+    pendingPayloads.clear();
+  }
   push(IPC.onRuntimeStatus, { state, detail });
 });
 

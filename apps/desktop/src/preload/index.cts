@@ -113,6 +113,8 @@ const api = {
     prepare: () => ipcRenderer.invoke(IPC.updatePrepare),
   },
   approval: {
+    /** 还在等回应的审批。渲染进程重新加载后用它补回来，推送只会来一次。 */
+    pending: () => ipcRenderer.invoke(IPC.approvalPending),
     respond: (id: string, approved: boolean, scope?: "once" | "session") =>
       ipcRenderer.invoke(IPC.approvalRespond, { id, approved, scope }),
   },

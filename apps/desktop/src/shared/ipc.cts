@@ -88,6 +88,7 @@ export const IPC = {
   profileList: "profile:list",
 
   approvalRespond: "approval:respond",
+  approvalPending: "approval:pending",
   pickDirectory: "dialog:pickDirectory",
 
   /** 主进程 → 渲染层的推送通道。 */
