@@ -70,6 +70,11 @@ func newHostFixture(t *testing.T, channel *fakeChannel) (*Host, *memStore, model
 	store := newMemStore()
 	plugin := model.Plugin{UUID: "p1", Name: "WeCom", Manifest: model.JSON(wecomManifest), Enabled: true}
 	store.plugins[plugin.UUID] = &plugin
+	// 一个配齐了的连接：没有连接（或没配齐）的渠道插件不会启动。
+	store.addConnection(plugin.UUID, "c1", "机器人 A")
+	store.config[configKey(plugin.UUID, "c1", "bot_secret")] = &model.PluginConfig{
+		PluginUUID: plugin.UUID, ConnectionID: "c1", Key: "bot_secret", Value: "initial", Secret: true,
+	}
 	host, err := NewHost(recordingGateway{}, NewConfigService(store),
 		map[string]ChannelFactory{"builtin:wecom": func() Channel { return channel }})
 	if err != nil {
@@ -165,6 +170,10 @@ func TestHostTurnsAPanicIntoARestart(t *testing.T) {
 	store := newMemStore()
 	plugin := model.Plugin{UUID: "p1", Name: "WeCom", Manifest: model.JSON(wecomManifest), Enabled: true}
 	store.plugins[plugin.UUID] = &plugin
+	store.addConnection(plugin.UUID, "c1", "机器人 A")
+	store.config[configKey(plugin.UUID, "c1", "bot_secret")] = &model.PluginConfig{
+		PluginUUID: plugin.UUID, ConnectionID: "c1", Key: "bot_secret", Value: "s", Secret: true,
+	}
 	host, err := NewHost(recordingGateway{}, NewConfigService(store),
 		map[string]ChannelFactory{"builtin:wecom": func() Channel { return channel }})
 	if err != nil {
@@ -196,7 +205,7 @@ func TestChannelReceivesConfigurationOnEveryAttempt(t *testing.T) {
 	host, store, plugin := newHostFixture(t, channel)
 	service := NewConfigService(store)
 	ctx := context.Background()
-	if err := service.Set(ctx, plugin, "bot_secret", "first"); err != nil {
+	if err := service.Set(ctx, plugin, "c1", "bot_secret", "first"); err != nil {
 		t.Fatal(err)
 	}
 	if err := host.Sync(ctx, []model.Plugin{plugin}); err != nil {
@@ -204,7 +213,7 @@ func TestChannelReceivesConfigurationOnEveryAttempt(t *testing.T) {
 	}
 	waitFor(t, func() bool { return channel.count() >= 1 }, "the channel never started")
 
-	if err := service.Set(ctx, plugin, "bot_secret", "rotated"); err != nil {
+	if err := service.Set(ctx, plugin, "c1", "bot_secret", "rotated"); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, func() bool {
@@ -256,5 +265,79 @@ func TestUnimplementedChannelProviderIsSkipped(t *testing.T) {
 	}
 	if len(host.Status()) != 0 {
 		t.Fatalf("status = %+v", host.Status())
+	}
+}
+
+// connectionChannel 记下每次启动时拿到的连接与凭据。
+type connectionChannel struct {
+	mu     sync.Mutex
+	starts map[string]int
+	seen   map[string]string
+}
+
+func (c *connectionChannel) ID() string { return "wecom" }
+
+func (c *connectionChannel) Run(ctx context.Context, deps ChannelDeps) error {
+	c.mu.Lock()
+	c.starts[deps.ConnectionID]++
+	c.seen[deps.ConnectionID] = deps.Config.String("bot_secret")
+	c.mu.Unlock()
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (c *connectionChannel) count(connectionID string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.starts[connectionID]
+}
+
+// 每个连接（一个企微机器人、一个微信号）各跑一个实例、各读自己的凭据；只重启一个时
+// 别的不受影响；没配齐的连接不启动。
+func TestEachConnectionRunsSeparately(t *testing.T) {
+	channel := &connectionChannel{starts: map[string]int{}, seen: map[string]string{}}
+	store := newMemStore()
+	plugin := model.Plugin{UUID: "p1", Name: "WeCom", Manifest: model.JSON(wecomManifest), Enabled: true}
+	store.plugins[plugin.UUID] = &plugin
+	for _, connection := range []struct{ id, secret string }{{"a", "secret-a"}, {"b", "secret-b"}, {"c", ""}} {
+		store.addConnection(plugin.UUID, connection.id, "机器人 "+connection.id)
+		if connection.secret != "" {
+			store.config[configKey(plugin.UUID, connection.id, "bot_secret")] = &model.PluginConfig{
+				PluginUUID: plugin.UUID, ConnectionID: connection.id, Key: "bot_secret", Value: connection.secret, Secret: true,
+			}
+		}
+	}
+	host, err := NewHost(recordingGateway{}, NewConfigService(store),
+		map[string]ChannelFactory{"builtin:wecom": func() Channel { return channel }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(host.Stop)
+	ctx := context.Background()
+	if err := host.Sync(ctx, []model.Plugin{plugin}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return channel.count("a") == 1 && channel.count("b") == 1 }, "both ready connections should start")
+	channel.mu.Lock()
+	if channel.seen["a"] != "secret-a" || channel.seen["b"] != "secret-b" {
+		t.Errorf("each connection must read its own credentials: %v", channel.seen)
+	}
+	channel.mu.Unlock()
+	if channel.count("c") != 0 || len(host.Status()) != 2 {
+		t.Errorf("an unconfigured connection must not start: starts=%d status=%d", channel.count("c"), len(host.Status()))
+	}
+
+	host.RestartConnection("a")
+	if err := host.Sync(ctx, []model.Plugin{plugin}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return channel.count("a") == 2 }, "the restarted connection should start again")
+	if channel.count("b") != 1 {
+		t.Errorf("restarting one connection must leave the others alone: b started %d times", channel.count("b"))
+	}
+	for _, status := range host.Status() {
+		if status.ConnectionID != "a" && status.ConnectionID != "b" {
+			t.Errorf("status must carry its connection: %+v", status)
+		}
 	}
 }

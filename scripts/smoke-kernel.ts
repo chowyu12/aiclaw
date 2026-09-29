@@ -61,7 +61,7 @@ async function main(): Promise<number> {
       JSON.stringify(listed[0]),
     );
 
-    // 缺必填配置时不能启用；填了秘密之后只回 isSet。
+    // 渠道插件的配置按连接存：没有配齐的连接时不能启用；连接各自一套凭据，秘密只回 isSet。
     const wecom = plugins.find((p) => p.pluginId === "aiclaw.wecom")!;
     let refused = "";
     try {
@@ -69,15 +69,38 @@ async function main(): Promise<number> {
     } catch (error) {
       refused = String(error);
     }
-    record("缺配置的插件拒绝启用", refused.includes("bot_id"), refused.slice(0, 80));
-    await client.pluginSetConfig(wecom.uuid, "bot_secret", "s3cret");
-    const fields = await client.pluginConfig(wecom.uuid);
-    const secret = fields.find((f) => f.key === "bot_secret");
+    record("没有可用连接的渠道插件拒绝启用", refused.includes("连接"), refused.slice(0, 80));
+    const botA = await client.connectionCreate(wecom.uuid, "机器人 A");
+    const botB = await client.connectionCreate(wecom.uuid, "机器人 B");
+    record("新建的连接缺凭据", botA.missingConfig.includes("bot_id") && botA.missingConfig.includes("bot_secret"), JSON.stringify(botA));
+    await client.pluginSetConfig(wecom.uuid, "bot_id", "bot-a", botA.uuid);
+    await client.pluginSetConfig(wecom.uuid, "bot_secret", "s3cret-a", botA.uuid);
+    await client.pluginSetConfig(wecom.uuid, "bot_id", "bot-b", botB.uuid);
+    const fieldsA = await client.pluginConfig(wecom.uuid, botA.uuid);
+    const fieldsB = await client.pluginConfig(wecom.uuid, botB.uuid);
+    const secret = fieldsA.find((f) => f.key === "bot_secret");
     record(
       "秘密配置只报 isSet",
-      secret?.isSet === true && secret.value === undefined && !JSON.stringify(fields).includes("s3cret"),
+      secret?.isSet === true && secret.value === undefined && !JSON.stringify(fieldsA).includes("s3cret"),
       JSON.stringify(secret),
     );
+    record(
+      "两个连接的凭据互不影响",
+      fieldsA.find((f) => f.key === "bot_id")?.value === "bot-a" && fieldsB.find((f) => f.key === "bot_id")?.value === "bot-b" &&
+        fieldsB.find((f) => f.key === "bot_secret")?.isSet === false,
+      `${fieldsA.find((f) => f.key === "bot_id")?.value} / ${fieldsB.find((f) => f.key === "bot_id")?.value}`,
+    );
+    await client.connectionRename(botB.uuid, "客服机器人");
+    const listed2 = (await client.pluginList()).find((p) => p.uuid === wecom.uuid)!;
+    record(
+      "插件列出各连接与它们缺的配置",
+      listed2.connections.length === 2 && listed2.connections.some((c) => c.name === "客服机器人" && c.missingConfig.includes("bot_secret")) &&
+        listed2.missingConfig.length === 0,
+      JSON.stringify(listed2.connections),
+    );
+    await client.connectionDelete(botB.uuid);
+    const listed3 = (await client.pluginList()).find((p) => p.uuid === wecom.uuid)!;
+    record("删掉一个连接，另一个还在", listed3.connections.length === 1 && listed3.connections[0]!.uuid === botA.uuid);
 
     // computer use 的开关就是插件：启用后贡献里 computerUse 为真。
     const cu = plugins.find((p) => p.pluginId === "aiclaw.computer-use")!;

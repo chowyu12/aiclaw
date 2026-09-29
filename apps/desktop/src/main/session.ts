@@ -11,6 +11,7 @@ import {
   ClawAgentClient,
   type AgentNotification,
   type PendingUserInput,
+  type ChannelConnectionView,
   type UsageSummary,
   type ApprovalPolicy,
   type Item,
@@ -688,12 +689,24 @@ export class SessionManager extends EventEmitter {
     await this.requireClient().pluginDelete(uuid);
   }
 
-  pluginConfig(uuid: string): Promise<PluginConfigField[]> {
-    return this.requireClient().pluginConfig(uuid);
+  pluginConfig(uuid: string, connectionId = ""): Promise<PluginConfigField[]> {
+    return this.requireClient().pluginConfig(uuid, connectionId);
   }
 
-  async setPluginConfig(uuid: string, key: string, value: string): Promise<void> {
-    await this.requireClient().pluginSetConfig(uuid, key, value);
+  async setPluginConfig(uuid: string, key: string, value: string, connectionId = ""): Promise<void> {
+    await this.requireClient().pluginSetConfig(uuid, key, value, connectionId);
+  }
+
+  connectionCreate(pluginUuid: string, name = ""): Promise<ChannelConnectionView> {
+    return this.requireClient().connectionCreate(pluginUuid, name);
+  }
+
+  async connectionRename(uuid: string, name: string): Promise<void> {
+    await this.requireClient().connectionRename(uuid, name);
+  }
+
+  async connectionDelete(uuid: string): Promise<void> {
+    await this.requireClient().connectionDelete(uuid);
   }
 
   pluginContributions(): Promise<PluginContributions> {
@@ -720,8 +733,8 @@ export class SessionManager extends EventEmitter {
     return this.requireClient().wechatLoginStart();
   }
 
-  wechatLoginPoll(uuid: string, token: string): Promise<WeChatLoginPollResult> {
-    return this.requireClient().wechatLoginPoll(uuid, token);
+  wechatLoginPoll(uuid: string, token: string, connectionId = ""): Promise<WeChatLoginPollResult> {
+    return this.requireClient().wechatLoginPoll(uuid, token, connectionId);
   }
 
   /** 试连一个 MCP server 并列出它的工具。配置页用，与会话无关。 */

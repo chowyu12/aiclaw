@@ -36,17 +36,19 @@ func (g *channelGateway) Submit(ctx context.Context, pluginUUID string, message 
 	s := g.server
 	channelID := strings.TrimSpace(message.ChannelID)
 	externalKey := strings.TrimSpace(message.ExternalKey)
+	connectionID := strings.TrimSpace(message.ConnectionID)
 	if pluginUUID == "" || channelID == "" || externalKey == "" {
 		return errors.New("入站消息缺少插件、通道或会话标识")
 	}
-	binding, err := s.appDB.GetChannelBinding(ctx, pluginUUID, channelID, externalKey)
+	// 放行记录按连接分开：同一个人找两个微信号，是两条记录、两个会话。
+	binding, err := s.appDB.GetChannelBinding(ctx, pluginUUID, channelID, connectionID, externalKey)
 	if err != nil {
 		return err
 	}
 	if binding == nil {
 		// 第一次见到这个外部会话：记下来让用户去放行，这次什么都不做。
 		pending := &model.ChannelBinding{
-			PluginUUID: pluginUUID, ChannelID: channelID, ExternalKey: externalKey,
+			PluginUUID: pluginUUID, ChannelID: channelID, ConnectionID: connectionID, ExternalKey: externalKey,
 			DisplayName: strings.TrimSpace(message.DisplayName), Allowed: false,
 			LastMessage: time.Now(),
 		}
@@ -131,7 +133,7 @@ func (g *channelGateway) sessionFor(ctx context.Context, binding *model.ChannelB
 		return nil, err
 	}
 	s.guard(session)
-	session.Title = bindingLabel(binding)
+	session.Title = g.sessionTitle(ctx, binding)
 	s.sessMu.Lock()
 	s.sessions[id] = session
 	s.sessMu.Unlock()
@@ -140,6 +142,28 @@ func (g *channelGateway) sessionFor(ctx context.Context, binding *model.ChannelB
 	}
 	binding.ThreadUUID = id
 	return session, nil
+}
+
+// sessionTitle 是通道会话的标题：连接名 · 对方。几个微信号、几个企微机器人同时在用时，
+// 侧边栏里看得出是哪个连接上的谁。对方的名字已经以连接名开头（升级迁移出来的
+// 「企业微信」连接，对方是「企业微信 张三」）就不重复。
+func (g *channelGateway) sessionTitle(ctx context.Context, binding *model.ChannelBinding) string {
+	label := bindingLabel(binding)
+	connections, err := g.server.appDB.ListChannelConnections(ctx, binding.PluginUUID)
+	if err != nil {
+		return label
+	}
+	for _, connection := range connections {
+		if connection.UUID != binding.ConnectionID {
+			continue
+		}
+		name := strings.TrimSpace(connection.Name)
+		if name == "" || strings.HasPrefix(label, name) {
+			return label
+		}
+		return name + " · " + label
+	}
+	return label
 }
 
 func bindingLabel(binding *model.ChannelBinding) string {

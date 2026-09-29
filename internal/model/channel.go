@@ -10,11 +10,13 @@ import "time"
 // start a turn, because a turn can run tools.
 type ChannelBinding struct {
 	ID         int64  `json:"id" gorm:"primaryKey;autoIncrement"`
-	PluginUUID string `json:"plugin_uuid" gorm:"size:36;not null;uniqueIndex:idx_channel_binding_key"`
-	ChannelID  string `json:"channel_id" gorm:"size:100;not null;uniqueIndex:idx_channel_binding_key"`
+	PluginUUID string `json:"plugin_uuid" gorm:"size:36;not null;uniqueIndex:idx_channel_binding_conn_key,priority:1"`
+	ChannelID  string `json:"channel_id" gorm:"size:100;not null;uniqueIndex:idx_channel_binding_conn_key,priority:2"`
+	// ConnectionID 是从哪个连接进来的（哪个微信号、哪个企微机器人）。同一个人找两个连接是两条记录、两个会话。
+	ConnectionID string `json:"connection_id" gorm:"size:64;not null;default:'';uniqueIndex:idx_channel_binding_conn_key,priority:3"`
 	// ExternalKey identifies the remote conversation: a group chat id where
 	// there is one, otherwise the sender.
-	ExternalKey string `json:"external_key" gorm:"size:200;not null;uniqueIndex:idx_channel_binding_key"`
+	ExternalKey string `json:"external_key" gorm:"size:200;not null;uniqueIndex:idx_channel_binding_conn_key,priority:4"`
 	DisplayName string `json:"display_name" gorm:"size:200"`
 	ThreadUUID  string `json:"thread_uuid" gorm:"size:36;index"`
 	ProviderID  int64  `json:"provider_id"`

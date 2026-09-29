@@ -103,7 +103,7 @@ func TestSearchEngineAndPluginSecretsAreEncrypted(t *testing.T) {
 
 	_ = store.SetPluginConfig(ctx, &model.PluginConfig{PluginUUID: "u", Key: "secret_token", Value: "tok", Secret: true})
 	_ = store.SetPluginConfig(ctx, &model.PluginConfig{PluginUUID: "u", Key: "corp_id", Value: "ww123", Secret: false})
-	items, err := store.ListPluginConfig(ctx, "u")
+	items, err := store.ListPluginConfig(ctx, "u", "")
 	if err != nil {
 		t.Fatal(err)
 	}

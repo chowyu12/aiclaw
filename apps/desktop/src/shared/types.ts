@@ -121,6 +121,16 @@ export interface PluginView {
   channels: number;
   permissions: string[];
   missingConfig: string[];
+  /** 渠道插件的连接（一个微信号、一个企微机器人一个）。别的插件是空的。 */
+  connections: ChannelConnectionView[];
+}
+
+/** 渠道插件的一个连接。 */
+export interface ChannelConnectionView {
+  uuid: string;
+  name: string;
+  /** 这个连接还没填的必填配置；非空时它不会启动。 */
+  missingConfig: string[];
 }
 
 /** 插件的一个配置项。秘密只报 isSet，值永不回传。 */
@@ -139,6 +149,9 @@ export interface ChannelStatusView {
   pluginName: string;
   channelId: string;
   displayName?: string;
+  /** 这个实例服务的连接。 */
+  connectionId?: string;
+  connectionName?: string;
   state: string;
   attempts?: number;
   lastError?: string;
@@ -148,6 +161,9 @@ export interface ChannelStatusView {
 export interface ChannelBindingView {
   pluginUuid: string;
   channelId: string;
+  /** 从哪个连接进来的。 */
+  connectionId: string;
+  connectionName?: string;
   externalKey: string;
   displayName?: string;
   sessionId?: string;
@@ -222,8 +238,12 @@ export interface SessionGroupView {
 
 export interface SessionGroupsView {
   groups: SessionGroupView[];
-  /** 会话 id → 分组 id。不在表里的会话是「未分组」。 */
+  /** 会话 id → 分组 id。不在表里的会话是「未分组」（渠道会话是「渠道会话」）。 */
   assignments: Record<string, string>;
+  /** 分组 id → 是否折叠。没记的：渠道会话默认折叠，其它默认展开。 */
+  collapsed: Record<string, boolean>;
+  /** 分组 id → 上次展开看过的时间（毫秒）。 */
+  seenAt: Record<string, number>;
 }
 
 export interface SessionSummaryView {

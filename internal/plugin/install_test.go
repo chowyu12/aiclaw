@@ -37,7 +37,9 @@ type memStore struct {
 	servers  map[string]*model.MCPServer
 	config   map[string]*model.PluginConfig
 	bindings map[string]*model.ChannelBinding
-	failOn   string
+	// connections 是渠道插件的连接，按加入顺序。
+	connections []model.ChannelConnection
+	failOn      string
 }
 
 func newMemStore() *memStore {
@@ -50,14 +52,16 @@ func newMemStore() *memStore {
 	}
 }
 
-func configKey(pluginUUID, key string) string { return pluginUUID + "\x00" + key }
+func configKey(pluginUUID, connectionID, key string) string {
+	return pluginUUID + "\x00" + connectionID + "\x00" + key
+}
 
-func (s *memStore) ListPluginConfig(_ context.Context, pluginUUID string) ([]model.PluginConfig, error) {
+func (s *memStore) ListPluginConfig(_ context.Context, pluginUUID, connectionID string) ([]model.PluginConfig, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	items := make([]model.PluginConfig, 0, len(s.config))
 	for _, item := range s.config {
-		if item.PluginUUID == pluginUUID {
+		if item.PluginUUID == pluginUUID && item.ConnectionID == connectionID {
 			items = append(items, *item)
 		}
 	}
@@ -71,15 +75,33 @@ func (s *memStore) SetPluginConfig(_ context.Context, item *model.PluginConfig) 
 		return fmt.Errorf("set plugin config failed")
 	}
 	stored := *item
-	s.config[configKey(item.PluginUUID, item.Key)] = &stored
+	s.config[configKey(item.PluginUUID, item.ConnectionID, item.Key)] = &stored
 	return nil
 }
 
-func (s *memStore) DeletePluginConfig(_ context.Context, pluginUUID, key string) error {
+func (s *memStore) DeletePluginConfig(_ context.Context, pluginUUID, connectionID, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.config, configKey(pluginUUID, key))
+	delete(s.config, configKey(pluginUUID, connectionID, key))
 	return nil
+}
+
+func (s *memStore) ListChannelConnections(_ context.Context, pluginUUID string) ([]model.ChannelConnection, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []model.ChannelConnection
+	for _, connection := range s.connections {
+		if pluginUUID == "" || connection.PluginUUID == pluginUUID {
+			out = append(out, connection)
+		}
+	}
+	return out, nil
+}
+
+func (s *memStore) addConnection(pluginUUID, uuid, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.connections = append(s.connections, model.ChannelConnection{UUID: uuid, PluginUUID: pluginUUID, Name: name})
 }
 
 func (s *memStore) DeleteChannelBindings(_ context.Context, pluginUUID string) error {

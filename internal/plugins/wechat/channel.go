@@ -111,11 +111,12 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, remote 
 	// Media is fetched here, on the turn's goroutine, not in the poll
 	// callback: a slow CDN download must not hold up other conversations.
 	inbound := pluginpkg.Inbound{
-		ChannelID:   ChannelID,
-		ExternalKey: message.FromUserID,
-		DisplayName: "微信 " + message.FromUserID,
-		SenderID:    message.FromUserID,
-		Text:        strings.TrimSpace(message.Text),
+		ChannelID:    ChannelID,
+		ConnectionID: deps.ConnectionID,
+		ExternalKey:  message.FromUserID,
+		DisplayName:  "微信 " + message.FromUserID,
+		SenderID:     message.FromUserID,
+		Text:         strings.TrimSpace(message.Text),
 	}
 	c.attachMedia(ctx, deps, message, &inbound)
 

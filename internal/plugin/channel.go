@@ -17,6 +17,8 @@ import (
 type Inbound struct {
 	// ChannelID is the contributing channel, e.g. "wecom".
 	ChannelID string
+	// ConnectionID is the connection the message came in on (from ChannelDeps).
+	ConnectionID string
 	// ExternalKey identifies the remote conversation: a group chat id where
 	// there is one, otherwise the sender.
 	ExternalKey string
@@ -60,6 +62,10 @@ var ErrBindingNotAllowed = fmt.Errorf("this conversation is not authorized to re
 type ChannelDeps struct {
 	// PluginUUID identifies the bundle this channel belongs to.
 	PluginUUID string
+	// ConnectionID is the connection this run serves (one WeChat account, one
+	// WeCom bot). The channel copies it into every Inbound so the gateway keeps
+	// each connection's conversations apart.
+	ConnectionID string
 	// Config reads the plugin's stored configuration, secrets included.
 	Config ConfigReader
 	// Gateway submits inbound messages as turns.
@@ -95,14 +101,16 @@ const (
 
 // ChannelStatus reports one channel's health.
 type ChannelStatus struct {
-	PluginUUID  string       `json:"plugin_uuid"`
-	PluginName  string       `json:"plugin_name"`
-	ChannelID   string       `json:"channel_id"`
-	DisplayName string       `json:"display_name,omitzero"`
-	State       ChannelState `json:"state"`
-	Attempts    int          `json:"attempts,omitzero"`
-	LastError   string       `json:"last_error,omitzero"`
-	StartedAt   time.Time    `json:"started_at,omitzero"`
+	PluginUUID  string `json:"plugin_uuid"`
+	PluginName  string `json:"plugin_name"`
+	ChannelID   string `json:"channel_id"`
+	DisplayName string `json:"display_name,omitzero"`
+	// ConnectionID 是这个实例服务的连接。
+	ConnectionID string       `json:"connection_id,omitzero"`
+	State        ChannelState `json:"state"`
+	Attempts     int          `json:"attempts,omitzero"`
+	LastError    string       `json:"last_error,omitzero"`
+	StartedAt    time.Time    `json:"started_at,omitzero"`
 }
 
 // statusHolder is the mutable half of a supervised channel.
@@ -124,6 +132,6 @@ func (h *statusHolder) get() ChannelStatus {
 }
 
 // channelKey identifies a supervised channel across sync calls.
-func channelKey(pluginUUID, channelID string) string {
-	return strings.TrimSpace(pluginUUID) + "/" + strings.TrimSpace(channelID)
+func channelKey(pluginUUID, channelID, connectionID string) string {
+	return strings.TrimSpace(pluginUUID) + "/" + strings.TrimSpace(channelID) + "/" + strings.TrimSpace(connectionID)
 }

@@ -12,6 +12,8 @@ package pluginhost
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -150,10 +152,38 @@ func (s *Service) view(ctx context.Context, item model.Plugin, skillItems []mode
 	} else if permissions != nil {
 		view.Permissions = permissions
 	}
-	if missing, err := s.config.MissingRequired(ctx, item); err != nil {
+	view.Connections = []protocol.ChannelConnectionView{}
+	if !pluginpkg.HasChannels(item) {
+		if missing, err := s.config.MissingRequired(ctx, item, ""); err != nil {
+			return view, err
+		} else if missing != nil {
+			view.MissingConfig = missing
+		}
+		return view, nil
+	}
+	// 渠道插件：配置按连接存。至少一个连接配齐了才能启用。
+	connections, err := s.db.ListChannelConnections(ctx, item.UUID)
+	if err != nil {
 		return view, err
-	} else if missing != nil {
-		view.MissingConfig = missing
+	}
+	ready := 0
+	for _, connection := range connections {
+		missing, err := s.config.MissingRequired(ctx, item, connection.UUID)
+		if err != nil {
+			return view, err
+		}
+		if missing == nil {
+			missing = []string{}
+		}
+		if len(missing) == 0 {
+			ready++
+		}
+		view.Connections = append(view.Connections, protocol.ChannelConnectionView{
+			UUID: connection.UUID, Name: connection.Name, MissingConfig: missing,
+		})
+	}
+	if ready == 0 {
+		view.MissingConfig = []string{"至少一个可用的连接"}
 	}
 	return view, nil
 }
@@ -210,13 +240,16 @@ func (s *Service) Delete(ctx context.Context, uuid string) error {
 	return s.syncChannels(ctx)
 }
 
-// ConfigFields 给配置表单用。秘密只报 isSet。
-func (s *Service) ConfigFields(ctx context.Context, uuid string) ([]protocol.PluginConfigField, error) {
+// ConfigFields 给配置表单用。秘密只报 isSet。connectionID 为空是插件本身的配置。
+func (s *Service) ConfigFields(ctx context.Context, uuid, connectionID string) ([]protocol.PluginConfigField, error) {
 	item, err := s.find(ctx, uuid)
 	if err != nil {
 		return nil, err
 	}
-	fields, err := s.config.Fields(ctx, item)
+	if err := s.checkConnection(ctx, item, connectionID); err != nil {
+		return nil, err
+	}
+	fields, err := s.config.Fields(ctx, item, connectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -230,13 +263,142 @@ func (s *Service) ConfigFields(ctx context.Context, uuid string) ([]protocol.Plu
 	return out, nil
 }
 
-// SetConfig 写一个配置项；空串表示清掉。改完通道重连时会读到新值。
-func (s *Service) SetConfig(ctx context.Context, uuid, key, value string) error {
+// SetConfig 写一个配置项；空串表示清掉。
+//
+// 连接的配置改完立刻重启那一个连接（凭据换了，旧的长连接还连着旧账号），别的连接
+// 不受影响；刚配齐的连接由 Sync 拉起来。
+func (s *Service) SetConfig(ctx context.Context, uuid, connectionID, key, value string) error {
 	item, err := s.find(ctx, uuid)
 	if err != nil {
 		return err
 	}
-	return s.config.Set(ctx, item, key, value)
+	if err := s.checkConnection(ctx, item, connectionID); err != nil {
+		return err
+	}
+	if err := s.config.Set(ctx, item, connectionID, key, value); err != nil {
+		return err
+	}
+	if connectionID == "" {
+		return nil
+	}
+	s.host.RestartConnection(connectionID)
+	return s.syncChannels(ctx)
+}
+
+// checkConnection 核对连接属于这个插件；渠道插件的配置必须指明连接。
+func (s *Service) checkConnection(ctx context.Context, item model.Plugin, connectionID string) error {
+	if connectionID == "" {
+		if pluginpkg.HasChannels(item) {
+			return fmt.Errorf("「%s」的配置是按连接存的：先选一个连接", item.Name)
+		}
+		return nil
+	}
+	connection, err := s.connection(ctx, connectionID)
+	if err != nil {
+		return err
+	}
+	if connection.PluginUUID != item.UUID {
+		return fmt.Errorf("连接 %s 不属于「%s」", connectionID, item.Name)
+	}
+	return nil
+}
+
+// ---------- 连接 ----------
+
+func (s *Service) connection(ctx context.Context, uuid string) (model.ChannelConnection, error) {
+	connections, err := s.db.ListChannelConnections(ctx, "")
+	if err != nil {
+		return model.ChannelConnection{}, err
+	}
+	for _, connection := range connections {
+		if connection.UUID == strings.TrimSpace(uuid) {
+			return connection, nil
+		}
+	}
+	return model.ChannelConnection{}, fmt.Errorf("连接不存在：%s", uuid)
+}
+
+// connectionNames 连接 id → 名字，给状态与放行记录显示。
+func (s *Service) connectionNames(ctx context.Context) map[string]string {
+	names := map[string]string{}
+	connections, err := s.db.ListChannelConnections(ctx, "")
+	if err != nil {
+		return names
+	}
+	for _, connection := range connections {
+		names[connection.UUID] = connection.Name
+	}
+	return names
+}
+
+// CreateConnection 给渠道插件加一个连接（一个企微机器人、一个微信号）。刚建出来没有
+// 凭据，不会启动；填好配置（或扫码登录）之后才拉起来。
+func (s *Service) CreateConnection(ctx context.Context, pluginUUID, name string) (protocol.ChannelConnectionView, error) {
+	item, err := s.find(ctx, pluginUUID)
+	if err != nil {
+		return protocol.ChannelConnectionView{}, err
+	}
+	if !pluginpkg.HasChannels(item) {
+		return protocol.ChannelConnectionView{}, fmt.Errorf("「%s」不是渠道插件，没有连接", item.Name)
+	}
+	connection, err := s.newConnection(ctx, item, name)
+	if err != nil {
+		return protocol.ChannelConnectionView{}, err
+	}
+	missing, _ := s.config.MissingRequired(ctx, item, connection.UUID)
+	if missing == nil {
+		missing = []string{}
+	}
+	return protocol.ChannelConnectionView{UUID: connection.UUID, Name: connection.Name, MissingConfig: missing}, nil
+}
+
+func (s *Service) newConnection(ctx context.Context, item model.Plugin, name string) (model.ChannelConnection, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		existing, err := s.db.ListChannelConnections(ctx, item.UUID)
+		if err != nil {
+			return model.ChannelConnection{}, err
+		}
+		name = fmt.Sprintf("%s %d", strings.TrimSuffix(item.Name, "连接器"), len(existing)+1)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		return model.ChannelConnection{}, err
+	}
+	connection := model.ChannelConnection{UUID: "k" + hex.EncodeToString(suffix), PluginUUID: item.UUID, Name: name}
+	return connection, s.db.CreateChannelConnection(ctx, &connection)
+}
+
+// RenameConnection 改连接的名字。会话标题里带着它，新来的消息就用新名字。
+func (s *Service) RenameConnection(ctx context.Context, uuid, name string) error {
+	if _, err := s.connection(ctx, uuid); err != nil {
+		return err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("名字不能为空")
+	}
+	return s.db.RenameChannelConnection(ctx, uuid, name)
+}
+
+// DeleteConnection 删掉一个连接：停掉它，删掉它的凭据与放行记录。会话本身留着，
+// 历史还能在侧边栏里翻。
+func (s *Service) DeleteConnection(ctx context.Context, uuid string) error {
+	connection, err := s.connection(ctx, uuid)
+	if err != nil {
+		return err
+	}
+	s.host.RestartConnection(connection.UUID)
+	if err := s.db.DeleteConnectionConfig(ctx, connection.PluginUUID, connection.UUID); err != nil {
+		return err
+	}
+	if err := s.db.DeleteConnectionBindings(ctx, connection.PluginUUID, connection.UUID); err != nil {
+		return err
+	}
+	if err := s.db.DeleteChannelConnection(ctx, connection.UUID); err != nil {
+		return err
+	}
+	return s.syncChannels(ctx)
 }
 
 // Contributions 汇总启用中的插件贡献给会话的东西。
@@ -318,12 +480,13 @@ func (s *Service) find(ctx context.Context, uuid string) (model.Plugin, error) {
 // ChannelStatus 报每个托管中的通道的状态。
 func (s *Service) ChannelStatus() []protocol.ChannelStatusView {
 	statuses := s.host.Status()
+	names := s.connectionNames(context.Background())
 	out := make([]protocol.ChannelStatusView, 0, len(statuses))
 	for _, st := range statuses {
 		out = append(out, protocol.ChannelStatusView{
 			PluginUUID: st.PluginUUID, PluginName: st.PluginName, ChannelID: st.ChannelID,
 			DisplayName: st.DisplayName, State: string(st.State), Attempts: st.Attempts,
-			LastError: st.LastError,
+			LastError: st.LastError, ConnectionID: st.ConnectionID, ConnectionName: names[st.ConnectionID],
 		})
 	}
 	return out
@@ -335,10 +498,12 @@ func (s *Service) Bindings(ctx context.Context) ([]protocol.ChannelBindingView, 
 	if err != nil {
 		return nil, err
 	}
+	names := s.connectionNames(ctx)
 	out := make([]protocol.ChannelBindingView, 0, len(items))
 	for _, item := range items {
 		view := protocol.ChannelBindingView{
 			PluginUUID: item.PluginUUID, ChannelID: item.ChannelID, ExternalKey: item.ExternalKey,
+			ConnectionID: item.ConnectionID, ConnectionName: names[item.ConnectionID],
 			DisplayName: item.DisplayName, SessionID: item.ThreadUUID,
 			ProviderID: item.ProviderID, Model: item.ModelName, Allowed: item.Allowed,
 			AllowedTools: []string{},
@@ -386,7 +551,7 @@ func (s *Service) Revoke(ctx context.Context, key protocol.ChannelBindingKey) er
 }
 
 func (s *Service) binding(ctx context.Context, key protocol.ChannelBindingKey) (*model.ChannelBinding, error) {
-	binding, err := s.db.GetChannelBinding(ctx, key.PluginUUID, key.ChannelID, key.ExternalKey)
+	binding, err := s.db.GetChannelBinding(ctx, key.PluginUUID, key.ChannelID, key.ConnectionID, key.ExternalKey)
 	if err != nil {
 		return nil, err
 	}
@@ -407,8 +572,11 @@ func (s *Service) WeChatLoginStart(ctx context.Context) (protocol.WeChatLoginSta
 	return protocol.WeChatLoginStartResult{Token: qr.Token, Image: qr.Image}, nil
 }
 
-// WeChatLoginPoll 查一次扫码进度；确认之后把凭据写进插件配置。
+// WeChatLoginPoll 查一次扫码进度；确认之后把凭据写进一个连接。
 // 凭据不回传：调用方只知道登录完成了，与秘密只报「已配置」是一回事。
+//
+// 没指明连接就是「添加一个微信号」：同一个微信号以前连过（ilink_bot_id 相同），
+// 写回它原来的连接，不重复建；否则新建一个。
 func (s *Service) WeChatLoginPoll(ctx context.Context, params protocol.WeChatLoginPollParams) (protocol.WeChatLoginPollResult, error) {
 	item, err := s.find(ctx, params.UUID)
 	if err != nil {
@@ -425,6 +593,31 @@ func (s *Service) WeChatLoginPoll(ctx context.Context, params protocol.WeChatLog
 	if !strings.EqualFold(result.Status, "confirmed") || strings.TrimSpace(result.BotToken) == "" {
 		return status, nil
 	}
+	connectionID := strings.TrimSpace(params.ConnectionID)
+	if connectionID != "" {
+		if err := s.checkConnection(ctx, item, connectionID); err != nil {
+			return status, err
+		}
+	} else {
+		connections, err := s.db.ListChannelConnections(ctx, item.UUID)
+		if err != nil {
+			return status, err
+		}
+		for _, connection := range connections {
+			values, err := s.config.Load(ctx, item.UUID, connection.UUID)
+			if err == nil && strings.TrimSpace(result.ILinkBotID) != "" && values.String(wechat.ConfigBotID) == result.ILinkBotID {
+				connectionID = connection.UUID
+				break
+			}
+		}
+		if connectionID == "" {
+			connection, err := s.newConnection(ctx, item, "")
+			if err != nil {
+				return status, err
+			}
+			connectionID = connection.UUID
+		}
+	}
 	for key, value := range map[string]string{
 		wechat.ConfigBotToken:  result.BotToken,
 		wechat.ConfigBotID:     result.ILinkBotID,
@@ -434,10 +627,12 @@ func (s *Service) WeChatLoginPoll(ctx context.Context, params protocol.WeChatLog
 		if strings.TrimSpace(value) == "" {
 			continue
 		}
-		if err := s.config.Set(ctx, item, key, value); err != nil {
+		if err := s.config.Set(ctx, item, connectionID, key, value); err != nil {
 			return status, err
 		}
 	}
-	status.Saved = true
-	return status, nil
+	status.Saved, status.ConnectionID = true, connectionID
+	// 重新登录的连接用新凭据重连；新连接（插件已启用时）马上拉起来。
+	s.host.RestartConnection(connectionID)
+	return status, s.syncChannels(ctx)
 }

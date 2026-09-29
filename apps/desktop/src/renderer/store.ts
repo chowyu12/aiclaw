@@ -78,7 +78,7 @@ const state = reactive({
     results: [] as SessionSummaryView[],
     loading: false,
   },
-  groups: { groups: [], assignments: {} } as SessionGroupsView,
+  groups: { groups: [], assignments: {}, collapsed: {}, seenAt: {} } as SessionGroupsView,
   /** 模型服务清单。由内核从配置库读，所以要运行时起来之后才有。 */
   providers: [] as ProviderView[],
   providersLoading: false,
@@ -130,6 +130,11 @@ const state = reactive({
  * 纯对象），第二条就开始失败。凡是把既有元素原样带过去的写法（展开、filter）
  * 都要先过这里；`.map(x => ({ ...x }))` 因为重建了对象反而是安全的。
  */
+/** 插件配置缓存的键：渠道插件按连接分开存。 */
+export function pluginConfigKey(uuid: string, connectionId = ""): string {
+  return connectionId ? `${uuid}:${connectionId}` : uuid;
+}
+
 function plain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -447,6 +452,11 @@ export const actions = {
     state.groups = (await window.aiclaw.groups.remove(groupId)) as SessionGroupsView;
   },
 
+  /** 折叠 / 展开一个分组。主进程同时记下「看过了」，折叠后据此数新消息。 */
+  async collapseGroup(groupId: string, collapsed: boolean): Promise<void> {
+    state.groups = (await window.aiclaw.groups.collapse(groupId, collapsed)) as SessionGroupsView;
+  },
+
   async assignSession(sessionId: string, groupId: string | null): Promise<void> {
     state.groups = (await window.aiclaw.session.assign({
       sessionId,
@@ -669,19 +679,57 @@ export const actions = {
     await actions.loadPlugins();
   },
 
-  async loadPluginConfig(uuid: string): Promise<void> {
-    state.pluginConfigs[uuid] = (await window.aiclaw.plugins.config(uuid)) as PluginConfigFieldView[];
+  /** 插件（或它的某个连接）的配置。缓存键见 pluginConfigKey。 */
+  async loadPluginConfig(uuid: string, connectionId = ""): Promise<void> {
+    state.pluginConfigs[pluginConfigKey(uuid, connectionId)] = (await window.aiclaw.plugins.config(
+      uuid,
+      connectionId,
+    )) as PluginConfigFieldView[];
   },
 
   /** 空串表示清掉。存完重拉一遍，秘密只会以 isSet 的形式回来。 */
-  async setPluginConfig(uuid: string, key: string, value: string): Promise<void> {
+  async setPluginConfig(uuid: string, key: string, value: string, connectionId = ""): Promise<void> {
     try {
-      await window.aiclaw.plugins.setConfig({ uuid, key, value });
+      await window.aiclaw.plugins.setConfig({ uuid, key, value, connectionId });
     } catch (error) {
       state.error = describeError(error);
     }
-    await actions.loadPluginConfig(uuid);
+    await actions.loadPluginConfig(uuid, connectionId);
     await actions.loadPlugins();
+    await actions.refreshChannels();
+  },
+
+  /** 给渠道插件加一个连接（一个企微机器人、一个微信号）。返回新连接的 id。 */
+  async createConnection(pluginUuid: string, name = ""): Promise<string> {
+    try {
+      const created = (await window.aiclaw.channels.createConnection(pluginUuid, name)) as { uuid: string };
+      await actions.loadPlugins();
+      return created.uuid;
+    } catch (error) {
+      state.error = describeError(error);
+      return "";
+    }
+  },
+
+  async renameConnection(uuid: string, name: string): Promise<void> {
+    try {
+      await window.aiclaw.channels.renameConnection(uuid, name);
+    } catch (error) {
+      state.error = describeError(error);
+    }
+    await actions.loadPlugins();
+    await actions.refreshChannels();
+  },
+
+  /** 删掉一个连接：停掉它、删掉它的凭据与放行记录。会话本身留着。 */
+  async deleteConnection(uuid: string): Promise<void> {
+    try {
+      await window.aiclaw.channels.deleteConnection(uuid);
+    } catch (error) {
+      state.error = describeError(error);
+    }
+    await actions.loadPlugins();
+    await actions.refreshChannels();
   },
 
   async refreshChannels(): Promise<void> {
@@ -700,6 +748,7 @@ export const actions = {
   async authorizeBinding(input: {
     pluginUuid: string;
     channelId: string;
+    connectionId: string;
     externalKey: string;
     providerId: number;
     model: string;
@@ -713,7 +762,7 @@ export const actions = {
     await actions.refreshChannels();
   },
 
-  async revokeBinding(key: { pluginUuid: string; channelId: string; externalKey: string }): Promise<void> {
+  async revokeBinding(key: { pluginUuid: string; channelId: string; connectionId: string; externalKey: string }): Promise<void> {
     try {
       await window.aiclaw.channels.revoke(plain(key));
     } catch (error) {
@@ -726,8 +775,17 @@ export const actions = {
     return (await window.aiclaw.wechat.loginStart()) as { token: string; image: string };
   },
 
-  async wechatLoginPoll(uuid: string, token: string): Promise<{ status: string; saved: boolean }> {
-    return (await window.aiclaw.wechat.loginPoll({ uuid, token })) as { status: string; saved: boolean };
+  /** connectionId 空着是添加一个微信号；给了是给那个连接重新登录。 */
+  async wechatLoginPoll(
+    uuid: string,
+    token: string,
+    connectionId = "",
+  ): Promise<{ status: string; saved: boolean; connectionId?: string }> {
+    return (await window.aiclaw.wechat.loginPoll({ uuid, token, connectionId })) as {
+      status: string;
+      saved: boolean;
+      connectionId?: string;
+    };
   },
 
   // ---------- 模型 ----------

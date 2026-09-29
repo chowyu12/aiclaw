@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
-import { actions, modelChoices, store } from "../store";
+import { actions, modelChoices, pluginConfigKey, store } from "../store";
 import { describeError } from "../errors";
 
 /**
@@ -17,6 +17,7 @@ import { describeError } from "../errors";
 
 type PluginRow = (typeof store.plugins)[number];
 type BindingRow = (typeof store.bindings)[number];
+type ConnectionRow = PluginRow["connections"][number];
 
 /** 权限名给人看的说法。表在内核那边（internal/skills 的常量），这里只做翻译。 */
 const PERMISSION_LABELS: Record<string, string> = {
@@ -45,8 +46,13 @@ const drafts = reactive<Record<string, string>>({});
 const authDrafts = reactive<Record<string, { choice: string; tools: string[] }>>({});
 
 // 微信扫码登录。二维码从中继来，几十秒后过期；确认之后凭据由内核写进配置。
-const wechatQR = ref<{ uuid: string; token: string; image: string } | null>(null);
+// connectionId 空着是「添加一个微信号」，给了是给那个连接重新登录。
+const wechatQR = ref<{ uuid: string; connectionId: string; token: string; image: string } | null>(null);
 const wechatStatus = ref("");
+/** 正在改名的连接与草稿。 */
+const renaming = reactive<Record<string, string>>({});
+/** 展开了凭据表单的连接（企微机器人刚加上时自动展开）。 */
+const editing = reactive<Record<string, boolean>>({});
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
 onMounted(() => void actions.loadPlugins());
@@ -70,26 +76,49 @@ function channelsOf(plugin: PluginRow) {
   return store.channels.filter((c) => c.pluginUuid === plugin.uuid);
 }
 
-function bindingsOf(plugin: PluginRow) {
-  return store.bindings.filter((b) => b.pluginUuid === plugin.uuid);
+/** 一个连接的运行状态（没在跑就没有）。 */
+function statusOf(connection: ConnectionRow) {
+  return store.channels.find((c) => c.connectionId === connection.uuid);
+}
+
+/** 一个连接的放行记录。 */
+function bindingsOf(plugin: PluginRow, connection: ConnectionRow) {
+  return store.bindings.filter((b) => b.pluginUuid === plugin.uuid && b.connectionId === connection.uuid);
 }
 
 function bindingKey(binding: BindingRow): string {
-  return `${binding.pluginUuid}/${binding.channelId}/${binding.externalKey}`;
+  return `${binding.pluginUuid}/${binding.channelId}/${binding.connectionId}/${binding.externalKey}`;
+}
+
+/** 连接那一行的状态字。 */
+function connectionState(plugin: PluginRow, connection: ConnectionRow): { text: string; kind: string } {
+  if (connection.missingConfig.length > 0) {
+    return { text: isWeChat(plugin) ? "还没登录" : `缺 ${connection.missingConfig.join("、")}`, kind: "bad" };
+  }
+  if (!plugin.enabled) return { text: "插件停用中", kind: "" };
+  const status = statusOf(connection);
+  if (!status) return { text: "未启动", kind: "" };
+  return { text: STATE_LABELS[status.state] ?? status.state, kind: status.state };
+}
+
+function configOf(plugin: PluginRow, connectionId = "") {
+  return store.pluginConfigs[pluginConfigKey(plugin.uuid, connectionId)] ?? [];
 }
 
 /** 收起时那一行右边的状态字。 */
 function summary(plugin: PluginRow): string {
+  if (isChannel(plugin)) {
+    const total = plugin.connections.length;
+    if (total === 0) return "还没有连接";
+    const running = channelsOf(plugin).filter((c) => c.state === "running").length;
+    return plugin.enabled ? `${total} 个连接 · ${running} 个已连接` : `${total} 个连接`;
+  }
   if (plugin.missingConfig.length > 0) return `缺 ${plugin.missingConfig.join("、")}`;
   const parts: string[] = [];
   if (plugin.tools > 0) parts.push("宿主能力");
   if (plugin.channels > 0) parts.push("通道");
   if (plugin.skills > 0) parts.push(`${plugin.skills} 个技能`);
   if (plugin.mcp > 0) parts.push(`${plugin.mcp} 个 MCP`);
-  if (plugin.enabled && isChannel(plugin)) {
-    const state = channelsOf(plugin)[0]?.state;
-    if (state) parts.push(STATE_LABELS[state] ?? state);
-  }
   return parts.join(" · ");
 }
 
@@ -114,19 +143,59 @@ async function run(task: () => Promise<unknown>): Promise<void> {
 
 function toggleExpand(plugin: PluginRow): void {
   expanded.value = expanded.value === plugin.uuid ? "" : plugin.uuid;
-  if (expanded.value && !store.pluginConfigs[plugin.uuid]) void actions.loadPluginConfig(plugin.uuid);
+  if (!expanded.value) return;
+  if (isChannel(plugin)) {
+    void actions.refreshChannels();
+    for (const connection of plugin.connections) void actions.loadPluginConfig(plugin.uuid, connection.uuid);
+  } else if (!store.pluginConfigs[plugin.uuid]) {
+    void actions.loadPluginConfig(plugin.uuid);
+  }
 }
 
-async function saveField(plugin: PluginRow, key: string): Promise<void> {
-  const draftKey = `${plugin.uuid}/${key}`;
+function draftKeyOf(plugin: PluginRow, key: string, connectionId = ""): string {
+  return `${plugin.uuid}/${connectionId}/${key}`;
+}
+
+async function saveField(plugin: PluginRow, key: string, connectionId = ""): Promise<void> {
+  const draftKey = draftKeyOf(plugin, key, connectionId);
   const value = (drafts[draftKey] ?? "").trim();
   if (!value) return;
-  await run(() => actions.setPluginConfig(plugin.uuid, key, value));
+  await run(() => actions.setPluginConfig(plugin.uuid, key, value, connectionId));
   drafts[draftKey] = "";
 }
 
-async function clearField(plugin: PluginRow, key: string): Promise<void> {
-  await run(() => actions.setPluginConfig(plugin.uuid, key, ""));
+async function clearField(plugin: PluginRow, key: string, connectionId = ""): Promise<void> {
+  await run(() => actions.setPluginConfig(plugin.uuid, key, "", connectionId));
+}
+
+// ---------- 连接 ----------
+
+/** 加一个连接：企微机器人建好就展开凭据表单；微信直接出二维码，扫完才建。 */
+async function addConnection(plugin: PluginRow): Promise<void> {
+  if (isWeChat(plugin)) {
+    await startWeChatLogin(plugin, "");
+    return;
+  }
+  const id = await actions.createConnection(plugin.uuid);
+  if (!id) return;
+  editing[id] = true;
+  await actions.loadPluginConfig(plugin.uuid, id);
+}
+
+function startRename(connection: ConnectionRow): void {
+  renaming[connection.uuid] = connection.name;
+}
+
+async function finishRename(connection: ConnectionRow): Promise<void> {
+  const name = (renaming[connection.uuid] ?? "").trim();
+  delete renaming[connection.uuid];
+  if (!name || name === connection.name) return;
+  await run(() => actions.renameConnection(connection.uuid, name));
+}
+
+async function removeConnection(connection: ConnectionRow): Promise<void> {
+  if (!confirm(`删除连接「${connection.name}」？它的凭据和放行记录一起删掉，已有的会话留着。`)) return;
+  await run(() => actions.deleteConnection(connection.uuid));
 }
 
 async function remove(plugin: PluginRow): Promise<void> {
@@ -162,6 +231,7 @@ async function authorize(binding: BindingRow): Promise<void> {
     actions.authorizeBinding({
       pluginUuid: binding.pluginUuid,
       channelId: binding.channelId,
+      connectionId: binding.connectionId,
       externalKey: binding.externalKey,
       providerId: Number(providerId),
       model,
@@ -175,6 +245,7 @@ async function revoke(binding: BindingRow): Promise<void> {
     actions.revokeBinding({
       pluginUuid: binding.pluginUuid,
       channelId: binding.channelId,
+      connectionId: binding.connectionId,
       externalKey: binding.externalKey,
     }),
   );
@@ -188,12 +259,12 @@ function formatTime(iso?: string): string {
 
 // ---------- 微信扫码 ----------
 
-async function startWeChatLogin(plugin: PluginRow): Promise<void> {
+async function startWeChatLogin(plugin: PluginRow, connectionId: string): Promise<void> {
   clearTimeout(pollTimer);
   wechatStatus.value = "正在向中继要二维码…";
   try {
     const qr = await actions.wechatLoginStart();
-    wechatQR.value = { uuid: plugin.uuid, token: qr.token, image: qr.image };
+    wechatQR.value = { uuid: plugin.uuid, connectionId, token: qr.token, image: qr.image };
     wechatStatus.value = "用微信扫一扫";
     void pollWeChat();
   } catch (error) {
@@ -210,13 +281,15 @@ async function pollWeChat(): Promise<void> {
   const current = wechatQR.value;
   if (!current) return;
   try {
-    const result = await actions.wechatLoginPoll(current.uuid, current.token);
+    const result = await actions.wechatLoginPoll(current.uuid, current.token, current.connectionId);
     if (wechatQR.value?.token !== current.token) return;
     if (result.saved) {
-      wechatStatus.value = "已登录，凭据已写入插件配置。现在可以启用它了。";
+      wechatStatus.value = current.connectionId
+        ? "已重新登录，连接用新凭据重连。"
+        : "已登录，加好了一个微信号。插件启用着的话它马上就连上。";
       wechatQR.value = null;
-      await actions.loadPluginConfig(current.uuid);
       await actions.loadPlugins();
+      await actions.refreshChannels();
       return;
     }
     if (result.status === "expired") {
@@ -297,10 +370,10 @@ async function pollWeChat(): Promise<void> {
             </p>
           </div>
 
-          <!-- 配置项：秘密只进不出。 -->
-          <div v-if="(store.pluginConfigs[plugin.uuid]?.length ?? 0) > 0" class="block">
+          <!-- 配置项：秘密只进不出。渠道插件的配置在各自的连接里。 -->
+          <div v-if="!isChannel(plugin) && configOf(plugin).length > 0" class="block">
             <div class="block-head"><span class="block-title">配置</span></div>
-            <div v-for="field in store.pluginConfigs[plugin.uuid]" :key="field.key" class="field">
+            <div v-for="field in configOf(plugin)" :key="field.key" class="field">
               <label>
                 <span>
                   {{ field.key }}
@@ -309,16 +382,12 @@ async function pollWeChat(): Promise<void> {
                 </span>
                 <div class="key-row">
                   <input
-                    v-model="drafts[`${plugin.uuid}/${field.key}`]"
+                    v-model="drafts[draftKeyOf(plugin, field.key)]"
                     :type="field.secret ? 'password' : 'text'"
                     :placeholder="field.secret ? (field.isSet ? '留空表示不修改' : '填入后只保存在本机') : (field.value || field.description || '')"
                     @keydown.enter="saveField(plugin, field.key)"
                   />
-                  <button
-                    class="ghost small"
-                    :disabled="!drafts[`${plugin.uuid}/${field.key}`]"
-                    @click="saveField(plugin, field.key)"
-                  >
+                  <button class="ghost small" :disabled="!drafts[draftKeyOf(plugin, field.key)]" @click="saveField(plugin, field.key)">
                     保存
                   </button>
                   <button v-if="field.isSet" class="ghost small" @click="clearField(plugin, field.key)">清掉</button>
@@ -328,77 +397,135 @@ async function pollWeChat(): Promise<void> {
             </div>
           </div>
 
-          <!-- 微信：扫码登录代替手填凭据。 -->
-          <div v-if="isWeChat(plugin)" class="block">
+          <!-- 渠道插件：一个连接（一个微信号、一个企微机器人）一张卡片。 -->
+          <div v-if="isChannel(plugin)" class="block">
             <div class="block-head">
-              <span class="block-title">扫码登录</span>
-              <button class="ghost small" @click="startWeChatLogin(plugin)">
-                {{ wechatQR?.uuid === plugin.uuid ? "重新获取" : "获取二维码" }}
-              </button>
+              <span class="block-title">连接</span>
+              <span class="actions">
+                <button class="ghost small" @click="actions.refreshChannels()">刷新</button>
+                <button class="primary small" @click="addConnection(plugin)">
+                  {{ isWeChat(plugin) ? "+ 添加微信号（扫码）" : "+ 添加机器人" }}
+                </button>
+              </span>
             </div>
             <p class="hint">
-              登录走第三方中继（iLink），可用性与账号风险由你自己承担。凭据由内核直接写进上面的配置，
-              不经过界面。
+              每个连接各自一套凭据、各自在线；同一个人找不同的连接，是不同的会话。
+              <template v-if="isWeChat(plugin)">登录走第三方中继（iLink），可用性与账号风险由你自己承担。</template>
             </p>
-            <img v-if="wechatQR?.uuid === plugin.uuid" class="qr" :src="wechatQR.image" alt="微信登录二维码" />
-            <p v-if="wechatStatus" class="hint">{{ wechatStatus }}</p>
-          </div>
 
-          <!-- 通道：连接状态 + 外部会话授权。 -->
-          <template v-if="isChannel(plugin)">
-            <div class="block">
-              <div class="block-head">
-                <span class="block-title">连接</span>
-                <button class="ghost small" @click="actions.refreshChannels()">刷新</button>
-              </div>
-              <p v-if="!plugin.enabled" class="hint">停用中，没有连接。</p>
-              <p v-else-if="channelsOf(plugin).length === 0" class="hint">还没有连接记录。</p>
-              <div v-for="channel in channelsOf(plugin)" :key="channel.channelId" class="channel">
-                <span class="dot" :class="channel.state" />
-                <span>{{ channel.displayName || channel.channelId }}：{{ STATE_LABELS[channel.state] ?? channel.state }}</span>
-                <span v-if="channel.attempts" class="hint">（第 {{ channel.attempts }} 次重连）</span>
-                <span v-if="channel.lastError" class="hint bad">{{ channel.lastError }}</span>
-              </div>
+            <!-- 添加微信号时的二维码（还没有连接，扫完才建）。 -->
+            <div v-if="wechatQR?.uuid === plugin.uuid && !wechatQR.connectionId" class="qr-box">
+              <img class="qr" :src="wechatQR.image" alt="微信登录二维码" />
+              <p class="hint">{{ wechatStatus }}</p>
             </div>
+            <p v-else-if="wechatStatus && isWeChat(plugin) && !wechatQR" class="hint">{{ wechatStatus }}</p>
 
-            <div class="block">
-              <div class="block-head"><span class="block-title">谁能找它</span></div>
-              <p class="hint">
-                外部会话（群或单聊）第一次发消息只会被记在这里，<strong>不会</strong>触发回答；
-                你放行之后它才能用。放行时选模型、选它能动的工具——默认只有只读工具，
-                因为发消息的人不是你。
-              </p>
-              <p v-if="bindingsOf(plugin).length === 0" class="hint">还没有外部会话找过它。</p>
-              <div v-for="binding in bindingsOf(plugin)" :key="bindingKey(binding)" class="binding" :class="{ allowed: binding.allowed }">
-                <div class="binding-head">
-                  <span class="name">{{ binding.displayName || binding.externalKey }}</span>
-                  <code class="ext">{{ binding.externalKey }}</code>
-                  <span class="badge" :class="{ ok: binding.allowed }">{{ binding.allowed ? "已放行" : "待放行" }}</span>
-                  <span v-if="binding.lastMessage" class="hint">最近 {{ formatTime(binding.lastMessage) }}</span>
-                </div>
-                <div class="binding-form">
-                  <select v-model="authDraft(binding).choice">
-                    <option value="">选模型…</option>
-                    <option v-for="c in choices" :key="`${c.providerId}/${c.model}`" :value="`${c.providerId}/${c.model}`">
-                      {{ c.model }} · {{ c.providerName }}
-                    </option>
-                  </select>
-                  <label v-for="tool in ACTING_TOOLS" :key="tool.name" class="tool">
-                    <input
-                      type="checkbox"
-                      :checked="authDraft(binding).tools.includes(tool.name)"
-                      @change="toggleTool(binding, tool.name, ($event.target as HTMLInputElement).checked)"
-                    />
-                    {{ tool.label }}
-                  </label>
-                  <button class="primary small" @click="authorize(binding)">
-                    {{ binding.allowed ? "更新" : "放行" }}
+            <p v-if="plugin.connections.length === 0" class="hint">
+              还没有连接。{{ isWeChat(plugin) ? "点「添加微信号」用微信扫码登录。" : "点「添加机器人」填入企业微信智能机器人的 bot_id 与 secret。" }}
+            </p>
+
+            <div v-for="connection in plugin.connections" :key="connection.uuid" class="connection">
+              <div class="conn-head">
+                <span class="dot" :class="connectionState(plugin, connection).kind" />
+                <input
+                  v-if="renaming[connection.uuid] !== undefined"
+                  v-model="renaming[connection.uuid]"
+                  class="rename"
+                  @keydown.enter="finishRename(connection)"
+                  @keydown.esc="delete renaming[connection.uuid]"
+                  @blur="finishRename(connection)"
+                />
+                <span v-else class="conn-name" title="双击改名" @dblclick="startRename(connection)">{{ connection.name }}</span>
+                <span class="conn-state" :class="connectionState(plugin, connection).kind">{{ connectionState(plugin, connection).text }}</span>
+                <span v-if="statusOf(connection)?.lastError" class="hint bad">{{ statusOf(connection)?.lastError }}</span>
+                <span class="actions">
+                  <button class="ghost small" @click="startRename(connection)">改名</button>
+                  <button v-if="isWeChat(plugin)" class="ghost small" @click="startWeChatLogin(plugin, connection.uuid)">重新扫码</button>
+                  <button v-else class="ghost small" @click="editing[connection.uuid] = !editing[connection.uuid]">
+                    {{ editing[connection.uuid] ? "收起凭据" : "凭据" }}
                   </button>
-                  <button v-if="binding.allowed" class="ghost small" @click="revoke(binding)">收回</button>
+                  <button class="icon" title="删除这个连接" @click="removeConnection(connection)">×</button>
+                </span>
+              </div>
+
+              <!-- 给这个连接重新登录的二维码。 -->
+              <div v-if="wechatQR?.connectionId === connection.uuid" class="qr-box">
+                <img class="qr" :src="wechatQR.image" alt="微信登录二维码" />
+                <p class="hint">{{ wechatStatus }}</p>
+              </div>
+
+              <!-- 企微等手填凭据的连接：没配齐时一直展开。 -->
+              <div v-if="!isWeChat(plugin) && (editing[connection.uuid] || connection.missingConfig.length > 0)" class="conn-config">
+                <div v-for="field in configOf(plugin, connection.uuid)" :key="field.key" class="field">
+                  <label>
+                    <span>
+                      {{ field.key }}
+                      <em v-if="field.required" class="req">必填</em>
+                      <em v-if="field.isSet" class="set">已配置</em>
+                    </span>
+                    <div class="key-row">
+                      <input
+                        v-model="drafts[draftKeyOf(plugin, field.key, connection.uuid)]"
+                        :type="field.secret ? 'password' : 'text'"
+                        :placeholder="field.secret ? (field.isSet ? '留空表示不修改' : '填入后只保存在本机') : (field.value || field.description || '')"
+                        @keydown.enter="saveField(plugin, field.key, connection.uuid)"
+                      />
+                      <button
+                        class="ghost small"
+                        :disabled="!drafts[draftKeyOf(plugin, field.key, connection.uuid)]"
+                        @click="saveField(plugin, field.key, connection.uuid)"
+                      >
+                        保存
+                      </button>
+                      <button v-if="field.isSet" class="ghost small" @click="clearField(plugin, field.key, connection.uuid)">清掉</button>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- 谁在通过这个连接找它。 -->
+              <div class="conn-bindings">
+                <p v-if="bindingsOf(plugin, connection).length === 0" class="hint">还没有人通过这个连接发过消息。</p>
+                <div
+                  v-for="binding in bindingsOf(plugin, connection)"
+                  :key="bindingKey(binding)"
+                  class="binding"
+                  :class="{ allowed: binding.allowed }"
+                >
+                  <div class="binding-head">
+                    <span class="name">{{ binding.displayName || binding.externalKey }}</span>
+                    <code class="ext">{{ binding.externalKey }}</code>
+                    <span class="badge" :class="{ ok: binding.allowed }">{{ binding.allowed ? "已放行" : "待放行" }}</span>
+                    <span v-if="binding.lastMessage" class="hint">最近 {{ formatTime(binding.lastMessage) }}</span>
+                  </div>
+                  <div class="binding-form">
+                    <select v-model="authDraft(binding).choice">
+                      <option value="">选模型…</option>
+                      <option v-for="c in choices" :key="`${c.providerId}/${c.model}`" :value="`${c.providerId}/${c.model}`">
+                        {{ c.model }} · {{ c.providerName }}
+                      </option>
+                    </select>
+                    <label v-for="tool in ACTING_TOOLS" :key="tool.name" class="tool">
+                      <input
+                        type="checkbox"
+                        :checked="authDraft(binding).tools.includes(tool.name)"
+                        @change="toggleTool(binding, tool.name, ($event.target as HTMLInputElement).checked)"
+                      />
+                      {{ tool.label }}
+                    </label>
+                    <button class="primary small" @click="authorize(binding)">
+                      {{ binding.allowed ? "更新" : "放行" }}
+                    </button>
+                    <button v-if="binding.allowed" class="ghost small" @click="revoke(binding)">收回</button>
+                  </div>
                 </div>
               </div>
             </div>
-          </template>
+            <p class="hint">
+              外部会话（群或单聊）第一次发消息只会被记下，<strong>不会</strong>触发回答；你放行之后它才能用。
+              放行时选模型、选它能动的工具——默认只有只读工具，因为发消息的人不是你。
+            </p>
+          </div>
         </template>
       </article>
 
@@ -690,6 +817,69 @@ button.small {
 .dot.failed,
 .dot.retrying {
   background: var(--danger);
+}
+
+.connection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+}
+
+.conn-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.conn-name {
+  font-weight: 600;
+  font-size: 13px;
+  cursor: text;
+}
+
+.conn-state {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.conn-state.running {
+  color: var(--ok);
+}
+
+.conn-state.bad,
+.conn-state.failed {
+  color: var(--danger);
+}
+
+.conn-head .actions,
+.block-head .actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.rename {
+  width: 180px;
+  padding: 2px 6px;
+  font-size: 13px;
+}
+
+.conn-config,
+.conn-bindings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-left: 16px;
+}
+
+.qr-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
 }
 
 .binding {

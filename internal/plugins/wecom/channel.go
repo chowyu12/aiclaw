@@ -125,11 +125,12 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, client 
 	reply := connector.NewReply(stream.push)
 
 	inbound := pluginpkg.Inbound{
-		ChannelID:   ChannelID,
-		ExternalKey: message.ThreadKey,
-		DisplayName: displayName(message),
-		SenderID:    message.SenderID,
-		Text:        text,
+		ChannelID:    ChannelID,
+		ConnectionID: deps.ConnectionID,
+		ExternalKey:  message.ThreadKey,
+		DisplayName:  displayName(message),
+		SenderID:     message.SenderID,
+		Text:         text,
 	}
 	c.attachMedia(ctx, deps, message, &inbound)
 	err := deps.Gateway.Submit(ctx, deps.PluginUUID, inbound, reply.Observe)

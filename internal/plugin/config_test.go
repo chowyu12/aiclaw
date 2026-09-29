@@ -27,6 +27,8 @@ func newConfigFixture(t *testing.T) (*ConfigService, *memStore, model.Plugin) {
 	store := newMemStore()
 	plugin := model.Plugin{UUID: "p1", Name: "Connector", Manifest: model.JSON(connectorManifest)}
 	store.plugins[plugin.UUID] = &plugin
+	// 渠道插件的配置按连接存：夹具里放一个连接，下面的读写都落在它上面。
+	store.addConnection(plugin.UUID, "c1", "机器人 A")
 	return NewConfigService(store), store, plugin
 }
 
@@ -35,14 +37,14 @@ func newConfigFixture(t *testing.T) (*ConfigService, *memStore, model.Plugin) {
 func TestFieldsNeverReturnSecretValues(t *testing.T) {
 	service, _, plugin := newConfigFixture(t)
 	ctx := context.Background()
-	if err := service.Set(ctx, plugin, "bot_secret", "s3cr3t"); err != nil {
+	if err := service.Set(ctx, plugin, "c1", "bot_secret", "s3cr3t"); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Set(ctx, plugin, "greeting", "hello"); err != nil {
+	if err := service.Set(ctx, plugin, "c1", "greeting", "hello"); err != nil {
 		t.Fatal(err)
 	}
 
-	fields, err := service.Fields(ctx, plugin)
+	fields, err := service.Fields(ctx, plugin, "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +72,7 @@ func TestFieldsNeverReturnSecretValues(t *testing.T) {
 	}
 
 	// The value must still be readable by the plugin implementation itself.
-	values, err := service.Load(ctx, plugin.UUID)
+	values, err := service.Load(ctx, plugin.UUID, "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +85,10 @@ func TestFieldsNeverReturnSecretValues(t *testing.T) {
 // a credential as a plain field and have it echoed back.
 func TestSecretFlagComesFromTheManifest(t *testing.T) {
 	service, store, plugin := newConfigFixture(t)
-	if err := service.Set(context.Background(), plugin, "bot_secret", "s3cr3t"); err != nil {
+	if err := service.Set(context.Background(), plugin, "c1", "bot_secret", "s3cr3t"); err != nil {
 		t.Fatal(err)
 	}
-	stored := store.config[configKey(plugin.UUID, "bot_secret")]
+	stored := store.config[configKey(plugin.UUID, "c1", "bot_secret")]
 	if stored == nil || !stored.Secret {
 		t.Fatalf("stored record = %+v", stored)
 	}
@@ -94,7 +96,7 @@ func TestSecretFlagComesFromTheManifest(t *testing.T) {
 
 func TestSetRejectsUndeclaredKeys(t *testing.T) {
 	service, store, plugin := newConfigFixture(t)
-	err := service.Set(context.Background(), plugin, "webhook_url", "https://example.invalid")
+	err := service.Set(context.Background(), plugin, "c1", "webhook_url", "https://example.invalid")
 	if err == nil || !strings.Contains(err.Error(), "webhook_url") {
 		t.Fatalf("an undeclared key was stored: %v", err)
 	}
@@ -107,17 +109,18 @@ func TestEnableRequiresDeclaredRequiredConfig(t *testing.T) {
 	service, _, plugin := newConfigFixture(t)
 	ctx := context.Background()
 
+	// 渠道插件看连接：一个配齐了的连接都没有，就不能启用。
 	err := service.ValidateEnable(ctx, plugin)
-	if err == nil || !strings.Contains(err.Error(), "bot_id") || !strings.Contains(err.Error(), "bot_secret") {
-		t.Fatalf("a plugin with missing required config was enabled: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "连接") {
+		t.Fatalf("a plugin with no ready connection was enabled: %v", err)
 	}
-	if err := service.Set(ctx, plugin, "bot_id", "bot-1"); err != nil {
+	if err := service.Set(ctx, plugin, "c1", "bot_id", "bot-1"); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.ValidateEnable(ctx, plugin); err == nil {
 		t.Fatal("a partially configured plugin was enabled")
 	}
-	if err := service.Set(ctx, plugin, "bot_secret", "s3cr3t"); err != nil {
+	if err := service.Set(ctx, plugin, "c1", "bot_secret", "s3cr3t"); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.ValidateEnable(ctx, plugin); err != nil {
@@ -125,35 +128,47 @@ func TestEnableRequiresDeclaredRequiredConfig(t *testing.T) {
 	}
 
 	// An optional key stays optional.
-	missing, err := service.MissingRequired(ctx, plugin)
+	missing, err := service.MissingRequired(ctx, plugin, "c1")
 	if err != nil || len(missing) != 0 {
 		t.Fatalf("missing = %+v err = %v", missing, err)
 	}
 }
 
-// Clearing a required key while the plugin runs would leave it enabled without
-// what it declared it needs.
+// Clearing a required plugin-level key while the plugin runs would leave it
+// enabled without what it declared it needs. A connection's key is different:
+// clearing it only stops that connection; the others keep running.
 func TestRequiredKeyCannotBeClearedWhileEnabled(t *testing.T) {
-	service, store, plugin := newConfigFixture(t)
+	store := newMemStore()
+	service := NewConfigService(store)
 	ctx := context.Background()
-	if err := service.Set(ctx, plugin, "bot_id", "bot-1"); err != nil {
+	plugin := model.Plugin{UUID: "p3", Name: "Research", Manifest: model.JSON(`{"schema_version":1,"id":"acme.research","name":"Research",
+		"config":{"token":{"type":"string","required":true,"secret":true}}}`)}
+	if err := service.Set(ctx, plugin, "", "token", "t"); err != nil {
 		t.Fatal(err)
 	}
 	enabled := plugin
 	enabled.Enabled = true
-
-	if err := service.Delete(ctx, enabled, "bot_id"); err == nil {
-		t.Fatal("a required key was cleared while the plugin was enabled")
+	if err := service.Delete(ctx, enabled, "", "token"); err == nil {
+		t.Fatal("a required plugin-level key was cleared while the plugin was enabled")
 	}
-	if store.config[configKey(plugin.UUID, "bot_id")] == nil {
+	if store.config[configKey(plugin.UUID, "", "token")] == nil {
 		t.Fatal("the refused delete still removed the value")
 	}
-	// Disabled, the same delete is allowed.
-	if err := service.Delete(ctx, plugin, "bot_id"); err != nil {
+	if err := service.Delete(ctx, plugin, "", "token"); err != nil {
 		t.Fatal(err)
 	}
-	if store.config[configKey(plugin.UUID, "bot_id")] != nil {
-		t.Fatal("the value survived the delete")
+
+	connector, connectorStore, channelPlugin := newConfigFixture(t)
+	if err := connector.Set(ctx, channelPlugin, "c1", "bot_id", "bot-1"); err != nil {
+		t.Fatal(err)
+	}
+	running := channelPlugin
+	running.Enabled = true
+	if err := connector.Delete(ctx, running, "c1", "bot_id"); err != nil {
+		t.Fatalf("clearing one connection's key should only stop that connection: %v", err)
+	}
+	if connectorStore.config[configKey(channelPlugin.UUID, "c1", "bot_id")] != nil {
+		t.Fatal("the connection's value survived the delete")
 	}
 }
 
@@ -161,13 +176,13 @@ func TestRequiredKeyCannotBeClearedWhileEnabled(t *testing.T) {
 func TestEmptyValueClearsAKey(t *testing.T) {
 	service, store, plugin := newConfigFixture(t)
 	ctx := context.Background()
-	if err := service.Set(ctx, plugin, "greeting", "hello"); err != nil {
+	if err := service.Set(ctx, plugin, "c1", "greeting", "hello"); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.Set(ctx, plugin, "greeting", "   "); err != nil {
+	if err := service.Set(ctx, plugin, "c1", "greeting", "   "); err != nil {
 		t.Fatal(err)
 	}
-	if store.config[configKey(plugin.UUID, "greeting")] != nil {
+	if store.config[configKey(plugin.UUID, "c1", "greeting")] != nil {
 		t.Fatalf("config = %+v", store.config)
 	}
 }
@@ -180,7 +195,7 @@ func TestPluginWithoutDeclaredConfigEnablesFreely(t *testing.T) {
 	if err := service.ValidateEnable(context.Background(), plugin); err != nil {
 		t.Fatal(err)
 	}
-	fields, err := service.Fields(context.Background(), plugin)
+	fields, err := service.Fields(context.Background(), plugin, "")
 	if err != nil || len(fields) != 0 {
 		t.Fatalf("fields = %+v err = %v", fields, err)
 	}
@@ -195,7 +210,7 @@ func TestUninstallClearsStoredConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.config[configKey(plugin.UUID, "token")] = &model.PluginConfig{
+	store.config[configKey(plugin.UUID, "c1", "token")] = &model.PluginConfig{
 		PluginUUID: plugin.UUID, Key: "token", Value: "s3cr3t", Secret: true,
 	}
 	if err := installer.Uninstall(ctx, *plugin); err != nil {

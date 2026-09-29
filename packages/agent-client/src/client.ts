@@ -36,6 +36,7 @@ import type {
   TurnStartResult,
   BrowserRequestParams,
   BrowserResult,
+  ChannelConnectionView,
   UsageSummary,
   UserInputRequestParams,
   UserInputResponse,
@@ -273,16 +274,37 @@ export class ClawAgentClient extends EventEmitter {
     return this.transport.request("plugin/delete", { uuid });
   }
 
-  async pluginConfig(uuid: string): Promise<PluginConfigField[]> {
+  /** 插件（或它的某个连接）的配置。渠道插件必须给 connectionId。 */
+  async pluginConfig(uuid: string, connectionId = ""): Promise<PluginConfigField[]> {
     this.assertReady();
-    const result = await this.transport.request<{ fields: PluginConfigField[] }>("plugin/config", { uuid });
+    const result = await this.transport.request<{ fields: PluginConfigField[] }>("plugin/config", {
+      uuid,
+      connectionId: connectionId || undefined,
+    });
     return result.fields ?? [];
   }
 
-  /** 空串表示清掉这一项。 */
-  pluginSetConfig(uuid: string, key: string, value: string): Promise<unknown> {
+  /** 空串表示清掉这一项。渠道插件必须给 connectionId：改完只重启那一个连接。 */
+  pluginSetConfig(uuid: string, key: string, value: string, connectionId = ""): Promise<unknown> {
     this.assertReady();
-    return this.transport.request("plugin/setConfig", { uuid, key, value });
+    return this.transport.request("plugin/setConfig", { uuid, key, value, connectionId: connectionId || undefined });
+  }
+
+  /** 给渠道插件加一个连接（一个企微机器人、一个微信号）。名字空着就自动编号。 */
+  connectionCreate(pluginUuid: string, name = ""): Promise<ChannelConnectionView> {
+    this.assertReady();
+    return this.transport.request<ChannelConnectionView>("channel/connectionCreate", { pluginUuid, name });
+  }
+
+  connectionRename(uuid: string, name: string): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("channel/connectionRename", { uuid, name });
+  }
+
+  /** 删掉一个连接：停掉它、删掉它的凭据与放行记录。会话本身留着。 */
+  connectionDelete(uuid: string): Promise<unknown> {
+    this.assertReady();
+    return this.transport.request("channel/connectionDelete", { uuid });
   }
 
   /** 启用中的插件贡献给会话的东西。开会话前拿一次。 */
@@ -335,9 +357,14 @@ export class ClawAgentClient extends EventEmitter {
     return this.transport.request<WeChatLoginStartResult>("wechat/loginStart", {});
   }
 
-  wechatLoginPoll(uuid: string, token: string): Promise<WeChatLoginPollResult> {
+  /** connectionId 空着是「添加一个微信号」：登录成功后新建连接（同一个号以前连过就写回原来的）。 */
+  wechatLoginPoll(uuid: string, token: string, connectionId = ""): Promise<WeChatLoginPollResult> {
     this.assertReady();
-    return this.transport.request<WeChatLoginPollResult>("wechat/loginPoll", { uuid, token });
+    return this.transport.request<WeChatLoginPollResult>("wechat/loginPoll", {
+      uuid,
+      token,
+      connectionId: connectionId || undefined,
+    });
   }
 
   async sessionList(): Promise<SessionSummary[]> {

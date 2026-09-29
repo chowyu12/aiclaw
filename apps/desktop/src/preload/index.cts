@@ -56,7 +56,8 @@ const api = {
     install: (path: string) => ipcRenderer.invoke(IPC.pluginInstall, path),
     toggle: (input: unknown) => ipcRenderer.invoke(IPC.pluginToggle, input),
     remove: (uuid: string) => ipcRenderer.invoke(IPC.pluginDelete, uuid),
-    config: (uuid: string) => ipcRenderer.invoke(IPC.pluginConfig, uuid),
+    /** 渠道插件的配置按连接存，给 connectionId。 */
+    config: (uuid: string, connectionId = "") => ipcRenderer.invoke(IPC.pluginConfig, { uuid, connectionId }),
     setConfig: (input: unknown) => ipcRenderer.invoke(IPC.pluginSetConfig, input),
     contributions: () => ipcRenderer.invoke(IPC.pluginContributions),
   },
@@ -65,6 +66,10 @@ const api = {
     bindings: () => ipcRenderer.invoke(IPC.channelBindings),
     authorize: (input: unknown) => ipcRenderer.invoke(IPC.channelAuthorize, input),
     revoke: (input: unknown) => ipcRenderer.invoke(IPC.channelRevoke, input),
+    /** 渠道插件的连接：一个微信号、一个企微机器人一个。 */
+    createConnection: (pluginUuid: string, name = "") => ipcRenderer.invoke(IPC.connectionCreate, { pluginUuid, name }),
+    renameConnection: (uuid: string, name: string) => ipcRenderer.invoke(IPC.connectionRename, { uuid, name }),
+    deleteConnection: (uuid: string) => ipcRenderer.invoke(IPC.connectionDelete, uuid),
   },
   wechat: {
     loginStart: () => ipcRenderer.invoke(IPC.wechatLoginStart),
@@ -86,6 +91,8 @@ const api = {
     create: (name: string) => ipcRenderer.invoke(IPC.groupCreate, name),
     rename: (input: unknown) => ipcRenderer.invoke(IPC.groupRename, input),
     remove: (groupId: string) => ipcRenderer.invoke(IPC.groupDelete, groupId),
+    /** 折叠 / 展开一个分组（同时记下「看过了」）。 */
+    collapse: (groupId: string, collapsed: boolean) => ipcRenderer.invoke(IPC.groupCollapse, { groupId, collapsed }),
   },
   profiles: {
     list: () => ipcRenderer.invoke(IPC.profileList),

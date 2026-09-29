@@ -88,7 +88,7 @@ func NewHost(gateway Gateway, config *ConfigService, factories map[string]Channe
 // called at startup and whenever a plugin is toggled, and is safe to call
 // repeatedly: a channel already running is left alone.
 func (h *Host) Sync(ctx context.Context, plugins []model.Plugin) error {
-	wanted, err := h.desired(plugins)
+	wanted, err := h.desired(ctx, plugins)
 	if err != nil {
 		return err
 	}
@@ -114,14 +114,29 @@ func (h *Host) Sync(ctx context.Context, plugins []model.Plugin) error {
 	return nil
 }
 
+// RestartConnection 停掉一个连接的运行实例，下一次 Sync 会用新配置重新拉起它。
+// 改了某个连接的凭据时调：只动那一个，别的连接不受影响。
+func (h *Host) RestartConnection(connectionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for key, run := range h.running {
+		if run.status.get().ConnectionID == connectionID {
+			run.cancel()
+			delete(h.running, key)
+		}
+	}
+}
+
 // desiredChannel is one channel that should be running.
 type desiredChannel struct {
 	plugin       model.Plugin
+	connection   model.ChannelConnection
 	contribution ChannelContribution
 	factory      ChannelFactory
 }
 
-func (h *Host) desired(plugins []model.Plugin) (map[string]desiredChannel, error) {
+// desired 列出应当在跑的渠道：每个启用了的渠道插件，它每个配置齐了的连接，各一个。
+func (h *Host) desired(ctx context.Context, plugins []model.Plugin) (map[string]desiredChannel, error) {
 	wanted := make(map[string]desiredChannel)
 	for _, plugin := range plugins {
 		if !plugin.Enabled || len(plugin.Manifest) == 0 {
@@ -142,6 +157,11 @@ func (h *Host) desired(plugins []model.Plugin) (map[string]desiredChannel, error
 		for _, permission := range declared {
 			granted[permission] = true
 		}
+		// 没配齐的连接不启动：它只会一遍遍失败。配齐了下一次 Sync 就会拉起来。
+		connections, err := h.config.ReadyConnections(ctx, plugin)
+		if err != nil {
+			return nil, err
+		}
 		for _, contribution := range manifest.Contributes.Channels {
 			provider, ok := LookupProvider(contribution.Provider)
 			if !ok {
@@ -157,8 +177,10 @@ func (h *Host) desired(plugins []model.Plugin) (map[string]desiredChannel, error
 			if !granted[skills.PermissionChannelReceive] || !covers(granted, provider.Requires) {
 				continue
 			}
-			wanted[channelKey(plugin.UUID, contribution.ID)] = desiredChannel{
-				plugin: plugin, contribution: contribution, factory: factory,
+			for _, connection := range connections {
+				wanted[channelKey(plugin.UUID, contribution.ID, connection.UUID)] = desiredChannel{
+					plugin: plugin, connection: connection, contribution: contribution, factory: factory,
+				}
 			}
 		}
 	}
@@ -171,7 +193,8 @@ func (h *Host) start(ctx context.Context, key string, wanted desiredChannel) {
 	holder := &statusHolder{status: ChannelStatus{
 		PluginUUID: wanted.plugin.UUID, PluginName: wanted.plugin.Name,
 		ChannelID: wanted.contribution.ID, DisplayName: wanted.contribution.DisplayName,
-		State: ChannelStarting,
+		ConnectionID: wanted.connection.UUID,
+		State:        ChannelStarting,
 	}}
 	h.running[key] = &channelRun{cancel: cancel, status: holder}
 	h.wg.Add(1)
@@ -191,7 +214,7 @@ func (h *Host) supervise(ctx context.Context, wanted desiredChannel, holder *sta
 		}
 		// Configuration is re-read on every attempt so rotating a credential
 		// takes effect on the next reconnect instead of needing a restart.
-		values, err := h.config.Load(ctx, wanted.plugin.UUID)
+		values, err := h.config.Load(ctx, wanted.plugin.UUID, wanted.connection.UUID)
 		started := time.Now()
 		if err == nil {
 			holder.set(func(s *ChannelStatus) {
@@ -199,7 +222,7 @@ func (h *Host) supervise(ctx context.Context, wanted desiredChannel, holder *sta
 				s.Attempts = attempt
 			})
 			if attempt > 0 {
-				h.log("channel %s/%s reconnecting (attempt %d)", wanted.plugin.Name, wanted.contribution.ID, attempt)
+				h.log("channel %s/%s reconnecting (attempt %d)", wanted.plugin.Name, wanted.connection.Name, attempt)
 			}
 			err = h.run(ctx, wanted, values)
 		}
@@ -208,7 +231,7 @@ func (h *Host) supervise(ctx context.Context, wanted desiredChannel, holder *sta
 			// It was up for a while: this is a new incident, not the previous
 			// one continuing. Start the backoff over so a long-lived channel
 			// never exhausts its attempts through unrelated blips.
-			h.log("channel %s/%s ran %s before failing; resetting backoff", wanted.plugin.Name, wanted.contribution.ID, ran.Round(time.Second))
+			h.log("channel %s/%s ran %s before failing; resetting backoff", wanted.plugin.Name, wanted.connection.Name, ran.Round(time.Second))
 			attempt, delay = 0, restartBaseDelay
 		}
 		if ctx.Err() != nil || errors.Is(err, context.Canceled) {
@@ -221,7 +244,7 @@ func (h *Host) supervise(ctx context.Context, wanted desiredChannel, holder *sta
 			return
 		}
 		message := err.Error()
-		h.log("channel %s/%s failed after %s: %v", wanted.plugin.Name, wanted.contribution.ID, ran.Round(time.Second), err)
+		h.log("channel %s/%s failed after %s: %v", wanted.plugin.Name, wanted.connection.Name, ran.Round(time.Second), err)
 		if attempt == maxRestartAttempts {
 			holder.set(func(s *ChannelStatus) {
 				s.State, s.LastError, s.Attempts = ChannelFailed, message, attempt
@@ -252,11 +275,14 @@ func (h *Host) run(ctx context.Context, wanted desiredChannel, values Values) (e
 		}
 	}()
 	channel := wanted.factory()
+	name := wanted.connection.Name
 	return channel.Run(ctx, ChannelDeps{
-		PluginUUID: wanted.plugin.UUID,
-		Config:     values,
-		Gateway:    h.gateway,
-		Log:        h.log,
+		PluginUUID:   wanted.plugin.UUID,
+		ConnectionID: wanted.connection.UUID,
+		Config:       values,
+		Gateway:      h.gateway,
+		// 日志前面带上连接名：好几个微信号同时在跑时，看得出是哪一个出的事。
+		Log: func(format string, args ...any) { h.log("["+name+"] "+format, args...) },
 	})
 }
 

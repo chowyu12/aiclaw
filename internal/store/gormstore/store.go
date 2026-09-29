@@ -70,7 +70,10 @@ func New(cfg config.DatabaseConfig) (*GormStore, error) {
 }
 
 func autoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	if err := dropReplacedIndexes(db); err != nil {
+		return err
+	}
+	if err := db.AutoMigrate(
 		&model.Provider{},
 		&model.MCPServer{},
 		&model.Project{},
@@ -85,8 +88,12 @@ func autoMigrate(db *gorm.DB) error {
 		&model.Plugin{},
 		&model.PluginConfig{},
 		&model.ChannelBinding{},
+		&model.ChannelConnection{},
 		&model.AppSetting{},
-	)
+	); err != nil {
+		return err
+	}
+	return migrateChannelConnections(db)
 }
 
 func TestConnection(cfg config.DatabaseConfig) error {

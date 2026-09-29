@@ -58,12 +58,21 @@ interface Bucket {
  * 与真实分组 id（g_ 前缀）也不会撞。
  */
 const UNGROUPED = "__ungrouped__";
+/**
+ * 内置的「渠道会话」分组：微信、企业微信进来的会话（id 以 c_ 开头）没被用户挪走时都在这儿，
+ * 默认折叠——它们是别人发来的，量大，不该把自己的会话挤下去。不能改名、不能删。
+ */
+const CHANNELS = "__channels__";
+
+function isChannelSession(session: SessionSummaryView): boolean {
+  return session.id.startsWith("c_");
+}
 
 const buckets = computed<Bucket[]>(() => {
   const assignments = store.groups.assignments;
   const byGroup = new Map<string, SessionSummaryView[]>();
   for (const session of store.sessions) {
-    const groupId = assignments[session.id] ?? UNGROUPED;
+    const groupId = assignments[session.id] ?? (isChannelSession(session) ? CHANNELS : UNGROUPED);
     const list = byGroup.get(groupId);
     if (list) list.push(session);
     else byGroup.set(groupId, [session]);
@@ -75,11 +84,48 @@ const buckets = computed<Bucket[]>(() => {
   // 未分组排最后：用户建了分组就是想先看见分组，没建时它是唯一一组，
   // 排哪儿都一样。
   const loose = byGroup.get(UNGROUPED) ?? [];
-  if (loose.length > 0 || result.length === 0) {
+  const channels = byGroup.get(CHANNELS) ?? [];
+  if (loose.length > 0 || (result.length === 0 && channels.length === 0)) {
     result.push({ id: UNGROUPED, name: "未分组", sessions: loose });
   }
+  // 渠道会话排最后：它们默认折叠，自己的会话在前面。
+  if (channels.length > 0) result.push({ id: CHANNELS, name: "渠道会话", sessions: channels });
   return result;
 });
+
+/** 没记过的：渠道会话默认折叠，其它默认展开。 */
+function isCollapsed(bucket: Bucket): boolean {
+  return store.groups.collapsed?.[bucket.id] ?? bucket.id === CHANNELS;
+}
+
+/** 折叠时还要露出来的：当前正在看的那个会话（从用量页之类的地方打开时，它可能在折叠的分组里）。 */
+function visibleSessions(bucket: Bucket): SessionSummaryView[] {
+  return isCollapsed(bucket) ? bucket.sessions.filter((session) => session.id === store.sessionId) : bucket.sessions;
+}
+
+/** 折叠着的分组里，上次看过之后有新消息的会话数。 */
+function unread(bucket: Bucket): number {
+  const seen = store.groups.seenAt?.[bucket.id] ?? 0;
+  return bucket.sessions.filter((session) => Date.parse(session.updatedAt) > seen).length;
+}
+
+/** 分组里有会话正在执行或在等回答：折叠时标题上亮一个点。 */
+function active(bucket: Bucket): boolean {
+  return bucket.sessions.some((session) => store.live[session.id]?.busy || waiting(session.id));
+}
+
+function toggleBucket(bucket: Bucket): void {
+  void actions.collapseGroup(bucket.id, !isCollapsed(bucket));
+}
+
+// 渠道会话分组第一次出现时记下「现在看过了」：不然一上来它所有的旧会话都算成新消息。
+watch(
+  () => buckets.value.some((bucket) => bucket.id === CHANNELS) && store.groups.seenAt?.[CHANNELS] === undefined,
+  (unseen) => {
+    if (unseen) void actions.collapseGroup(CHANNELS, true);
+  },
+  { immediate: true },
+);
 
 async function newGroup(): Promise<void> {
   await actions.createGroup(`分组 ${store.groups.groups.length + 1}`);
@@ -251,9 +297,17 @@ function when(iso: string): string {
         :key="bucket.id"
         class="bucket"
       >
-        <header class="bucket-head">
+        <header class="bucket-head" :class="{ collapsed: isCollapsed(bucket) }">
+          <button
+            class="fold"
+            :title="isCollapsed(bucket) ? '展开' : '折叠'"
+            :aria-expanded="!isCollapsed(bucket)"
+            @click="toggleBucket(bucket)"
+          >
+            {{ isCollapsed(bucket) ? "▸" : "▾" }}
+          </button>
           <input
-            v-if="renaming === bucket.id && bucket.id !== UNGROUPED"
+            v-if="renaming === bucket.id && bucket.id !== UNGROUPED && bucket.id !== CHANNELS"
             v-model="renameDraft"
             class="rename"
             autofocus
@@ -262,12 +316,21 @@ function when(iso: string): string {
             @blur="commitRename()"
           />
           <template v-else>
-            <span class="bucket-name" @dblclick="bucket.id !== UNGROUPED && startRename(bucket.id, bucket.name)">
+            <span
+              class="bucket-name"
+              @click="toggleBucket(bucket)"
+              @dblclick="bucket.id !== UNGROUPED && bucket.id !== CHANNELS && startRename(bucket.id, bucket.name)"
+            >
               {{ bucket.name }}
             </span>
             <span class="count">{{ bucket.sessions.length }}</span>
+            <!-- 折叠时：有新消息给个数，有会话在跑 / 在等回答亮个点。 -->
+            <span v-if="isCollapsed(bucket) && unread(bucket) > 0" class="unread" :title="`上次看过之后有 ${unread(bucket)} 个会话有新消息`">
+              {{ unread(bucket) }} 新
+            </span>
+            <span v-if="isCollapsed(bucket) && active(bucket)" class="running" title="有会话正在执行或在等你回答"></span>
             <button
-              v-if="bucket.id !== UNGROUPED"
+              v-if="bucket.id !== UNGROUPED && bucket.id !== CHANNELS"
               class="icon tiny"
               title="删除分组（会话会回到未分组）"
               @click="removeGroup(bucket.id, bucket.name)"
@@ -278,7 +341,7 @@ function when(iso: string): string {
         </header>
 
         <div
-          v-for="session in bucket.sessions"
+          v-for="session in visibleSessions(bucket)"
           :key="session.id"
           class="item"
           :class="{ active: session.id === store.sessionId }"
@@ -317,7 +380,9 @@ function when(iso: string): string {
             >
               {{ group.name }}
             </button>
-            <button class="move-option" @click="moveTo(session.id, null)">未分组</button>
+            <button class="move-option" @click="moveTo(session.id, null)">
+              {{ isChannelSession(session) ? "渠道会话" : "未分组" }}
+            </button>
             <p v-if="store.groups.groups.length === 0" class="move-hint">
               还没有分组，先用右上角的 ▤ 建一个。
             </p>
@@ -566,6 +631,28 @@ function when(iso: string): string {
 }
 
 /* 正在执行的会话：标题前一个呼吸的小点。 */
+.fold {
+  padding: 0 2px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.bucket-name {
+  cursor: pointer;
+}
+
+.unread {
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: 10.5px;
+  line-height: 16px;
+}
+
 .running {
   display: inline-block;
   width: 7px;

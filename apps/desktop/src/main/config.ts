@@ -106,8 +106,12 @@ export interface SessionGroup {
 
 export interface SessionGroups {
   groups: SessionGroup[];
-  /** 会话 id → 分组 id。不在表里的会话就是「未分组」。 */
+  /** 会话 id → 分组 id。不在表里的会话就是「未分组」（渠道会话是「渠道会话」）。 */
   assignments: Record<string, string>;
+  /** 分组 id → 是否折叠。没记的：渠道会话默认折叠，其它默认展开。 */
+  collapsed: Record<string, boolean>;
+  /** 分组 id → 上次展开看过的时间（毫秒）。折叠时据此数「有几个会话有新消息」。 */
+  seenAt: Record<string, number>;
 }
 
 export class ConfigStore {
@@ -250,22 +254,40 @@ export class ConfigStore {
    * 见 pruneGroupAssignments。
    */
   readGroups(): SessionGroups {
-    if (!existsSync(this.groupsPath)) return { groups: [], assignments: {} };
+    const empty: SessionGroups = { groups: [], assignments: {}, collapsed: {}, seenAt: {} };
+    if (!existsSync(this.groupsPath)) return empty;
     try {
       const raw = JSON.parse(readFileSync(this.groupsPath, "utf8")) as Partial<SessionGroups>;
+      const record = <T>(value: unknown): Record<string, T> =>
+        value && typeof value === "object" ? (value as Record<string, T>) : {};
       return {
         groups: Array.isArray(raw.groups) ? raw.groups : [],
-        assignments:
-          raw.assignments && typeof raw.assignments === "object" ? raw.assignments : {},
+        assignments: record<string>(raw.assignments),
+        collapsed: record<boolean>(raw.collapsed),
+        seenAt: record<number>(raw.seenAt),
       };
     } catch {
-      return { groups: [], assignments: {} };
+      return empty;
     }
   }
 
-  writeGroups(next: SessionGroups): SessionGroups {
-    writeFileSync(this.groupsPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-    return next;
+  /**
+   * 写分组文件。**没给的字段沿用原来的**：各处调用只关心自己改的那一项
+   *（分组、归属、折叠），整个对象重写的话别的字段会被悄悄冲掉。
+   */
+  writeGroups(next: Partial<SessionGroups>): SessionGroups {
+    const merged = { ...this.readGroups(), ...next };
+    writeFileSync(this.groupsPath, `${JSON.stringify(merged, null, 2)}\n`, "utf8");
+    return merged;
+  }
+
+  /** 折叠 / 展开一个分组；展开（或折叠时）同时记下「看过了」。 */
+  setGroupCollapsed(groupId: string, collapsed: boolean): SessionGroups {
+    const current = this.readGroups();
+    return this.writeGroups({
+      collapsed: { ...current.collapsed, [groupId]: collapsed },
+      seenAt: { ...current.seenAt, [groupId]: Date.now() },
+    });
   }
 
   /**

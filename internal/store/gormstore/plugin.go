@@ -70,9 +70,11 @@ func (s *GormStore) DeletePlugin(ctx context.Context, pluginUUID string) error {
 	return nil
 }
 
-func (s *GormStore) ListPluginConfig(ctx context.Context, pluginUUID string) ([]model.PluginConfig, error) {
+// ListPluginConfig 列出一个插件在某个连接下的配置。connectionID 为空是插件本身的配置。
+func (s *GormStore) ListPluginConfig(ctx context.Context, pluginUUID, connectionID string) ([]model.PluginConfig, error) {
 	var items []model.PluginConfig
-	if err := s.db.WithContext(ctx).Where("plugin_uuid = ?", pluginUUID).Order("key ASC").Find(&items).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("plugin_uuid = ? AND connection_id = ?", pluginUUID, connectionID).
+		Order("key ASC").Find(&items).Error; err != nil {
 		return nil, err
 	}
 	// 只有 secret 的值加密：普通配置（比如企业微信的 corp id）明文存着，
@@ -91,17 +93,49 @@ func (s *GormStore) SetPluginConfig(ctx context.Context, item *model.PluginConfi
 		stored.Value = s.seal(item.Value)
 	}
 	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "plugin_uuid"}, {Name: "key"}},
+		Columns:   []clause.Column{{Name: "plugin_uuid"}, {Name: "connection_id"}, {Name: "key"}},
 		DoUpdates: clause.AssignmentColumns([]string{"value", "secret", "updated_at"}),
 	}).Create(&stored).Error
 }
 
-func (s *GormStore) DeletePluginConfig(ctx context.Context, pluginUUID, key string) error {
-	return s.db.WithContext(ctx).Where("plugin_uuid = ? AND key = ?", pluginUUID, key).Delete(&model.PluginConfig{}).Error
+func (s *GormStore) DeletePluginConfig(ctx context.Context, pluginUUID, connectionID, key string) error {
+	return s.db.WithContext(ctx).Where("plugin_uuid = ? AND connection_id = ? AND key = ?", pluginUUID, connectionID, key).
+		Delete(&model.PluginConfig{}).Error
+}
+
+// DeleteConnectionConfig 删掉一个连接的全部配置。连接删了，它的凭据不该留下。
+func (s *GormStore) DeleteConnectionConfig(ctx context.Context, pluginUUID, connectionID string) error {
+	return s.db.WithContext(ctx).Where("plugin_uuid = ? AND connection_id = ?", pluginUUID, connectionID).
+		Delete(&model.PluginConfig{}).Error
+}
+
+// ListChannelConnections 列出一个插件的连接，按创建先后。pluginUUID 为空列全部。
+func (s *GormStore) ListChannelConnections(ctx context.Context, pluginUUID string) ([]model.ChannelConnection, error) {
+	var items []model.ChannelConnection
+	query := s.db.WithContext(ctx).Order("id ASC")
+	if pluginUUID != "" {
+		query = query.Where("plugin_uuid = ?", pluginUUID)
+	}
+	return items, query.Find(&items).Error
+}
+
+func (s *GormStore) CreateChannelConnection(ctx context.Context, item *model.ChannelConnection) error {
+	return s.db.WithContext(ctx).Create(item).Error
+}
+
+func (s *GormStore) RenameChannelConnection(ctx context.Context, uuid, name string) error {
+	return s.db.WithContext(ctx).Model(&model.ChannelConnection{}).Where("uuid = ?", uuid).Update("name", name).Error
+}
+
+func (s *GormStore) DeleteChannelConnection(ctx context.Context, uuid string) error {
+	return s.db.WithContext(ctx).Where("uuid = ?", uuid).Delete(&model.ChannelConnection{}).Error
 }
 
 // DeletePluginConfigs removes every stored value of a plugin. Secrets must not
 // outlive the bundle they belong to.
 func (s *GormStore) DeletePluginConfigs(ctx context.Context, pluginUUID string) error {
+	if err := s.db.WithContext(ctx).Where("plugin_uuid = ?", pluginUUID).Delete(&model.ChannelConnection{}).Error; err != nil {
+		return err
+	}
 	return s.db.WithContext(ctx).Where("plugin_uuid = ?", pluginUUID).Delete(&model.PluginConfig{}).Error
 }

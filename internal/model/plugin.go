@@ -37,10 +37,28 @@ type Plugin struct {
 // changes how the value is handled — never returned to the UI, never logged,
 // never placed in a rollout or model context. See docs/design/plugin-system.md.
 type PluginConfig struct {
-	ID         int64     `json:"id" gorm:"primaryKey;autoIncrement"`
-	PluginUUID string    `json:"plugin_uuid" gorm:"size:36;not null;uniqueIndex:idx_plugin_config_key"`
-	Key        string    `json:"key" gorm:"size:200;not null;uniqueIndex:idx_plugin_config_key"`
-	Value      string    `json:"-" gorm:"type:text"`
-	Secret     bool      `json:"secret" gorm:"not null"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         int64  `json:"id" gorm:"primaryKey;autoIncrement"`
+	PluginUUID string `json:"plugin_uuid" gorm:"size:36;not null;uniqueIndex:idx_plugin_config_conn_key,priority:1"`
+	// ConnectionID 是这个值属于哪个连接（渠道插件的一个微信号、一个企微机器人）。
+	// 空串是插件本身的配置（不带渠道的插件只有这一种）。
+	ConnectionID string    `json:"connection_id" gorm:"size:64;not null;default:'';uniqueIndex:idx_plugin_config_conn_key,priority:2"`
+	Key          string    `json:"key" gorm:"size:200;not null;uniqueIndex:idx_plugin_config_conn_key,priority:3"`
+	Value        string    `json:"-" gorm:"type:text"`
+	Secret       bool      `json:"secret" gorm:"not null"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
+// ChannelConnection 是渠道插件的一个连接：一个微信号、一个企业微信机器人。
+//
+// 一个插件可以有多个连接，各有各的凭据（PluginConfig.ConnectionID）、各自一个运行
+// 实例、各自的放行记录（ChannelBinding.ConnectionID）——同一个人找两个微信号，是两个
+// 会话。早先一个插件只有一套凭据；升级时那一套自动变成它的第一个连接。
+type ChannelConnection struct {
+	ID         int64  `json:"id" gorm:"primaryKey;autoIncrement"`
+	UUID       string `json:"uuid" gorm:"uniqueIndex;size:64;not null"`
+	PluginUUID string `json:"plugin_uuid" gorm:"size:36;not null;index"`
+	// Name 是给人看的名字（「客服机器人」「我的小号」），会话标题里带着它。
+	Name      string    `json:"name" gorm:"size:200;not null"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

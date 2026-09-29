@@ -242,20 +242,30 @@ function registerIpc(): void {
     sessions.togglePlugin(input.uuid, input.enabled),
   );
   ipcMain.handle(IPC.pluginDelete, (_event, uuid: string) => sessions.deletePlugin(uuid));
-  ipcMain.handle(IPC.pluginConfig, (_event, uuid: string) => sessions.pluginConfig(uuid));
+  // 渠道插件的配置按连接存：带上 connectionId。
+  ipcMain.handle(IPC.pluginConfig, (_event, input: string | { uuid: string; connectionId?: string }) =>
+    typeof input === "string" ? sessions.pluginConfig(input) : sessions.pluginConfig(input.uuid, input.connectionId ?? ""),
+  );
   ipcMain.handle(
     IPC.pluginSetConfig,
-    (_event, input: { uuid: string; key: string; value: string }) =>
-      sessions.setPluginConfig(input.uuid, input.key, input.value),
+    (_event, input: { uuid: string; key: string; value: string; connectionId?: string }) =>
+      sessions.setPluginConfig(input.uuid, input.key, input.value, input.connectionId ?? ""),
   );
+  ipcMain.handle(IPC.connectionCreate, (_event, input: { pluginUuid: string; name?: string }) =>
+    sessions.connectionCreate(input.pluginUuid, input.name ?? ""),
+  );
+  ipcMain.handle(IPC.connectionRename, (_event, input: { uuid: string; name: string }) =>
+    sessions.connectionRename(input.uuid, input.name),
+  );
+  ipcMain.handle(IPC.connectionDelete, (_event, uuid: string) => sessions.connectionDelete(uuid));
   ipcMain.handle(IPC.pluginContributions, () => sessions.pluginContributions());
   ipcMain.handle(IPC.channelStatus, () => sessions.channelStatus());
   ipcMain.handle(IPC.channelBindings, () => sessions.channelBindings());
   ipcMain.handle(IPC.channelAuthorize, (_event, params) => sessions.authorizeChannel(params));
   ipcMain.handle(IPC.channelRevoke, (_event, key) => sessions.revokeChannel(key));
   ipcMain.handle(IPC.wechatLoginStart, () => sessions.wechatLoginStart());
-  ipcMain.handle(IPC.wechatLoginPoll, (_event, input: { uuid: string; token: string }) =>
-    sessions.wechatLoginPoll(input.uuid, input.token),
+  ipcMain.handle(IPC.wechatLoginPoll, (_event, input: { uuid: string; token: string; connectionId?: string }) =>
+    sessions.wechatLoginPoll(input.uuid, input.token, input.connectionId ?? ""),
   );
 
   ipcMain.handle(IPC.mcpRead, () => store.readMcpServers());
@@ -320,6 +330,9 @@ function registerIpc(): void {
     return skills.dir;
   });
   ipcMain.handle(IPC.groupRead, () => store.readGroups());
+  ipcMain.handle(IPC.groupCollapse, (_event, input: { groupId: string; collapsed: boolean }) =>
+    store.setGroupCollapsed(String(input.groupId), input.collapsed === true),
+  );
   ipcMain.handle(IPC.groupCreate, (_event, name: string) => {
     const current = store.readGroups();
     const group = { id: `g_${Date.now().toString(36)}`, name: name.trim() || "新分组" };

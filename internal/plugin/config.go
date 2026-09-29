@@ -11,10 +11,14 @@ import (
 
 // ConfigStore persists plugin configuration. Values live in the same local
 // SQLite database as the rest of the application's credentials.
+//
+// 渠道插件（微信、企业微信）的配置是按连接存的：每个连接（一个微信号、一个企微机器人）
+// 一套凭据，connectionID 就是它的 id。不带渠道的插件只有插件级配置，connectionID 为空。
 type ConfigStore interface {
-	ListPluginConfig(ctx context.Context, pluginUUID string) ([]model.PluginConfig, error)
+	ListPluginConfig(ctx context.Context, pluginUUID, connectionID string) ([]model.PluginConfig, error)
 	SetPluginConfig(ctx context.Context, item *model.PluginConfig) error
-	DeletePluginConfig(ctx context.Context, pluginUUID, key string) error
+	DeletePluginConfig(ctx context.Context, pluginUUID, connectionID, key string) error
+	ListChannelConnections(ctx context.Context, pluginUUID string) ([]model.ChannelConnection, error)
 }
 
 // ConfigReader is what a plugin implementation sees. It deliberately exposes
@@ -65,8 +69,8 @@ func NewConfigService(store ConfigStore) *ConfigService {
 
 // Load returns every stored value of a plugin, secrets included. It is the
 // path a plugin implementation reads through; nothing here reaches the UI.
-func (s *ConfigService) Load(ctx context.Context, pluginUUID string) (Values, error) {
-	items, err := s.store.ListPluginConfig(ctx, pluginUUID)
+func (s *ConfigService) Load(ctx context.Context, pluginUUID, connectionID string) (Values, error) {
+	items, err := s.store.ListPluginConfig(ctx, pluginUUID, connectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -79,12 +83,12 @@ func (s *ConfigService) Load(ctx context.Context, pluginUUID string) (Values, er
 
 // Fields merges a plugin's declared configuration with what is stored, for
 // display. Secret values are reported as set, never returned.
-func (s *ConfigService) Fields(ctx context.Context, plugin model.Plugin) ([]Field, error) {
+func (s *ConfigService) Fields(ctx context.Context, plugin model.Plugin, connectionID string) ([]Field, error) {
 	declared, err := declaredConfig(plugin)
 	if err != nil {
 		return nil, err
 	}
-	items, err := s.store.ListPluginConfig(ctx, plugin.UUID)
+	items, err := s.store.ListPluginConfig(ctx, plugin.UUID, connectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +120,7 @@ func (s *ConfigService) Fields(ctx context.Context, plugin model.Plugin) ([]Fiel
 // be read by the plugin, and storing arbitrary user input under a plugin's
 // name invites confusion about what is actually configured. Whether a value is
 // secret comes from the manifest, never from the caller.
-func (s *ConfigService) Set(ctx context.Context, plugin model.Plugin, key, value string) error {
+func (s *ConfigService) Set(ctx context.Context, plugin model.Plugin, connectionID, key, value string) error {
 	key = strings.TrimSpace(key)
 	declared, err := declaredConfig(plugin)
 	if err != nil {
@@ -128,30 +132,32 @@ func (s *ConfigService) Set(ctx context.Context, plugin model.Plugin, key, value
 	}
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return s.Delete(ctx, plugin, key)
+		return s.Delete(ctx, plugin, connectionID, key)
 	}
 	return s.store.SetPluginConfig(ctx, &model.PluginConfig{
-		PluginUUID: plugin.UUID, Key: key, Value: value, Secret: definition.Secret,
+		PluginUUID: plugin.UUID, ConnectionID: connectionID, Key: key, Value: value, Secret: definition.Secret,
 	})
 }
 
-// Delete removes one value. A required key cannot be cleared while the plugin
-// is enabled: that would leave it running without what it declared it needs.
-func (s *ConfigService) Delete(ctx context.Context, plugin model.Plugin, key string) error {
+// Delete removes one value. A required plugin-level key cannot be cleared
+// while the plugin is enabled: that would leave it running without what it
+// declared it needs. A connection's key can: that connection just stops
+// starting until it is filled in again, the others keep running.
+func (s *ConfigService) Delete(ctx context.Context, plugin model.Plugin, connectionID, key string) error {
 	key = strings.TrimSpace(key)
 	declared, err := declaredConfig(plugin)
 	if err != nil {
 		return err
 	}
-	if definition, ok := declared[key]; ok && definition.Required && plugin.Enabled {
+	if definition, ok := declared[key]; ok && definition.Required && plugin.Enabled && connectionID == "" {
 		return fmt.Errorf("%q is required by %s; disable the plugin before clearing it", key, plugin.Name)
 	}
-	return s.store.DeletePluginConfig(ctx, plugin.UUID, key)
+	return s.store.DeletePluginConfig(ctx, plugin.UUID, connectionID, key)
 }
 
 // MissingRequired reports the declared keys that are required and unset. A
 // plugin can be installed without them, but not enabled.
-func (s *ConfigService) MissingRequired(ctx context.Context, plugin model.Plugin) ([]string, error) {
+func (s *ConfigService) MissingRequired(ctx context.Context, plugin model.Plugin, connectionID string) ([]string, error) {
 	declared, err := declaredConfig(plugin)
 	if err != nil {
 		return nil, err
@@ -159,7 +165,7 @@ func (s *ConfigService) MissingRequired(ctx context.Context, plugin model.Plugin
 	if len(declared) == 0 {
 		return nil, nil
 	}
-	values, err := s.Load(ctx, plugin.UUID)
+	values, err := s.Load(ctx, plugin.UUID, connectionID)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +182,21 @@ func (s *ConfigService) MissingRequired(ctx context.Context, plugin model.Plugin
 // ValidateEnable refuses to enable a plugin whose required configuration is
 // absent, so a connector cannot be switched on into a state where it can only
 // fail.
+//
+// 渠道插件看的是连接：至少有一个连接的配置是齐的才能启用；没配齐的连接不启动，
+// 其它连接照跑。
 func (s *ConfigService) ValidateEnable(ctx context.Context, plugin model.Plugin) error {
-	missing, err := s.MissingRequired(ctx, plugin)
+	if HasChannels(plugin) {
+		ready, err := s.ReadyConnections(ctx, plugin)
+		if err != nil {
+			return err
+		}
+		if len(ready) == 0 {
+			return fmt.Errorf("「%s」还没有可用的连接：先添加一个并填好配置", plugin.Name)
+		}
+		return nil
+	}
+	missing, err := s.MissingRequired(ctx, plugin, "")
 	if err != nil {
 		return err
 	}
@@ -185,6 +204,37 @@ func (s *ConfigService) ValidateEnable(ctx context.Context, plugin model.Plugin)
 		return fmt.Errorf("plugin %q needs configuration before it can be enabled: %s", plugin.Name, strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// ReadyConnections 是配置齐了、可以启动的那些连接。
+func (s *ConfigService) ReadyConnections(ctx context.Context, plugin model.Plugin) ([]model.ChannelConnection, error) {
+	connections, err := s.store.ListChannelConnections(ctx, plugin.UUID)
+	if err != nil {
+		return nil, err
+	}
+	ready := make([]model.ChannelConnection, 0, len(connections))
+	for _, connection := range connections {
+		missing, err := s.MissingRequired(ctx, plugin, connection.UUID)
+		if err != nil {
+			return nil, err
+		}
+		if len(missing) == 0 {
+			ready = append(ready, connection)
+		}
+	}
+	return ready, nil
+}
+
+// HasChannels 报告插件是否贡献了渠道（它的配置按连接存）。
+func HasChannels(plugin model.Plugin) bool {
+	if len(plugin.Manifest) == 0 {
+		return false
+	}
+	manifest := &Manifest{}
+	if err := decodeManifest(plugin.Manifest, manifest); err != nil {
+		return false
+	}
+	return len(manifest.Contributes.Channels) > 0
 }
 
 func declaredConfig(plugin model.Plugin) (map[string]model.SkillConfigField, error) {

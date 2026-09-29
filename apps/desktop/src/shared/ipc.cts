@@ -51,6 +51,9 @@ export const IPC = {
   channelBindings: "channel:bindings",
   channelAuthorize: "channel:authorize",
   channelRevoke: "channel:revoke",
+  connectionCreate: "connection:create",
+  connectionRename: "connection:rename",
+  connectionDelete: "connection:delete",
   wechatLoginStart: "wechat:loginStart",
   wechatLoginPoll: "wechat:loginPoll",
 
@@ -86,6 +89,7 @@ export const IPC = {
   groupRead: "group:read",
   groupCreate: "group:create",
   groupRename: "group:rename",
+  groupCollapse: "group:collapse",
   groupDelete: "group:delete",
   sessionAssign: "session:assign",
 

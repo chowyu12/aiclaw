@@ -269,6 +269,16 @@ export interface PluginView {
   permissions: string[];
   /** 还没填的必填配置项；非空时启用会被拒绝。 */
   missingConfig: string[];
+  /** 渠道插件的连接（一个微信号、一个企微机器人一个）。别的插件是空的。 */
+  connections: ChannelConnectionView[];
+}
+
+/** 渠道插件的一个连接。 */
+export interface ChannelConnectionView {
+  uuid: string;
+  name: string;
+  /** 这个连接还没填的必填配置；非空时它不会启动。 */
+  missingConfig: string[];
 }
 
 /** 一个配置项。秘密只报 isSet，值永不回传。 */
@@ -301,6 +311,9 @@ export interface ChannelStatusView {
   pluginName: string;
   channelId: string;
   displayName?: string;
+  /** 这个实例服务的连接。 */
+  connectionId?: string;
+  connectionName?: string;
   state: "starting" | "running" | "retrying" | "failed" | "stopped" | string;
   attempts?: number;
   lastError?: string;
@@ -310,6 +323,9 @@ export interface ChannelStatusView {
 export interface ChannelBindingView {
   pluginUuid: string;
   channelId: string;
+  /** 从哪个连接进来的。 */
+  connectionId: string;
+  connectionName?: string;
   externalKey: string;
   displayName?: string;
   sessionId?: string;
@@ -323,6 +339,7 @@ export interface ChannelBindingView {
 export interface ChannelBindingKey {
   pluginUuid: string;
   channelId: string;
+  connectionId: string;
   externalKey: string;
 }
 
@@ -341,6 +358,8 @@ export interface WeChatLoginStartResult {
 export interface WeChatLoginPollResult {
   status: "wait" | "scaned" | "confirmed" | "expired" | string;
   saved: boolean;
+  /** 凭据写进了哪个连接（新建的或原来的）。 */
+  connectionId?: string;
 }
 
 export interface MCPProbeResult {

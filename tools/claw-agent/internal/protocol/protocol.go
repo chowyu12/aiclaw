@@ -43,6 +43,9 @@ const (
 	MethodChannelBindings  = "channel/bindings"
 	MethodChannelAuthorize = "channel/authorize"
 	MethodChannelRevoke    = "channel/revoke"
+	MethodConnectionCreate = "channel/connectionCreate"
+	MethodConnectionRename = "channel/connectionRename"
+	MethodConnectionDelete = "channel/connectionDelete"
 	MethodChannelMedia     = "channel/media"
 	MethodUsageSummary     = "usage/summary"
 	MethodWeChatLoginStart = "wechat/loginStart"
@@ -383,6 +386,33 @@ type PluginView struct {
 	Permissions []string `json:"permissions"`
 	/** 还没填的必填配置项；非空时启用会被拒绝。 */
 	MissingConfig []string `json:"missingConfig"`
+	/** 渠道插件的连接（一个微信号、一个企微机器人一个）。别的插件是空的。 */
+	Connections []ChannelConnectionView `json:"connections"`
+}
+
+// ChannelConnectionView 是渠道插件的一个连接。
+type ChannelConnectionView struct {
+	UUID string `json:"uuid"`
+	Name string `json:"name"`
+	/** 这个连接还没填的必填配置；非空时它不会启动。 */
+	MissingConfig []string `json:"missingConfig"`
+}
+
+type ConnectionCreateParams struct {
+	PluginUUID string `json:"pluginUuid"`
+	Name       string `json:"name"`
+}
+
+type ConnectionRenameParams struct {
+	UUID string `json:"uuid"`
+	Name string `json:"name"`
+}
+
+// PluginConfigParams 读一个插件（或它的某个连接）的配置。
+type PluginConfigParams struct {
+	UUID string `json:"uuid"`
+	/** 渠道插件的连接 id；空是插件本身的配置。 */
+	ConnectionID string `json:"connectionId,omitempty"`
 }
 
 type PluginInstallParams struct {
@@ -416,7 +446,9 @@ type PluginConfigResult struct {
 
 type PluginSetConfigParams struct {
 	UUID string `json:"uuid"`
-	Key  string `json:"key"`
+	/** 渠道插件的连接 id；空是插件本身的配置。 */
+	ConnectionID string `json:"connectionId,omitempty"`
+	Key          string `json:"key"`
 	/** 空串表示清掉。 */
 	Value string `json:"value"`
 }
@@ -447,6 +479,9 @@ type ChannelStatusView struct {
 	PluginName  string `json:"pluginName"`
 	ChannelID   string `json:"channelId"`
 	DisplayName string `json:"displayName,omitempty"`
+	/** 这个实例服务的连接。 */
+	ConnectionID   string `json:"connectionId,omitempty"`
+	ConnectionName string `json:"connectionName,omitempty"`
 	/** starting / running / retrying / failed / stopped */
 	State     string `json:"state"`
 	Attempts  int    `json:"attempts,omitempty"`
@@ -458,10 +493,13 @@ type ChannelStatusView struct {
 // 未授权的也在列表里：收到消息只是记下来等用户放行，绝不因此起一轮——
 // 一轮会跑工具，而发消息的人不是本机用户。
 type ChannelBindingView struct {
-	PluginUUID  string `json:"pluginUuid"`
-	ChannelID   string `json:"channelId"`
-	ExternalKey string `json:"externalKey"`
-	DisplayName string `json:"displayName,omitempty"`
+	PluginUUID string `json:"pluginUuid"`
+	ChannelID  string `json:"channelId"`
+	/** 从哪个连接进来的。 */
+	ConnectionID   string `json:"connectionId"`
+	ConnectionName string `json:"connectionName,omitempty"`
+	ExternalKey    string `json:"externalKey"`
+	DisplayName    string `json:"displayName,omitempty"`
 	/** 这个外部会话对应的本地会话 id；还没聊过是空。 */
 	SessionID  string `json:"sessionId,omitempty"`
 	ProviderID int64  `json:"providerId,omitempty"`
@@ -473,9 +511,10 @@ type ChannelBindingView struct {
 }
 
 type ChannelBindingKey struct {
-	PluginUUID  string `json:"pluginUuid"`
-	ChannelID   string `json:"channelId"`
-	ExternalKey string `json:"externalKey"`
+	PluginUUID   string `json:"pluginUuid"`
+	ChannelID    string `json:"channelId"`
+	ConnectionID string `json:"connectionId"`
+	ExternalKey  string `json:"externalKey"`
 }
 
 type ChannelAuthorizeParams struct {
@@ -497,6 +536,8 @@ type WeChatLoginStartResult struct {
 type WeChatLoginPollParams struct {
 	UUID  string `json:"uuid"`
 	Token string `json:"token"`
+	/** 给哪个连接重新登录；空表示登录成功后新建一个连接（添加一个微信号）。 */
+	ConnectionID string `json:"connectionId,omitempty"`
 }
 
 type WeChatLoginPollResult struct {
@@ -504,6 +545,8 @@ type WeChatLoginPollResult struct {
 	Status string `json:"status"`
 	/** 凭据已写进插件配置。凭据本身不回传。 */
 	Saved bool `json:"saved"`
+	/** 凭据写进了哪个连接（新建的或原来的）。 */
+	ConnectionID string `json:"connectionId,omitempty"`
 }
 
 // MCPServerConfig 是一个要挂载的 MCP server。

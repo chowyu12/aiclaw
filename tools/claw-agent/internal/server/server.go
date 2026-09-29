@@ -241,6 +241,7 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		protocol.MethodPluginDelete, protocol.MethodPluginConfig, protocol.MethodPluginSetConfig,
 		protocol.MethodPluginContrib, protocol.MethodChannelStatus, protocol.MethodChannelBindings,
 		protocol.MethodChannelAuthorize, protocol.MethodChannelRevoke,
+		protocol.MethodConnectionCreate, protocol.MethodConnectionRename, protocol.MethodConnectionDelete,
 		protocol.MethodWeChatLoginStart, protocol.MethodWeChatLoginPoll:
 		s.handlePlugin(ctx, f)
 	case protocol.MethodSearchList, protocol.MethodSearchCreate, protocol.MethodSearchUpdate,
@@ -663,12 +664,12 @@ func (s *Server) handlePlugin(ctx context.Context, f frame) {
 		}
 		s.writeResult(f.ID, map[string]any{})
 	case protocol.MethodPluginConfig:
-		var params protocol.PluginUUIDParams
+		var params protocol.PluginConfigParams
 		if err := json.Unmarshal(f.Params, &params); err != nil {
 			s.writeError(f.ID, codeInvalidParams, "invalid params")
 			return
 		}
-		fields, err := s.plugins.ConfigFields(ctx, params.UUID)
+		fields, err := s.plugins.ConfigFields(ctx, params.UUID, params.ConnectionID)
 		if err != nil {
 			fail(codeInvalidParams, err)
 			return
@@ -680,7 +681,41 @@ func (s *Server) handlePlugin(ctx context.Context, f frame) {
 			s.writeError(f.ID, codeInvalidParams, "invalid params")
 			return
 		}
-		if err := s.plugins.SetConfig(ctx, params.UUID, params.Key, params.Value); err != nil {
+		if err := s.plugins.SetConfig(ctx, params.UUID, params.ConnectionID, params.Key, params.Value); err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodConnectionCreate:
+		var params protocol.ConnectionCreateParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		view, err := s.plugins.CreateConnection(ctx, params.PluginUUID, params.Name)
+		if err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, view)
+	case protocol.MethodConnectionRename:
+		var params protocol.ConnectionRenameParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		if err := s.plugins.RenameConnection(ctx, params.UUID, params.Name); err != nil {
+			fail(codeInvalidParams, err)
+			return
+		}
+		s.writeResult(f.ID, map[string]any{})
+	case protocol.MethodConnectionDelete:
+		var params protocol.PluginUUIDParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		if err := s.plugins.DeleteConnection(ctx, params.UUID); err != nil {
 			fail(codeInvalidParams, err)
 			return
 		}
