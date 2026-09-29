@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -293,7 +293,12 @@ export class SessionManager extends EventEmitter {
       extensionVersion: status.connected?.extension ?? "",
       extensionDir: extensionDir(),
       pairingCode: status.pairing?.code ?? "",
-      browsers: installedBrowsers().map(({ id, name }) => ({ id, name })),
+      browsers: installedBrowsers().map(({ id, name, isDefault, storeUrl }) => ({
+        id,
+        name,
+        isDefault,
+        fromStore: storeUrl !== "",
+      })),
     };
   }
 
@@ -303,8 +308,15 @@ export class SessionManager extends EventEmitter {
    * 不用在 .app 里一层层点（选择框默认进不了 .app 内部）。
    */
   async openExtensionPage(browserId: string): Promise<void> {
-    const browser = installedBrowsers().find((item) => item.id === browserId);
-    if (!browser) throw new Error("没找到这个浏览器");
+    const browsers = installedBrowsers();
+    // 没指定就用默认浏览器（排在第一个）。
+    const browser = browserId ? browsers.find((item) => item.id === browserId) : browsers[0];
+    if (!browser) throw new Error(browserId ? "没找到这个浏览器" : "没找到能装扩展的浏览器（Chrome / Edge / Brave / Arc）");
+    if (browser.storeUrl) {
+      // 上架之后：打开商店页，用户点「获取」就装好了，之后自动弹配对页。
+      await run("open", ["-a", browser.app, browser.storeUrl]);
+      return;
+    }
     const dir = extensionDir();
     clipboard.writeText(dir);
     await shell.openPath(dir);
@@ -314,6 +326,7 @@ export class SessionManager extends EventEmitter {
       await run("open", ["-a", browser.app]).catch(() => undefined);
     });
   }
+
 
   async stop(): Promise<void> {
     const client = this.client;
@@ -767,26 +780,73 @@ interface KnownBrowser {
   app: string;
   /** 扩展管理页。 */
   extensionsPage: string;
+  /** 系统里登记的默认浏览器是它。 */
+  isDefault: boolean;
+  /** 商店里扩展页面的地址。空表示还没上架，走「加载已解压的扩展程序」。 */
+  storeUrl: string;
 }
 
-const BROWSER_CANDIDATES: (Omit<KnownBrowser, "app"> & { bundle: string })[] = [
-  { id: "edge", name: "Microsoft Edge", bundle: "Microsoft Edge.app", extensionsPage: "edge://extensions" },
-  { id: "chrome", name: "Chrome", bundle: "Google Chrome.app", extensionsPage: "chrome://extensions" },
-  { id: "brave", name: "Brave", bundle: "Brave Browser.app", extensionsPage: "brave://extensions" },
-  { id: "arc", name: "Arc", bundle: "Arc.app", extensionsPage: "chrome://extensions" },
-  { id: "chromium", name: "Chromium", bundle: "Chromium.app", extensionsPage: "chrome://extensions" },
+interface BrowserCandidate {
+  id: string;
+  name: string;
+  bundle: string;
+  bundleId: string;
+  extensionsPage: string;
+  /** 上架后填：这个浏览器的扩展商店里「AIClaw 浏览器助手」的页面。 */
+  storeUrl: string;
+}
+
+const BROWSER_CANDIDATES: BrowserCandidate[] = [
+  { id: "edge", name: "Microsoft Edge", bundle: "Microsoft Edge.app", bundleId: "com.microsoft.edgemac", extensionsPage: "edge://extensions", storeUrl: "" },
+  { id: "chrome", name: "Chrome", bundle: "Google Chrome.app", bundleId: "com.google.chrome", extensionsPage: "chrome://extensions", storeUrl: "" },
+  { id: "brave", name: "Brave", bundle: "Brave Browser.app", bundleId: "com.brave.browser", extensionsPage: "brave://extensions", storeUrl: "" },
+  { id: "arc", name: "Arc", bundle: "Arc.app", bundleId: "company.thebrowser.browser", extensionsPage: "chrome://extensions", storeUrl: "" },
+  { id: "chromium", name: "Chromium", bundle: "Chromium.app", bundleId: "org.chromium.chromium", extensionsPage: "chrome://extensions", storeUrl: "" },
 ];
 
-/** 本机装了哪些能装这个扩展的浏览器。目前只认 macOS 的位置；别的平台返回空，设置页给通用说明。 */
+let defaultBrowserCache: { at: number; bundleId: string } | null = null;
+
+/**
+ * 系统默认浏览器的 bundle id（小写）。读 LaunchServices 里 https 的处理程序。
+ * 读不到返回空串。缓存一分钟：连接状态每变一次都要列浏览器，不必每次都读。
+ */
+function defaultBrowserBundleId(): string {
+  if (defaultBrowserCache && Date.now() - defaultBrowserCache.at < 60_000) return defaultBrowserCache.bundleId;
+  let bundleId = "";
+  try {
+    const plist = join(homedir(), "Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist");
+    const raw = execFileSync("plutil", ["-convert", "json", "-o", "-", plist], { encoding: "utf8", timeout: 2000 });
+    const handlers = (JSON.parse(raw) as { LSHandlers?: { LSHandlerURLScheme?: string; LSHandlerRoleAll?: string }[] }).LSHandlers ?? [];
+    bundleId = (handlers.find((handler) => handler.LSHandlerURLScheme === "https")?.LSHandlerRoleAll ?? "").toLowerCase();
+  } catch {
+    bundleId = "";
+  }
+  defaultBrowserCache = { at: Date.now(), bundleId };
+  return bundleId;
+}
+
+/**
+ * 本机装了哪些能装这个扩展的浏览器，默认浏览器排第一。目前只认 macOS 的位置；
+ * 别的平台返回空，设置页给通用说明。
+ */
 function installedBrowsers(): KnownBrowser[] {
   if (process.platform !== "darwin") return [];
   const roots = ["/Applications", join(homedir(), "Applications")];
+  const preferred = defaultBrowserBundleId();
   const found: KnownBrowser[] = [];
   for (const candidate of BROWSER_CANDIDATES) {
     const app = roots.map((root) => join(root, candidate.bundle)).find((path) => existsSync(path));
-    if (app) found.push({ id: candidate.id, name: candidate.name, app, extensionsPage: candidate.extensionsPage });
+    if (!app) continue;
+    found.push({
+      id: candidate.id,
+      name: candidate.name,
+      app,
+      extensionsPage: candidate.extensionsPage,
+      isDefault: candidate.bundleId === preferred,
+      storeUrl: candidate.storeUrl,
+    });
   }
-  return found;
+  return found.sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 }
 
 /** 配对码：24 个字符，够随机，又能整段复制粘贴。 */

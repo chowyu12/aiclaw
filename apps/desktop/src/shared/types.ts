@@ -329,5 +329,12 @@ export interface BrowserBridgeView {
   /** 正在配对时两边显示的四位代码；不在配对是空串。 */
   pairingCode: string;
   /** 本机装了的、能装这个扩展的浏览器（设置页据此给「在 X 中打开扩展页」按钮）。 */
-  browsers: { id: string; name: string }[];
+  browsers: {
+    id: string;
+    name: string;
+    /** 系统默认浏览器（排在第一个）。 */
+    isDefault: boolean;
+    /** 已上架：从商店装。否则走「加载已解压的扩展程序」。 */
+    fromStore: boolean;
+  }[];
 }

@@ -51,16 +51,26 @@ onMounted(async () => {
 });
 onUnmounted(() => stopBridge?.());
 
-/** 连接状态那一行。 */
-const bridgeLine = computed(() => {
-  const view = bridge.value;
-  if (!view) return "";
-  if (view.error) return view.error;
-  if (view.browser) return `已连上 ${view.browser}（扩展 ${view.extensionVersion}）`;
-  if (view.pairingCode) return "正在配对：到浏览器里核对代码后点「允许」";
-  if (!view.listening) return "还没开始监听";
-  return "等扩展连上来：装好扩展后几秒内浏览器会弹出配对页";
-});
+/** 默认浏览器（主进程已经排在第一个）与其它装着的浏览器。 */
+const defaultBrowser = computed(() => bridge.value?.browsers?.[0] ?? null);
+const otherBrowsers = computed(() => (bridge.value?.browsers ?? []).slice(1));
+const connecting = ref(false);
+
+/**
+ * 「连接我的浏览器」：切过去，扩展本来就装着的话它两三秒内自己连上来（或来配对），
+ * 那就什么都不用开；没来就在默认浏览器里打开扩展页（上架后是商店页）。
+ */
+async function connectMyBrowser(): Promise<void> {
+  connecting.value = true;
+  try {
+    await useBackend("extension");
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    if (bridge.value?.browser || bridge.value?.pairingCode) return;
+    await openInBrowser(defaultBrowser.value?.id ?? "");
+  } finally {
+    connecting.value = false;
+  }
+}
 
 async function useBackend(backend: "builtin" | "extension"): Promise<void> {
   await saveField({ browserBackend: backend });
@@ -492,73 +502,91 @@ async function purge(): Promise<void> {
         <span>浏览器：模型按元素编号打开网页、点、填、读（勾上后可以选用你自己的 Chrome / Edge）</span>
       </label>
       <div v-if="store.config.browser" class="field backend">
-        <span class="field-label">在哪儿打开网页</span>
-        <label class="switch">
-          <input
-            type="radio"
-            name="browser-backend"
-            :checked="store.config.browserBackend !== 'extension'"
-            @change="useBackend('builtin')"
-          />
-          <span>AIClaw 自带的浏览器窗口（独立的登录，窗口可见）</span>
-        </label>
-        <label class="switch">
-          <input
-            type="radio"
-            name="browser-backend"
-            :checked="store.config.browserBackend === 'extension'"
-            @change="useBackend('extension')"
-          />
-          <span>我的浏览器（Chrome / Edge）：在后台标签页里操作，用我已有的登录，不抢鼠标</span>
-        </label>
-        <template v-if="store.config.browserBackend === 'extension'">
-          <p class="bridge-status" :class="{ ok: bridge?.browser, bad: bridge?.error }">
-            <span class="dot" />{{ bridgeLine }}
+        <!-- 已连上：一行状态，外加改回去的入口。 -->
+        <template v-if="store.config.browserBackend === 'extension' && bridge?.browser">
+          <p class="bridge-status ok">
+            <span class="dot" />在你的 {{ bridge.browser }} 里操作：后台标签页、用你已有的登录、不抢鼠标
           </p>
-          <!-- 配对进行中：浏览器那边开着配对页，两边显示同一个代码。 -->
+          <div class="row links">
+            <button class="link" @click="useBackend('builtin')">改回 AIClaw 自带窗口</button>
+          </div>
+        </template>
+
+        <!-- 自带窗口：一个按钮切过去。 -->
+        <template v-else-if="store.config.browserBackend !== 'extension'">
+          <p class="guide-lead">
+            现在用 AIClaw 自带的浏览器窗口（独立的登录，窗口可见）。也可以让它在你自己的浏览器里、
+            用你已有的登录、在后台标签页里操作：
+          </p>
+          <div class="row">
+            <button class="primary" :disabled="connecting" @click="connectMyBrowser()">
+              {{ connecting ? "正在打开…" : `连接我的浏览器${defaultBrowser ? `（${defaultBrowser.name}）` : ""}` }}
+            </button>
+          </div>
+        </template>
+
+        <!-- 连接中：按步骤打勾。 -->
+        <template v-else>
+          <ol class="progress">
+            <li :class="bridge?.pairingCode ? 'done' : 'now'">安装扩展</li>
+            <li :class="bridge?.pairingCode ? 'now' : ''">在浏览器里确认配对</li>
+            <li>连上</li>
+          </ol>
+
           <div v-if="bridge?.pairingCode" class="pairing">
             <span class="pair-code">{{ bridge.pairingCode }}</span>
-            <span>浏览器里弹出了配对页：核对上面的代码一致，在<strong>浏览器里</strong>点「允许」。</span>
+            <span>浏览器里弹出了配对页：核对代码一致，在<strong>浏览器里</strong>点「允许」。</span>
           </div>
-          <template v-else-if="!bridge?.browser">
-            <p class="guide-lead">还没连上。第一次用要在浏览器里装一次扩展（装好后会自动弹出配对页，不用复制配对码）：</p>
-            <div v-if="bridge?.browsers?.length" class="row open-buttons">
-              <button v-for="item in bridge?.browsers ?? []" :key="item.id" @click="openInBrowser(item.id)">
-                在 {{ item.name }} 中打开扩展页
+          <template v-else>
+            <p v-if="defaultBrowser?.fromStore" class="guide-lead">
+              在打开的商店页点「获取」，装好后浏览器会自动弹出配对页。
+            </p>
+            <p v-else-if="defaultBrowser" class="guide-lead">
+              {{ defaultBrowser.name }} 的扩展页已经打开，扩展目录的路径也复制好了：打开「开发者模式」→
+              点「加载已解压的扩展程序」→ 按 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> 粘贴、回车、点「选择」。
+              装好后浏览器会自动弹出配对页。
+            </p>
+            <p v-else class="guide-lead">
+              没找到 Chrome / Edge。在浏览器的扩展页里打开「开发者模式」，「加载已解压的扩展程序」选这个目录：
+              <code class="path">{{ bridge?.extensionDir }}</code>
+            </p>
+            <div class="row links">
+              <button v-if="defaultBrowser" class="link" @click="openInBrowser(defaultBrowser.id)">重新打开扩展页</button>
+              <button
+                v-for="item in otherBrowsers"
+                :key="item.id"
+                class="link"
+                @click="openInBrowser(item.id)"
+              >
+                改用 {{ item.name }}
               </button>
+              <button class="link" @click="revealExtension">在访达中显示扩展目录</button>
             </div>
-            <ol class="steps">
-              <li>
-                在扩展页打开右上角（Edge 在左侧）的「开发者模式」，点「加载已解压的扩展程序」。
-                <span v-if="bridge?.browsers?.length">上面的按钮已经打开了扩展页和扩展目录，并把目录路径复制好了：</span>
-              </li>
-              <li>
-                在选择框里按 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd>，粘贴路径、回车，再点「选择」。
-                <code class="path">{{ bridge?.extensionDir }}</code>
-              </li>
-              <li>几秒后浏览器会弹出配对页，核对代码后点「允许」就连上了。</li>
-            </ol>
-            <details class="manual">
-              <summary>配对页没弹出来？手动填配对码</summary>
-              <p>
-                点浏览器工具栏上的 AIClaw 图标（没看到就在拼图图标里把它固定出来），把配对码粘进去保存：
-                <span class="row token">
-                  <code>{{ store.config.browserPairToken ? "•".repeat(12) : "（保存后生成）" }}</code>
-                  <button :disabled="!store.config.browserPairToken" @click="copyToken">
-                    {{ tokenCopied ? "已复制" : "复制配对码" }}
-                  </button>
-                  <button :disabled="!store.config.browserPairToken" @click="repairToken">重新生成</button>
-                </span>
-              </p>
-            </details>
           </template>
-          <p class="note">
-            AIClaw 只在它自己开的后台标签页（「AIClaw」标签组）里操作，不切换你正在看的页面；
-            要它接管你已经打开的页面，在对话里说，它会先请你确认。操作期间浏览器顶部会显示「正在调试此浏览器」，
-            点「取消」就能让它立刻停手；空闲一分钟后提示条自己消失。
-            <strong>配对码等于这个浏览器的钥匙</strong>：别发给别人；重新生成后旧码立刻作废。
-          </p>
+          <p v-if="bridge?.error" class="bridge-status bad"><span class="dot" />{{ bridge.error }}</p>
+          <div class="row links">
+            <button class="link" @click="useBackend('builtin')">取消，改回自带窗口</button>
+          </div>
         </template>
+
+        <details v-if="store.config.browserBackend === 'extension'" class="manual">
+          <summary>它能做什么、怎么让它停下来</summary>
+          <p>
+            AIClaw 只在它自己开的后台标签页（「AIClaw」标签组）里操作，不切换你正在看的页面；要接管你已经打开的页面，
+            它会先在 AIClaw 里请你确认。操作期间浏览器顶部会显示「正在调试此浏览器」，点「取消」就能让它立刻停手；
+            空闲一分钟后提示条自己消失。
+          </p>
+          <p>
+            配对页没弹出来？点浏览器工具栏上的 AIClaw 图标，把配对码粘进去：
+            <span class="row token">
+              <button :disabled="!store.config.browserPairToken" @click="copyToken">
+                {{ tokenCopied ? "已复制" : "复制配对码" }}
+              </button>
+              <button :disabled="!store.config.browserPairToken" @click="repairToken">重新生成</button>
+            </span>
+            配对码等于这个浏览器的钥匙，别发给别人。
+          </p>
+        </details>
       </div>
       <p class="note">
         模型拿到的是页面上可交互元素的<strong>编号列表</strong>（链接、按钮、输入框），
@@ -794,6 +822,77 @@ label em {
   background: var(--danger);
 }
 
+.progress {
+  display: flex;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: step;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.progress li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  counter-increment: step;
+}
+
+.progress li::before {
+  content: counter(step);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--rule-strong);
+  border-radius: 50%;
+  font-size: 10.5px;
+}
+
+.progress li.now {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.progress li.now::before {
+  border-color: var(--ok);
+  color: var(--ok);
+}
+
+.progress li.done {
+  color: var(--ok);
+}
+
+.progress li.done::before {
+  content: "✓";
+  border-color: var(--ok);
+  background: var(--ok);
+  color: #fff;
+}
+
+.links {
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+button.primary {
+  padding: 6px 16px;
+  border: 1px solid var(--ok);
+  border-radius: var(--r-md);
+  background: var(--ok);
+  color: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+button.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .pairing {
   display: flex;
   align-items: center;
@@ -855,14 +954,14 @@ kbd {
   color: var(--ink-2);
 }
 
-.steps .path {
+.path {
   display: block;
   word-break: break-all;
   font-size: 11px;
   color: var(--muted);
 }
 
-.steps .token {
+.token {
   display: inline-flex;
   margin-left: 4px;
 }

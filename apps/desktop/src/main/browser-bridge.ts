@@ -27,7 +27,13 @@ import type { Duplex } from "node:stream";
 export const BRIDGE_PORT = 17891;
 /** 扩展的 ID，由 manifest.json 里的 key 决定。改 key 就要改这里。 */
 export const EXTENSION_ID = "doofgbncfflbmekanpfocimbideeiadd";
-const EXTENSION_ORIGIN = `chrome-extension://${EXTENSION_ID}`;
+/**
+ * 认哪些扩展。本地加载的那个 ID 由 manifest 里的 key 固定；上架之后商店会给扩展
+ * 另分配 ID（Chrome 应用商店、Edge 加载项各一个），拿到之后加在这里——Origin 校验
+ * 靠这张表，漏了的话商店版装上也连不进来。
+ */
+export const EXTENSION_IDS: readonly string[] = [EXTENSION_ID];
+const EXTENSION_ORIGINS = EXTENSION_IDS.map((id) => `chrome-extension://${id}`);
 /** 一条消息的上限：一张全屏截图的 base64 也就几 MB。 */
 const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
 const HEARTBEAT_MS = 20_000;
@@ -219,17 +225,18 @@ export class ExtensionBridge extends EventEmitter {
   private pairingWith: { connection: Connection; code: string; userAgent: string; timer: NodeJS.Timeout } | null = null;
   private readonly pairToken: () => string;
   private readonly port: number;
-  private readonly origin: string;
+  private readonly origins: readonly string[];
+  private readonly rejectedOrigins = new Map<string, number>();
 
   /**
    * @param pairToken 取当前配对码。每次握手现取：用户在设置页重新生成之后，
    *   旧的立刻作废。
    */
-  constructor(pairToken: () => string, port = BRIDGE_PORT, origin = EXTENSION_ORIGIN) {
+  constructor(pairToken: () => string, port = BRIDGE_PORT, origins: string | readonly string[] = EXTENSION_ORIGINS) {
     super();
     this.pairToken = pairToken;
     this.port = port;
-    this.origin = origin;
+    this.origins = typeof origins === "string" ? [origins] : origins;
   }
 
   status(): BridgeStatus {
@@ -316,7 +323,17 @@ export class ExtensionBridge extends EventEmitter {
     };
     if (request.url !== "/extension") return reject(404);
     // 网页伪造不了 Origin：随便一个网页都能连 ws://127.0.0.1，这里把它们全挡在外面。
-    if (request.headers.origin !== this.origin) return reject(403);
+    const origin = request.headers.origin ?? "";
+    if (!this.origins.includes(origin)) {
+      // 记下来（商店版扩展 ID 没登记时就是这样连不上），但同一个来源一分钟只记一次：
+      // 任何网页都能来敲这个端口，不能让它把日志刷满。
+      const last = this.rejectedOrigins.get(origin) ?? 0;
+      if (Date.now() - last > 60_000) {
+        this.rejectedOrigins.set(origin, Date.now());
+        this.log(`拒绝了一个不认识的来源：${origin || "（没有 Origin）"}`);
+      }
+      return reject(403);
+    }
     const key = request.headers["sec-websocket-key"];
     if (typeof key !== "string" || request.headers.upgrade?.toLowerCase() !== "websocket") return reject(400);
     const accept = createHash("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
