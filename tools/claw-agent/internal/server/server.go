@@ -429,7 +429,7 @@ func (s *Server) sessionOptions(id string) []agent.Option {
 		return nil
 	}
 	// 子 agent 同理只给用户自己的会话：外部的人不该能借助手在用户电脑上开一群 agent。
-	options := []agent.Option{agent.WithCollaboration(s.collab)}
+	options := []agent.Option{agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s})}
 	if s.plugins != nil {
 		options = append(options, agent.WithMailbox(s.plugins.EmailAccount))
 	}
@@ -534,7 +534,7 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 	}
 	// 有轮次在跑就把输入排进去，不另起一轮：宿主拿到的是那一轮的 id，
 	// 也不会再收到一次 turn/started。见 Session.pending 的说明。
-	if running, queued := session.Enqueue(params.Text, params.Images); queued {
+	if running, queued := session.Enqueue(params.Text, params.Images, params.References...); queued {
 		s.writeResult(f.ID, protocol.TurnStartResult{TurnID: running, Queued: true})
 		return
 	}
@@ -544,7 +544,7 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 	s.writeResult(f.ID, protocol.TurnStartResult{TurnID: turnID})
 
 	go func() {
-		session.RunTurn(ctx, turnID, params.Text, params.Images, params.AudioPaths, &emitter{server: s})
+		session.RunTurn(ctx, turnID, params.Text, params.Images, params.AudioPaths, &emitter{server: s}, params.References...)
 		if err := session.Save(ctx, s.db); err != nil {
 			s.options.Logf("保存会话失败：%v", err)
 		}

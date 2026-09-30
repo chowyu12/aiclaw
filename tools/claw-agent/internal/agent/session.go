@@ -63,6 +63,8 @@ type userInput struct {
 	mail     bool
 	mailFrom string
 	notice   string
+	// refs 是这条输入里 @ 引用的会话（见 threads.go）。
+	refs []protocol.ThreadRef
 }
 
 // Session 是一个会话：一份配置 + 一段对话历史 + 一套已挂载的工具。
@@ -103,6 +105,8 @@ type Session struct {
 	pendingSignal chan struct{}
 	// collab 是多 agent 协作的控制面（见 collab.go）。nil 表示不挂协作工具。
 	collab Collaboration
+	// threads 是读别的会话的来源（见 threads.go）。nil 表示不挂 read_thread / list_threads。
+	threads ThreadSource
 	// backoff 给出第 n 次重试前的等待时长；测试把它换成零等待。
 	backoff func(attempt int) time.Duration
 	// lastInputTokens 是最近一次采样上游报的输入 token 数，压缩阈值据此判断。
@@ -283,6 +287,9 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	}
 	// 协作工具同样不进 exec（Codex 也这样）：在脚本里开 agent、等 agent 没有意义。
 	if err := session.registerCollabTools(); err != nil {
+		return nil, err
+	}
+	if err := session.registerThreadTools(); err != nil {
 		return nil, err
 	}
 

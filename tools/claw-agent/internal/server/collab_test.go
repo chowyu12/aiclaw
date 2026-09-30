@@ -399,3 +399,47 @@ func TestArchiveSessionTree(t *testing.T) {
 		t.Errorf("恢复之后整支回来：%+v", list)
 	}
 }
+
+// 会话引用：B 引用 A，模型在 B 里调 read_thread 读到 A 的结论；A 在存档里时也读得到。
+func TestReadThreadAcrossSessions(t *testing.T) {
+	model := &scriptedModel{
+		root: func(step int, request wireRequest) string {
+			text := request.text()
+			if !strings.Contains(text, "## 引用的会话") {
+				return sseText("结论：用方案二")
+			}
+			if step == 0 {
+				return sseToolCall("r1", "read_thread", `{"threadId":"s_root"}`)
+			}
+			return sseText("读到了")
+		},
+		child: func(wireRequest) string { return sseText("好") },
+	}
+	server, first := collabServer(t, model)
+	ctx := context.Background()
+	first.RunTurn(ctx, "t1", "定个方案", nil, nil, &emitter{server: server})
+	if err := first.Save(ctx, server.db); err != nil {
+		t.Fatal(err)
+	}
+	// 从内存里摘掉，逼 read_thread 去读存档。
+	server.unload(first.ID)
+
+	id := "s_second"
+	second, err := agent.New(ctx, id, first.Config(), server.keyFor, server.sessionOptions(id)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.sessions[id] = second
+	second.RunTurn(ctx, "t2", "照 @定个方案 的结论往下做", nil, nil, &emitter{server: server},
+		protocol.ThreadRef{ID: "s_root", Title: "定个方案"})
+
+	last := model.lastRootRequest().text()
+	for _, want := range []string{"## 引用的会话", "[@定个方案](thread://s_root)", "结论：用方案二", "不可信的资料"} {
+		if !strings.Contains(last, want) {
+			t.Errorf("B 的最后一次请求里缺 %q", want)
+		}
+	}
+	if second.LastAnswer() != "读到了" {
+		t.Errorf("回答不对：%q", second.LastAnswer())
+	}
+}

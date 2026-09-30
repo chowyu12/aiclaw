@@ -354,6 +354,7 @@ async function main(): Promise<number> {
         "子 agent：用户会话挂上协作工具",
         ["spawn_agent", "send_message", "followup_task", "wait_agent", "list_agents", "interrupt_agent"].every((name) => rootSession.tools.includes(name)),
       );
+      record("会话引用：用户会话挂上 read_thread / list_threads", ["read_thread", "list_threads"].every((name) => rootSession.tools.includes(name)));
       let summary = "";
       let childStarted = "";
       const done = new Promise<void>((resolve) => {

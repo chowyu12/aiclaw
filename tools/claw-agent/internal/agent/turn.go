@@ -35,6 +35,7 @@ func (s *Session) RunTurn(
 	images [][]byte,
 	audioPaths []string,
 	emitter Emitter,
+	refs ...protocol.ThreadRef,
 ) {
 	ctx, cancel := context.WithCancel(parent)
 	s.mu.Lock()
@@ -46,7 +47,7 @@ func (s *Session) RunTurn(
 	}
 	if s.cancelTurn != nil {
 		// 上一轮还在跑：把输入排进队列而不是拒绝。见 pending 字段的说明。
-		s.pending = append(s.pending, userInput{text: text, images: images})
+		s.pending = append(s.pending, userInput{text: text, images: images, refs: refs})
 		s.mu.Unlock()
 		s.signalPending()
 		cancel()
@@ -79,7 +80,7 @@ func (s *Session) RunTurn(
 	// 没有新输入的一轮：由邮箱里的消息开起来的（子 agent 完成、followup_task），
 	// 排着的那几条上面已经插进去了，不再补一条空的用户消息。
 	if text != "" || transcript != "" || len(images) > 0 {
-		s.acceptUserInput(ctx, turnID, text, transcript, images, emitter)
+		s.acceptUserInput(ctx, turnID, text, transcript, images, emitter, refs)
 	}
 
 	usage, err := s.loop(ctx, turnID, emitter)
@@ -105,17 +106,20 @@ func (s *Session) RunTurn(
 // text 是用户原话，transcript 是附带音频的转写（没有就是空串）。两者分开传：
 // 界面上显示原话，进模型历史的是原话加转写与转述；存档里两份都留（Message.Shown），
 // 切回会话时还原的才是用户发的那一版。
-func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript string, images [][]byte, emitter Emitter) {
+func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript string, images [][]byte, emitter Emitter, refs []protocol.ThreadRef) {
 	images = limitImages(images)
+	refs = s.cleanReferences(refs)
 	// 用户消息本身也是一个条目，让宿主的时间线和模型看到的历史一致。
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{
 		SessionID: s.ID, TurnID: turnID,
 		Item: protocol.Item{
 			ID: newID("user"), Kind: protocol.ItemUserMessage, Text: text, Images: images,
-			At: time.Now().UnixMilli(),
+			At: time.Now().UnixMilli(), References: refs,
 		},
 	})
-	content := text + transcript
+	// 引用了别的会话：给模型的那份按 Codex 的格式附上引用说明（见 threads.go），
+	// 时间线与存档里还原的仍是用户的原话。
+	content := withReferences(text, refs) + transcript
 	if strings.TrimSpace(content) == "" && len(images) > 0 {
 		// 只发了图、没配文字：明说这是一条新消息。空着的话模型看到的是一条没有
 		// 正文的 user 消息，常常当成「继续」接着做上一件事（见 interruptMarker）。
@@ -129,7 +133,7 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 		}
 	}
 	if message.Content != text || len(message.Images) != len(images) {
-		message.Shown = &llm.Shown{Text: text, Images: images}
+		message.Shown = &llm.Shown{Text: text, Images: images, References: toLLMRefs(refs)}
 	}
 	s.appendMessage(message)
 	if s.Title == "" {
@@ -143,13 +147,13 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 // 卡在那里会让正在跑的这一轮停住。宿主在有音频时不走排队（见 handleTurnStart）。
 //
 // 没有进行中的轮次时返回 false，调用方按常规起新一轮。
-func (s *Session) Enqueue(text string, images [][]byte) (string, bool) {
+func (s *Session) Enqueue(text string, images [][]byte, refs ...protocol.ThreadRef) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.cancelTurn == nil {
 		return "", false
 	}
-	s.pending = append(s.pending, userInput{text: text, images: images})
+	s.pending = append(s.pending, userInput{text: text, images: images, refs: refs})
 	defer s.signalPending()
 	return s.currentTurn, true
 }
@@ -204,7 +208,7 @@ func (s *Session) drainPending(ctx context.Context, turnID string, emitter Emitt
 			s.acceptAgentMail(turnID, input, emitter)
 			continue
 		}
-		s.acceptUserInput(ctx, turnID, input.text, "", input.images, emitter)
+		s.acceptUserInput(ctx, turnID, input.text, "", input.images, emitter, input.refs)
 	}
 }
 

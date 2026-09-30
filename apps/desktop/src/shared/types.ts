@@ -50,6 +50,12 @@ export interface SessionStartView {
   history?: HistoryItemView[];
 }
 
+/** 一条消息里 @ 引用的另一个会话。 */
+export interface ThreadRefView {
+  id: string;
+  title: string;
+}
+
 /** 还原历史用的条目，字段与 claw-agent 的 Item 一致。 */
 export interface HistoryItemView {
   id: string;
@@ -59,6 +65,8 @@ export interface HistoryItemView {
   text?: string;
   /** 用户消息带的图片，base64 的 JPEG。 */
   images?: string[];
+  /** 用户消息里 @ 引用的会话。 */
+  references?: ThreadRefView[];
   toolName?: string;
   toolArgs?: string;
   toolResult?: string;

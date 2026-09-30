@@ -876,6 +876,17 @@ type TurnStartParams struct {
 	 * 是附件太大。宿主把文件暂存到磁盘，这里只传路径。
 	 */
 	AudioPaths []string `json:"audioPaths,omitempty"`
+	/**
+	 * 这条消息里 @ 引用的其他会话（参照 Codex 的 task mentions）。内核在给模型的那份
+	 * 消息里附上引用说明，要求它先用 read_thread 读；界面上显示的仍是用户的原话。
+	 */
+	References []ThreadRef `json:"references,omitempty"`
+}
+
+// ThreadRef 是一条消息引用的另一个会话。
+type ThreadRef struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 type TurnStartResult struct {
@@ -939,6 +950,8 @@ type Item struct {
 	 * 而不是只留在模型的消息历史里——不然点开旧会话，问题里那张截图就没了。
 	 */
 	Images [][]byte `json:"images,omitempty"`
+	/** 用户消息里 @ 引用的会话。 */
+	References []ThreadRef `json:"references,omitempty"`
 	/** 工具调用条目的字段。 */
 	ToolName string `json:"toolName,omitempty"`
 	ToolArgs string `json:"toolArgs,omitempty"`

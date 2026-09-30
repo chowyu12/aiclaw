@@ -449,9 +449,11 @@ export class SessionManager extends EventEmitter {
     text: string;
     images?: string[];
     audioPaths?: string[];
+    /** 这条消息里 @ 引用的会话。 */
+    references?: { id: string; title: string }[];
   }): Promise<string> {
     const result = await this.requireClient().turnStart(
-      input.sessionId, input.text, input.images, input.audioPaths,
+      input.sessionId, input.text, input.images, input.audioPaths, input.references,
     );
     return result.turnId;
   }

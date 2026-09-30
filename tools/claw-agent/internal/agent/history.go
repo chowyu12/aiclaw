@@ -52,21 +52,24 @@ func (s *Session) History() []protocol.Item {
 		case llm.RoleUser:
 			// 有 Shown 的按用户发的那一版还原（见 llm.Message.Shown）。
 			text, images := message.Content, message.Images
+			var refs []protocol.ThreadRef
 			if shown := message.Shown; shown != nil {
 				if shown.Hidden {
 					continue
 				}
 				text, images = shown.Text, shown.Images
+				refs = fromLLMRefs(shown.References)
 			} else if legacySynthetic(message.Content) {
 				continue
 			}
 			seq, round = 0, 0
 			items = append(items, protocol.Item{
-				ID:     historyID("user", index),
-				Kind:   protocol.ItemUserMessage,
-				Text:   text,
-				Images: images,
-				At:     message.At,
+				ID:         historyID("user", index),
+				Kind:       protocol.ItemUserMessage,
+				Text:       text,
+				Images:     images,
+				At:         message.At,
+				References: refs,
 			})
 		case llm.RoleAssistant:
 			// 采样步骤排在它引发的工具之前：那才是实际发生的顺序，

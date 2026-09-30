@@ -72,6 +72,14 @@ type Shown struct {
 	// Hidden 表示这条不是用户说的（工具截屏的画面、中断标记、压缩摘要），
 	// 时间线上不显示。
 	Hidden bool `json:",omitempty"`
+	// References 是这条消息里 @ 引用的会话，切回会话时还原成那排引用标签。
+	References []Reference `json:",omitempty"`
+}
+
+// Reference 是一条消息里引用的另一个会话。
+type Reference struct {
+	ID    string
+	Title string
 }
 
 // Tool 是提供给模型的工具定义。Parameters 是 JSON Schema。

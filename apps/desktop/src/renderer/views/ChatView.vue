@@ -17,6 +17,15 @@ import { groupTurns, stepsElapsed, type Turn } from "../turns";
 import { renderMarkdown } from "../markdown";
 import { answerText, answerTime, formatMessageTime, fullMessageTime } from "../message-meta";
 import { formatDuration as formatVoiceTime, MAX_SECONDS, VoiceRecorder } from "../voice";
+import {
+  activeReferences,
+  applyMention,
+  mentionCandidates,
+  mentionQuery,
+  mentionTitle,
+  type MentionBinding,
+} from "../mentions";
+import type { SessionSummaryView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
 import QuestionCard from "./QuestionCard.vue";
 
@@ -172,6 +181,97 @@ function insertAtCursor(text: string): void {
   });
 }
 
+// ---------- @ 引用会话 ----------
+//
+// 打 @ 弹出会话列表（标题命中的在前，然后是正文搜索命中的），↑↓ 选、Enter / Tab 确定、
+// Esc 关掉。选中插入「@标题 」并记下绑定；发送时只交还留在正文里的那几个。
+
+const bindings = ref<MentionBinding[]>([]);
+const mention = ref<{ start: number; query: string } | null>(null);
+const mentionIndex = ref(0);
+const mentionHits = ref<SessionSummaryView[]>([]);
+let mentionSearch: ReturnType<typeof setTimeout> | undefined;
+
+const mentionList = computed(() =>
+  mention.value ? mentionCandidates(mention.value.query, store.sessions, mentionHits.value, store.sessionId) : [],
+);
+
+/** 光标动了（打字、点击、方向键）就重新看一次是不是在打 @。 */
+function updateMention(): void {
+  const element = input.value;
+  const found = element ? mentionQuery(draft.value, element.selectionStart ?? draft.value.length) : null;
+  const changed = found?.query !== mention.value?.query || found?.start !== mention.value?.start;
+  mention.value = found;
+  if (!changed) return;
+  mentionIndex.value = 0;
+  clearTimeout(mentionSearch);
+  mentionHits.value = [];
+  const query = found?.query.trim() ?? "";
+  if (!query) return;
+  // 正文搜索打一次内核的 LIKE：防抖，打字期间只有最后一次有用。
+  mentionSearch = setTimeout(async () => {
+    try {
+      const hits = (await window.aiclaw.session.search(query)) as SessionSummaryView[];
+      if (mention.value?.query.trim() === query) mentionHits.value = hits;
+    } catch {
+      // 搜不到就只按标题匹配
+    }
+  }, 150);
+}
+
+function pickMention(session: SessionSummaryView): void {
+  const element = input.value;
+  const current = mention.value;
+  if (!element || !current) return;
+  const title = mentionTitle(session.title);
+  const next = applyMention(draft.value, current.start, element.selectionStart ?? draft.value.length, title);
+  draft.value = next.text;
+  bindings.value = [...bindings.value, { id: session.id, title }];
+  mention.value = null;
+  void nextTick(() => {
+    element.focus();
+    element.setSelectionRange(next.caret, next.caret);
+  });
+}
+
+/** 「@ 引用会话」按钮：在光标处插一个 @，弹出列表。 */
+function startMention(): void {
+  const element = input.value;
+  if (!element) return;
+  const caret = element.selectionStart ?? draft.value.length;
+  const before = draft.value.slice(0, caret);
+  const glue = before && !/\s$/.test(before) ? " " : "";
+  draft.value = `${before}${glue}@${draft.value.slice(caret)}`;
+  void nextTick(() => {
+    element.focus();
+    const position = caret + glue.length + 1;
+    element.setSelectionRange(position, position);
+    updateMention();
+  });
+}
+
+/** 输入框的键盘：列表开着时 ↑↓ / Enter / Tab / Esc 归它，不然照常。 */
+function onMentionKey(event: KeyboardEvent): boolean {
+  if (!mention.value || mentionList.value.length === 0 || event.isComposing) return false;
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    const count = mentionList.value.length;
+    mentionIndex.value = (mentionIndex.value + (event.key === "ArrowDown" ? 1 : count - 1)) % count;
+    return true;
+  }
+  if (event.key === "Enter" || event.key === "Tab") {
+    event.preventDefault();
+    pickMention(mentionList.value[mentionIndex.value]!);
+    return true;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    mention.value = null;
+    return true;
+  }
+  return false;
+}
+
 // ---------- 附件 ----------
 //
 // 贴一张报错截图问「这是什么」是最常见的用法之一。图片走视觉通道发给模型，
@@ -284,16 +384,20 @@ async function submit(): Promise<void> {
     .filter((item): item is AudioAttachment => item.kind === "audio")
     .map((item) => ({ name: item.name, data: item.data }));
   if (!text.trim() && images.length === 0 && audio.length === 0) return;
+  const references = activeReferences(text, bindings.value);
   draft.value = "";
   attachments.value = [];
   attachError.value = "";
-  await actions.send(text, images, audio);
+  bindings.value = [];
+  mention.value = null;
+  await actions.send(text, images, audio, references);
   await scrollToEnd();
 }
 
 // Enter 发送、Shift+Enter 换行。中文输入法组字期间的 Enter 不能当发送，
 // 否则选词就把半句话发出去了。
 function onKeydown(event: KeyboardEvent): void {
+  if (onMentionKey(event)) return;
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
   event.preventDefault();
   void submit();
@@ -515,6 +619,18 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                 {{ turn.user.text }}
               </div>
             </div>
+            <!-- 这条消息引用的会话：点一下打开它。 -->
+            <div v-if="(turn.user.references ?? []).length > 0" class="refs">
+              <button
+                v-for="ref in turn.user.references"
+                :key="ref.id"
+                class="ref"
+                :title="`打开「${ref.title}」`"
+                @click="actions.openSession(ref.id)"
+              >
+                ↪ {{ ref.title }}
+              </button>
+            </div>
             <!-- 时间与复制放在气泡外面一行：塞进气泡里会和正文挤在一起，
                  而且用户复制的只是自己打的字，不该带上时间。 -->
             <div class="msg-meta user-meta" :class="{ pinned: isMarked(`u-${turn.key}`) }">
@@ -628,10 +744,31 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
               <button v-if="!sttReady" class="link" @click="actions.setView('settings')">去配置</button>
             </p>
 
+            <!-- @ 引用会话的候选列表：浮在输入框上面。 -->
+            <div v-if="mention && mentionList.length > 0" class="mention-menu" role="listbox">
+              <div class="mention-head">引用会话：模型会先读它，再回答你</div>
+              <button
+                v-for="(session, index) in mentionList"
+                :key="session.id"
+                class="mention-option"
+                :class="{ on: index === mentionIndex }"
+                role="option"
+                :aria-selected="index === mentionIndex"
+                @mousedown.prevent="pickMention(session)"
+                @mouseenter="mentionIndex = index"
+              >
+                <span class="mention-title">{{ session.title || "未命名会话" }}</span>
+                <span class="mention-meta">{{ session.parentId ? "子 agent · " : "" }}{{ formatMessageTime(Date.parse(session.updatedAt)) }}</span>
+              </button>
+            </div>
             <textarea
               ref="input"
               v-model="draft"
               rows="2"
+              @input="updateMention"
+              @click="updateMention"
+              @keyup="(event: KeyboardEvent) => { if (!['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) updateMention(); }"
+              @blur="mention = null"
               @paste="onPaste"
               :placeholder="
                 store.busy
@@ -653,6 +790,10 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                 <button class="chip" title="贴图片或文本文件（也可以直接粘贴/拖进来）" @click="picker?.click()">
                   <span class="chip-icon">+</span>
                   附件
+                </button>
+                <button class="chip" title="引用另一个会话：模型会先读它（也可以直接打 @）" @mousedown.prevent @click="startMention()">
+                  <span class="chip-icon">@</span>
+                  引用会话
                 </button>
 
                 <!-- 工作区按会话设。摆在这里而不是配置页：它是「这次要在哪儿
@@ -1284,6 +1425,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
 }
 
 .composer {
+  position: relative;
   max-width: var(--content-width);
   margin: 0 auto;
   border: 1px solid var(--rule-strong);
@@ -1644,4 +1786,89 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
   color: var(--danger);
 }
 
+
+/* @ 引用会话 */
+.mention-menu {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+}
+
+.mention-head {
+  padding: 4px 8px 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.mention-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+
+.mention-option.on {
+  background: var(--accent-soft);
+}
+
+.mention-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.mention-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* 与消息同一条中线、同样的左右留白，标签贴着气泡的右边缘。 */
+.refs {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: var(--content-width);
+  margin: -14px auto 20px;
+  padding: 0 28px;
+}
+
+.ref {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 9px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-full);
+  background: var(--surface);
+  color: var(--accent);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.ref:hover {
+  background: var(--accent-soft);
+}
 </style>

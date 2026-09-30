@@ -533,10 +533,18 @@ export interface TurnStartResult {
   queued?: boolean;
 }
 
+/** 一条消息里 @ 引用的另一个会话。 */
+export interface ThreadRef {
+  id: string;
+  title: string;
+}
+
 export interface Item {
   id: string;
   kind: ItemKind;
   text?: string;
+  /** 用户消息里 @ 引用的会话。 */
+  references?: ThreadRef[];
   /** 用户消息带的图片，base64 的 PNG/JPEG。恢复会话时要能重新画出来。 */
   images?: string[];
   toolName?: string;

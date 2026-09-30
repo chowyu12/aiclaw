@@ -23,6 +23,7 @@ import type {
   ProviderView,
   SearchEngineCreateParams,
   EmailTestResult,
+  ThreadRef,
   ScheduleRequestParams,
   ScheduleResult,
   AudioTranscribeParams,
@@ -470,10 +471,11 @@ export class ClawAgentClient extends EventEmitter {
     text: string,
     images?: string[],
     audioPaths?: string[],
+    references?: ThreadRef[],
   ): Promise<TurnStartResult> {
     this.assertReady();
     return this.transport.request<{ turnId: string }>("turn/start", {
-      sessionId, text, images, audioPaths,
+      sessionId, text, images, audioPaths, references,
     });
   }
 

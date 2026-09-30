@@ -1084,6 +1084,7 @@ export const actions = {
     text: string,
     images: string[] = [],
     audio: { name: string; data: string }[] = [],
+    references: { id: string; title: string }[] = [],
   ): Promise<void> {
     if (!text.trim() && images.length === 0 && audio.length === 0) return;
     // 没有会话就先开一个。删掉当前会话之后运行时仍然是 ready，输入框还能打字，
@@ -1108,6 +1109,7 @@ export const actions = {
       // 不标记的话通道会话与本机发送没法区分，二选一必错一头。
       pending: true,
       at: Date.now(),
+      references: references.length > 0 ? references : undefined,
     });
     record.busy = true;
     try {
@@ -1116,7 +1118,7 @@ export const actions = {
       for (const item of audio) {
         audioPaths.push((await window.aiclaw.audio.stage(plain(item))) as string);
       }
-      await window.aiclaw.session.send({ sessionId, text, images, audioPaths });
+      await window.aiclaw.session.send({ sessionId, text, images, audioPaths, references: plain(references) });
     } catch (error) {
       record.busy = false;
       state.error = describeError(error);
