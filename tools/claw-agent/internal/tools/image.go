@@ -13,6 +13,8 @@ import (
 	_ "image/png" //
 	"math"
 	"os"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 /*
@@ -44,11 +46,11 @@ const (
 func viewImageTool() Tool {
 	return Tool{
 		Name: "view_image",
-		Description: "看一张本机已有的图片（截图、照片、图表都行）。" +
-			"图会作为画面送给你，不是文字。路径相对工作区解析，也可以给绝对路径。",
+		Description: "View an image file on this machine (screenshots, photos, charts, etc.). " +
+			"The image is sent to you as a picture, not as text. Relative paths resolve against the workspace; absolute paths also work.",
 		Effect: EffectRead,
 		Schema: schema(map[string]any{
-			"path": map[string]any{"type": "string", "description": "图片文件路径"},
+			"path": map[string]any{"type": "string", "description": "Path to the image file"},
 		}, "path"),
 		Handler: func(_ context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
@@ -63,20 +65,21 @@ func viewImageTool() Tool {
 			}
 			info, err := os.Stat(path)
 			if err != nil {
-				return "", fmt.Errorf("读取失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
 			}
 			if info.IsDir() {
-				return "", fmt.Errorf("%s 是一个目录，不是图片", args.Path)
+				return "", i18n.E("{path} 是一个目录，不是图片", "path", args.Path)
 			}
 			if info.Size() > maxImageFileBytes {
-				return "", fmt.Errorf(
-					"图片太大（%.1f MB，上限 %d MB）", float64(info.Size())/(1<<20), maxImageFileBytes>>20,
+				return "", i18n.E(
+					"图片太大（{size} MB，上限 {limit} MB）",
+					"size", fmt.Sprintf("%.1f", float64(info.Size())/(1<<20)), "limit", maxImageFileBytes>>20,
 				)
 			}
 
 			file, err := os.Open(path)
 			if err != nil {
-				return "", fmt.Errorf("读取失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
 			}
 			defer file.Close()
 
@@ -84,13 +87,13 @@ func viewImageTool() Tool {
 			if err != nil {
 				// 说清楚是「不是图片/不支持这个格式」，模型才知道该换个做法
 				//（比如先用命令转一下），而不是反复重试同一个路径。
-				return "", fmt.Errorf("解不开这个图片（支持 png / jpeg / gif）：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("解不开这个图片（支持 png / jpeg / gif）"), err)
 			}
 
 			scaled := downscale(source, maxImageEdge)
 			var buffer bytes.Buffer
 			if err := jpeg.Encode(&buffer, scaled, &jpeg.Options{Quality: 82}); err != nil {
-				return "", fmt.Errorf("图片转码失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("图片转码失败"), err)
 			}
 			env.Attach(buffer.Bytes())
 
@@ -98,11 +101,11 @@ func viewImageTool() Tool {
 			final := scaled.Bounds()
 			note := ""
 			if final.Dx() != original.Dx() {
-				note = fmt.Sprintf("，已缩到 %d×%d", final.Dx(), final.Dy())
+				note = i18n.D("，已缩到 {width}×{height}", "width", final.Dx(), "height", final.Dy())
 			}
-			return fmt.Sprintf(
-				"已加载 %s（%s，%d×%d%s）。画面在下一条消息里。",
-				args.Path, format, original.Dx(), original.Dy(), note,
+			return i18n.D(
+				"已加载 {path}（{format}，{width}×{height}{note}）。画面在下一条消息里。",
+				"path", args.Path, "format", format, "width", original.Dx(), "height", original.Dy(), "note", note,
 			), nil
 		},
 	}

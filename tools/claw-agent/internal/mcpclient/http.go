@@ -5,13 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // httpTransport 是 MCP 的 Streamable HTTP 传输（规范版本 2025-03-26）。
@@ -45,10 +46,10 @@ type httpTransport struct {
 func startHTTP(config Config) (*httpTransport, error) {
 	url := strings.TrimSpace(config.URL)
 	if url == "" {
-		return nil, errors.New("MCP server 地址为空")
+		return nil, i18n.E("MCP server 地址为空")
 	}
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-		return nil, fmt.Errorf("MCP server 地址必须是 http(s)：%s", url)
+		return nil, i18n.E("MCP server 地址必须是 http(s)：{url}", "url", url)
 	}
 	headers := make(map[string]string, len(config.Headers))
 	for key, value := range config.Headers {
@@ -64,7 +65,7 @@ func startHTTP(config Config) (*httpTransport, error) {
 
 func (t *httpTransport) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	if t.closed.Load() {
-		return nil, errors.New("MCP server 已关闭")
+		return nil, i18n.E("MCP server 已关闭")
 	}
 	id := t.nextID.Add(1)
 	resp, err := t.post(ctx, rpcRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}, &id)
@@ -127,8 +128,8 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 
 	response, err := t.client.Do(request)
 	if err != nil {
-		t.setStatus("请求失败：" + err.Error())
-		return rpcResponse{}, fmt.Errorf("连接 MCP server 失败：%w", err)
+		t.setStatus(i18n.D("请求失败：{err}", "err", err))
+		return rpcResponse{}, fmt.Errorf("%s%w", i18n.D("连接 MCP server 失败："), err)
 	}
 	defer response.Body.Close()
 
@@ -143,7 +144,7 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 		snippet, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
 		detail := strings.TrimSpace(string(snippet))
 		t.setStatus(fmt.Sprintf("HTTP %d %s", response.StatusCode, detail))
-		return rpcResponse{}, fmt.Errorf("MCP server 返回 HTTP %d：%s", response.StatusCode, detail)
+		return rpcResponse{}, i18n.E("MCP server 返回 HTTP {status}：{detail}", "status", response.StatusCode, "detail", detail)
 	}
 	if wantID == nil {
 		return rpcResponse{}, nil
@@ -157,7 +158,7 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 	var resp rpcResponse
 	raw, err := io.ReadAll(io.LimitReader(response.Body, 32<<20))
 	if err != nil {
-		return rpcResponse{}, fmt.Errorf("读取 MCP server 响应失败：%w", err)
+		return rpcResponse{}, fmt.Errorf("%s%w", i18n.D("读取 MCP server 响应失败："), err)
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		// 可能是批量响应（数组）。取 id 对得上的那条。
@@ -169,7 +170,7 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 				}
 			}
 		}
-		return rpcResponse{}, fmt.Errorf("MCP server 响应不是合法 JSON-RPC：%w", err)
+		return rpcResponse{}, fmt.Errorf("%s%w", i18n.D("MCP server 响应不是合法 JSON-RPC："), err)
 	}
 	return resp, nil
 }
@@ -213,13 +214,13 @@ func readSSEResponse(body io.Reader, wantID int64) (rpcResponse, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return rpcResponse{}, fmt.Errorf("读取 MCP 事件流失败：%w", err)
+		return rpcResponse{}, fmt.Errorf("%s%w", i18n.D("读取 MCP 事件流失败："), err)
 	}
 	// 流结束前最后一个事件可能没有空行收尾。
 	if resp, ok := flush(); ok {
 		return resp, nil
 	}
-	return rpcResponse{}, errors.New("MCP 事件流结束但没有收到对应的响应")
+	return rpcResponse{}, i18n.E("MCP 事件流结束但没有收到对应的响应")
 }
 
 func (t *httpTransport) setStatus(status string) {

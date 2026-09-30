@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { actions, store } from "../store";
 import { describeError } from "../errors";
+import { t } from "../i18n";
 import {
   MODEL_ROLES,
   ROLE_LABELS,
@@ -24,16 +25,37 @@ import {
 type ProviderRow = (typeof store.providers)[number];
 
 /** 各类型的显示名与默认端点。默认端点与内核 providers 包里那张表一致，改一处要改另一处。 */
+// 要翻译的显示名写成 getter：每次读都按当前语言取。
 const TYPES: { id: string; label: string; baseUrl: string }[] = [
-  { id: "openai-compatible", label: "OpenAI 兼容", baseUrl: "" },
+  {
+    id: "openai-compatible",
+    get label() {
+      return t("OpenAI 兼容");
+    },
+    baseUrl: "",
+  },
   { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
-  { id: "qwen", label: "通义千问", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+  {
+    id: "qwen",
+    get label() {
+      return t("通义千问");
+    },
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  },
   { id: "kimi", label: "Kimi", baseUrl: "https://api.moonshot.cn/v1" },
   { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
-  { id: "claude", label: "Claude（OpenAI 兼容入口）", baseUrl: "https://api.anthropic.com/v1" },
+  {
+    id: "claude",
+    get label() {
+      return t("Claude（OpenAI 兼容入口）");
+    },
+    baseUrl: "https://api.anthropic.com/v1",
+  },
   {
     id: "gemini",
-    label: "Gemini（OpenAI 兼容入口）",
+    get label() {
+      return t("Gemini（OpenAI 兼容入口）");
+    },
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
   },
 ];
@@ -139,7 +161,7 @@ async function run(task: () => Promise<unknown>): Promise<void> {
 
 async function add(): Promise<void> {
   await run(async () => {
-    const created = await actions.createProvider({ name: "新模型服务", type: "openai-compatible" });
+    const created = await actions.createProvider({ name: t("新模型服务"), type: "openai-compatible" });
     // 新加的直接展开：它是空的，收起来等于加了个看不见的东西。
     expanded.value = created.id;
   });
@@ -160,7 +182,7 @@ async function saveKey(id: number): Promise<void> {
 }
 
 async function remove(provider: ProviderRow): Promise<void> {
-  if (!confirm(`删除模型服务「${provider.name}」？用它的会话下次恢复时要重新选模型。`)) return;
+  if (!confirm(t("删除模型服务「{name}」？用它的会话下次恢复时要重新选模型。", { name: provider.name }))) return;
   await run(() => actions.deleteProvider(provider.id));
 }
 
@@ -212,9 +234,9 @@ async function fetchModels(provider: ProviderRow): Promise<void> {
 
 /** 收起时那一行右边的状态字。 */
 function summary(provider: ProviderRow): string {
-  if (!provider.apiKeySet) return "没配 Key";
-  if (provider.models.length === 0) return "清单为空";
-  return `${provider.models.length} 个模型`;
+  if (!provider.apiKeySet) return t("没配 Key");
+  if (provider.models.length === 0) return t("清单为空");
+  return t("{n} 个模型", { n: provider.models.length });
 }
 </script>
 
@@ -222,26 +244,26 @@ function summary(provider: ProviderRow): string {
   <div class="page">
     <section>
       <header>
-        <h2>模型服务</h2>
+        <h2>{{ t("模型服务") }}</h2>
         <p class="sub">
-          一个模型服务就是一个 OpenAI 兼容端点：填地址、Key，再写上要用的模型名。
-          清单里的模型就是对话页顶部能选的那些；改动立刻生效，新会话与切模型都用得上。
+          {{ t("一个模型服务就是一个 OpenAI 兼容端点：填地址、Key，再写上要用的模型名。") }}
+          {{ t("清单里的模型就是对话页顶部能选的那些；改动立刻生效，新会话与切模型都用得上。") }}
         </p>
       </header>
 
       <p class="note">
-        Key 只存进本机的配置库，不写进日志、不进诊断包、不经界面回显。
-        Claude 与 Gemini 走的是它们的 OpenAI 兼容入口——原生接口不支持。
+        {{ t("Key 只存进本机的配置库，不写进日志、不进诊断包、不经界面回显。") }}
+        {{ t("Claude 与 Gemini 走的是它们的 OpenAI 兼容入口——原生接口不支持。") }}
       </p>
 
       <div class="add">
-        <button class="ghost" @click="add()">+ 添加模型服务</button>
-        <button class="ghost" @click="actions.loadProviders()">刷新</button>
+        <button class="ghost" @click="add()">+ {{ t("添加模型服务") }}</button>
+        <button class="ghost" @click="actions.loadProviders()">{{ t("刷新") }}</button>
       </div>
 
       <p v-if="store.providersError" class="note warn">{{ store.providersError }}</p>
       <p v-else-if="store.providers.length === 0 && !store.providersLoading" class="note">
-        还没有模型服务。添加一个，填上端点与 Key，再写上模型名。
+        {{ t("还没有模型服务。添加一个，填上端点与 Key，再写上模型名。") }}
       </p>
 
       <article
@@ -257,8 +279,8 @@ function summary(provider: ProviderRow): string {
             @click="toggleExpand(provider.id)"
           >
             <span class="chevron">{{ expanded === provider.id ? "▾" : "▸" }}</span>
-            <span class="name">{{ provider.name || "未命名" }}</span>
-            <span class="badge">{{ TYPES.find((t) => t.id === provider.type)?.label ?? provider.type }}</span>
+            <span class="name">{{ provider.name || t("未命名") }}</span>
+            <span class="badge">{{ TYPES.find((item) => item.id === provider.type)?.label ?? provider.type }}</span>
             <span class="state" :class="{ bad: !provider.apiKeySet }">{{ summary(provider) }}</span>
           </button>
           <label class="toggle">
@@ -267,33 +289,33 @@ function summary(provider: ProviderRow): string {
               :checked="provider.enabled"
               @change="patch(provider.id, { enabled: ($event.target as HTMLInputElement).checked })"
             />
-            启用
+            {{ t("启用") }}
           </label>
-          <button class="icon" title="删除" @click="remove(provider)">×</button>
+          <button class="icon" :title="t(`删除`)" @click="remove(provider)">×</button>
         </div>
 
         <template v-if="expanded === provider.id">
           <label>
-            <span>名字</span>
+            <span>{{ t("名字") }}</span>
             <input
               :value="provider.name"
-              placeholder="给这个服务起个名字"
+              :placeholder="t(`给这个服务起个名字`)"
               @change="patch(provider.id, { name: ($event.target as HTMLInputElement).value })"
             />
           </label>
 
           <div class="pair">
             <label>
-              <span>类型</span>
+              <span>{{ t("类型") }}</span>
               <select
                 :value="provider.type"
                 @change="patch(provider.id, { type: ($event.target as HTMLSelectElement).value })"
               >
-                <option v-for="t in TYPES" :key="t.id" :value="t.id">{{ t.label }}</option>
+                <option v-for="kind in TYPES" :key="kind.id" :value="kind.id">{{ kind.label }}</option>
               </select>
             </label>
             <label>
-              <span>端点</span>
+              <span>{{ t("端点") }}</span>
               <input
                 :value="provider.baseUrl"
                 :placeholder="placeholderFor(provider.type)"
@@ -301,19 +323,19 @@ function summary(provider: ProviderRow): string {
               />
             </label>
           </div>
-          <p class="hint">填到 <code>/v1</code>。留空用该类型的默认端点（OpenAI 兼容类型必须填）。</p>
+          <p class="hint">{{ t("填到") }} <code>/v1</code>{{ t("。留空用该类型的默认端点（OpenAI 兼容类型必须填）。") }}</p>
 
           <label>
-            <span>Key<em v-if="provider.apiKeySet">已配置</em></span>
+            <span>Key<em v-if="provider.apiKeySet">{{ t("已配置") }}</em></span>
             <div class="key-row">
               <input
                 v-model="keyDrafts[provider.id]"
                 type="password"
-                :placeholder="provider.apiKeySet ? '留空表示不修改' : 'sk-…'"
+                :placeholder="provider.apiKeySet ? t(`留空表示不修改`) : 'sk-…'"
                 @keydown.enter="saveKey(provider.id)"
               />
               <button class="ghost" :disabled="!keyDrafts[provider.id]" @click="saveKey(provider.id)">
-                保存 Key
+                {{ t("保存 Key") }}
               </button>
             </div>
           </label>
@@ -323,33 +345,32 @@ function summary(provider: ProviderRow): string {
           <div class="models">
             <div class="models-head">
               <span class="models-title">
-                模型清单
-                <em>{{ provider.models.length }} 个{{ markedCount(provider) ? ` · ${markedCount(provider)} 个标了能力` : "" }}</em>
+                {{ t("模型清单") }}
+                <em>{{ t("{n} 个", { n: provider.models.length }) }}{{ markedCount(provider) ? " · " + t("{n} 个标了能力", { n: markedCount(provider) }) : "" }}</em>
               </span>
               <input
                 v-model="modelSearch[provider.id]"
                 class="models-search"
-                placeholder="搜索模型"
+                :placeholder="t(`搜索模型`)"
               />
             </div>
 
             <div class="model-add">
               <input
                 v-model="modelDrafts[provider.id]"
-                placeholder="手动添加一个模型名，回车确认"
+                :placeholder="t(`手动添加一个模型名，回车确认`)"
                 @keydown.enter="addModel(provider)"
               />
               <button class="ghost small" :disabled="!modelDrafts[provider.id]" @click="addModel(provider)">
-                添加
+                {{ t("添加") }}
               </button>
             </div>
 
             <p v-if="provider.models.length === 0" class="hint">
-              还没有模型。从端点拉一遍，或者手动加一个——清单里的模型名就是发给
-              服务的那个名字。
+              {{ t("还没有模型。从端点拉一遍，或者手动加一个——清单里的模型名就是发给服务的那个名字。") }}
             </p>
             <p v-else-if="modelRows(provider).length === 0" class="hint">
-              没有匹配「{{ modelSearch[provider.id] }}」的模型。
+              {{ t("没有匹配「{keyword}」的模型。", { keyword: modelSearch[provider.id] ?? "" }) }}
             </p>
 
             <div v-for="entry in modelRows(provider)" :key="entry" class="model-row">
@@ -362,17 +383,16 @@ function summary(provider: ProviderRow): string {
                 />
                 {{ ROLE_LABELS[role] }}
               </label>
-              <button class="icon" title="从清单里移除" @click="removeModel(provider, entry)">×</button>
+              <button class="icon" :title="t(`从清单里移除`)" @click="removeModel(provider, entry)">×</button>
               <!-- 勾反了当场说：选了这个角色一用就是一个莫名其妙的 400，那时已经离这里很远。 -->
               <span v-if="markConflict(entry)" class="hint bad conflict">{{ markConflict(entry) }}</span>
             </div>
 
             <p v-if="hiddenCount(provider) > 0" class="hint">
-              还有 {{ hiddenCount(provider) }} 个没列出来，搜索名字找它们。
+              {{ t("还有 {n} 个没列出来，搜索名字找它们。", { n: hiddenCount(provider) }) }}
             </p>
             <p class="hint">
-              勾了能力的模型会出现在「配置 → 多模态」对应角色的候选里。不勾不影响
-              它当对话模型用。
+              {{ t("勾了能力的模型会出现在「配置 → 多模态」对应角色的候选里。不勾不影响它当对话模型用。") }}
             </p>
           </div>
 
@@ -382,31 +402,31 @@ function summary(provider: ProviderRow): string {
               :disabled="!provider.apiKeySet || fetches[provider.id]?.loading"
               @click="fetchModels(provider)"
             >
-              {{ fetches[provider.id]?.loading ? "拉取中…" : "从端点拉取模型名" }}
+              {{ fetches[provider.id]?.loading ? t("拉取中…") : t("从端点拉取模型名") }}
             </button>
             <button
               class="ghost small"
               :disabled="provider.models.length === 0 || marking[provider.id]?.loading"
               @click="autoMark(provider)"
             >
-              {{ marking[provider.id]?.loading ? "查询中…" : "自动标记能力" }}
+              {{ marking[provider.id]?.loading ? t("查询中…") : t("自动标记能力") }}
             </button>
             <span v-if="marking[provider.id]?.error" class="hint bad">{{ marking[provider.id]!.error }}</span>
             <span v-else-if="marking[provider.id]?.matched !== undefined" class="hint">
-              查到 {{ marking[provider.id]!.matched }} 个<template v-if="marking[provider.id]?.guessed">，{{ marking[provider.id]!.guessed }} 个表里没有、按名字猜的</template>，另 {{ marking[provider.id]!.unmatched }} 个表里没有，要自己勾。
+              {{ t("查到 {n} 个", { n: marking[provider.id]!.matched ?? 0 }) }}<template v-if="marking[provider.id]?.guessed">{{ t("，{n} 个表里没有、按名字猜的", { n: marking[provider.id]!.guessed ?? 0 }) }}</template>{{ t("，另 {n} 个表里没有，要自己勾。", { n: marking[provider.id]!.unmatched ?? 0 }) }}
               <!-- 两份表少拉到一份时说出来：结果不完整，用户该知道再点一次可能更全。 -->
-              <template v-if="marking[provider.id]?.note">{{ marking[provider.id]!.note }}。</template>
+              <template v-if="marking[provider.id]?.note">{{ t("{note}。", { note: marking[provider.id]!.note ?? "" }) }}</template>
             </span>
             <span v-if="fetches[provider.id]?.error" class="hint bad">{{ fetches[provider.id]?.error }}</span>
             <span v-else-if="fetches[provider.id]?.count !== undefined" class="hint">
-              端点返回 {{ fetches[provider.id]?.count }} 个，已并进清单。
+              {{ t("端点返回 {n} 个，已并进清单。", { n: fetches[provider.id]?.count ?? 0 }) }}
             </span>
-            <span v-else-if="!provider.apiKeySet" class="hint">先保存 Key 才能拉取。</span>
+            <span v-else-if="!provider.apiKeySet" class="hint">{{ t("先保存 Key 才能拉取。") }}</span>
           </div>
         </template>
       </article>
 
-      <p v-if="saving" class="note">保存中…</p>
+      <p v-if="saving" class="note">{{ t("保存中…") }}</p>
     </section>
   </div>
 </template>

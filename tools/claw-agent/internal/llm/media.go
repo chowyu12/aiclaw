@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // mediaTimeout 是这三个端点的上限。
@@ -58,28 +60,28 @@ func (c *Client) GenerateImage(ctx context.Context, model, prompt, size string) 
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil, fmt.Errorf("图片服务的返回看不懂：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("图片服务的返回看不懂"), err)
 	}
 	if len(parsed.Data) == 0 {
-		return nil, fmt.Errorf("图片服务没有返回任何图片")
+		return nil, i18n.E("图片服务没有返回任何图片")
 	}
 	if b64 := parsed.Data[0].B64; b64 != "" {
 		decoded, err := base64.StdEncoding.DecodeString(b64)
 		if err != nil {
-			return nil, fmt.Errorf("图片数据解不开：%w", err)
+			return nil, fmt.Errorf("%s: %w", i18n.D("图片数据解不开"), err)
 		}
 		return decoded, nil
 	}
 	if url := parsed.Data[0].URL; url != "" {
 		return c.fetch(ctx, url)
 	}
-	return nil, fmt.Errorf("图片服务既没给数据也没给地址")
+	return nil, i18n.E("图片服务既没给数据也没给地址")
 }
 
 // Transcribe 把一段音频转成文字。name 只用来让服务端认出格式。
 func (c *Client) Transcribe(ctx context.Context, model, name string, audio []byte) (string, error) {
 	if len(audio) > maxAudioBytes {
-		return "", fmt.Errorf("音频太大（%.1f MB，上限 %d MB）", float64(len(audio))/(1<<20), maxAudioBytes>>20)
+		return "", i18n.E("音频太大（{size} MB，上限 {limit} MB）", "size", fmt.Sprintf("%.1f", float64(len(audio))/(1<<20)), "limit", maxAudioBytes>>20)
 	}
 	if c.dialect == dialectDashScope {
 		return c.dashScopeTranscribe(ctx, model, name, audio)
@@ -174,21 +176,21 @@ func (c *Client) postJSONTo(ctx context.Context, target string, payload []byte) 
 func (c *Client) do(request *http.Request) ([]byte, error) {
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("请求失败：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("请求失败"), err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<20))
 	if err != nil {
-		return nil, fmt.Errorf("读取响应失败：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("读取响应失败"), err)
 	}
 	if response.StatusCode != http.StatusOK {
 		message := upstreamMessage(body)
 		if message == "" && response.StatusCode == http.StatusNotFound {
 			// 空的 404 几乎只有一个意思：这个端点没有这条路。说出来，模型才不会
 			// 换个尺寸再试三次。
-			message = "这个端点没有 " + request.URL.Path + " 这条接口，这家服务的这个能力可能要走别的地址"
+			message = i18n.D("这个端点没有 {path} 这条接口，这家服务的这个能力可能要走别的地址", "path", request.URL.Path)
 		}
-		return nil, fmt.Errorf("上游返回 %d：%s", response.StatusCode, message)
+		return nil, i18n.E("上游返回 {status}：{message}", "status", response.StatusCode, "message", message)
 	}
 	return body, nil
 }
@@ -202,11 +204,11 @@ func (c *Client) fetch(ctx context.Context, url string) ([]byte, error) {
 	// 不带 Authorization：那是图床的临时地址，把 Key 发给第三方没有道理。
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("下载生成的图片失败：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("下载生成的图片失败"), err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("下载生成的图片失败：HTTP %d", response.StatusCode)
+		return nil, i18n.E("下载生成的图片失败：HTTP {status}", "status", response.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(response.Body, 64<<20))
 }

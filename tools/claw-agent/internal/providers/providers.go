@@ -10,7 +10,6 @@ package providers
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
@@ -70,7 +70,7 @@ func (s *Store) List(ctx context.Context) ([]protocol.ProviderView, error) {
 func (s *Store) Create(ctx context.Context, params protocol.ProviderCreateParams) (protocol.ProviderView, error) {
 	name := strings.TrimSpace(params.Name)
 	if name == "" {
-		return protocol.ProviderView{}, errors.New("名字不能为空")
+		return protocol.ProviderView{}, i18n.E("名字不能为空")
 	}
 	providerType := strings.TrimSpace(params.Type)
 	if providerType == "" {
@@ -100,7 +100,7 @@ func (s *Store) Update(ctx context.Context, params protocol.ProviderUpdateParams
 	if params.Name != nil {
 		name := strings.TrimSpace(*params.Name)
 		if name == "" {
-			return protocol.ProviderView{}, errors.New("名字不能为空")
+			return protocol.ProviderView{}, i18n.E("名字不能为空")
 		}
 		req.Name = &name
 	}
@@ -142,21 +142,21 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 func (s *Store) Resolve(ctx context.Context, m *protocol.ModelConfig) (string, error) {
 	item, err := s.db.GetProvider(ctx, m.ProviderID)
 	if err != nil {
-		return "", fmt.Errorf("模型服务不存在（id=%d）：%w", m.ProviderID, err)
+		return "", fmt.Errorf("%s%w", i18n.D("模型服务不存在（id={id}）：", "id", m.ProviderID), err)
 	}
 	if !item.Enabled {
-		return "", fmt.Errorf("模型服务「%s」已停用", item.Name)
+		return "", i18n.E("模型服务「{name}」已停用", "name", item.Name)
 	}
 	baseURL := item.BaseURL
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = defaultBaseURLs[string(item.Type)]
 	}
 	if strings.TrimSpace(baseURL) == "" {
-		return "", fmt.Errorf("模型服务「%s」没有填端点", item.Name)
+		return "", i18n.E("模型服务「{name}」没有填端点", "name", item.Name)
 	}
 	m.BaseURL = baseURL
 	if strings.TrimSpace(item.APIKey) == "" {
-		return "", fmt.Errorf("模型服务「%s」没有配置 Key", item.Name)
+		return "", i18n.E("模型服务「{name}」没有配置 Key", "name", item.Name)
 	}
 	return item.APIKey, nil
 }
@@ -180,13 +180,13 @@ func (s *Store) FetchModels(ctx context.Context, id int64) ([]string, error) {
 	req.Header.Set("Accept", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("连接模型服务失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("连接模型服务失败："), err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode != http.StatusOK {
 		// 把上游的话带出来：401/403 最常见，都是 Key 的问题，直接说比让人猜强。
-		return nil, fmt.Errorf("模型服务返回 %d：%s", resp.StatusCode, upstreamMessage(body))
+		return nil, i18n.E("模型服务返回 {status}：{message}", "status", resp.StatusCode, "message", upstreamMessage(body))
 	}
 	var parsed struct {
 		Data []struct {
@@ -194,7 +194,7 @@ func (s *Store) FetchModels(ctx context.Context, id int64) ([]string, error) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, fmt.Errorf("模型列表不是预期的格式：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("模型列表不是预期的格式："), err)
 	}
 	names := make([]string, 0, len(parsed.Data))
 	for _, entry := range parsed.Data {

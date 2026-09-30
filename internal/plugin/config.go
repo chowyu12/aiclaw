@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 )
 
@@ -192,7 +193,7 @@ func (s *ConfigService) ValidateEnable(ctx context.Context, plugin model.Plugin)
 			return err
 		}
 		if len(ready) == 0 {
-			return fmt.Errorf("「%s」还没有可用的连接：先添加一个并填好配置", plugin.Name)
+			return i18n.E("「{name}」还没有可用的连接：先添加一个并填好配置", "name", plugin.Name)
 		}
 		return nil
 	}

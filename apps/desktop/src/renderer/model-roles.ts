@@ -7,24 +7,43 @@
  * 单独成文件是为了能在 node 里直接测，同 model-choices.ts。
  */
 
+import { tr } from "../shared/i18n.js";
+
 export type ModelRole = "vision" | "stt" | "tts" | "image";
 
 /** 全部角色，界面按它出勾选项与角色格。顺序与 Go 侧 KnownRoles 一致。 */
 export const MODEL_ROLES: ModelRole[] = ["vision", "stt", "tts", "image"];
 
+// 用 getter：每次读都按当前语言翻译（切换语言后 App 整树重挂，这里跟着变）。
 export const ROLE_LABELS: Record<ModelRole, string> = {
-  vision: "看图",
-  stt: "听写",
-  tts: "朗读",
-  image: "画图",
+  get vision() {
+    return tr("看图");
+  },
+  get stt() {
+    return tr("听写");
+  },
+  get tts() {
+    return tr("朗读");
+  },
+  get image() {
+    return tr("画图");
+  },
 };
 
 /** 配置页上每个角色格的说明。 */
 export const ROLE_HINTS: Record<ModelRole, string> = {
-  vision: "对话模型不认图时，用它把图转成文字再交给对话模型",
-  stt: "把音频转成文字（transcribe_audio 工具）",
-  tts: "把文字读成语音（speak 工具）",
-  image: "按描述生成图片（generate_image 工具）",
+  get vision() {
+    return tr("对话模型不认图时，用它把图转成文字再交给对话模型");
+  },
+  get stt() {
+    return tr("把音频转成文字（transcribe_audio 工具）");
+  },
+  get tts() {
+    return tr("把文字读成语音（speak 工具）");
+  },
+  get image() {
+    return tr("按描述生成图片（generate_image 工具）");
+  },
 };
 
 /** 一条清单项拆开之后的样子。 */
@@ -148,10 +167,10 @@ export function markConflict(entry: string): string {
   const parsed = parseModelMark(entry);
   const guess = guessRoleByName(parsed.name);
   if (guess === "tts" && parsed.roles.includes("stt") && !parsed.roles.includes("tts")) {
-    return "名字像朗读（TTS）模型，却勾了听写";
+    return tr("名字像朗读（TTS）模型，却勾了听写");
   }
   if (guess === "stt" && parsed.roles.includes("tts") && !parsed.roles.includes("stt")) {
-    return "名字像听写（ASR）模型，却勾了朗读";
+    return tr("名字像听写（ASR）模型，却勾了朗读");
   }
   return "";
 }

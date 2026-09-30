@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
@@ -103,18 +104,18 @@ func (s *Session) registerCollabTools() error {
 
 	if err := register(tools.Tool{
 		Name: "spawn_agent",
-		Description: "开一个子 agent 去做一件边界清楚的事，立刻返回，它在后台跑。" +
-			"它的规范名是你的路径加上 task_name（你是 /root 时，task_name 为 research 的子 agent 叫 /root/research），" +
-			"在你的子树里可以只写 research。它有和你一样的工具，能给你和别的 agent 发消息，完成时它的最终回答会投进你的邮箱。" +
-			"fork_turns 默认 all（带上全部上下文）；none 表示什么都不带，那样任务说明里就得写清所有背景。\n" +
-			"何时用：用户或技能明确要求分工、并行时才开；要求「仔细」「深入调查」本身不算授权。" +
-			"先想清楚关键路径：马上要用结果的事自己做，能并行、不挡你下一步的边角任务才交出去。" +
-			"任务要具体、自包含、互不重复；改代码时让各个子 agent 的写入范围不重叠（大家共用同一个工作区），" +
-			"并让它在最终回答里列出改了哪些文件。交出去之后去做不重叠的事，别自己再做一遍，别一遍遍地等。",
+		Description: "Spawn a sub-agent to handle a well-scoped task. Returns immediately; the agent runs in the background. " +
+			"Its canonical name is your path plus task_name (if you are /root, a sub-agent with task_name research is /root/research); " +
+			"within your subtree you can refer to it simply as research. It has the same tools as you, can message you and other agents, and its final answer is delivered to your mailbox when it finishes. " +
+			"fork_turns defaults to all (carry the full context); none carries nothing, in which case the task message must spell out all the background.\n" +
+			"When to use: only spawn when the user or a skill explicitly asks for delegation or parallel work; being asked to be \"thorough\" or to \"investigate in depth\" is not by itself permission. " +
+			"Think through the critical path first: do the work whose result you need right away yourself, and hand off only side tasks that can run in parallel without blocking your next step. " +
+			"Tasks must be concrete, self-contained and non-overlapping; when changing code, give each sub-agent a non-overlapping write scope (everyone shares the same workspace), " +
+			"and have it list the files it changed in its final answer. After handing off, work on something that doesn't overlap — don't redo the task yourself, and don't wait on it repeatedly.",
 		Schema: schemaOf(map[string]any{
-			"task_name":  map[string]any{"type": "string", "description": "子 agent 的任务名：小写字母、数字、下划线"},
-			"message":    map[string]any{"type": "string", "description": "交给它的任务说明（纯文本）"},
-			"fork_turns": map[string]any{"type": "string", "description": "带多少轮上下文：all（默认）、none，或一个正整数字符串（如 \"3\"，只带最近几轮）"},
+			"task_name":  map[string]any{"type": "string", "description": "Task name for the sub-agent: lowercase letters, digits and underscores"},
+			"message":    map[string]any{"type": "string", "description": "The task description for it (plain text)"},
+			"fork_turns": map[string]any{"type": "string", "description": "How much context to carry: all (default), none, or a positive integer string (e.g. \"3\" carries only the last few turns)"},
 		}, "task_name", "message"),
 		Effect: tools.EffectRead,
 		Handler: func(ctx context.Context, raw json.RawMessage, _ *tools.Env) (string, error) {
@@ -128,7 +129,7 @@ func (s *Session) registerCollabTools() error {
 			}
 			name := strings.TrimSpace(args.TaskName)
 			if !taskNamePattern.MatchString(name) {
-				return "", errors.New("task_name 只能用小写字母、数字、下划线，最长 40 个字符")
+				return "", i18n.E("task_name 只能用小写字母、数字、下划线，最长 40 个字符")
 			}
 			if strings.TrimSpace(args.Message) == "" {
 				return "", errors.New("Empty message can't be sent to an agent")
@@ -148,8 +149,8 @@ func (s *Session) registerCollabTools() error {
 	}
 
 	messageSchema := schemaOf(map[string]any{
-		"target":  map[string]any{"type": "string", "description": "目标 agent：规范名（/root/research）或你子树里的任务名（research）；/root 是根"},
-		"message": map[string]any{"type": "string", "description": "消息内容（纯文本）"},
+		"target":  map[string]any{"type": "string", "description": "Target agent: canonical name (/root/research) or a task name within your subtree (research); /root is the root"},
+		"message": map[string]any{"type": "string", "description": "Message content (plain text)"},
 	}, "target", "message")
 	sendHandler := func(trigger bool) tools.Handler {
 		return func(ctx context.Context, raw json.RawMessage, _ *tools.Env) (string, error) {
@@ -171,7 +172,7 @@ func (s *Session) registerCollabTools() error {
 	}
 	if err := register(tools.Tool{
 		Name:        "send_message",
-		Description: "给一个已有的 agent 发消息。消息会尽快送到，但不会叫它开新的一轮。",
+		Description: "Send a message to an existing agent. The message is delivered as soon as possible but does not start a new turn for it.",
 		Schema:      messageSchema,
 		Effect:      tools.EffectRead,
 		Handler:     sendHandler(false),
@@ -180,8 +181,8 @@ func (s *Session) registerCollabTools() error {
 	}
 	if err := register(tools.Tool{
 		Name: "followup_task",
-		Description: "给一个已有的非根 agent 追加任务：它闲着就开一轮；正在跑的话，任务在它下一次采样前" +
-			"（或正在执行的工具调用结束后）送到。",
+		Description: "Give an existing non-root agent a follow-up task: if it is idle, it starts a new turn; if it is running, the task is delivered before its next sampling step " +
+			"(or after the tool call in progress finishes).",
 		Schema:  messageSchema,
 		Effect:  tools.EffectRead,
 		Handler: sendHandler(true),
@@ -191,11 +192,11 @@ func (s *Session) registerCollabTools() error {
 
 	if err := register(tools.Tool{
 		Name: "wait_agent",
-		Description: "等任何一个活着的 agent 给你的邮箱来东西（排队的消息或完成通知）；用户这时插话也会提前结束等待。" +
-			"不返回内容：来的东西会作为消息出现在你的上下文里。只在下一步确实要用结果、别的都做不了时才等，" +
-			"而且等久一点（按分钟算），别反复短轮询。",
+		Description: "Wait until any live agent puts something in your mailbox (a queued message or a completion notification); new input from the user also ends the wait early. " +
+			"Returns no content: whatever arrives shows up as messages in your context. Only wait when your next step really needs the result and there is nothing else you can do, " +
+			"and wait long (minutes), rather than polling repeatedly with short timeouts.",
 		Schema: schemaOf(map[string]any{
-			"timeout_ms": map[string]any{"type": "integer", "description": fmt.Sprintf("最多等多久（毫秒），默认 %d，范围 %d～%d", defaultWaitMS, minWaitMS, maxWaitMS)},
+			"timeout_ms": map[string]any{"type": "integer", "description": fmt.Sprintf("Maximum wait in milliseconds; default %d, range %d–%d", defaultWaitMS, minWaitMS, maxWaitMS)},
 		}),
 		Effect: tools.EffectRead,
 		Handler: func(ctx context.Context, raw json.RawMessage, _ *tools.Env) (string, error) {
@@ -234,9 +235,9 @@ func (s *Session) registerCollabTools() error {
 
 	if err := register(tools.Tool{
 		Name:        "list_agents",
-		Description: "列出当前这棵树上活着的 agent，可以按路径前缀筛。",
+		Description: "List the live agents in the current tree, optionally filtered by path prefix.",
 		Schema: schemaOf(map[string]any{
-			"path_prefix": map[string]any{"type": "string", "description": "路径前缀，末尾不带斜杠；不填列出全部"},
+			"path_prefix": map[string]any{"type": "string", "description": "Path prefix, without a trailing slash; omit to list all"},
 		}),
 		Effect: tools.EffectRead,
 		Handler: func(_ context.Context, raw json.RawMessage, _ *tools.Env) (string, error) {
@@ -261,9 +262,9 @@ func (s *Session) registerCollabTools() error {
 
 	return register(tools.Tool{
 		Name:        "interrupt_agent",
-		Description: "打断某个 agent 当前这一轮（如果它在跑），返回它之前的状态。它还在，之后还能接着发消息、派任务。",
+		Description: "Interrupt an agent's current turn (if it is running) and return its previous status. The agent stays alive; you can keep messaging it and giving it tasks afterwards.",
 		Schema: schemaOf(map[string]any{
-			"target": map[string]any{"type": "string", "description": "目标 agent 的规范名或任务名"},
+			"target": map[string]any{"type": "string", "description": "Canonical name or task name of the target agent"},
 		}, "target"),
 		Effect: tools.EffectRead,
 		Handler: func(_ context.Context, raw json.RawMessage, _ *tools.Env) (string, error) {

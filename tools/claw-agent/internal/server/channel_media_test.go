@@ -78,10 +78,10 @@ func TestChannelFilesAreSavedAndDescribed(t *testing.T) {
 	if !strings.HasPrefix(text, "帮我看看") {
 		t.Errorf("用户原话应在最前：%q", text)
 	}
-	if !strings.Contains(text, "附件 notes.md") || !strings.Contains(text, "# 标题\n正文") {
+	if !strings.Contains(text, "Attachment notes.md") || !strings.Contains(text, "# 标题\n正文") {
 		t.Errorf("文本文件应并进正文：%q", text)
 	}
-	if !strings.Contains(text, "[用户发来文件 报告.pdf") || strings.Contains(text, "%PDF") {
+	if !strings.Contains(text, "[The user sent file 报告.pdf") || strings.Contains(text, "%PDF") {
 		t.Errorf("二进制文件只说明、不并进正文：%q", text)
 	}
 	if len(audio) != 1 || !strings.HasSuffix(audio[0], "voice.m4a") {
@@ -116,7 +116,7 @@ func TestUnsupportedImageIsSaidNotDropped(t *testing.T) {
 	gateway, _ := testGateway(t)
 	huge := bytes.Repeat([]byte{0xAB}, maxRawImageBytes+1)
 	text, images, _ := gateway.prepareAttachments("c_1", pluginpkg.Inbound{Images: [][]byte{huge}})
-	if len(images) != 0 || !strings.Contains(text, "没能转交") {
+	if len(images) != 0 || !strings.Contains(text, "could not be passed on") {
 		t.Errorf("解不开的大图要说一声：text=%q images=%d", text, len(images))
 	}
 }

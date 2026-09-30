@@ -8,10 +8,10 @@ package searchengines
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/chowyu12/aiclaw/internal/tools/websearch"
@@ -69,7 +69,7 @@ func (s *Store) Active(ctx context.Context) (*model.SearchEngineConfig, error) {
 func (s *Store) Create(ctx context.Context, params protocol.SearchEngineCreateParams) (protocol.SearchEngineView, error) {
 	provider := model.SearchEngineProvider(strings.TrimSpace(params.Provider))
 	if !known(provider) {
-		return protocol.SearchEngineView{}, fmt.Errorf("不支持的搜索引擎类型：%q", params.Provider)
+		return protocol.SearchEngineView{}, i18n.E("不支持的搜索引擎类型：{provider}", "provider", fmt.Sprintf("%q", params.Provider))
 	}
 	name := strings.TrimSpace(params.Name)
 	if name == "" {
@@ -91,12 +91,12 @@ func (s *Store) Create(ctx context.Context, params protocol.SearchEngineCreatePa
 func (s *Store) Update(ctx context.Context, params protocol.SearchEngineUpdateParams) (protocol.SearchEngineView, error) {
 	item, err := s.db.GetSearchEngineConfig(ctx, params.ID)
 	if err != nil {
-		return protocol.SearchEngineView{}, fmt.Errorf("搜索引擎不存在（id=%d）：%w", params.ID, err)
+		return protocol.SearchEngineView{}, fmt.Errorf("%s%w", i18n.D("搜索引擎不存在（id={id}）：", "id", params.ID), err)
 	}
 	if params.Provider != nil {
 		provider := model.SearchEngineProvider(strings.TrimSpace(*params.Provider))
 		if !known(provider) {
-			return protocol.SearchEngineView{}, fmt.Errorf("不支持的搜索引擎类型：%q", *params.Provider)
+			return protocol.SearchEngineView{}, i18n.E("不支持的搜索引擎类型：{provider}", "provider", fmt.Sprintf("%q", *params.Provider))
 		}
 		item.Provider = provider
 	}
@@ -129,10 +129,10 @@ func (s *Store) Delete(ctx context.Context, id int64) error {
 func (s *Store) Test(ctx context.Context, params protocol.SearchEngineTestParams) (protocol.SearchEngineTestResult, error) {
 	item, err := s.db.GetSearchEngineConfig(ctx, params.ID)
 	if err != nil {
-		return protocol.SearchEngineTestResult{}, fmt.Errorf("搜索引擎不存在（id=%d）：%w", params.ID, err)
+		return protocol.SearchEngineTestResult{}, fmt.Errorf("%s%w", i18n.D("搜索引擎不存在（id={id}）：", "id", params.ID), err)
 	}
 	if strings.TrimSpace(item.APIKey) == "" {
-		return protocol.SearchEngineTestResult{}, errors.New("这个引擎还没配 Key")
+		return protocol.SearchEngineTestResult{}, i18n.E("这个引擎还没配 Key")
 	}
 	// 试搜不看启用状态：用户就是想在启用前确认 Key 对不对。
 	probe := *item
@@ -163,7 +163,7 @@ func label(provider model.SearchEngineProvider) string {
 	case model.SearchEngineSerpAPI:
 		return "SerpAPI"
 	case model.SearchEngineAliyunIQS:
-		return "阿里云 IQS"
+		return i18n.D("阿里云 IQS")
 	}
 	return string(provider)
 }

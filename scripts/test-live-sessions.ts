@@ -71,6 +71,9 @@ test("「已中断」不算错误", () => {
   const live = fresh();
   const applied = applyAgentEvent(live, event("turn/completed", "A", { error: "已中断" }), "A");
   assert.equal(applied.error, "");
+  // 英文界面下内核给的是英文。
+  const english = applyAgentEvent(fresh(), event("turn/completed", "A", { error: "Interrupted" }), "A");
+  assert.equal(english.error, "");
 });
 
 test("没带 sessionId 的事件算到当前会话头上", () => {

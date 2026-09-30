@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // legacyFile 是旧版「一个会话一个 JSON 文件」的形状。
@@ -37,7 +39,7 @@ func ImportLegacy(ctx context.Context, s *Store, dataHome string) (int, error) {
 		return 0, nil
 	}
 	if err != nil {
-		return 0, fmt.Errorf("读取旧会话目录失败：%w", err)
+		return 0, fmt.Errorf("%s%w", i18n.D("读取旧会话目录失败："), err)
 	}
 
 	imported := 0

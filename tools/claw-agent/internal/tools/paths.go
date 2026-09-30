@@ -1,11 +1,12 @@
 package tools
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 /*
@@ -29,7 +30,12 @@ import (
 */
 
 // ErrProtected 是命中敏感名单时的错误。单独一个类型，便于上层认出来。
-var ErrProtected = errors.New("涉及凭据的路径不允许访问")
+var ErrProtected error = protectedError{}
+
+// protectedError 在 Error() 时才翻译：包级变量初始化时桌面端还没告诉内核界面语言。
+type protectedError struct{}
+
+func (protectedError) Error() string { return i18n.D("涉及凭据的路径不允许访问") }
 
 // protectedRelative 是相对用户主目录的敏感路径。
 //
@@ -118,7 +124,7 @@ func (e *Env) Protected(path string) bool {
 func (e *Env) resolve(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
-		return "", errors.New("路径不能为空")
+		return "", i18n.E("路径不能为空")
 	}
 	base := e.Base()
 	target := e.expandHome(trimmed)
@@ -144,19 +150,19 @@ func (e *Env) resolve(raw string) (string, error) {
 		}
 		parent := filepath.Dir(existing)
 		if parent == existing {
-			return "", fmt.Errorf("路径不可达：%s", raw)
+			return "", i18n.E("路径不可达：{path}", "path", raw)
 		}
 		missing = append([]string{filepath.Base(existing)}, missing...)
 		existing = parent
 	}
 	resolvedAncestor, err := filepath.EvalSymlinks(existing)
 	if err != nil {
-		return "", fmt.Errorf("路径不可达：%s", raw)
+		return "", i18n.E("路径不可达：{path}", "path", raw)
 	}
 	// 尚不存在的那截里不允许再出现 ..：那会让最终落点跳出已解析的祖先。
 	for _, segment := range missing {
 		if segment == ".." {
-			return "", fmt.Errorf("路径里不允许出现 ..：%s", raw)
+			return "", i18n.E("路径里不允许出现 ..：{path}", "path", raw)
 		}
 	}
 	return filepath.Join(append([]string{resolvedAncestor}, missing...)...), nil
@@ -191,7 +197,7 @@ func (e *Env) ResolveRead(raw string) (string, error) {
 		return "", err
 	}
 	if e.Protected(path) {
-		return "", fmt.Errorf("%w：%s", ErrProtected, raw)
+		return "", fmt.Errorf("%w: %s", ErrProtected, raw)
 	}
 	return path, nil
 }
@@ -206,7 +212,7 @@ func (e *Env) ResolveWrite(raw string) (path string, inside bool, err error) {
 		return "", false, err
 	}
 	if e.Protected(path) {
-		return "", false, fmt.Errorf("%w：%s", ErrProtected, raw)
+		return "", false, fmt.Errorf("%w: %s", ErrProtected, raw)
 	}
 	// 用户在本次会话里批准过的目录，与工作区同等对待——他已经明确说过
 	// 「往这儿写没问题」，再问一次就是没记住他的话。

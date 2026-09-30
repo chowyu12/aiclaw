@@ -98,6 +98,8 @@ export interface SessionStartParams {
   enableSchedule?: boolean;
   /** 会话一开始的标题；空的话由第一条消息生成。 */
   title?: string;
+  /** 界面语言（en / zh-CN），决定模型默认用什么语言回复。 */
+  locale?: string;
   /**
    * 技能目录列表。每一项是一个技能自己的目录（里面直接放 SKILL.md），
    * 不是装着若干技能的根目录——技能散在好几个地方且结构各异，
@@ -131,6 +133,7 @@ export interface SessionRefresh {
   /** 挂上邮件工具（邮件插件启用时）。 */
   enableEmail?: boolean;
   enableSchedule?: boolean;
+  locale?: string;
   disableSandbox: boolean;
   codeMode: boolean;
   approvalPolicy: ApprovalPolicy;

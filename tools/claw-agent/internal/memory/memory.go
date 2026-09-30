@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 const (
@@ -38,12 +40,12 @@ func Load(path string) (string, error) {
 		return "", nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("读取长期记忆失败：%w", err)
+		return "", fmt.Errorf("%s%w", i18n.D("读取长期记忆失败："), err)
 	}
 	if len(raw) > MaxBytes {
 		// 超限的文件多半是被手工塞了别的东西。读前面那截总比整个放弃强，
 		// 但要让调用方知道。
-		return string(raw[:MaxBytes]), fmt.Errorf("长期记忆超过 %d 字节，只读取了前面部分", MaxBytes)
+		return string(raw[:MaxBytes]), i18n.E("长期记忆超过 {n} 字节，只读取了前面部分", "n", MaxBytes)
 	}
 	return string(raw), nil
 }
@@ -55,10 +57,10 @@ func Load(path string) (string, error) {
 func Append(path, entry string) (string, error) {
 	text := strings.TrimSpace(entry)
 	if text == "" {
-		return "", fmt.Errorf("记忆内容为空")
+		return "", i18n.E("记忆内容为空")
 	}
 	if len(text) > maxEntryBytes {
-		return "", fmt.Errorf("单条记忆超过 %d 字节；长期记忆放的是结论，不是原始内容", maxEntryBytes)
+		return "", i18n.E("单条记忆超过 {n} 字节；长期记忆放的是结论，不是原始内容", "n", maxEntryBytes)
 	}
 
 	existing, _ := Load(path)
@@ -67,13 +69,13 @@ func Append(path, entry string) (string, error) {
 		return existing, nil
 	}
 	if len(existing)+len(text) > MaxBytes {
-		return "", fmt.Errorf(
-			"长期记忆已接近 %d 字节上限，这条没有写入；请先整理 %s", MaxBytes, path,
+		return "", i18n.E(
+			"长期记忆已接近 {n} 字节上限，这条没有写入；请先整理 {path}", "n", MaxBytes, "path", path,
 		)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("创建记忆目录失败：%w", err)
+		return "", fmt.Errorf("%s%w", i18n.D("创建记忆目录失败："), err)
 	}
 
 	var builder strings.Builder
@@ -89,10 +91,10 @@ func Append(path, entry string) (string, error) {
 	// 先写临时文件再改名：进程在写一半时被杀不会留下半条记忆。
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(updated), 0o600); err != nil {
-		return "", fmt.Errorf("写入长期记忆失败：%w", err)
+		return "", fmt.Errorf("%s%w", i18n.D("写入长期记忆失败："), err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		return "", fmt.Errorf("写入长期记忆失败：%w", err)
+		return "", fmt.Errorf("%s%w", i18n.D("写入长期记忆失败："), err)
 	}
 	return updated, nil
 }

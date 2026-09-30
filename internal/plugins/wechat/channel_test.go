@@ -258,7 +258,7 @@ func TestImagesAndFilesAreDownloadedAndSubmitted(t *testing.T) {
 	if len(got.Files) != 1 || got.Files[0].Name != "报告.pdf" || string(got.Files[0].Data) != "file:报告.pdf" {
 		t.Errorf("files = %+v", got.Files)
 	}
-	if !strings.Contains(got.Text, "下载失败") {
+	if !strings.Contains(got.Text, "downloading it failed") {
 		t.Errorf("a failed download must be said in the text: %q", got.Text)
 	}
 	waitFor(t, func() bool { return len(remote.replies()) > 0 }, "no reply was sent")

@@ -2,6 +2,7 @@
  * 「用我的浏览器」那条路上的纯函数：按键怎么翻成 CDP 事件、截图多大、是哪个浏览器。
  * 标签页列表怎么写给模型在 browser-snapshot.ts（与快照共用不可信边界）。单独成文件是为了能在 node 里测（scripts/test-browser-cdp.ts）。
  */
+import { tr } from "../shared/i18n.js";
 
 /** 一次按键在 CDP Input.dispatchKeyEvent 里的样子。 */
 export interface CdpKey {
@@ -67,5 +68,5 @@ export function browserName(userAgent: string): string {
   if (/OPR\//.test(userAgent)) return "Opera";
   if (/Brave/.test(userAgent)) return "Brave";
   if (/Chrome\//.test(userAgent)) return "Chrome";
-  return "浏览器";
+  return tr("浏览器");
 }

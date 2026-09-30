@@ -3,12 +3,12 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 	legacy "github.com/chowyu12/aiclaw/internal/protocol"
@@ -38,7 +38,7 @@ func (g *channelGateway) Submit(ctx context.Context, pluginUUID string, message 
 	externalKey := strings.TrimSpace(message.ExternalKey)
 	connectionID := strings.TrimSpace(message.ConnectionID)
 	if pluginUUID == "" || channelID == "" || externalKey == "" {
-		return errors.New("入站消息缺少插件、通道或会话标识")
+		return i18n.E("入站消息缺少插件、通道或会话标识")
 	}
 	// 放行记录按连接分开：同一个人找两个微信号，是两条记录、两个会话。
 	binding, err := s.appDB.GetChannelBinding(ctx, pluginUUID, channelID, connectionID, externalKey)
@@ -65,7 +65,7 @@ func (g *channelGateway) Submit(ctx context.Context, pluginUUID string, message 
 		return pluginpkg.ErrBindingNotAllowed
 	}
 	if binding.ProviderID == 0 || strings.TrimSpace(binding.ModelName) == "" {
-		return fmt.Errorf("会话「%s」还没选模型", bindingLabel(binding))
+		return i18n.E("会话「{name}」还没选模型", "name", bindingLabel(binding))
 	}
 
 	session, err := g.sessionFor(ctx, binding)
@@ -78,13 +78,13 @@ func (g *channelGateway) Submit(ctx context.Context, pluginUUID string, message 
 	if session.Busy() {
 		// 通道自己按会话串行派发，正常到不了这里；到了也别把输入排进队列——
 		// 排队的输入没有出口，发消息的人会等一个永远不来的回复。
-		return errors.New("上一条消息还在处理")
+		return i18n.E("上一条消息还在处理")
 	}
 
 	g.applyMedia(ctx, session, binding)
 	text, images, audioPaths := g.prepareAttachments(session.ID, message)
 	if strings.TrimSpace(text) == "" && len(images) == 0 && len(audioPaths) == 0 {
-		return errors.New("这条消息里没有能交给助手的内容")
+		return i18n.E("这条消息里没有能交给助手的内容")
 	}
 
 	turnID := fmt.Sprintf("t_%d", time.Now().UnixNano())
@@ -230,27 +230,27 @@ func (e *channelEmitter) emit(event legacy.Event) {
 // RequestApproval 不会被调到：通道会话是「无人值守」档位，要确认的操作直接失败。
 // 万一调到了也按拒绝处理——另一头没有人能点「允许」。
 func (e *channelEmitter) RequestApproval(context.Context, protocol.ApprovalRequestParams) (protocol.ApprovalResponse, error) {
-	return protocol.ApprovalResponse{}, errors.New("通道会话无人值守，需要确认的操作不执行")
+	return protocol.ApprovalResponse{}, i18n.E("通道会话无人值守，需要确认的操作不执行")
 }
 
 // RequestComputer 同理：屏幕操作只能由桌面会话发起。
 func (e *channelEmitter) RequestComputer(context.Context, protocol.ComputerRequestParams) (protocol.ComputerResult, error) {
-	return protocol.ComputerResult{}, errors.New("通道会话不能操作屏幕")
+	return protocol.ComputerResult{}, i18n.E("通道会话不能操作屏幕")
 }
 
 // RequestUserInput 同理：通道那一头看不到选项卡片。正常到不了这里（通道会话是
 // 无人值守档位，不注册 ask_user），万一到了就让模型把问题写进回复里问。
 func (e *channelEmitter) RequestUserInput(context.Context, protocol.UserInputRequestParams) (protocol.UserInputResponse, error) {
-	return protocol.UserInputResponse{}, errors.New("这个会话里没有人能点选项卡片；把问题直接写在回复里问对方")
+	return protocol.UserInputResponse{}, i18n.E("这个会话里没有人能点选项卡片；把问题直接写在回复里问对方")
 }
 
 // RequestSchedule 同理：外部的人不该能在用户的电脑上排定时任务。通道会话本来就不挂
 // 这组工具，这里再挡一次。
 func (e *channelEmitter) RequestSchedule(context.Context, protocol.ScheduleRequestParams) (protocol.ScheduleResult, error) {
-	return protocol.ScheduleResult{}, errors.New("通道会话不能管理定时任务")
+	return protocol.ScheduleResult{}, i18n.E("通道会话不能管理定时任务")
 }
 
 // RequestBrowser 同理：浏览器窗口在桌面上，外部用户不该驾驭它。
 func (e *channelEmitter) RequestBrowser(context.Context, protocol.BrowserRequestParams) (protocol.BrowserResult, error) {
-	return protocol.BrowserResult{}, errors.New("通道会话不能操作浏览器")
+	return protocol.BrowserResult{}, i18n.E("通道会话不能操作浏览器")
 }

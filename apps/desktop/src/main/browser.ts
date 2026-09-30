@@ -1,6 +1,7 @@
 import { BrowserWindow } from "electron";
 
-import { NOT_CONNECTED, type ExtensionBridge } from "./browser-bridge.js";
+import { tr } from "../shared/i18n.js";
+import { notConnected, type ExtensionBridge } from "./browser-bridge.js";
 import { cdpKey, pngSize } from "./browser-cdp.js";
 import {
   EXTRACT_SCRIPT,
@@ -142,7 +143,7 @@ export class AgentBrowser {
       case "use_tab":
         return this.useTab(request.tabId ?? -1);
       default:
-        throw new Error(`不认识的浏览器操作：${String(request.action)}`);
+        throw new Error(tr("不认识的浏览器操作：{action}", { action: String(request.action) }));
     }
   }
 
@@ -156,7 +157,7 @@ export class AgentBrowser {
   private async current(): Promise<PageDriver> {
     const driver = this.driver();
     if (!(await driver.hasPage())) {
-      throw new Error("浏览器里还没有打开任何页面，先用 browser_navigate 打开一个网址。");
+      throw new Error(tr("浏览器里还没有打开任何页面，先用 browser_navigate 打开一个网址。"));
     }
     return driver;
   }
@@ -164,15 +165,15 @@ export class AgentBrowser {
   private async navigate(raw: string): Promise<BrowserResult> {
     const url = raw.trim();
     if (!/^(https?:\/\/|data:text\/html)/i.test(url)) {
-      throw new Error(`只能打开 http/https 网址，给的是：${url.slice(0, 80)}`);
+      throw new Error(tr("只能打开 http/https 网址，给的是：{url}", { url: url.slice(0, 80) }));
     }
     if (this.backend() === "extension" && /^data:/i.test(url)) {
-      throw new Error("在你的浏览器里只能打开 http/https 网址。");
+      throw new Error(tr("在你的浏览器里只能打开 http/https 网址。"));
     }
     const driver = this.driver();
     await driver.load(url);
     await sleep(SETTLE_MS);
-    return this.snapshot("已打开。");
+    return this.snapshot(tr("已打开。"));
   }
 
   private async snapshot(note = ""): Promise<BrowserResult> {
@@ -195,10 +196,12 @@ export class AgentBrowser {
         return "ok";
       })()`,
     );
-    if (outcome === "missing") throw new Error(`没有 ${index} 号元素：编号来自上一次快照，页面可能已经变了，先 browser_snapshot。`);
-    if (outcome === "hidden") throw new Error(`${index} 号元素现在不可见，先滚动或展开它所在的区域。`);
+    if (outcome === "missing") {
+      throw new Error(tr("没有 {index} 号元素：编号来自上一次快照，页面可能已经变了，先 browser_snapshot。", { index }));
+    }
+    if (outcome === "hidden") throw new Error(tr("{index} 号元素现在不可见，先滚动或展开它所在的区域。", { index }));
     await driver.settle();
-    return this.snapshot(`已点击 ${index} 号。`);
+    return this.snapshot(tr("已点击 {index} 号。", { index }));
   }
 
   private async type(index: number, text: string, submit: boolean): Promise<BrowserResult> {
@@ -227,11 +230,11 @@ export class AgentBrowser {
         return "ok";
       })()`,
     );
-    if (outcome === "missing") throw new Error(`没有 ${index} 号元素：先 browser_snapshot 拿最新编号。`);
-    if (outcome === "not-input") throw new Error(`${index} 号不是输入框。`);
+    if (outcome === "missing") throw new Error(tr("没有 {index} 号元素：先 browser_snapshot 拿最新编号。", { index }));
+    if (outcome === "not-input") throw new Error(tr("{index} 号不是输入框。", { index }));
     if (submit) await driver.pressKey("Enter");
     await driver.settle();
-    return this.snapshot(submit ? `已填入并提交 ${index} 号。` : `已填入 ${index} 号。`);
+    return this.snapshot(submit ? tr("已填入并提交 {index} 号。", { index }) : tr("已填入 {index} 号。", { index }));
   }
 
   private async select(index: number, value: string): Promise<BrowserResult> {
@@ -252,11 +255,13 @@ export class AgentBrowser {
         return "ok";
       })()`,
     );
-    if (outcome === "missing") throw new Error(`没有 ${index} 号元素：先 browser_snapshot 拿最新编号。`);
-    if (outcome === "not-select") throw new Error(`${index} 号不是下拉框。`);
-    if (outcome.startsWith("no-option:")) throw new Error(`下拉框里没有「${value}」，可选：${outcome.slice(10)}`);
+    if (outcome === "missing") throw new Error(tr("没有 {index} 号元素：先 browser_snapshot 拿最新编号。", { index }));
+    if (outcome === "not-select") throw new Error(tr("{index} 号不是下拉框。", { index }));
+    if (outcome.startsWith("no-option:")) {
+      throw new Error(tr("下拉框里没有「{value}」，可选：{options}", { value, options: outcome.slice(10) }));
+    }
     await driver.settle();
-    return this.snapshot(`已在 ${index} 号里选了「${value}」。`);
+    return this.snapshot(tr("已在 {index} 号里选了「{value}」。", { index, value }));
   }
 
   private async scroll(dy: number, index: number): Promise<BrowserResult> {
@@ -265,26 +270,26 @@ export class AgentBrowser {
       const found = await driver.evaluate<boolean>(
         `(() => { const el = document.querySelector('[data-aiclaw-i="${index}"]'); if (!el) return false; el.scrollIntoView({ block: "center" }); return true; })()`,
       );
-      if (!found) throw new Error(`没有 ${index} 号元素。`);
+      if (!found) throw new Error(tr("没有 {index} 号元素。", { index }));
     } else {
       await driver.evaluate(`window.scrollBy(0, ${Math.trunc(dy)})`);
     }
     await sleep(SETTLE_MS / 2);
-    return this.snapshot("已滚动。");
+    return this.snapshot(tr("已滚动。"));
   }
 
   private async back(): Promise<BrowserResult> {
     const driver = await this.current();
-    if (!(await driver.back())) throw new Error("没有可以后退的页面。");
+    if (!(await driver.back())) throw new Error(tr("没有可以后退的页面。"));
     await sleep(SETTLE_MS);
-    return this.snapshot("已后退。");
+    return this.snapshot(tr("已后退。"));
   }
 
   private async key(name: string): Promise<BrowserResult> {
     const driver = await this.current();
     await driver.pressKey(name.trim());
     await driver.settle();
-    return this.snapshot(`已按 ${name}。`);
+    return this.snapshot(tr("已按 {key}。", { key: name }));
   }
 
   private async extract(): Promise<BrowserResult> {
@@ -297,7 +302,10 @@ export class AgentBrowser {
     const driver = await this.current();
     const { base64, width, height } = await driver.screenshot();
     return {
-      text: `已截图（${width}×${height}）。截图只用来看布局；操作仍按 browser_snapshot 的编号。`,
+      // 前半句是结果，跟界面语言；后半句教模型怎么用工具，固定英文。
+      text:
+        tr("已截图（{width}×{height}）。", { width, height }) +
+        " Screenshots are only for seeing the layout; still act by the numbers from browser_snapshot.",
       imageBase64: base64,
       width,
       height,
@@ -309,8 +317,11 @@ export class AgentBrowser {
       const url = this.window.hasOpenPage() ? await this.window.url() : "";
       return {
         text: url
-          ? `现在用的是 AIClaw 自带的浏览器窗口，只有一个页面：${url}。要操作你自己浏览器里的标签页，在设置 → 浏览器里改成「用我的浏览器」。`
-          : "现在用的是 AIClaw 自带的浏览器窗口，还没有打开页面。",
+          ? tr(
+              "现在用的是 AIClaw 自带的浏览器窗口，只有一个页面：{url}。要操作你自己浏览器里的标签页，在设置 → 浏览器里改成「用我的浏览器」。",
+              { url },
+            )
+          : tr("现在用的是 AIClaw 自带的浏览器窗口，还没有打开页面。"),
       };
     }
     return { text: formatTabs(await this.tab.list(), this.tab.currentTab()) };
@@ -318,10 +329,13 @@ export class AgentBrowser {
 
   private async useTab(tabId: number): Promise<BrowserResult> {
     if (this.backend() !== "extension") {
-      throw new Error("只有在「用我的浏览器」模式下才能接管标签页（设置 → 浏览器）。");
+      throw new Error(tr("只有在「用我的浏览器」模式下才能接管标签页（设置 → 浏览器）。"));
     }
     await this.tab.use(tabId);
-    return this.snapshot(`已切到标签页 ${tabId}。它是用户自己打开的页面，操作前想清楚用户是否要你改动它。`);
+    return this.snapshot(
+      tr("已切到标签页 {tabId}。", { tabId }) +
+        " It is a page the user opened themselves; before acting, consider whether the user wants you to change it.",
+    );
   }
 }
 
@@ -352,7 +366,7 @@ class WindowDriver implements PageDriver {
     const window = new BrowserWindow({
       width: 1200,
       height: 860,
-      title: "AIClaw 浏览器",
+      title: tr("AIClaw 浏览器"),
       show: true,
       webPreferences: {
         partition: "persist:agent-browser",
@@ -377,7 +391,7 @@ class WindowDriver implements PageDriver {
 
   async load(url: string): Promise<void> {
     const window = this.ensure();
-    await withTimeout(window.loadURL(url), LOAD_TIMEOUT_MS, "页面加载超时（30 秒）").catch((error: unknown) => {
+    await withTimeout(window.loadURL(url), LOAD_TIMEOUT_MS, tr("页面加载超时（30 秒）")).catch((error: unknown) => {
       // loadURL 在某些跳转 / 中止时会抛 ERR_ABORTED，页面其实已经在了；
       // 真失败的话下面取快照时 URL 还是空的，会在那里报。
       const message = String(error instanceof Error ? error.message : error);
@@ -404,7 +418,7 @@ class WindowDriver implements PageDriver {
     if (!window.webContents.navigationHistory.canGoBack()) return false;
     const loaded = onceLoaded(window);
     window.webContents.navigationHistory.goBack();
-    await withTimeout(loaded, LOAD_TIMEOUT_MS, "后退后页面加载超时");
+    await withTimeout(loaded, LOAD_TIMEOUT_MS, tr("后退后页面加载超时"));
     return true;
   }
 
@@ -413,7 +427,7 @@ class WindowDriver implements PageDriver {
     const window = this.ensure();
     await sleep(SETTLE_MS);
     if (window.webContents.isLoading()) {
-      await withTimeout(onceLoaded(window), LOAD_TIMEOUT_MS, "页面加载超时（30 秒）").catch(() => undefined);
+      await withTimeout(onceLoaded(window), LOAD_TIMEOUT_MS, tr("页面加载超时（30 秒）")).catch(() => undefined);
       await sleep(SETTLE_MS / 2);
     }
   }
@@ -447,7 +461,7 @@ class ExtensionDriver implements PageDriver {
   }
 
   private connection(): ExtensionBridge {
-    if (!this.bridge) throw new Error(NOT_CONNECTED);
+    if (!this.bridge) throw new Error(notConnected());
     return this.bridge;
   }
 
@@ -468,7 +482,7 @@ class ExtensionDriver implements PageDriver {
   async use(tabId: number): Promise<void> {
     const tabs = await this.list();
     if (!tabs.some((tab) => tab.tabId === tabId)) {
-      throw new Error(`没有编号为 ${tabId} 的网页标签页，先 browser_tabs 看一眼。`);
+      throw new Error(tr("没有编号为 {tabId} 的网页标签页，先 browser_tabs 看一眼。", { tabId }));
     }
     this.tabId = tabId;
   }
@@ -508,7 +522,7 @@ class ExtensionDriver implements PageDriver {
   }
 
   private async cdp<T>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {
-    if (this.tabId === null) throw new Error("浏览器里还没有打开任何页面，先用 browser_navigate 打开一个网址。");
+    if (this.tabId === null) throw new Error(tr("浏览器里还没有打开任何页面，先用 browser_navigate 打开一个网址。"));
     return this.connection().request<T>("cdp", { tabId: this.tabId, method, params }, timeoutMs);
   }
 
@@ -518,15 +532,15 @@ class ExtensionDriver implements PageDriver {
       exceptionDetails?: { text?: string; exception?: { description?: string } };
     }>("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true, userGesture: true });
     if (response.exceptionDetails) {
-      const detail = response.exceptionDetails.exception?.description ?? response.exceptionDetails.text ?? "脚本出错";
-      throw new Error(`页面脚本出错：${detail.split("\n")[0]}`);
+      const detail = response.exceptionDetails.exception?.description ?? response.exceptionDetails.text ?? tr("脚本出错");
+      throw new Error(tr("页面脚本出错：{detail}", { detail: detail.split("\n")[0] ?? "" }));
     }
     return response.result?.value as T;
   }
 
   async pressKey(name: string): Promise<void> {
     const key = cdpKey(name);
-    if (!key) throw new Error(`不认识的按键：${name}`);
+    if (!key) throw new Error(tr("不认识的按键：{key}", { key: name }));
     const base = { key: key.key, code: key.code, windowsVirtualKeyCode: key.windowsVirtualKeyCode };
     await this.cdp("Input.dispatchKeyEvent", { type: key.text ? "keyDown" : "rawKeyDown", ...base, text: key.text });
     await this.cdp("Input.dispatchKeyEvent", { type: "keyUp", ...base });
@@ -555,8 +569,9 @@ class ExtensionDriver implements PageDriver {
     const response = await this.cdp<{ data?: string }>("Page.captureScreenshot", { format: "png" }, 15_000).catch(
       (error: unknown) => {
         throw new Error(
-          `截图失败：${error instanceof Error ? error.message : String(error)}。` +
-            "后台标签页有时截不了图，操作仍可按 browser_snapshot 的编号进行。",
+          tr("截图失败：{error}。后台标签页有时截不了图，操作仍可按 browser_snapshot 的编号进行。", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
         );
       },
     );

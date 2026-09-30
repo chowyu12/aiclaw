@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
@@ -51,11 +51,11 @@ func (s *Session) registerBrowserTools() error {
 	specs := []spec{
 		{
 			name: "browser_navigate",
-			description: "在浏览器里打开一个网址（http/https），加载完返回页面标题与可交互元素的编号列表。" +
-				"之后用 browser_click / browser_type 按编号操作。用的是用户自己的浏览器时，页面开在 AIClaw 的后台标签页里，" +
-				"不切换用户正在看的页面。",
+			description: "Open a URL (http/https) in the browser. Once it loads, returns the page title and a numbered list of interactive elements; " +
+				"then act on them by number with browser_click / browser_type. When the user's own browser is in use, the page opens in a background AIClaw tab " +
+				"and doesn't switch away from the page the user is looking at.",
 			schema: schemaOf(map[string]any{
-				"url": map[string]any{"type": "string", "description": "完整网址，带 https://"},
+				"url": map[string]any{"type": "string", "description": "Full URL, including https://"},
 			}, "url"),
 			effect: tools.EffectExternal,
 			build: func(raw json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -63,19 +63,19 @@ func (s *Session) registerBrowserTools() error {
 					URL string `json:"url"`
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.BrowserRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.BrowserRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				url := strings.TrimSpace(args.URL)
 				if url == "" {
-					return protocol.BrowserRequestParams{}, errors.New("url 不能为空")
+					return protocol.BrowserRequestParams{}, i18n.E("url 不能为空")
 				}
 				return protocol.BrowserRequestParams{Action: protocol.BrowserNavigate, URL: url}, nil
 			},
 		},
 		{
 			name: "browser_snapshot",
-			description: "重新读一遍当前页面：标题、网址、滚动位置，以及可交互元素的编号列表" +
-				"（链接、按钮、输入框、下拉框）。页面变了（点了、滚了、等它加载完）之后再操作前先取一次。",
+			description: "Re-read the current page: title, URL, scroll position, and the numbered list of interactive elements " +
+				"(links, buttons, inputs, selects). After the page changes (a click, a scroll, finished loading), take a fresh snapshot before acting again.",
 			schema: emptySchema(),
 			effect: tools.EffectRead,
 			build: func(json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -84,18 +84,18 @@ func (s *Session) registerBrowserTools() error {
 		},
 		{
 			name:        "browser_click",
-			description: "点击编号列表里的某个元素。返回点击后的页面状态。",
+			description: "Click an element from the numbered list. Returns the page state after the click.",
 			schema:      indexSchema(),
 			effect:      tools.EffectWrite,
 			build:       indexAction(protocol.BrowserClick),
 		},
 		{
 			name:        "browser_type",
-			description: "往某个输入框（按编号）里填文本：先清空再输入。submit 为 true 时填完按回车提交。",
+			description: "Type text into an input (by number): clears it first, then types. With submit=true, presses Enter afterwards to submit.",
 			schema: schemaOf(map[string]any{
-				"index":  map[string]any{"type": "integer", "description": "元素编号"},
-				"text":   map[string]any{"type": "string", "description": "要填的文本"},
-				"submit": map[string]any{"type": "boolean", "description": "填完是否按回车"},
+				"index":  map[string]any{"type": "integer", "description": "Element number"},
+				"text":   map[string]any{"type": "string", "description": "Text to enter"},
+				"submit": map[string]any{"type": "boolean", "description": "Press Enter after typing"},
 			}, "index", "text"),
 			effect: tools.EffectWrite,
 			build: func(raw json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -105,10 +105,10 @@ func (s *Session) registerBrowserTools() error {
 					Submit bool   `json:"submit"`
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.BrowserRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.BrowserRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				if args.Index == nil {
-					return protocol.BrowserRequestParams{}, errors.New("必须给出 index")
+					return protocol.BrowserRequestParams{}, i18n.E("必须给出 index")
 				}
 				return protocol.BrowserRequestParams{
 					Action: protocol.BrowserType, Index: *args.Index, Text: args.Text, Submit: args.Submit,
@@ -117,10 +117,10 @@ func (s *Session) registerBrowserTools() error {
 		},
 		{
 			name:        "browser_select",
-			description: "在下拉框（按编号）里选一项，按选项文字或值匹配。",
+			description: "Choose an option in a select (by number), matched by option text or value.",
 			schema: schemaOf(map[string]any{
-				"index": map[string]any{"type": "integer", "description": "下拉框的编号"},
-				"value": map[string]any{"type": "string", "description": "要选的选项文字或值"},
+				"index": map[string]any{"type": "integer", "description": "Number of the select"},
+				"value": map[string]any{"type": "string", "description": "Text or value of the option to choose"},
 			}, "index", "value"),
 			effect: tools.EffectWrite,
 			build: func(raw json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -129,20 +129,20 @@ func (s *Session) registerBrowserTools() error {
 					Value string `json:"value"`
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.BrowserRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.BrowserRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				if args.Index == nil || strings.TrimSpace(args.Value) == "" {
-					return protocol.BrowserRequestParams{}, errors.New("必须给出 index 与 value")
+					return protocol.BrowserRequestParams{}, i18n.E("必须给出 index 与 value")
 				}
 				return protocol.BrowserRequestParams{Action: protocol.BrowserSelect, Index: *args.Index, Value: args.Value}, nil
 			},
 		},
 		{
 			name:        "browser_scroll",
-			description: "滚动页面。给 dy（正数向下，单位像素，一屏约 800）；或给 index 滚到某个元素处。",
+			description: "Scroll the page. Pass dy (pixels, positive scrolls down; one screen is about 800), or pass index to scroll to an element.",
 			schema: schemaOf(map[string]any{
-				"dy":    map[string]any{"type": "integer", "description": "纵向滚动量，正数向下"},
-				"index": map[string]any{"type": "integer", "description": "滚到这个编号的元素处"},
+				"dy":    map[string]any{"type": "integer", "description": "Vertical scroll amount; positive scrolls down"},
+				"index": map[string]any{"type": "integer", "description": "Scroll to the element with this number"},
 			}),
 			effect: tools.EffectWrite,
 			build: func(raw json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -151,21 +151,21 @@ func (s *Session) registerBrowserTools() error {
 					Index *int `json:"index"`
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.BrowserRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.BrowserRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				request := protocol.BrowserRequestParams{Action: protocol.BrowserScroll, DY: args.DY, Index: -1}
 				if args.Index != nil {
 					request.Index = *args.Index
 				}
 				if request.DY == 0 && args.Index == nil {
-					return protocol.BrowserRequestParams{}, errors.New("给 dy 或 index 其中一个")
+					return protocol.BrowserRequestParams{}, i18n.E("给 dy 或 index 其中一个")
 				}
 				return request, nil
 			},
 		},
 		{
 			name:        "browser_back",
-			description: "浏览器后退一页。",
+			description: "Go back one page in the browser.",
 			schema:      emptySchema(),
 			effect:      tools.EffectWrite,
 			build: func(json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -174,9 +174,9 @@ func (s *Session) registerBrowserTools() error {
 		},
 		{
 			name:        "browser_key",
-			description: "在页面当前焦点处按一个键：Enter、Escape、Tab、ArrowDown、PageDown 等。",
+			description: "Press a key at the page's current focus: Enter, Escape, Tab, ArrowDown, PageDown, etc.",
 			schema: schemaOf(map[string]any{
-				"key": map[string]any{"type": "string", "description": "按键名"},
+				"key": map[string]any{"type": "string", "description": "Key name"},
 			}, "key"),
 			effect: tools.EffectWrite,
 			build: func(raw json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -184,18 +184,18 @@ func (s *Session) registerBrowserTools() error {
 					Key string `json:"key"`
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.BrowserRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.BrowserRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				if strings.TrimSpace(args.Key) == "" {
-					return protocol.BrowserRequestParams{}, errors.New("key 不能为空")
+					return protocol.BrowserRequestParams{}, i18n.E("key 不能为空")
 				}
 				return protocol.BrowserRequestParams{Action: protocol.BrowserKey, Keys: args.Key}, nil
 			},
 		},
 		{
 			name: "browser_extract",
-			description: "把当前页面的正文抽成纯文本交给你（去掉导航、脚本），用来读文章、表格、搜索结果。" +
-				"页面很长时只给前面一部分，需要后面的先滚动再抽。",
+			description: "Extract the main content of the current page as plain text (navigation and scripts removed), for reading articles, tables and search results. " +
+				"Long pages are cut off after the first part; to read further, scroll first and extract again.",
 			schema: emptySchema(),
 			effect: tools.EffectRead,
 			build: func(json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -204,8 +204,8 @@ func (s *Session) registerBrowserTools() error {
 		},
 		{
 			name: "browser_tabs",
-			description: "列出用户浏览器里打开着的网页标签页（编号、标题、网址，标出用户正在看的那个）。" +
-				"用户说「就在我现在这个页面上」「我开着的那个表单」时，先用它找到那个标签页，再 browser_use_tab。",
+			description: "List the tabs open in the user's browser (number, title, URL, with the one the user is viewing marked). " +
+				"When the user says \"on the page I'm on\" or \"the form I have open\", use this to find that tab first, then call browser_use_tab.",
 			schema: emptySchema(),
 			effect: tools.EffectRead,
 			build: func(json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -214,11 +214,11 @@ func (s *Session) registerBrowserTools() error {
 		},
 		{
 			name: "browser_use_tab",
-			description: "接管用户浏览器里一个已经打开的标签页，之后的快照、点击、输入都作用在它上面。" +
-				"那是用户自己的页面、带着他的登录，只在用户明确要你操作它时用；平时打开网址用 browser_navigate，" +
-				"它会在 AIClaw 自己的后台标签页里开，不打扰用户。",
+			description: "Take over a tab already open in the user's browser; subsequent snapshots, clicks and typing act on it. " +
+				"It is the user's own page, signed in with their accounts — use this only when the user explicitly asks you to work on it. To open a URL normally, use browser_navigate, " +
+				"which opens it in AIClaw's own background tab without disturbing the user.",
 			schema: schemaOf(map[string]any{
-				"tabId": map[string]any{"type": "integer", "description": "browser_tabs 列出的编号"},
+				"tabId": map[string]any{"type": "integer", "description": "Tab number from browser_tabs"},
 			}, "tabId"),
 			// 接管的是用户自己的页面（带着他的登录）：与打开网址一样，每次都问。
 			effect: tools.EffectExternal,
@@ -227,17 +227,17 @@ func (s *Session) registerBrowserTools() error {
 					TabID *int `json:"tabId"`
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.BrowserRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.BrowserRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				if args.TabID == nil || *args.TabID <= 0 {
-					return protocol.BrowserRequestParams{}, errors.New("必须给出 browser_tabs 列出的 tabId")
+					return protocol.BrowserRequestParams{}, i18n.E("必须给出 browser_tabs 列出的 tabId")
 				}
 				return protocol.BrowserRequestParams{Action: protocol.BrowserUseTab, TabID: *args.TabID, Index: -1}, nil
 			},
 		},
 		{
 			name:        "browser_screenshot",
-			description: "把浏览器当前页面截图给你看。编号列表看不出布局、图表、验证码时用；平时用 browser_snapshot 更省。",
+			description: "Take a screenshot of the browser's current page. Use it when the numbered list can't show layout, charts or CAPTCHAs; otherwise browser_snapshot is cheaper.",
 			schema:      emptySchema(),
 			effect:      tools.EffectRead,
 			build: func(json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -262,7 +262,7 @@ func (s *Session) registerBrowserTools() error {
 				request.TurnID = env.TurnID
 				emitter := s.currentEmitter()
 				if emitter == nil {
-					return "", errors.New("没有进行中的轮次，无法操作浏览器")
+					return "", i18n.E("没有进行中的轮次，无法操作浏览器")
 				}
 				return s.runBrowserAction(ctx, env, request, item.effect, emitter)
 			},
@@ -282,7 +282,7 @@ func (s *Session) runBrowserAction(
 ) (string, error) {
 	if err := env.RequestApproval(
 		ctx, effect, protocol.ApprovalTool,
-		"浏览器 "+string(request.Action), describeBrowserAction(request),
+		i18n.D("浏览器 {action}", "action", string(request.Action)), describeBrowserAction(request),
 		browserApprovalReason(request),
 	); err != nil {
 		return "", err
@@ -294,42 +294,42 @@ func (s *Session) runBrowserAction(
 	if result.ImageBase64 != "" {
 		image, err := base64.StdEncoding.DecodeString(result.ImageBase64)
 		if err != nil {
-			return "", fmt.Errorf("截图数据损坏：%w", err)
+			return "", fmt.Errorf("%s: %w", i18n.D("截图数据损坏"), err)
 		}
 		env.Attach(image)
 	}
 	if result.Text == "" {
-		return "已执行。", nil
+		return i18n.D("已执行。"), nil
 	}
 	return result.Text, nil
 }
 
 func browserApprovalReason(request protocol.BrowserRequestParams) string {
 	if request.Action == protocol.BrowserUseTab {
-		return "接管的是你自己打开的页面：之后的点击、输入都作用在它上面，用的是你的登录"
+		return i18n.D("接管的是你自己打开的页面：之后的点击、输入都作用在它上面，用的是你的登录")
 	}
-	return "在浏览器里操作（设置 → 浏览器里选的那个：AIClaw 自带的窗口，或你自己的浏览器）"
+	return i18n.D("在浏览器里操作（设置 → 浏览器里选的那个：AIClaw 自带的窗口，或你自己的浏览器）")
 }
 
 func describeBrowserAction(request protocol.BrowserRequestParams) string {
 	switch request.Action {
 	case protocol.BrowserNavigate:
-		return "打开 " + request.URL
+		return i18n.D("打开 {url}", "url", request.URL)
 	case protocol.BrowserClick:
-		return fmt.Sprintf("点击 %d 号元素", request.Index)
+		return i18n.D("点击 {index} 号元素", "index", request.Index)
 	case protocol.BrowserType:
-		return fmt.Sprintf("在 %d 号元素里输入：%s", request.Index, request.Text)
+		return i18n.D("在 {index} 号元素里输入：{text}", "index", request.Index, "text", request.Text)
 	case protocol.BrowserSelect:
-		return fmt.Sprintf("在 %d 号下拉框里选：%s", request.Index, request.Value)
+		return i18n.D("在 {index} 号下拉框里选：{value}", "index", request.Index, "value", request.Value)
 	case protocol.BrowserScroll:
 		if request.Index >= 0 {
-			return fmt.Sprintf("滚到 %d 号元素", request.Index)
+			return i18n.D("滚到 {index} 号元素", "index", request.Index)
 		}
-		return fmt.Sprintf("滚动 %d 像素", request.DY)
+		return i18n.D("滚动 {dy} 像素", "dy", request.DY)
 	case protocol.BrowserKey:
-		return "按键：" + request.Keys
+		return i18n.D("按键：{keys}", "keys", request.Keys)
 	case protocol.BrowserUseTab:
-		return fmt.Sprintf("接管你浏览器里的标签页 %d", request.TabID)
+		return i18n.D("接管你浏览器里的标签页 {tab}", "tab", request.TabID)
 	default:
 		return string(request.Action)
 	}
@@ -341,10 +341,10 @@ func indexAction(action protocol.BrowserAction) func(json.RawMessage) (protocol.
 			Index *int `json:"index"`
 		}
 		if err := json.Unmarshal(raw, &args); err != nil {
-			return protocol.BrowserRequestParams{}, errors.New("参数不是合法 JSON 对象")
+			return protocol.BrowserRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 		}
 		if args.Index == nil || *args.Index < 0 {
-			return protocol.BrowserRequestParams{}, errors.New("必须给出编号列表里的 index")
+			return protocol.BrowserRequestParams{}, i18n.E("必须给出编号列表里的 index")
 		}
 		return protocol.BrowserRequestParams{Action: action, Index: *args.Index}, nil
 	}
@@ -352,6 +352,6 @@ func indexAction(action protocol.BrowserAction) func(json.RawMessage) (protocol.
 
 func indexSchema() json.RawMessage {
 	return schemaOf(map[string]any{
-		"index": map[string]any{"type": "integer", "description": "元素编号，来自 browser_snapshot / browser_navigate 的列表"},
+		"index": map[string]any{"type": "integer", "description": "Element number from the browser_snapshot / browser_navigate list"},
 	}, "index")
 }

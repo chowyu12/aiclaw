@@ -2,6 +2,7 @@
 import { reactive } from "vue";
 import { actions } from "../store";
 import { describeError } from "../errors";
+import { locale, t } from "../i18n";
 import type { Turn } from "../turns";
 
 /**
@@ -17,11 +18,18 @@ defineProps<{
   open: boolean;
   /** 折叠条上的那行字，由 ChatView 按当轮状态算好传进来。 */
   summary: string;
+  /** 这一轮正在跑：折叠条点亮。原来靠 summary 以「执行中」开头来判断，翻译之后就不成立了。 */
+  live?: boolean;
 }>();
 
 defineEmits<{ toggle: [] }>();
 
-const STEP_LABEL = { llm: "llm", tool: "工具", notice: "提示" } as const;
+function stepLabel(kind: "llm" | "tool" | "notice"): string {
+  // 与旁边的 "llm" 一样用小写短标签；词典里的「工具」是页面标题用的 "Tools"。
+  if (kind === "tool") return locale.value === "en" ? "tool" : "工具";
+  if (kind === "notice") return t("提示");
+  return "llm";
+}
 
 /**
  * 产出物（生成的图、合成的语音）的内容，按路径缓存。
@@ -72,15 +80,15 @@ function llmSubline(step: Turn["steps"][number]): string {
   const parts: string[] = [];
   if (step.round) parts.push(`R${step.round}`);
   if (step.ttftMs) parts.push(`TTFT ${formatDuration(step.ttftMs)}`);
-  if (step.thinkMs) parts.push(`思考 ${formatDuration(step.thinkMs)}`);
-  if (step.toolCalls) parts.push(`${step.toolCalls} 工具调用`);
+  if (step.thinkMs) parts.push(t("思考 {time}", { time: formatDuration(step.thinkMs) }));
+  if (step.toolCalls) parts.push(t("{n} 工具调用", { n: step.toolCalls }));
   return parts.join(" · ");
 }
 </script>
 
 <template>
   <div class="steps">
-    <button class="steps-head" :class="{ live: !!summary && summary.startsWith('执行中') }" @click="$emit('toggle')">
+    <button class="steps-head" :class="{ live: !!live }" @click="$emit('toggle')">
       <span class="chev" :class="{ open }">›</span>
       {{ summary }}
     </button>
@@ -90,7 +98,7 @@ function llmSubline(step: Turn["steps"][number]): string {
         <summary @click="loadArtifacts(step)">
           <div class="row">
             <span class="dot" />
-            <span class="kind" :data-kind="step.step">{{ STEP_LABEL[step.step] }}</span>
+            <span class="kind" :data-kind="step.step">{{ stepLabel(step.step) }}</span>
             <span v-if="step.seq" class="seq">{{ step.seq }}</span>
             <span class="name">{{ step.title }}</span>
             <span v-if="step.durationMs !== undefined" class="pill">
@@ -118,7 +126,7 @@ function llmSubline(step: Turn["steps"][number]): string {
           />
           <audio v-else-if="media[path]?.kind === 'audio'" :src="media[path]!.dataUrl" controls />
           <p v-else-if="media[path]?.error" class="artifact-note bad">{{ media[path]!.error }}</p>
-          <p v-else class="artifact-note">正在读取…</p>
+          <p v-else class="artifact-note">{{ t("正在读取…") }}</p>
           <button class="artifact-path" @click="actions.openFile(path)">{{ path }}</button>
         </div>
       </details>

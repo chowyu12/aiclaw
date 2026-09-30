@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 	"github.com/chowyu12/aiclaw/internal/plugins/connector"
 	"github.com/chowyu12/aiclaw/pkg/wecomaibot"
@@ -92,7 +93,7 @@ func (c *Channel) Run(ctx context.Context, deps pluginpkg.ChannelDeps) error {
 			c.serve(runCtx, deps, client, message)
 		})
 		if !accepted {
-			c.reply(client, message, "当前正在处理其他会话，请稍后再发一次。")
+			c.reply(client, message, i18n.D("当前正在处理其他会话，请稍后再发一次。"))
 		}
 	})
 
@@ -137,14 +138,14 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, client 
 
 	switch {
 	case errors.Is(err, pluginpkg.ErrBindingNotAllowed):
-		stream.finish("这个会话还没有被授权访问助手，请在桌面端的插件设置里放行后再试。")
+		stream.finish(i18n.D("这个会话还没有被授权访问助手，请在桌面端的插件设置里放行后再试。"))
 	case err != nil:
 		deps.Log("wecom turn failed for %s: %v", message.ThreadKey, err)
 		// The error may name internal paths or configuration, so the sender
 		// gets an acknowledgement rather than the detail.
-		stream.finish("处理这条消息时出错了，请稍后再试。")
+		stream.finish(i18n.D("处理这条消息时出错了，请稍后再试。"))
 	case reply.Failed() || strings.TrimSpace(reply.Text()) == "":
-		stream.finish("这次没有得到可用的回复，请换个说法再试一次。")
+		stream.finish(i18n.D("这次没有得到可用的回复，请换个说法再试一次。"))
 	default:
 		stream.finish(reply.Text())
 	}
@@ -170,7 +171,7 @@ func (c *Channel) attachMedia(ctx context.Context, deps pluginpkg.ChannelDeps, m
 		data, _, err := download(ctx, ref)
 		if err != nil {
 			deps.Log("wecom image download failed for %s: %v", message.ThreadKey, err)
-			notes = append(notes, "[用户发来一张图片，但下载失败了]")
+			notes = append(notes, "[The user sent an image, but downloading it failed]")
 			continue
 		}
 		inbound.Images = append(inbound.Images, data)
@@ -179,7 +180,7 @@ func (c *Channel) attachMedia(ctx context.Context, deps pluginpkg.ChannelDeps, m
 		data, name, err := download(ctx, ref)
 		if err != nil {
 			deps.Log("wecom file download failed for %s: %v", message.ThreadKey, err)
-			notes = append(notes, "[用户发来一个文件，但下载失败了]")
+			notes = append(notes, "[The user sent a file, but downloading it failed]")
 			continue
 		}
 		if strings.TrimSpace(name) == "" {
@@ -257,9 +258,9 @@ func (s *streamer) finish(text string) {
 
 func displayName(message *wecomaibot.NormalizedMessage) string {
 	if message.Base != nil && strings.TrimSpace(message.Base.ChatID) != "" {
-		return "企业微信群 " + message.Base.ChatID
+		return i18n.D("企业微信群 {id}", "id", message.Base.ChatID)
 	}
-	return "企业微信 " + message.SenderID
+	return i18n.D("企业微信 {id}", "id", message.SenderID)
 }
 
 // dial builds the real transport.

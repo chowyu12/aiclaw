@@ -169,7 +169,7 @@ func TestChangingTheWorkspaceUpdatesTheSystemPrompt(t *testing.T) {
 	session := newTestSession(t, &fakeModel{}, protocol.ApprovalOnWrite)
 	session.config.Workdir = ""
 	session.messages[0].Content = buildSystemPrompt(session.config, session.registry, session.skills, "")
-	if !strings.Contains(session.messages[0].Content, "没有设置工作区") {
+	if !strings.Contains(session.messages[0].Content, "has no workspace set") {
 		t.Fatalf("前提不成立：%s", session.messages[0].Content)
 	}
 
@@ -182,7 +182,7 @@ func TestChangingTheWorkspaceUpdatesTheSystemPrompt(t *testing.T) {
 	if !strings.Contains(prompt, workspace) {
 		t.Errorf("提示词里应当是新的工作区：%s", prompt)
 	}
-	if strings.Contains(prompt, "没有设置工作区") {
+	if strings.Contains(prompt, "has no workspace set") {
 		t.Errorf("旧的那句话还在：%s", prompt)
 	}
 	// 只换第一条，对话历史不能被动。

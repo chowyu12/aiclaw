@@ -1,9 +1,10 @@
 package llm
 
 import (
-	"fmt"
 	"strings"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // Error 是一次模型调用的失败，带上重试与压缩需要的分类信息。
@@ -28,7 +29,7 @@ func (e *Error) Error() string {
 	if e.Status == 0 {
 		return e.Message
 	}
-	return fmt.Sprintf("模型返回错误（HTTP %d）：%s", e.Status, e.Message)
+	return i18n.D("模型返回错误（HTTP {status}）：{message}", "status", e.Status, "message", e.Message)
 }
 
 func (e *Error) Unwrap() error { return e.Err }

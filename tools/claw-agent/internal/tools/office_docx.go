@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -56,7 +56,7 @@ func readDocx(target string, offset int) (string, error) {
 	}
 	root, err := parseXML(data)
 	if err != nil {
-		return "", fmt.Errorf("解析 %s 失败：%w", main, err)
+		return "", fmt.Errorf("%s: %w", i18n.D("解析 {name} 失败", "name", main), err)
 	}
 	reader := &docxReader{
 		styles: map[string]docxStyle{}, numAbs: map[string]string{},
@@ -80,7 +80,7 @@ func readDocx(target string, offset int) (string, error) {
 
 	body := root.child("body")
 	if body == nil {
-		return "", fmt.Errorf("%s 里没有正文（w:body）", main)
+		return "", i18n.E("{name} 里没有正文（w:body）", "name", main)
 	}
 	var out strings.Builder
 	lastList := false
@@ -103,19 +103,19 @@ func readDocx(target string, offset int) (string, error) {
 
 	text := out.String()
 	if text == "" {
-		return "（文档没有文字内容）", nil
+		return i18n.D("（文档没有文字内容）"), nil
 	}
 	runes := utf8.RuneCountInString(text)
 	if offset > 0 {
 		if offset >= runes {
-			return "", fmt.Errorf("offset %d 超出文档长度（共 %d 字符）", offset, runes)
+			return "", i18n.E("offset {offset} 超出文档长度（共 {total} 字符）", "offset", offset, "total", runes)
 		}
 		text = string([]rune(text)[offset:])
 	}
 	kept, truncated := clipText(text)
 	if truncated {
 		next := offset + utf8.RuneCountInString(kept)
-		kept += fmt.Sprintf("\n\n[内容已截断：全文共 %d 字符，已返回到第 %d 字符；用 offset=%d 接着读]", runes, next, next)
+		kept += "\n\n" + i18n.D("[内容已截断：全文共 {total} 字符，已返回到第 {next} 字符；用 offset={next} 接着读]", "total", runes, "next", next)
 	}
 	return kept, nil
 }
@@ -400,15 +400,15 @@ func (r *docxReader) table(tbl *xnode) string {
 func writeDocxTool() Tool {
 	return Tool{
 		Name: "write_docx",
-		Description: "用 Markdown 风格的文字生成一个 Word 文档（.docx），已有同名文件会被覆盖。支持：# 到 ###### 标题、" +
-			"普通段落（每行一段）、- 或 * 开头的项目符号、1. 开头的编号列表（缩进两格为下一级）、**加粗**、*斜体*、`代码`、" +
-			"``` 代码块、> 引用、| a | b | 形式的表格（第二行 |---| 分隔时首行为表头）、单独一行 --- 为分页。" +
-			"写到工作区之外会先请用户确认。",
+		Description: "Create a Word document (.docx) from Markdown-style text; an existing file with the same name is overwritten. Supports: # to ###### headings, " +
+			"plain paragraphs (one per line), bullets starting with - or *, numbered lists starting with 1. (indent two spaces for the next level), **bold**, *italic*, `code`, " +
+			"``` code blocks, > quotes, tables in | a | b | form (the first row is the header when the second row is a |---| separator), and a line containing only --- for a page break. " +
+			"Writing outside the workspace asks the user for confirmation first.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
-			"path":    map[string]any{"type": "string", "description": "输出路径，扩展名 .docx。相对路径按工作区解析"},
-			"content": map[string]any{"type": "string", "description": "文档内容（Markdown 风格）"},
-			"title":   map[string]any{"type": "string", "description": "文档属性里的标题，可不传"},
+			"path":    map[string]any{"type": "string", "description": "Output path with a .docx extension. Relative paths resolve against the workspace"},
+			"content": map[string]any{"type": "string", "description": "Document content (Markdown style)"},
+			"title":   map[string]any{"type": "string", "description": "Title in the document properties; optional"},
 		}, "path", "content"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
@@ -426,14 +426,15 @@ func writeDocxTool() Tool {
 			if err != nil {
 				return "", err
 			}
-			target, err := approveOfficeWrite(ctx, env, args.Path, "写入 Word 文档", nil)
+			target, err := approveOfficeWrite(ctx, env, args.Path, i18n.D("写入 Word 文档"), nil)
 			if err != nil {
 				return "", err
 			}
 			if err := writeFileAtomic(target, data); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("已写入 %s（%d 段，%d 个表格，%d 字节）", args.Path, stats.paragraphs, stats.tables, len(data)), nil
+			return i18n.D("已写入 {path}（{paragraphs} 段，{tables} 个表格，{bytes} 字节）",
+				"path", args.Path, "paragraphs", stats.paragraphs, "tables", stats.tables, "bytes", len(data)), nil
 		},
 	}
 }
@@ -494,7 +495,7 @@ func buildDocx(content, title string) ([]byte, docxStats, error) {
 	}
 	data, err := buildPackage(parts)
 	if err != nil {
-		return nil, docxStats{}, fmt.Errorf("打包 docx 失败：%w", err)
+		return nil, docxStats{}, fmt.Errorf("%s: %w", i18n.D("打包 docx 失败"), err)
 	}
 	return data, builder.stats, nil
 }
@@ -916,14 +917,14 @@ func docxNumberingXML(orderedLists int) string {
 func editDocxTool() Tool {
 	return Tool{
 		Name: "edit_docx",
-		Description: "在已有的 Word 文档（.docx）里把一段精确文字替换成新文字，其余内容与格式保持不动。" +
-			"old_text 必须在正文中唯一出现，且不能跨段落；被 Word 拆成多段格式的文字也能匹配，替换后沿用匹配开头处的格式。" +
-			"new_text 里的换行会成为段内换行。先用 read_office 看原文。写到工作区之外会先请用户确认。",
+		Description: "Replace an exact piece of text in an existing Word document (.docx) with new text, leaving all other content and formatting untouched. " +
+			"old_text must appear exactly once in the body and cannot span paragraphs; text that Word split into several formatting runs still matches, and the replacement takes the formatting at the start of the match. " +
+			"Line breaks in new_text become line breaks within the paragraph. Read the original with read_office first. Writing outside the workspace asks the user for confirmation first.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
-			"path":     map[string]any{"type": "string", "description": "docx 文件路径。相对路径按工作区解析"},
-			"old_text": map[string]any{"type": "string", "description": "要被替换的原文（纯文字，不带 Markdown 标记），必须唯一"},
-			"new_text": map[string]any{"type": "string", "description": "替换成的新文字"},
+			"path":     map[string]any{"type": "string", "description": "Path to the .docx file. Relative paths resolve against the workspace"},
+			"old_text": map[string]any{"type": "string", "description": "The original text to replace (plain text, no Markdown markup); must be unique"},
+			"new_text": map[string]any{"type": "string", "description": "The replacement text"},
 		}, "path", "old_text", "new_text"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
@@ -935,10 +936,10 @@ func editDocxTool() Tool {
 				return "", err
 			}
 			if args.OldText == "" {
-				return "", errors.New("old_text 不能为空；要写全新文档用 write_docx")
+				return "", i18n.E("old_text 不能为空；要写全新文档用 write_docx")
 			}
 			if strings.Contains(args.OldText, "\n") {
-				return "", errors.New("old_text 不能跨段落（不能含换行）；请分段各替换一次")
+				return "", i18n.E("old_text 不能跨段落（不能含换行）；请分段各替换一次")
 			}
 			if err := requireExt(args.Path, ".docx", ".docm"); err != nil {
 				return "", err
@@ -957,14 +958,14 @@ func editDocxTool() Tool {
 			// 与 edit_file 一样：先确认改得了，再问用户，别让人批准一次注定失败的修改。
 			if err := env.requestApprovalScoped(
 				ctx, writeEffect(inside), protocol.ApprovalWrite,
-				"修改 Word 文档", target, outsideReason(env, inside), scopeOf(inside, target),
+				i18n.D("修改 Word 文档"), target, outsideReason(env, inside), scopeOf(inside, target),
 			); err != nil {
 				return "", err
 			}
 			if err := writeFileAtomic(target, data); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("已修改 %s", args.Path), nil
+			return i18n.D("已修改 {path}", "path", args.Path), nil
 		},
 	}
 }
@@ -986,7 +987,7 @@ type docxTextNode struct {
 func editDocx(target, oldText, newText string) ([]byte, error) {
 	reader, err := zip.OpenReader(target)
 	if err != nil {
-		return nil, fmt.Errorf("打不开 %s：不是有效的 docx（%v）", target, err)
+		return nil, i18n.E("打不开 {path}：不是有效的 docx（{err}）", "path", target, "err", err)
 	}
 	defer reader.Close()
 	pkg := &ooxmlPackage{closer: reader, files: map[string]*zip.File{}} // 由上面的 defer 关闭
@@ -1000,7 +1001,7 @@ func editDocx(target, oldText, newText string) ([]byte, error) {
 	}
 	paragraphs, err := scanDocxParagraphs(data)
 	if err != nil {
-		return nil, fmt.Errorf("解析 %s 失败：%w", main, err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("解析 {name} 失败", "name", main), err)
 	}
 
 	count := 0
@@ -1018,10 +1019,10 @@ func editDocx(target, oldText, newText string) ([]byte, error) {
 		count += n
 	}
 	if count == 0 {
-		return nil, errors.New("文档正文里找不到 old_text；先用 read_office 确认原文（它不能跨段落，也不能含 Markdown 标记）")
+		return nil, i18n.E("文档正文里找不到 old_text；先用 read_office 确认原文（它不能跨段落，也不能含 Markdown 标记）")
 	}
 	if count > 1 {
-		return nil, fmt.Errorf("old_text 在文档里出现了 %d 次，无法确定改哪一处；请带上更多上下文使其唯一", count)
+		return nil, i18n.E("old_text 在文档里出现了 {n} 次，无法确定改哪一处；请带上更多上下文使其唯一", "n", count)
 	}
 
 	// 把匹配区间 [matchAt, matchEnd) 落到各个 w:t 上。
@@ -1064,7 +1065,7 @@ func editDocx(target, oldText, newText string) ([]byte, error) {
 	for _, file := range reader.File {
 		if !strings.EqualFold(file.Name, main) {
 			if err := writer.Copy(file); err != nil {
-				return nil, fmt.Errorf("复制 %s 失败：%w", file.Name, err)
+				return nil, fmt.Errorf("%s: %w", i18n.D("复制 {name} 失败", "name", file.Name), err)
 			}
 			continue
 		}

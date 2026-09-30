@@ -65,7 +65,7 @@ func TestLongEnumsAreCappedButStillSayWhatTheyAre(t *testing.T) {
 	}
 	schema := `{"type":"string","enum":[` + strings.Join(names, ",") + `]}`
 	got := ts(t, schema)
-	if !strings.Contains(got, "| string") || !strings.Contains(got, "共 120 个取值") {
+	if !strings.Contains(got, "| string") || !strings.Contains(got, "120 values in total") {
 		t.Errorf("超长 enum 应当截断并说明总数：%s", got)
 	}
 	if len(got) > 800 {

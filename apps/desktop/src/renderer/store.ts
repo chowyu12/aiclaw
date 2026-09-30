@@ -34,6 +34,8 @@ import type {
   UpdateStatusView,
 } from "../shared/types";
 import type { ScheduledTaskInput, ScheduledTaskView } from "../shared/schedule";
+import { normalizeLocale } from "../shared/i18n";
+import { setLocale, t } from "./i18n";
 
 declare global {
   interface Window {
@@ -148,7 +150,7 @@ function plain<T>(value: T): T {
 /** 侧边栏里那个会话叫什么，给错误条用。 */
 function sessionLabel(sessionId: string): string {
   const found = state.sessions.find((session) => session.id === sessionId);
-  return found?.title || "另一个会话";
+  return found?.title || t("另一个会话");
 }
 
 export type { AppConfigView, TimelineEntry, LiveSession };
@@ -168,11 +170,12 @@ export const actions = {
     if (!window.aiclaw) {
       // preload 没注入。这是构建问题不是配置问题，说清楚免得用户去翻设置。
       state.error =
-        "本地桥接未加载（preload 注入失败），界面无法读写配置。这是构建问题：重新执行 make build 再启动；仍然如此请带上这条信息找开发。";
+        t("本地桥接未加载（preload 注入失败），界面无法读写配置。这是构建问题：重新执行 make build 再启动；仍然如此请带上这条信息找开发。");
       return;
     }
     try {
       state.config = (await window.aiclaw.config.read()) as AppConfigView;
+      setLocale(normalizeLocale(state.config.language));
       state.model = state.config.model;
       state.providerId = state.config.providerId;
       state.profiles = (await window.aiclaw.profiles.list()) as {
@@ -184,7 +187,7 @@ export const actions = {
       state.mcpServers = (await window.aiclaw.mcp.read()) as McpServerView[];
       state.skills = (await window.aiclaw.skills.list()) as SkillView[];
     } catch (error) {
-      state.error = `读取本地配置失败：${describeError(error)}`;
+      state.error = t("读取本地配置失败：{error}", { error: describeError(error) });
       return;
     }
 
@@ -200,7 +203,7 @@ export const actions = {
       const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId);
       // 错误条是全局的：后台那个会话出错也要让人看见，不然它就静静地停了。
       if (applied.error) {
-        const label = applied.sessionId === state.sessionId ? "" : `${sessionLabel(applied.sessionId)}：`;
+        const label = applied.sessionId === state.sessionId ? "" : t("{label}：", { label: sessionLabel(applied.sessionId) });
         state.error = label + applied.error;
       }
       // 没见过的会话开跑了，侧边栏要立刻有它：微信来一条消息就是一个新会话，
@@ -264,7 +267,7 @@ export const actions = {
         for (const record of Object.values(state.live)) record.busy = false;
       }
       if (state.runtime.state === "failed") {
-        state.error = state.runtime.detail ?? "本地运行时启动失败";
+        state.error = state.runtime.detail ?? t("本地运行时启动失败");
       }
     });
     window.aiclaw.on.updateProgress((payload) => {
@@ -284,6 +287,9 @@ export const actions = {
     // 结构化克隆克隆不了，IPC 会直接抛。带原始值的 patch 一直没事，
     // 所以这个坑到有嵌套对象的配置项时才露出来。
     state.config = (await window.aiclaw.config.write(plain(patch))) as AppConfigView;
+    setLocale(normalizeLocale(state.config.language));
+    // 审批档位的名称与说明是主进程按语言给的，换了语言重新取一次。
+    if ("language" in patch) state.profiles = (await window.aiclaw.profiles.list()) as typeof state.profiles;
     // 还没开会话时顶部显示的就是默认模型，跟着配置走。
     if (!state.sessionId) {
       state.model = state.config.model;
@@ -335,7 +341,7 @@ export const actions = {
       await actions.refreshSessions();
       await actions.loadProviders();
     } catch (error) {
-      state.error = `启动本地运行时失败：${describeError(error)}`;
+      state.error = t("启动本地运行时失败：{error}", { error: describeError(error) });
     }
   },
 
@@ -400,7 +406,7 @@ export const actions = {
         state.live[sessionId] = newLive(restoreHistory(info.history ?? []));
       }
     } catch (error) {
-      if (state.sessionId === sessionId) state.error = `打开会话失败：${describeError(error)}`;
+      if (state.sessionId === sessionId) state.error = t("打开会话失败：{error}", { error: describeError(error) });
     } finally {
       if (state.loadingSession === sessionId) state.loadingSession = "";
     }
@@ -546,7 +552,7 @@ export const actions = {
       state.model = info.model;
       state.providerId = info.providerId;
     } catch (error) {
-      state.error = `重新挂载失败：${describeError(error)}`;
+      state.error = t("重新挂载失败：{error}", { error: describeError(error) });
     }
   },
 
@@ -948,7 +954,7 @@ export const actions = {
       }
     } catch (error) {
       state.updating = false;
-      state.error = `升级失败：${describeError(error)}`;
+      state.error = t("升级失败：{error}", { error: describeError(error) });
     }
   },
 
@@ -1069,7 +1075,7 @@ export const actions = {
       // 切失败就把显示切回去，别让界面显示一个内核并没有在用的模型。
       state.model = previous.model;
       state.providerId = previous.providerId;
-      state.error = `切换模型失败：${describeError(error)}`;
+      state.error = t("切换模型失败：{error}", { error: describeError(error) });
     }
   },
 
@@ -1093,7 +1099,7 @@ export const actions = {
       try {
         await actions.newSession();
       } catch (error) {
-        state.error = `新建会话失败：${describeError(error)}`;
+        state.error = t("新建会话失败：{error}", { error: describeError(error) });
         return;
       }
     }

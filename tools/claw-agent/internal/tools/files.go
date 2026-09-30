@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -46,9 +47,9 @@ func outsideReason(env *Env, inside bool) string {
 		return ""
 	}
 	if strings.TrimSpace(env.Workspace) == "" {
-		return "这个会话没有设置工作区，所有写入都会先问一句"
+		return i18n.D("这个会话没有设置工作区，所有写入都会先问一句")
 	}
-	return fmt.Sprintf("这个路径在会话工作区（%s）之外", env.Workspace)
+	return i18n.D("这个路径在会话工作区（{workspace}）之外", "workspace", env.Workspace)
 }
 
 // RegisterFileTools 登记文件类内置工具。
@@ -67,18 +68,18 @@ func RegisterFileTools(registry *Registry) error {
 func readTool() Tool {
 	return Tool{
 		Name: "read_file",
-		Description: "读取一个文件的内容。可以读工作区之外的文件（涉及凭据的目录除外）。" +
-			"大文件会被截断。",
+		Description: "Read a file's contents. Files outside the workspace can be read too (except directories that hold credentials). " +
+			"Large files are truncated.",
 		Effect: EffectRead,
 		Schema: schema(map[string]any{
 			"path": map[string]any{
-				"type": "string", "description": "文件路径。相对路径按工作区解析，也可以给绝对路径",
+				"type": "string", "description": "File path. Relative paths resolve against the workspace; absolute paths also work",
 			},
 			"offset": map[string]any{
-				"type": "integer", "description": "从第几行开始读，1 起；不传从头读", "minimum": 1,
+				"type": "integer", "description": "Line to start reading from, 1-based; omit to read from the beginning", "minimum": 1,
 			},
 			"limit": map[string]any{
-				"type": "integer", "description": "最多读多少行", "minimum": 1,
+				"type": "integer", "description": "Maximum number of lines to read", "minimum": 1,
 			},
 		}, "path"),
 		Handler: func(_ context.Context, raw json.RawMessage, env *Env) (string, error) {
@@ -96,10 +97,10 @@ func readTool() Tool {
 			}
 			info, err := os.Stat(path)
 			if err != nil {
-				return "", fmt.Errorf("读取失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
 			}
 			if info.IsDir() {
-				return "", fmt.Errorf("%s 是目录，不是文件；用 list_dir 看目录内容", args.Path)
+				return "", i18n.E("{path} 是目录，不是文件；用 list_dir 看目录内容", "path", args.Path)
 			}
 			// Office 文件是 zip 包，按文本读出来只是一串乱码，还白占上下文。
 			// 直接指到 read_office；老格式则直接说清读不了。
@@ -107,12 +108,12 @@ func readTool() Tool {
 				if legacy {
 					return "", legacyOfficeError(path)
 				}
-				return "", fmt.Errorf("%s 是 Office 文件（压缩包格式），read_file 读不出文字；请改用 read_office", args.Path)
+				return "", i18n.E("{path} 是 Office 文件（压缩包格式），read_file 读不出文字；请改用 read_office", "path", args.Path)
 			}
 
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return "", fmt.Errorf("读取失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
 			}
 			truncated := false
 			if len(content) > maxReadBytes {
@@ -128,7 +129,7 @@ func readTool() Tool {
 					start = args.Offset - 1
 				}
 				if start >= len(lines) {
-					return "", fmt.Errorf("offset %d 超出文件行数 %d", args.Offset, len(lines))
+					return "", i18n.E("offset {offset} 超出文件行数 {lines}", "offset", args.Offset, "lines", len(lines))
 				}
 				end := len(lines)
 				if args.Limit > 0 && start+args.Limit < end {
@@ -138,7 +139,7 @@ func readTool() Tool {
 				text = strings.Join(lines[start:end], "\n")
 			}
 			if truncated {
-				text += "\n\n[内容已截断]"
+				text += "\n\n" + i18n.D("[内容已截断]")
 			}
 			return text, nil
 		},
@@ -148,11 +149,11 @@ func readTool() Tool {
 func writeTool() Tool {
 	return Tool{
 		Name:        "write_file",
-		Description: "把内容写入文件，覆盖已有内容。父目录会自动创建。写到工作区之外会先请用户确认。",
+		Description: "Write content to a file, overwriting what is there. Parent directories are created automatically. Writing outside the workspace asks the user for confirmation first.",
 		Effect:      EffectWrite,
 		Schema: schema(map[string]any{
-			"path":    map[string]any{"type": "string", "description": "文件路径。相对路径按工作区解析"},
-			"content": map[string]any{"type": "string", "description": "完整文件内容"},
+			"path":    map[string]any{"type": "string", "description": "File path. Relative paths resolve against the workspace"},
+			"content": map[string]any{"type": "string", "description": "The complete file content"},
 		}, "path", "content"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
@@ -168,17 +169,17 @@ func writeTool() Tool {
 			}
 			if err := env.requestApprovalScoped(
 				ctx, writeEffect(inside), protocol.ApprovalWrite,
-				"写入文件", path, outsideReason(env, inside), scopeOf(inside, path),
+				i18n.D("写入文件"), path, outsideReason(env, inside), scopeOf(inside, path),
 			); err != nil {
 				return "", err
 			}
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-				return "", fmt.Errorf("创建父目录失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("创建父目录失败"), err)
 			}
 			if err := os.WriteFile(path, []byte(args.Content), 0o644); err != nil {
-				return "", fmt.Errorf("写入失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 			}
-			return fmt.Sprintf("已写入 %s（%d 字节）", args.Path, len(args.Content)), nil
+			return i18n.D("已写入 {path}（{bytes} 字节）", "path", args.Path, "bytes", len(args.Content)), nil
 		},
 	}
 }
@@ -186,13 +187,13 @@ func writeTool() Tool {
 func editTool() Tool {
 	return Tool{
 		Name: "edit_file",
-		Description: "把文件里的一段精确文本替换成新文本。" +
-			"old_text 必须在文件中唯一出现，否则报错——这样不会改错地方。",
+		Description: "Replace an exact piece of text in a file with new text. " +
+			"old_text must appear exactly once in the file, otherwise the call fails — so the wrong spot never gets edited.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
-			"path":     map[string]any{"type": "string", "description": "文件路径。相对路径按工作区解析"},
-			"old_text": map[string]any{"type": "string", "description": "要被替换的原文，必须唯一"},
-			"new_text": map[string]any{"type": "string", "description": "替换成的新文本"},
+			"path":     map[string]any{"type": "string", "description": "File path. Relative paths resolve against the workspace"},
+			"old_text": map[string]any{"type": "string", "description": "The original text to replace; must be unique"},
+			"new_text": map[string]any{"type": "string", "description": "The replacement text"},
 		}, "path", "old_text", "new_text"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
@@ -204,7 +205,7 @@ func editTool() Tool {
 				return "", err
 			}
 			if args.OldText == "" {
-				return "", errors.New("old_text 不能为空；要写全新内容用 write_file")
+				return "", i18n.E("old_text 不能为空；要写全新内容用 write_file")
 			}
 			path, inside, err := env.ResolveWrite(args.Path)
 			if err != nil {
@@ -212,27 +213,27 @@ func editTool() Tool {
 			}
 			content, err := os.ReadFile(path)
 			if err != nil {
-				return "", fmt.Errorf("读取失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
 			}
 			text := string(content)
 			count := strings.Count(text, args.OldText)
 			if count == 0 {
-				return "", errors.New("文件里找不到 old_text；先用 read_file 确认原文（注意空白与缩进）")
+				return "", i18n.E("文件里找不到 old_text；先用 read_file 确认原文（注意空白与缩进）")
 			}
 			if count > 1 {
-				return "", fmt.Errorf("old_text 在文件里出现了 %d 次，无法确定改哪一处；请带上更多上下文使其唯一", count)
+				return "", i18n.E("old_text 在文件里出现了 {count} 次，无法确定改哪一处；请带上更多上下文使其唯一", "count", count)
 			}
 			if err := env.requestApprovalScoped(
 				ctx, writeEffect(inside), protocol.ApprovalWrite,
-				"修改文件", path, outsideReason(env, inside), scopeOf(inside, path),
+				i18n.D("修改文件"), path, outsideReason(env, inside), scopeOf(inside, path),
 			); err != nil {
 				return "", err
 			}
 			updated := strings.Replace(text, args.OldText, args.NewText, 1)
 			if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
-				return "", fmt.Errorf("写入失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 			}
-			return fmt.Sprintf("已修改 %s", args.Path), nil
+			return i18n.D("已修改 {path}", "path", args.Path), nil
 		},
 	}
 }
@@ -240,10 +241,10 @@ func editTool() Tool {
 func listTool() Tool {
 	return Tool{
 		Name:        "list_dir",
-		Description: "列出一个目录的条目。可以列工作区之外的目录（涉及凭据的目录除外）。",
+		Description: "List the entries of a directory. Directories outside the workspace can be listed too (except directories that hold credentials).",
 		Effect:      EffectRead,
 		Schema: schema(map[string]any{
-			"path": map[string]any{"type": "string", "description": "目录路径；不传列工作区根（没设工作区时是主目录）"},
+			"path": map[string]any{"type": "string", "description": "Directory path; omit to list the workspace root (the home directory when no workspace is set)"},
 		}),
 		Handler: func(_ context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
@@ -261,10 +262,10 @@ func listTool() Tool {
 			}
 			entries, err := os.ReadDir(path)
 			if err != nil {
-				return "", fmt.Errorf("列目录失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("列目录失败"), err)
 			}
 			if len(entries) == 0 {
-				return "（空目录）", nil
+				return i18n.D("（空目录）"), nil
 			}
 			lines := make([]string, 0, len(entries))
 			for _, entry := range entries {
@@ -278,7 +279,7 @@ func listTool() Tool {
 					lines = append(lines, name)
 					continue
 				}
-				lines = append(lines, fmt.Sprintf("%s\t%d 字节", name, info.Size()))
+				lines = append(lines, name+"\t"+i18n.D("{bytes} 字节", "bytes", info.Size()))
 			}
 			sort.Strings(lines)
 			return strings.Join(lines, "\n"), nil
@@ -289,14 +290,14 @@ func listTool() Tool {
 func grepTool() Tool {
 	return Tool{
 		Name:        "search_files",
-		Description: "按正则搜索文件内容，返回命中行及其文件与行号。默认搜工作区，也可以指定别的目录。",
+		Description: "Search file contents with a regular expression; returns matching lines with their file and line number. Searches the workspace by default; another directory can be given.",
 		Effect:      EffectRead,
 		Schema: schema(map[string]any{
-			"pattern": map[string]any{"type": "string", "description": "Go 正则表达式"},
-			"path":    map[string]any{"type": "string", "description": "限定搜索的目录；不传搜整个工作区"},
-			"glob":    map[string]any{"type": "string", "description": "文件名通配，例如 *.go"},
+			"pattern": map[string]any{"type": "string", "description": "Go regular expression"},
+			"path":    map[string]any{"type": "string", "description": "Directory to limit the search to; omit to search the whole workspace"},
+			"glob":    map[string]any{"type": "string", "description": "File name glob, e.g. *.go"},
 			"max_results": map[string]any{
-				"type": "integer", "description": "最多返回多少条，默认 100", "minimum": 1, "maximum": 1000,
+				"type": "integer", "description": "Maximum number of matches to return, default 100", "minimum": 1, "maximum": 1000,
 			},
 		}, "pattern"),
 		Handler: func(_ context.Context, raw json.RawMessage, env *Env) (string, error) {
@@ -311,7 +312,7 @@ func grepTool() Tool {
 			}
 			expression, err := regexp.Compile(args.Pattern)
 			if err != nil {
-				return "", fmt.Errorf("正则不合法：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("正则不合法"), err)
 			}
 			if strings.TrimSpace(args.Path) == "" {
 				args.Path = "."
@@ -373,10 +374,10 @@ func grepTool() Tool {
 				return nil
 			})
 			if walkErr != nil && !errors.Is(walkErr, filepath.SkipAll) {
-				return "", fmt.Errorf("搜索失败：%w", walkErr)
+				return "", fmt.Errorf("%s: %w", i18n.D("搜索失败"), walkErr)
 			}
 			if len(matches) == 0 {
-				return "没有命中。", nil
+				return i18n.D("没有命中。"), nil
 			}
 			return strings.Join(matches, "\n"), nil
 		},

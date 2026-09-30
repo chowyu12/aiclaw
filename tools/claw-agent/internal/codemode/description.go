@@ -73,32 +73,32 @@ func AssignIdentifiers(tools []Tool) []Tool {
 // Description 组出 exec 工具的描述。
 func Description(tools []Tool) string {
 	var builder strings.Builder
-	builder.WriteString(`执行一段 JavaScript 来调用工具并组合结果。
+	builder.WriteString(`Run a snippet of JavaScript that calls tools and combines their results.
 
-- 代码在一个隔离的 JS 环境里跑：没有 require、没有文件系统、没有网络、没有 console，
-  **也没有 setTimeout 之类的定时器**（需要等待就直接 await 工具，别自己造轮询）。
-  能用的只有下面列出的工具与辅助函数。需要读写文件或执行命令时，用对应的工具。
-- 直接给 JavaScript 源码，不要包 markdown 代码围栏。
-- 所有工具挂在全局 tools 上，都返回 Promise：const r = await tools.某个工具({ ... })。
-  参数传一个对象。
-- 返回值：工具输出是 JSON 就是对象/数组（直接 r.results），否则是字符串；String(r) 与
-  字符串拼接得到原始 JSON 文本，要 .slice 先 JSON.stringify(r)。run_command 返回字符串，没有 .stdout。
-- 名字放进变量时写 tools[名字]，**名字里不带 tools. 前缀**——下面列的是调用写法
-  tools.某个工具(...)，其中工具名只是「某个工具」那一段。
-- 工具失败会抛异常，可以用 try/catch 接住并改用别的做法。
-- **只把需要的结果交出去**：中间数据留在脚本里，不要整份 text() 出来。
-  这正是用它的理由——十几次查询只回最后那几行。
+- The code runs in an isolated JS environment: no require, no file system, no network, no console,
+  **and no timers such as setTimeout** (to wait, just await the tool; don't build your own polling).
+  Only the tools and helpers listed below are available. To read or write files or run commands, use the corresponding tools.
+- Pass raw JavaScript source; don't wrap it in markdown code fences.
+- Every tool lives on the global tools object and returns a Promise: const r = await tools.some_tool({ ... }).
+  Pass the arguments as one object.
+- Return values: if a tool outputs JSON you get an object/array (use r.results directly); otherwise a string. String(r) and
+  string concatenation give the raw JSON text; to .slice it, JSON.stringify(r) first. run_command returns a string with no .stdout.
+- When the name is in a variable, write tools[name], **without the tools. prefix in the name** — the list below shows the call form
+  tools.some_tool(...), where the tool name is only the "some_tool" part.
+- A failing tool throws an exception; catch it with try/catch and try another approach.
+- **Return only the results you need**: keep intermediate data inside the script instead of text()-ing all of it.
+  That is the whole point of exec — a dozen queries, and only the last few lines come back.
 
-辅助函数：
-- text(值)：追加一行输出。对象会被 JSON 化。
-- exit()：立刻结束（相当于提前 return）。
-- store(键, 值) / load(键)：在同一会话的多次执行之间存取数据。
-- ALL_TOOLS：[{ name, description }]，可以自己 filter 找工具。
+Helpers:
+- text(value): append a line of output. Objects are JSON-encoded.
+- exit(): stop immediately (like an early return).
+- store(key, value) / load(key): save and load data across runs within the same chat.
+- ALL_TOOLS: [{ name, description }]; filter it yourself to find tools.
 
-写法示例：
+Example:
   const rows = [];
   for (const table of ["a", "b"]) {
-    const result = await tools.某个查询工具({ table });
+    const result = await tools.some_query_tool({ table });
     rows.push(table + "=" + result.count);
   }
   return rows.join(", ");
@@ -108,7 +108,7 @@ func Description(tools []Tool) string {
 	sorted := append([]Tool(nil), tools...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Ident < sorted[j].Ident })
 
-	builder.WriteString(fmt.Sprintf("可用工具（共 %d 个）：\n", len(sorted)))
+	builder.WriteString(fmt.Sprintf("Available tools (%d in total):\n", len(sorted)))
 	for index, tool := range sorted {
 		if index >= maxDeclared {
 			break
@@ -125,8 +125,8 @@ func Description(tools []Tool) string {
 		// 存在的东西：只写「还有 101 个」，它就断定没有；而按字母序取前几个，看到的
 		// 全是同一个前缀（一串「企业 xx 查询」），另一头的整块工具照样看不见。
 		builder.WriteString(fmt.Sprintf(
-			"…还有 %d 个没有列出签名，比如 %s。用 ALL_TOOLS 按名字或说明搜到完整名字，再直接调用。\n",
-			len(hidden), strings.Join(sampleIdents(hidden, sampledHidden), "、"),
+			"…and %d more without signatures listed, e.g. %s. Search ALL_TOOLS by name or description to find the full name, then call it directly.\n",
+			len(hidden), strings.Join(sampleIdents(hidden, sampledHidden), ", "),
 		))
 	}
 	return builder.String()

@@ -5,6 +5,7 @@ import ChatView from "./views/ChatView.vue";
 import SettingsShell from "./views/SettingsShell.vue";
 import SessionSidebar from "./views/SessionSidebar.vue";
 import ApprovalDialog from "./views/ApprovalDialog.vue";
+import { locale, t } from "./i18n";
 
 /** 「配完了」= 选好了默认模型（它所属的模型服务在库里带着端点与 Key）。 */
 const configured = computed(() => Boolean(store.config?.providerId && store.config.model));
@@ -42,13 +43,14 @@ onMounted(() => {
 <template>
   <!-- 没有顶栏：窗口自己有标题栏，再挂一条就是两层。导航挪进了侧边栏底部的
        设置菜单——MCP、技能和配置都是低频的全局设置，不值得常驻一整行。 -->
-  <div class="shell">
+  <!-- 按语言设 key：切换语言时整棵树重新挂载一次，纯函数算出来的文案也跟着换。 -->
+  <div :key="locale" class="shell">
     <SessionSidebar />
 
     <main class="pane">
       <div v-if="store.error" class="error-bar">
         <span>{{ store.error }}</span>
-        <button @click="actions.clearError()">知道了</button>
+        <button @click="actions.clearError()">{{ t("知道了") }}</button>
       </div>
 
 

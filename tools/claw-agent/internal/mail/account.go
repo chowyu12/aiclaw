@@ -10,10 +10,12 @@
 package mail
 
 import (
-	"errors"
 	"fmt"
 	"net/mail"
+	"strconv"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // Account 是一个邮箱账号的连接信息。Password 是明文，只在内存里经手。
@@ -74,7 +76,7 @@ func (a Account) Normalize() (Account, error) {
 	a.Address = strings.TrimSpace(a.Address)
 	parsed, err := mail.ParseAddress(a.Address)
 	if err != nil || parsed.Address != a.Address {
-		return a, fmt.Errorf("邮箱地址不对：%q", a.Address)
+		return a, i18n.E("邮箱地址不对：{address}", "address", strconv.Quote(a.Address))
 	}
 	a.Name = strings.TrimSpace(a.Name)
 	a.Username = strings.TrimSpace(a.Username)
@@ -109,7 +111,7 @@ func (a Account) Normalize() (Account, error) {
 		}
 	}
 	if a.IMAPPort > 65535 || a.SMTPPort > 65535 {
-		return a, errors.New("端口号不对")
+		return a, i18n.E("端口号不对")
 	}
 	return a, nil
 }
@@ -135,23 +137,31 @@ func (a Account) hint() string {
 	host := strings.ToLower(a.IMAPHost + " " + a.SMTPHost)
 	switch {
 	case strings.Contains(host, "qiye.163.com"):
-		return "网易企业邮箱：在网页版「设置 → 客户端设置」里开启 IMAP/SMTP；开了安全登录的话要生成「客户端专用密码」填在这里"
+		return i18n.D("网易企业邮箱：在网页版「设置 → 客户端设置」里开启 IMAP/SMTP；开了安全登录的话要生成「客户端专用密码」填在这里")
 	case strings.Contains(host, "exmail.qq.com"):
-		return "腾讯企业邮箱：在网页版「设置 → 客户端设置」里开启 IMAP/SMTP；开了安全登录的话要生成「客户端专用密码」填在这里"
+		return i18n.D("腾讯企业邮箱：在网页版「设置 → 客户端设置」里开启 IMAP/SMTP；开了安全登录的话要生成「客户端专用密码」填在这里")
 	case strings.Contains(host, "qiye.aliyun.com"):
-		return "阿里企业邮箱：确认管理员开放了 IMAP/SMTP；开了二次验证的话要用「三方客户端安全密码」"
+		return i18n.D("阿里企业邮箱：确认管理员开放了 IMAP/SMTP；开了二次验证的话要用「三方客户端安全密码」")
 	}
 	switch Domain(a.Address) {
 	case "qq.com", "foxmail.com", "vip.qq.com":
-		return "QQ 邮箱要在网页版「设置 → 账号」里开启 IMAP/SMTP 服务，密码处填生成的授权码"
+		return i18n.D("QQ 邮箱要在网页版「设置 → 账号」里开启 IMAP/SMTP 服务，密码处填生成的授权码")
 	case "163.com", "126.com", "yeah.net", "vip.163.com":
-		return "网易邮箱要在网页版「设置 → POP3/SMTP/IMAP」里开启 IMAP/SMTP 服务，密码处填授权码"
+		return i18n.D("网易邮箱要在网页版「设置 → POP3/SMTP/IMAP」里开启 IMAP/SMTP 服务，密码处填授权码")
 	case "gmail.com", "googlemail.com":
-		return "Gmail 要开两步验证，再到 Google 账号「应用专用密码」里生成一个填在这里"
+		return i18n.D("Gmail 要开两步验证，再到 Google 账号「应用专用密码」里生成一个填在这里")
 	case "outlook.com", "hotmail.com", "live.com":
-		return "Outlook 个人邮箱要用应用密码；微软已逐步关闭这类邮箱的密码登录，可能连不上"
+		return i18n.D("Outlook 个人邮箱要用应用密码；微软已逐步关闭这类邮箱的密码登录，可能连不上")
 	case "icloud.com", "me.com":
-		return "iCloud 邮箱要在 Apple 账号里生成「App 专用密码」填在这里"
+		return i18n.D("iCloud 邮箱要在 Apple 账号里生成「App 专用密码」填在这里")
 	}
-	return "检查密码（很多邮箱要用单独生成的授权码 / 应用密码）以及是否开启了 IMAP/SMTP"
+	return i18n.D("检查密码（很多邮箱要用单独生成的授权码 / 应用密码）以及是否开启了 IMAP/SMTP")
+}
+
+// wrapErr 在一句（已翻译的）说明后面接上原始错误，保留 %w；冒号跟着界面语言。
+func wrapErr(message string, err error) error {
+	if i18n.Default() == i18n.Chinese {
+		return fmt.Errorf("%s：%w", message, err)
+	}
+	return fmt.Errorf("%s: %w", message, err)
 }

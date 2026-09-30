@@ -3,14 +3,16 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/xuri/excelize/v2"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 const (
@@ -33,19 +35,19 @@ const (
 func readXlsx(target, sheet, cellRange string) (string, error) {
 	file, err := excelize.OpenFile(target)
 	if err != nil {
-		return "", fmt.Errorf("打不开 %s：%w", target, err)
+		return "", fmt.Errorf("%s: %w", i18n.D("打不开 {path}", "path", target), err)
 	}
 	defer file.Close()
 
 	sheets := file.GetSheetList()
 	if len(sheets) == 0 {
-		return "（工作簿里没有工作表）", nil
+		return i18n.D("（工作簿里没有工作表）"), nil
 	}
 	if sheet == "" {
 		sheet = sheets[0]
 	}
 	if index, err := file.GetSheetIndex(sheet); err != nil || index < 0 {
-		return "", fmt.Errorf("没有名为 %q 的工作表；现有：%s", sheet, strings.Join(sheets, "、"))
+		return "", i18n.E("没有名为 {sheet} 的工作表；现有：{sheets}", "sheet", strconv.Quote(sheet), "sheets", strings.Join(sheets, officeListSep()))
 	}
 
 	// 先走一遍迭代器算出真实的行列数。<dimension> 元素是生成器自己写的，
@@ -81,10 +83,10 @@ func readXlsx(target, sheet, cellRange string) (string, error) {
 	}
 
 	var out strings.Builder
-	out.WriteString("工作表：")
+	out.WriteString(i18n.D("工作表："))
 	for index, name := range sheets {
 		if index > 0 {
-			out.WriteString("、")
+			out.WriteString(officeListSep())
 		}
 		if name == sheet {
 			out.WriteString("[" + name + "]")
@@ -92,15 +94,19 @@ func readXlsx(target, sheet, cellRange string) (string, error) {
 			out.WriteString(name)
 		}
 	}
-	fmt.Fprintf(&out, "\n当前工作表 %q：共 %d 行 × %d 列", sheet, totalRows, totalCols)
+	out.WriteString("\n")
 	if totalRows > 0 && totalCols > 0 {
 		lastName, _ := excelize.CoordinatesToCellName(totalCols, totalRows)
-		out.WriteString("（A1:" + lastName + "）")
+		out.WriteString(i18n.D("当前工作表 {sheet}：共 {rows} 行 × {cols} 列（{range}）",
+			"sheet", strconv.Quote(sheet), "rows", totalRows, "cols", totalCols, "range", "A1:"+lastName))
+	} else {
+		out.WriteString(i18n.D("当前工作表 {sheet}：共 {rows} 行 × {cols} 列",
+			"sheet", strconv.Quote(sheet), "rows", totalRows, "cols", totalCols))
 	}
 	out.WriteString("\n")
 
 	if totalRows == 0 || firstRow > lastRow || firstCol > lastCol {
-		out.WriteString("\n（这个区域没有数据）")
+		out.WriteString("\n" + i18n.D("（这个区域没有数据）"))
 		return out.String(), nil
 	}
 
@@ -110,29 +116,29 @@ func readXlsx(target, sheet, cellRange string) (string, error) {
 	}
 	startName, _ := excelize.CoordinatesToCellName(firstCol, firstRow)
 	endName, _ := excelize.CoordinatesToCellName(lastCol, lastRow)
-	fmt.Fprintf(&out, "区域 %s:%s：\n\n", startName, endName)
+	out.WriteString(i18n.D("区域 {range}：", "range", startName+":"+endName) + "\n\n")
 	out.WriteString(mdTable(rows))
 
 	if len(formulas) > 0 {
-		out.WriteString("\n\n公式（单元格里显示的是计算值）：")
+		out.WriteString("\n\n" + i18n.D("公式（单元格里显示的是计算值）："))
 		for index, item := range formulas {
 			if index >= xlsxMaxListed {
-				fmt.Fprintf(&out, "\n……另有 %d 个公式未列出", len(formulas)-xlsxMaxListed)
+				out.WriteString("\n" + i18n.D("……另有 {n} 个公式未列出", "n", len(formulas)-xlsxMaxListed))
 				break
 			}
 			out.WriteString("\n- " + item)
 		}
 	}
 	if merged, err := file.GetMergeCells(sheet); err == nil && len(merged) > 0 {
-		out.WriteString("\n\n合并单元格（值只在左上角那一格）：")
+		out.WriteString("\n\n" + i18n.D("合并单元格（值只在左上角那一格）："))
 		for index, cell := range merged {
 			if index >= xlsxMaxListed {
-				fmt.Fprintf(&out, "\n……另有 %d 处未列出", len(merged)-xlsxMaxListed)
+				out.WriteString("\n" + i18n.D("……另有 {n} 处合并单元格未列出", "n", len(merged)-xlsxMaxListed))
 				break
 			}
 			out.WriteString("\n- " + cell.GetStartAxis() + ":" + cell.GetEndAxis())
 			if value := strings.TrimSpace(cell.GetCellValue()); value != "" {
-				out.WriteString("（" + shortText(value, 40) + "）")
+				out.WriteString(officeParen(shortText(value, 40)))
 			}
 		}
 	}
@@ -141,15 +147,17 @@ func readXlsx(target, sheet, cellRange string) (string, error) {
 	if rowsClipped || lastRow < totalRows {
 		nextStart, _ := excelize.CoordinatesToCellName(firstCol, lastRow+1)
 		nextEnd, _ := excelize.CoordinatesToCellName(lastCol, min(lastRow+xlsxDefaultRows, totalRows))
-		more = append(more, fmt.Sprintf("只显示到第 %d 行（共 %d 行），用 range=%s:%s 读后面的", lastRow, totalRows, nextStart, nextEnd))
+		more = append(more, i18n.D("只显示到第 {last} 行（共 {total} 行），用 range={next} 读后面的",
+			"last", lastRow, "total", totalRows, "next", nextStart+":"+nextEnd))
 	}
 	if colsClipped {
-		more = append(more, fmt.Sprintf("一次最多显示 %d 列（共 %d 列），用 range 指定列区间读其余列", xlsxMaxCols, totalCols))
+		more = append(more, i18n.D("一次最多显示 {max} 列（共 {total} 列），用 range 指定列区间读其余列",
+			"max", xlsxMaxCols, "total", totalCols))
 	}
 	if len(more) > 0 {
-		out.WriteString("\n\n[" + strings.Join(more, "；") + "]")
+		out.WriteString("\n\n[" + strings.Join(more, officeClauseSep()) + "]")
 	}
-	hint := fmt.Sprintf("用更小的 range 分段读，例如 %s:%s", startName, mustCellName(lastCol, firstRow+(lastRow-firstRow)/2))
+	hint := i18n.D("用更小的 range 分段读，例如 {range}", "range", startName+":"+mustCellName(lastCol, firstRow+(lastRow-firstRow)/2))
 	return clipOffice(out.String(), hint), nil
 }
 
@@ -169,7 +177,7 @@ func shortText(text string, limit int) string {
 func xlsxExtent(file *excelize.File, sheet string) (int, int, error) {
 	rows, err := file.Rows(sheet)
 	if err != nil {
-		return 0, 0, fmt.Errorf("读取工作表失败：%w", err)
+		return 0, 0, fmt.Errorf("%s: %w", i18n.D("读取工作表失败"), err)
 	}
 	defer rows.Close()
 	lastRow, maxCols, current := 0, 0, 0
@@ -177,7 +185,7 @@ func xlsxExtent(file *excelize.File, sheet string) (int, int, error) {
 		current++
 		columns, err := rows.Columns()
 		if err != nil {
-			return 0, 0, fmt.Errorf("读取工作表失败：%w", err)
+			return 0, 0, fmt.Errorf("%s: %w", i18n.D("读取工作表失败"), err)
 		}
 		// Columns 会去掉行尾空格，这里再确认一下整行是不是真的有字。
 		width := 0
@@ -199,7 +207,11 @@ func xlsxExtent(file *excelize.File, sheet string) (int, int, error) {
 // 公式格：excelize 自己写的文件没有缓存值（它不算公式），Excel 保存过的才有；
 // 没有缓存值时用 CalcCellValue 现算一次，算不出来就显示公式本身。
 func xlsxBlock(file *excelize.File, sheet string, firstRow, lastRow, firstCol, lastCol int) ([][]string, []string, error) {
-	header := []string{"行"}
+	rowLabel := "Row"
+	if officeZh() {
+		rowLabel = "行"
+	}
+	header := []string{rowLabel}
 	for col := firstCol; col <= lastCol; col++ {
 		name, _ := excelize.ColumnNumberToName(col)
 		header = append(header, name)
@@ -212,7 +224,7 @@ func xlsxBlock(file *excelize.File, sheet string, firstRow, lastRow, firstCol, l
 			cell, _ := excelize.CoordinatesToCellName(col, row)
 			value, err := file.GetCellValue(sheet, cell)
 			if err != nil {
-				return nil, nil, fmt.Errorf("读取 %s 失败：%w", cell, err)
+				return nil, nil, fmt.Errorf("%s: %w", i18n.D("读取 {cell} 失败", "cell", cell), err)
 			}
 			if formula, _ := file.GetCellFormula(sheet, cell); formula != "" {
 				if value == "" {
@@ -239,7 +251,7 @@ func parseCellRange(text string) (firstCol, firstRow, lastCol, lastRow int, err 
 	}
 	parts := strings.Split(text, ":")
 	if len(parts) > 2 {
-		return 0, 0, 0, 0, fmt.Errorf("range %q 不合法，应当形如 A1:F200", text)
+		return 0, 0, 0, 0, i18n.E("range {range} 不合法，应当形如 A1:F200", "range", strconv.Quote(text))
 	}
 	parse := func(ref string, isEnd bool) (int, int, error) {
 		letters := strings.TrimRightFunc(ref, unicode.IsDigit)
@@ -248,17 +260,17 @@ func parseCellRange(text string) (firstCol, firstRow, lastCol, lastRow int, err 
 		if letters != "" {
 			n, err := excelize.ColumnNameToNumber(letters)
 			if err != nil {
-				return 0, 0, fmt.Errorf("range 里的列 %q 不合法", letters)
+				return 0, 0, i18n.E("range 里的列 {col} 不合法", "col", strconv.Quote(letters))
 			}
 			col = n
 		}
 		if digits != "" {
 			if _, err := fmt.Sscan(digits, &row); err != nil || row < 1 {
-				return 0, 0, fmt.Errorf("range 里的行 %q 不合法", digits)
+				return 0, 0, i18n.E("range 里的行 {row} 不合法", "row", strconv.Quote(digits))
 			}
 		}
 		if col == 0 && row == 0 {
-			return 0, 0, fmt.Errorf("range %q 不合法，应当形如 A1:F200", text)
+			return 0, 0, i18n.E("range {range} 不合法，应当形如 A1:F200", "range", strconv.Quote(text))
 		}
 		if col == 0 && !isEnd {
 			col = 1
@@ -311,39 +323,39 @@ type xlsxSheetSpec struct {
 
 func writeXlsxTool() Tool {
 	cell := map[string]any{
-		"description": "单元格：字符串、数字、布尔或 null。以 = 开头的字符串是公式（如 =SUM(B2:B10)）；要写字面上的 = 开头文字，前面加一个单引号",
+		"description": "Cell: string, number, boolean or null. A string starting with = is a formula (e.g. =SUM(B2:B10)); to write literal text that starts with =, prefix it with a single quote",
 	}
 	return Tool{
 		Name: "write_xlsx",
-		Description: "写 Excel 文件（.xlsx）。文件不存在就新建；已存在就只改 sheets 里列出的工作表，其余工作表原样保留。" +
-			"同名工作表默认先清空再写（mode=replace），mode=update 只覆盖写到的单元格。" +
-			"公式写成以 = 开头的字符串，打开文件时 Excel 会自动重算。写到工作区之外会先请用户确认。",
+		Description: "Write an Excel file (.xlsx). Creates the file if it doesn't exist; if it does, only the sheets listed in sheets are changed and all other sheets are kept as they are. " +
+			"By default a sheet with the same name is cleared before writing (mode=replace); mode=update only overwrites the cells written. " +
+			"Write formulas as strings starting with =; Excel recalculates them when the file is opened. Writing outside the workspace asks the user for confirmation first.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
-			"path": map[string]any{"type": "string", "description": "输出路径，扩展名 .xlsx 或 .xlsm。相对路径按工作区解析"},
+			"path": map[string]any{"type": "string", "description": "Output path with an .xlsx or .xlsm extension. Relative paths resolve against the workspace"},
 			"sheets": map[string]any{
 				"type": "array", "minItems": 1,
-				"description": "要写的工作表",
+				"description": "The sheets to write",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"name": map[string]any{"type": "string", "description": "工作表名称（最多 31 个字符，不能含 : \\ / ? * [ ]）"},
+						"name": map[string]any{"type": "string", "description": "Sheet name (at most 31 characters; cannot contain : \\ / ? * [ ])"},
 						"rows": map[string]any{
-							"type": "array", "description": "按行给出的单元格值，二维数组",
+							"type": "array", "description": "Cell values row by row, as a 2-D array",
 							"items": map[string]any{"type": "array", "items": cell},
 						},
-						"start": map[string]any{"type": "string", "description": "左上角单元格，默认 A1"},
+						"start": map[string]any{"type": "string", "description": "Top-left cell, default A1"},
 						"mode": map[string]any{
 							"type": "string", "enum": []string{"replace", "update"},
-							"description": "工作表已存在时：replace 先清空（默认），update 只覆盖写到的格子",
+							"description": "When the sheet already exists: replace clears it first (default); update only overwrites the cells written",
 						},
 					},
 					"required":             []string{"name", "rows"},
 					"additionalProperties": false,
 				},
 			},
-			"header_bold": map[string]any{"type": "boolean", "description": "每个工作表写入区域的第一行加粗（当表头），默认 false"},
-			"auto_width":  map[string]any{"type": "boolean", "description": "按内容粗略调整列宽，默认 true"},
+			"header_bold": map[string]any{"type": "boolean", "description": "Bold the first row of each sheet's written range (as a header); default false"},
+			"auto_width":  map[string]any{"type": "boolean", "description": "Roughly fit column widths to the content; default true"},
 		}, "path", "sheets"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
@@ -359,24 +371,24 @@ func writeXlsxTool() Tool {
 				return "", err
 			}
 			if len(args.Sheets) == 0 {
-				return "", errors.New("sheets 不能为空")
+				return "", i18n.E("sheets 不能为空")
 			}
 			seen := map[string]bool{}
 			for _, spec := range args.Sheets {
 				key := strings.ToLower(strings.TrimSpace(spec.Name))
 				if key == "" {
-					return "", errors.New("每个工作表都要有 name")
+					return "", i18n.E("每个工作表都要有 name")
 				}
 				if seen[key] {
-					return "", fmt.Errorf("工作表 %q 重复出现", spec.Name)
+					return "", i18n.E("工作表 {name} 重复出现", "name", strconv.Quote(spec.Name))
 				}
 				seen[key] = true
 				if spec.Mode != "" && spec.Mode != "replace" && spec.Mode != "update" {
-					return "", fmt.Errorf("mode 只能是 replace 或 update，收到 %q", spec.Mode)
+					return "", i18n.E("mode 只能是 replace 或 update，收到 {mode}", "mode", strconv.Quote(spec.Mode))
 				}
 			}
 			autoWidth := args.AutoWidth == nil || *args.AutoWidth
-			target, err := approveOfficeWrite(ctx, env, args.Path, "写入 Excel 文件", func(target string) error {
+			target, err := approveOfficeWrite(ctx, env, args.Path, i18n.D("写入 Excel 文件"), func(target string) error {
 				// 已有文件是改了扩展名的 .xls 时，excelize 只会报一句看不懂的 zip 错误。
 				if fileExists(target) {
 					return checkNotOLE(target)
@@ -390,7 +402,7 @@ func writeXlsxTool() Tool {
 			if err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("已写入 %s：%s", args.Path, summary), nil
+			return i18n.D("已写入 {path}：{summary}", "path", args.Path, "summary", summary), nil
 		},
 	}
 }
@@ -408,7 +420,7 @@ func writeXlsx(target string, specs []xlsxSheetSpec, headerBold, autoWidth bool)
 	if existed {
 		opened, err := excelize.OpenFile(target)
 		if err != nil {
-			return "", fmt.Errorf("打不开已有的 %s：%w", target, err)
+			return "", fmt.Errorf("%s: %w", i18n.D("打不开已有的 {path}", "path", target), err)
 		}
 		file = opened
 	} else {
@@ -420,7 +432,7 @@ func writeXlsx(target string, specs []xlsxSheetSpec, headerBold, autoWidth bool)
 	// 否则成品里会多出一张没人要的空表。
 	if !existed && !strings.EqualFold(specs[0].Name, "Sheet1") {
 		if err := file.SetSheetName("Sheet1", specs[0].Name); err != nil {
-			return "", fmt.Errorf("工作表名 %q 不可用：%w", specs[0].Name, err)
+			return "", fmt.Errorf("%s: %w", i18n.D("工作表名 {name} 不可用", "name", strconv.Quote(specs[0].Name)), err)
 		}
 	}
 
@@ -449,28 +461,28 @@ func writeXlsx(target string, specs []xlsxSheetSpec, headerBold, autoWidth bool)
 	}
 	buffer, err := file.WriteToBuffer()
 	if err != nil {
-		return "", fmt.Errorf("生成 xlsx 失败：%w", err)
+		return "", fmt.Errorf("%s: %w", i18n.D("生成 xlsx 失败"), err)
 	}
 	if err := writeFileAtomic(target, buffer.Bytes()); err != nil {
 		return "", err
 	}
-	action := "新建工作簿"
+	sheets := strings.Join(notes, officeClauseSep())
 	if existed {
-		action = "更新工作簿"
+		return i18n.D("更新工作簿，{sheets}", "sheets", sheets), nil
 	}
-	return action + "，" + strings.Join(notes, "；"), nil
+	return i18n.D("新建工作簿，{sheets}", "sheets", sheets), nil
 }
 
 func writeXlsxSheet(file *excelize.File, spec xlsxSheetSpec, boldStyle int, autoWidth bool) (string, error) {
 	name := strings.TrimSpace(spec.Name)
 	index, err := file.GetSheetIndex(name)
 	if err != nil {
-		return "", fmt.Errorf("工作表名 %q 不可用：%w", name, err)
+		return "", fmt.Errorf("%s: %w", i18n.D("工作表名 {name} 不可用", "name", strconv.Quote(name)), err)
 	}
 	created := index < 0
 	if created {
 		if _, err := file.NewSheet(name); err != nil {
-			return "", fmt.Errorf("工作表名 %q 不可用：%w", name, err)
+			return "", fmt.Errorf("%s: %w", i18n.D("工作表名 {name} 不可用", "name", strconv.Quote(name)), err)
 		}
 	} else if spec.Mode != "update" {
 		if err := clearXlsxSheet(file, name); err != nil {
@@ -482,7 +494,7 @@ func writeXlsxSheet(file *excelize.File, spec xlsxSheetSpec, boldStyle int, auto
 	if strings.TrimSpace(spec.Start) != "" {
 		col, row, err := excelize.CellNameToCoordinates(strings.ToUpper(strings.TrimSpace(spec.Start)))
 		if err != nil {
-			return "", fmt.Errorf("start %q 不是合法的单元格地址", spec.Start)
+			return "", i18n.E("start {start} 不是合法的单元格地址", "start", strconv.Quote(spec.Start))
 		}
 		startCol, startRow = col, row
 	}
@@ -494,11 +506,11 @@ func writeXlsxSheet(file *excelize.File, spec xlsxSheetSpec, boldStyle int, auto
 		for c, value := range row {
 			cell, err := excelize.CoordinatesToCellName(startCol+c, startRow+r)
 			if err != nil {
-				return "", fmt.Errorf("单元格超出表格范围：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("单元格超出表格范围"), err)
 			}
 			display, isFormula, err := setXlsxCell(file, name, cell, value)
 			if err != nil {
-				return "", fmt.Errorf("写 %s!%s 失败：%w", name, cell, err)
+				return "", fmt.Errorf("%s: %w", i18n.D("写 {cell} 失败", "cell", name+"!"+cell), err)
 			}
 			if value != nil {
 				cells++
@@ -526,18 +538,19 @@ func writeXlsxSheet(file *excelize.File, spec xlsxSheetSpec, boldStyle int, auto
 			}
 		}
 	}
-	action := "覆盖"
+	stats := i18n.D("{rows} 行 × {cols} 列，{cells} 个单元格", "rows", len(spec.Rows), "cols", maxCols, "cells", cells)
+	if formulas > 0 {
+		stats = i18n.D("{rows} 行 × {cols} 列，{cells} 个单元格，其中 {formulas} 个公式",
+			"rows", len(spec.Rows), "cols", maxCols, "cells", cells, "formulas", formulas)
+	}
+	quoted := strconv.Quote(name)
 	switch {
 	case created:
-		action = "新建"
+		return i18n.D("新建工作表 {name}（{stats}）", "name", quoted, "stats", stats), nil
 	case spec.Mode == "update":
-		action = "更新"
+		return i18n.D("更新工作表 {name}（{stats}）", "name", quoted, "stats", stats), nil
 	}
-	note := fmt.Sprintf("%s工作表 %q（%d 行 × %d 列，%d 个单元格", action, name, len(spec.Rows), maxCols, cells)
-	if formulas > 0 {
-		note += fmt.Sprintf("，其中 %d 个公式", formulas)
-	}
-	return note + "）", nil
+	return i18n.D("覆盖工作表 {name}（{stats}）", "name", quoted, "stats", stats), nil
 }
 
 // setXlsxCell 按 JSON 值的类型写一个格子，返回用来估列宽的显示文字。

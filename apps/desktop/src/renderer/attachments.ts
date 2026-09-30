@@ -6,6 +6,7 @@
  * 会出错的恰恰是判断那一半——收下一个 200MB 的视频、或者把二进制当文本
  * 塞进提示词，都是判断错了。
  */
+import { tr } from "../shared/i18n.js";
 
 /** 一张要随消息发出去的图片。data 是 base64，不带 `data:` 前缀。 */
 export interface ImageAttachment {
@@ -104,10 +105,10 @@ export function classifyFile(
   //（拖进来的文件在某些系统上没有 MIME），所以以扩展名为准。
   if (AUDIO_EXTENSIONS.has(extension) || (type.startsWith("audio/") && extension !== "svg")) {
     if (audioAlready >= MAX_AUDIO) {
-      return { accept: "no", reason: `一条消息最多 ${MAX_AUDIO} 段音频` };
+      return { accept: "no", reason: tr("一条消息最多 {n} 段音频", { n: MAX_AUDIO }) };
     }
     if (file.size > MAX_AUDIO_BYTES) {
-      return { accept: "no", reason: "音频太大（超过 25MB）" };
+      return { accept: "no", reason: tr("音频太大（超过 25MB）") };
     }
     return { accept: "audio" };
   }
@@ -118,10 +119,10 @@ export function classifyFile(
       return { accept: "text" };
     }
     if (imagesAlready >= MAX_IMAGES) {
-      return { accept: "no", reason: `一条消息最多 ${MAX_IMAGES} 张图` };
+      return { accept: "no", reason: tr("一条消息最多 {n} 张图", { n: MAX_IMAGES }) };
     }
     if (file.size > MAX_IMAGE_BYTES) {
-      return { accept: "no", reason: "图片太大（超过 20MB）" };
+      return { accept: "no", reason: tr("图片太大（超过 20MB）") };
     }
     return { accept: "image" };
   }
@@ -132,7 +133,7 @@ export function classifyFile(
 
   return {
     accept: "no",
-    reason: `不支持这种文件（${file.name}）。把它放进工作目录，然后让我去读它。`,
+    reason: tr("不支持这种文件（{name}）。把它放进工作目录，然后让我去读它。", { name: file.name }),
   };
 }
 
@@ -179,14 +180,14 @@ export async function readImage(file: File): Promise<ImageAttachment> {
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d");
-  if (!context) throw new Error("浏览器没给出 2d 画布，无法处理图片");
+  if (!context) throw new Error(tr("浏览器没给出 2d 画布，无法处理图片"));
   context.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
 
   const preview = canvas.toDataURL("image/jpeg", 0.82);
   return {
     kind: "image",
-    name: file.name || "截图.jpg",
+    name: file.name || tr("截图.jpg"),
     data: preview.slice(preview.indexOf(",") + 1),
     preview,
   };
@@ -200,7 +201,7 @@ export async function readAudio(file: File): Promise<AudioAttachment> {
   for (let index = 0; index < buffer.length; index += 8192) {
     binary += String.fromCharCode(...buffer.subarray(index, index + 8192));
   }
-  return { kind: "audio", name: file.name || "录音", data: btoa(binary), size: buffer.length };
+  return { kind: "audio", name: file.name || tr("录音"), data: btoa(binary), size: buffer.length };
 }
 
 /** 读一个文本文件，按上限截断。 */

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { actions, store } from "../store";
+import { t } from "../i18n";
 
 /**
  * 技能管理：这台机器上所有能用的技能，按来源分组。
@@ -24,6 +25,21 @@ interface SkillGroup {
 
 /** 组的顺序，与主进程 skill-roots.ts 里的优先级一致。插件来源不止一个，按前缀归到同一位。 */
 const ORDER = ["通用", "AIClaw", "插件", "项目", "Claude Code", "Codex", "npm 全局"];
+
+/** 插件来源的标签形如「插件 · 名字」（见主进程 skills.ts）。 */
+const PLUGIN_PREFIX = "插件 · ";
+
+/**
+ * 来源标签给人看的说法。标签本身由主进程按中文给出（分组、排序都认它），
+ * 这里只在显示时换成当前语言；认不出的（Claude Code、Codex 这类专名）原样显示。
+ */
+function sourceLabel(source: string): string {
+  if (source === "通用") return t("通用");
+  if (source === "项目") return t("项目");
+  if (source === "npm 全局") return t("npm 全局");
+  if (source.startsWith(PLUGIN_PREFIX)) return t("插件 · {name}", { name: source.slice(PLUGIN_PREFIX.length) });
+  return source;
+}
 
 function rank(source: string): number {
   const index = ORDER.findIndex((label) => source === label || source.startsWith(`${label} `));
@@ -87,7 +103,7 @@ function toggleGroup(source: string): void {
 onMounted(() => void actions.refreshSkills());
 
 async function remove(id: string, name: string): Promise<void> {
-  if (!confirm(`删除技能「${name}」？目录会从本机移除，不可恢复。`)) return;
+  if (!confirm(t("删除技能「{name}」？目录会从本机移除，不可恢复。", { name }))) return;
   await actions.deleteSkill(id);
 }
 </script>
@@ -96,44 +112,34 @@ async function remove(id: string, name: string): Promise<void> {
   <div class="page">
     <section>
       <header>
-        <h2>技能</h2>
+        <h2>{{ t("技能") }}</h2>
         <p class="sub">
-          一个技能就是一个目录，里面放 <code>SKILL.md</code>：开头写 name 与 description，
-          下面写清楚什么时候用、怎么做。模型只在系统提示词里看到名字与用途，
-          判断用得上时才把正文取出来——所以 description 要写清楚<strong>什么时候</strong>用。
+          {{ t("一个技能就是一个目录，里面放") }} <code>SKILL.md</code>{{ t("：开头写 name 与 description，下面写清楚什么时候用、怎么做。模型只在系统提示词里看到名字与用途，判断用得上时才把正文取出来——所以 description 要写清楚") }}<strong>{{ t("什么时候用") }}</strong>{{ t("。") }}
         </p>
         <p class="sub">
-          AIClaw 的技能目录是 <code>~/.agents/skills</code>——<code>npx skills add -g</code> 装的就在这里，
-          Codex、Cursor、Gemini CLI 等也读它，装一次各处都能用。这里还会一并列出
-          Claude Code（<code>~/.claude/skills</code>）、Codex
-          （<code>~/.codex/skills</code>）、当前工作目录的 <code>.claude/skills</code>、
-          npm 全局包里的技能，以及启用中的插件带来的——它们是同一种格式，
-          没必要在这里再装一遍。别处的技能可以关掉但删不了，去它自己的位置删
-          （插件带的随插件停用一起消失）。同名时按这个顺序取第一个：
-          通用 &gt; 插件 &gt; 项目 &gt; Claude Code &gt; Codex &gt; npm。
+          {{ t("AIClaw 的技能目录是") }} <code>~/.agents/skills</code>{{ t("——") }}<code>npx skills add -g</code> {{ t("装的就在这里，Codex、Cursor、Gemini CLI 等也读它，装一次各处都能用。这里还会一并列出 Claude Code（") }}<code>~/.claude/skills</code>{{ t("）、Codex（") }}<code>~/.codex/skills</code>{{ t("）、当前工作目录的") }} <code>.claude/skills</code>{{ t("、npm 全局包里的技能，以及启用中的插件带来的——它们是同一种格式，没必要在这里再装一遍。别处的技能可以关掉但删不了，去它自己的位置删（插件带的随插件停用一起消失）。同名时按这个顺序取第一个：通用 > 插件 > 项目 > Claude Code > Codex > npm。") }}
         </p>
       </header>
 
       <div class="actions">
-        <button class="ghost" @click="actions.openSkillsDir()">打开技能目录</button>
-        <button class="ghost" @click="actions.refreshSkills()">刷新</button>
+        <button class="ghost" @click="actions.openSkillsDir()">{{ t("打开技能目录") }}</button>
+        <button class="ghost" @click="actions.refreshSkills()">{{ t("刷新") }}</button>
       </div>
 
       <p v-if="store.skills.length === 0" class="note">
-        还没有技能。点「打开技能目录」，在里面建一个子目录放 SKILL.md。
+        {{ t("还没有技能。点「打开技能目录」，在里面建一个子目录放 SKILL.md。") }}
       </p>
 
       <div v-for="group in groups" :key="group.source" class="group">
         <!-- 整行都能点，收起/展开这一组。收起时顺带说有几个开着的，别让人为此展开。 -->
         <button class="group-head" :aria-expanded="!collapsed.has(group.source)" @click="toggleGroup(group.source)">
           <span class="chevron">{{ collapsed.has(group.source) ? "▸" : "▾" }}</span>
-          <span class="badge" :class="{ external: !group.writable }">{{ group.source }}</span>
+          <span class="badge" :class="{ external: !group.writable }">{{ sourceLabel(group.source) }}</span>
           <span class="count">
-            {{ group.skills.length }} 个<template v-if="collapsed.has(group.source)">
-              · {{ group.skills.filter((s) => s.enabled).length }} 个启用</template>
+            {{ t("{n} 个", { n: group.skills.length }) }}<template v-if="collapsed.has(group.source)"> {{ t("· {n} 个启用", { n: group.skills.filter((s) => s.enabled).length }) }}</template>
           </span>
           <span v-if="group.dir" class="group-dir" :title="group.dir">{{ group.dir }}</span>
-          <span v-if="!group.writable" class="group-note">只能关，不能删</span>
+          <span v-if="!group.writable" class="group-note">{{ t("只能关，不能删") }}</span>
         </button>
 
         <article
@@ -153,20 +159,20 @@ async function remove(id: string, name: string): Promise<void> {
               :checked="skill.enabled"
               @change="actions.toggleSkill(skill.id, ($event.target as HTMLInputElement).checked)"
             />
-            启用
+            {{ t("启用") }}
           </label>
           <!-- 别处目录里的技能不给删按钮：那是人家 Claude Code / Codex 的东西，
                在这里删掉会让那边也一起没了。 -->
           <button
             v-if="skill.writable"
             class="icon"
-            title="删除"
+            :title="t(`删除`)"
             @click="remove(skill.id, skill.name)"
           >
             ×
           </button>
         </div>
-        <p class="desc">{{ skill.description || "（没写 description——模型无从判断什么时候该用它）" }}</p>
+        <p class="desc">{{ skill.description || t("（没写 description——模型无从判断什么时候该用它）") }}</p>
         </article>
       </div>
     </section>

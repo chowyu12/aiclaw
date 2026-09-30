@@ -4,10 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
@@ -48,8 +48,8 @@ func (s *Session) registerComputerTools() error {
 	}{
 		{
 			name: "computer_screenshot",
-			description: "截取当前屏幕并交给你看。操作之前先截一张：你不知道屏幕上现在是什么，" +
-				"凭记忆点坐标几乎一定会点错。返回里带屏幕的逻辑尺寸，按它换算坐标。",
+			description: "Take a screenshot of the current screen and show it to you. Take one before acting: you don't know what is on screen right now, " +
+				"and clicking coordinates from memory will almost certainly miss. The result includes the screen's logical size; convert coordinates using it.",
 			schema: emptySchema(),
 			build: func(json.RawMessage) (protocol.ComputerRequestParams, error) {
 				return protocol.ComputerRequestParams{Action: protocol.ComputerScreenshot}, nil
@@ -57,82 +57,82 @@ func (s *Session) registerComputerTools() error {
 		},
 		{
 			name:        "computer_click",
-			description: "在屏幕坐标处单击左键。坐标原点在左上角，单位是逻辑像素。",
+			description: "Left-click at screen coordinates. The origin is the top-left corner; units are logical pixels.",
 			schema:      pointSchema(),
 			build:       pointAction(protocol.ComputerClick),
 		},
 		{
 			name:        "computer_double_click",
-			description: "在屏幕坐标处双击左键。",
+			description: "Double-click at screen coordinates.",
 			schema:      pointSchema(),
 			build:       pointAction(protocol.ComputerDoubleClick),
 		},
 		{
 			name:        "computer_right_click",
-			description: "在屏幕坐标处单击右键。",
+			description: "Right-click at screen coordinates.",
 			schema:      pointSchema(),
 			build:       pointAction(protocol.ComputerRightClick),
 		},
 		{
 			name:        "computer_move",
-			description: "把鼠标移到屏幕坐标处，不点击。用来触发悬停。",
+			description: "Move the mouse to screen coordinates without clicking, e.g. to trigger a hover.",
 			schema:      pointSchema(),
 			build:       pointAction(protocol.ComputerMove),
 		},
 		{
 			name:        "computer_type",
-			description: "在当前焦点处输入一段文本。先确认焦点在你想要的输入框里——这个工具不会帮你点。",
+			description: "Type text at the current focus. Make sure the focus is in the input you want first — this tool won't click for you.",
 			schema: schemaOf(map[string]any{
-				"text": map[string]any{"type": "string", "description": "要输入的文本"},
+				"text": map[string]any{"type": "string", "description": "Text to type"},
 			}, "text"),
 			build: func(raw json.RawMessage) (protocol.ComputerRequestParams, error) {
 				var args struct {
 					Text string `json:"text"`
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.ComputerRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.ComputerRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				if args.Text == "" {
-					return protocol.ComputerRequestParams{}, errors.New("text 不能为空")
+					return protocol.ComputerRequestParams{}, i18n.E("text 不能为空")
 				}
 				return protocol.ComputerRequestParams{Action: protocol.ComputerType, Text: args.Text}, nil
 			},
 		},
 		{
 			name: "computer_key",
-			description: "按一个按键或组合键，例如 Return、Escape、Tab、cmd+s、ctrl+c。" +
-				"组合用加号连接。",
+			description: "Press a key or key combination, e.g. Return, Escape, Tab, cmd+s, ctrl+c. " +
+				"Join combinations with a plus sign.",
 			schema: schemaOf(map[string]any{
-				"keys": map[string]any{"type": "string", "description": "按键组合，如 cmd+s"},
+				"keys": map[string]any{"type": "string", "description": "Key combination, e.g. cmd+s"},
 			}, "keys"),
 			build: func(raw json.RawMessage) (protocol.ComputerRequestParams, error) {
 				var args struct {
 					Keys string `json:"keys"`
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.ComputerRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.ComputerRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				if strings.TrimSpace(args.Keys) == "" {
-					return protocol.ComputerRequestParams{}, errors.New("keys 不能为空")
+					return protocol.ComputerRequestParams{}, i18n.E("keys 不能为空")
 				}
 				return protocol.ComputerRequestParams{Action: protocol.ComputerKey, Keys: args.Keys}, nil
 			},
 		},
 		{
 			name:        "computer_scroll",
-			description: "在屏幕坐标处滚动。dy 正数向下，dx 正数向右。",
+			description: "Scroll at screen coordinates. Positive dy scrolls down; positive dx scrolls right.",
 			schema: schemaOf(map[string]any{
-				"x":  map[string]any{"type": "integer", "description": "横坐标"},
-				"y":  map[string]any{"type": "integer", "description": "纵坐标"},
-				"dx": map[string]any{"type": "integer", "description": "横向滚动量，正数向右"},
-				"dy": map[string]any{"type": "integer", "description": "纵向滚动量，正数向下"},
+				"x":  map[string]any{"type": "integer", "description": "X coordinate"},
+				"y":  map[string]any{"type": "integer", "description": "Y coordinate"},
+				"dx": map[string]any{"type": "integer", "description": "Horizontal scroll amount; positive scrolls right"},
+				"dy": map[string]any{"type": "integer", "description": "Vertical scroll amount; positive scrolls down"},
 			}, "x", "y"),
 			build: func(raw json.RawMessage) (protocol.ComputerRequestParams, error) {
 				var args struct {
 					X, Y, DX, DY int
 				}
 				if err := json.Unmarshal(raw, &args); err != nil {
-					return protocol.ComputerRequestParams{}, errors.New("参数不是合法 JSON 对象")
+					return protocol.ComputerRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 				}
 				return protocol.ComputerRequestParams{
 					Action: protocol.ComputerScroll, X: args.X, Y: args.Y, DX: args.DX, DY: args.DY,
@@ -160,7 +160,7 @@ func (s *Session) registerComputerTools() error {
 				request.TurnID = env.TurnID
 				emitter := s.currentEmitter()
 				if emitter == nil {
-					return "", errors.New("没有进行中的轮次，无法执行屏幕操作")
+					return "", i18n.E("没有进行中的轮次，无法执行屏幕操作")
 				}
 				return s.runComputerAction(ctx, env, request, emitter)
 			},
@@ -184,8 +184,8 @@ func (s *Session) runComputerAction(
 	}
 	if err := env.RequestApproval(
 		ctx, effect, protocol.ApprovalExec,
-		"屏幕操作 "+string(request.Action), describeComputerAction(request),
-		"这个动作作用于整个屏幕，不受工作目录限制",
+		i18n.D("屏幕操作 {action}", "action", string(request.Action)), describeComputerAction(request),
+		i18n.D("这个动作作用于整个屏幕，不受工作目录限制"),
 	); err != nil {
 		return "", err
 	}
@@ -197,14 +197,14 @@ func (s *Session) runComputerAction(
 	if result.ImageBase64 != "" {
 		image, err := base64.StdEncoding.DecodeString(result.ImageBase64)
 		if err != nil {
-			return "", fmt.Errorf("截屏数据损坏：%w", err)
+			return "", fmt.Errorf("%s: %w", i18n.D("截屏数据损坏"), err)
 		}
 		// 图不能放进工具结果——Chat Completions 的 tool 消息必须是纯字符串。
 		// 挂到附件上，由轮次循环在工具结果之后补一条带图的 user 消息。
 		env.Attach(image)
 	}
 	if result.Text == "" {
-		return "已执行。", nil
+		return i18n.D("已执行。"), nil
 	}
 	return result.Text, nil
 }
@@ -212,15 +212,15 @@ func (s *Session) runComputerAction(
 func describeComputerAction(request protocol.ComputerRequestParams) string {
 	switch request.Action {
 	case protocol.ComputerScreenshot:
-		return "截取整个屏幕"
+		return i18n.D("截取整个屏幕")
 	case protocol.ComputerType:
-		return "输入文本：" + request.Text
+		return i18n.D("输入文本：{text}", "text", request.Text)
 	case protocol.ComputerKey:
-		return "按键：" + request.Keys
+		return i18n.D("按键：{keys}", "keys", request.Keys)
 	case protocol.ComputerScroll:
-		return fmt.Sprintf("在 (%d, %d) 滚动 dx=%d dy=%d", request.X, request.Y, request.DX, request.DY)
+		return i18n.D("在 ({x}, {y}) 滚动 dx={dx} dy={dy}", "x", request.X, "y", request.Y, "dx", request.DX, "dy", request.DY)
 	default:
-		return fmt.Sprintf("在屏幕坐标 (%d, %d)", request.X, request.Y)
+		return i18n.D("在屏幕坐标 ({x}, {y})", "x", request.X, "y", request.Y)
 	}
 }
 
@@ -233,15 +233,15 @@ func pointAction(
 			Y *int `json:"y"`
 		}
 		if err := json.Unmarshal(raw, &args); err != nil {
-			return protocol.ComputerRequestParams{}, errors.New("参数不是合法 JSON 对象")
+			return protocol.ComputerRequestParams{}, i18n.E("参数不是合法 JSON 对象")
 		}
 		// 坐标用指针判断有没有给：0 是合法坐标（左上角），
 		// 用零值判断会把「没给」和「给了 0」混在一起。
 		if args.X == nil || args.Y == nil {
-			return protocol.ComputerRequestParams{}, errors.New("必须同时给出 x 与 y")
+			return protocol.ComputerRequestParams{}, i18n.E("必须同时给出 x 与 y")
 		}
 		if *args.X < 0 || *args.Y < 0 {
-			return protocol.ComputerRequestParams{}, errors.New("坐标不能为负")
+			return protocol.ComputerRequestParams{}, i18n.E("坐标不能为负")
 		}
 		return protocol.ComputerRequestParams{Action: action, X: *args.X, Y: *args.Y}, nil
 	}
@@ -249,8 +249,8 @@ func pointAction(
 
 func pointSchema() json.RawMessage {
 	return schemaOf(map[string]any{
-		"x": map[string]any{"type": "integer", "description": "横坐标，原点在屏幕左上角"},
-		"y": map[string]any{"type": "integer", "description": "纵坐标，原点在屏幕左上角"},
+		"x": map[string]any{"type": "integer", "description": "X coordinate; origin at the top-left of the screen"},
+		"y": map[string]any{"type": "integer", "description": "Y coordinate; origin at the top-left of the screen"},
 	}, "x", "y")
 }
 

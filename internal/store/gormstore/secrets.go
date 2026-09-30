@@ -2,10 +2,10 @@ package gormstore
 
 import (
 	"context"
-	"fmt"
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/secrets"
 )
@@ -56,7 +56,7 @@ func (s *GormStore) MigrateSecrets(ctx context.Context) (int, error) {
 
 	var providers []model.Provider
 	if err := s.db.WithContext(ctx).Find(&providers).Error; err != nil {
-		return changed, fmt.Errorf("读模型服务失败：%w", err)
+		return changed, i18n.E("读模型服务失败：{error}", "error", err)
 	}
 	for _, item := range providers {
 		if item.APIKey == "" || secrets.Sealed(item.APIKey) {
@@ -64,14 +64,14 @@ func (s *GormStore) MigrateSecrets(ctx context.Context) (int, error) {
 		}
 		if err := s.db.WithContext(ctx).Model(&model.Provider{}).Where("id = ?", item.ID).
 			Update("api_key", s.cipher.Seal(item.APIKey)).Error; err != nil {
-			return changed, fmt.Errorf("加密模型服务 %d 的 Key 失败：%w", item.ID, err)
+			return changed, i18n.E("加密模型服务 {id} 的 Key 失败：{error}", "id", item.ID, "error", err)
 		}
 		changed++
 	}
 
 	var engines []model.SearchEngineConfig
 	if err := s.db.WithContext(ctx).Find(&engines).Error; err != nil {
-		return changed, fmt.Errorf("读搜索引擎失败：%w", err)
+		return changed, i18n.E("读搜索引擎失败：{error}", "error", err)
 	}
 	for _, item := range engines {
 		if item.APIKey == "" || secrets.Sealed(item.APIKey) {
@@ -79,14 +79,14 @@ func (s *GormStore) MigrateSecrets(ctx context.Context) (int, error) {
 		}
 		if err := s.db.WithContext(ctx).Model(&model.SearchEngineConfig{}).Where("id = ?", item.ID).
 			Update("api_key", s.cipher.Seal(item.APIKey)).Error; err != nil {
-			return changed, fmt.Errorf("加密搜索引擎 %d 的 Key 失败：%w", item.ID, err)
+			return changed, i18n.E("加密搜索引擎 {id} 的 Key 失败：{error}", "id", item.ID, "error", err)
 		}
 		changed++
 	}
 
 	var configs []model.PluginConfig
 	if err := s.db.WithContext(ctx).Where("secret = ?", true).Find(&configs).Error; err != nil {
-		return changed, fmt.Errorf("读插件配置失败：%w", err)
+		return changed, i18n.E("读插件配置失败：{error}", "error", err)
 	}
 	for _, item := range configs {
 		if item.Value == "" || secrets.Sealed(item.Value) {
@@ -94,7 +94,7 @@ func (s *GormStore) MigrateSecrets(ctx context.Context) (int, error) {
 		}
 		if err := s.db.WithContext(ctx).Model(&model.PluginConfig{}).Where("id = ?", item.ID).
 			Update("value", s.cipher.Seal(item.Value)).Error; err != nil {
-			return changed, fmt.Errorf("加密插件配置 %d 失败：%w", item.ID, err)
+			return changed, i18n.E("加密插件配置 {id} 失败：{error}", "id", item.ID, "error", err)
 		}
 		changed++
 	}

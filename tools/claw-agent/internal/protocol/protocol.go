@@ -60,8 +60,10 @@ const (
 	MethodSearchDelete     = "search/delete"
 	MethodSearchTest       = "search/test"
 	MethodEmailTest        = "plugin/emailTest"
-	MethodAudioTranscribe  = "audio/transcribe"
-	MethodShutdown         = "shutdown"
+	// 界面语言：内核给人看的提示、报错跟着它（启动时由环境变量 AICLAW_LOCALE 带进来）。
+	MethodConfigLocale    = "config/locale"
+	MethodAudioTranscribe = "audio/transcribe"
+	MethodShutdown        = "shutdown"
 )
 
 // ---------- agent → 宿主的通知 ----------
@@ -742,6 +744,8 @@ type SessionStartParams struct {
 	EnableSchedule bool `json:"enableSchedule,omitempty"`
 	/** 会话一开始的标题。空的话由第一条消息生成；定时任务用它写上任务名。 */
 	Title string `json:"title,omitempty"`
+	/** 界面语言（en / zh-CN）。决定模型默认用什么语言回复；用户用别的语言提问时跟着用户。 */
+	Locale string `json:"locale,omitempty"`
 	/** 子 agent：父会话的 id 与自己在协作树上的路径（/root/research）。普通会话为空。 */
 	ParentID  string `json:"parentId,omitempty"`
 	AgentPath string `json:"agentPath,omitempty"`
@@ -791,6 +795,7 @@ type SessionRefresh struct {
 	EnableBrowser     bool                       `json:"enableBrowser,omitempty"`
 	EnableEmail       bool                       `json:"enableEmail,omitempty"`
 	EnableSchedule    bool                       `json:"enableSchedule,omitempty"`
+	Locale            string                     `json:"locale,omitempty"`
 	DisableSandbox    bool                       `json:"disableSandbox"`
 	CodeMode          bool                       `json:"codeMode"`
 	ApprovalPolicy    ApprovalPolicy             `json:"approvalPolicy"`
@@ -1089,3 +1094,8 @@ type ApprovalResponse struct {
 
 // RawMessage 便于在不解码的情况下转发。
 type RawMessage = json.RawMessage
+
+// ConfigLocaleParams 是 config/locale 的参数。
+type ConfigLocaleParams struct {
+	Locale string `json:"locale"`
+}

@@ -8,6 +8,7 @@ import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
 import { Scheduler } from "./scheduler.js";
 import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
+import { normalizeLocale, setCurrentLocale, tr } from "../shared/i18n.js";
 import { Updater } from "./updater.js";
 import { DiagnosticsLog, buildReport } from "./diagnostics.js";
 import { LogFile } from "./logfile.js";
@@ -52,7 +53,10 @@ const SCHEDULED_GROUP = "__scheduled__";
 const scheduler = new Scheduler(store.dataDir, {
   async runTask(task) {
     const title = `⏰ ${task.name} · ${formatWhen(new Date())}`;
-    const text = `（这是定时任务「${task.name}」自动发起的，用户此刻可能不在电脑前。）\n\n${task.prompt}`;
+    // 这段是发给模型的，固定英文，不随界面语言变（与内核的系统提示同一口径）。
+    const text =
+      `(This chat was started automatically by the scheduled task "${task.name}"; ` +
+      `the user may not be at the computer right now.)\n\n${task.prompt}`;
     const sessionId = await sessions.runBackgroundSession({ workspace: task.workspace, title, text });
     const groups = store.readGroups();
     store.writeGroups({ assignments: { ...groups.assignments, [sessionId]: SCHEDULED_GROUP } });
@@ -61,8 +65,8 @@ const scheduler = new Scheduler(store.dataDir, {
   notify(task, ok, detail) {
     if (!Notification.isSupported()) return;
     const notification = new Notification({
-      title: ok ? `定时任务「${task.name}」完成了` : `定时任务「${task.name}」没做完`,
-      body: ok ? "点这里查看结果" : detail.slice(0, 120) || "点这里查看",
+      title: ok ? tr("定时任务「{name}」完成了", { name: task.name }) : tr("定时任务「{name}」没做完", { name: task.name }),
+      body: ok ? tr("点这里查看结果") : detail.slice(0, 120) || tr("点这里查看"),
     });
     notification.on("click", () => {
       if (mainWindow) {
@@ -181,6 +185,11 @@ function registerIpc(): void {
   // 改配置不用重启运行时：模型、审批档位这些都是按会话下发的。
   ipcMain.handle(IPC.configWrite, async (_event, patch: Record<string, unknown>) => {
     const result = await store.writeConfig(patch);
+    // 主进程发的系统通知、对话框也跟着换语言。
+    if ("language" in patch) {
+      setCurrentLocale(normalizeLocale(result.language));
+      await sessions.setKernelLocale(result.language);
+    }
     // 通道会话（微信、企业微信）是内核自己建的，角色配置要推过去才用得上。
     if ("roles" in patch) await sessions.syncChannelMedia();
     if ("browser" in patch || "browserBackend" in patch) await sessions.syncBrowserBridge();
@@ -195,14 +204,14 @@ function registerIpc(): void {
   ipcMain.handle(IPC.browserBridgeReveal, async () => {
     const dir = sessions.browserBridge().extensionDir;
     const failure = await shell.openPath(dir);
-    if (failure) throw new Error(`打不开扩展目录 ${dir}：${failure}`);
+    if (failure) throw new Error(tr("打不开扩展目录 {dir}：{reason}", { dir, reason: failure }));
     return dir;
   });
   ipcMain.handle(IPC.clipboardWrite, (_event, text: unknown, html?: unknown) => {
     // 只收字符串，而且有上限：渲染层展示的是模型输出，不该借这个口子往剪贴板里
     // 塞任意大小的东西。一段回答再长也到不了这个数。
-    if (typeof text !== "string") throw new Error("只能复制文本");
-    if (text.length > 2_000_000) throw new Error("内容太长，没有复制");
+    if (typeof text !== "string") throw new Error(tr("只能复制文本"));
+    if (text.length > 2_000_000) throw new Error(tr("内容太长，没有复制"));
     // 同时放一份 HTML：粘进 Word、飞书、邮件这类富文本应用时保留标题、列表、表格；
     // 粘进纯文本的地方拿到的仍是 Markdown 原文（与 Codex 0.154 同一个改进）。
     if (typeof html === "string" && html && html.length <= 4_000_000) {
@@ -356,19 +365,19 @@ function registerIpc(): void {
         platform: process.platform,
         arch: process.arch,
         paths: {
-          日志: logFile.directory,
-          应用数据: app.getPath("userData"),
-          "技能与记忆": store.homeDir,
-          模型配置库: store.appDbPath,
+          [tr("日志")]: logFile.directory,
+          [tr("应用数据")]: app.getPath("userData"),
+          [tr("技能与记忆")]: store.homeDir,
+          [tr("模型配置库")]: store.appDbPath,
           // 工作区是按会话来的，这里给的是当前那个会话的。
-          当前会话工作区: sessions.currentWorkspace() || "（未设置）",
+          [tr("当前会话工作区")]: sessions.currentWorkspace() || tr("（未设置）"),
         },
         runtime: {
-          状态: sessions.running ? "ready" : "stopped",
+          [tr("状态")]: sessions.running ? "ready" : "stopped",
           // 只给 id：名字与端点在库里，Key 更不能出现在这儿。
-          模型服务: config.providerId ? `#${config.providerId}` : "（未选）",
-          模型: config.model,
-          审批档位: config.profile,
+          [tr("模型服务")]: config.providerId ? `#${config.providerId}` : tr("（未选）"),
+          [tr("模型")]: config.model,
+          [tr("审批档位")]: config.profile,
         },
         mounts: sessions.lastMounts(),
       },
@@ -393,7 +402,7 @@ function registerIpc(): void {
   );
   ipcMain.handle(IPC.groupCreate, (_event, name: string) => {
     const current = store.readGroups();
-    const group = { id: `g_${Date.now().toString(36)}`, name: name.trim() || "新分组" };
+    const group = { id: `g_${Date.now().toString(36)}`, name: name.trim() || tr("新分组") };
     return store.writeGroups({ groups: [...current.groups, group], assignments: current.assignments });
   });
   ipcMain.handle(IPC.groupRename, (_event, input: { groupId: string; name: string }) => {
@@ -468,7 +477,7 @@ function registerIpc(): void {
     if (!mainWindow) return null;
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ["openDirectory", "createDirectory"],
-      title: "选择 Agent 的工作目录",
+      title: tr("选择 Agent 的工作目录"),
     });
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
@@ -565,6 +574,7 @@ if (!app.requestSingleInstanceLock()) {
     // 技能与记忆从 userData 搬到 ~/.aiclaw。只搬一次，目标已存在就跳过。
     store.migrateHomeData();
     store.migrateSkills();
+    setCurrentLocale(normalizeLocale(store.readConfig().language));
     registerIpc();
     createWindow();
     void sessions.syncBrowserBridge();

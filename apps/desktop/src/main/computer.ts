@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { desktopCapturer, screen, systemPreferences } from "electron";
 
+import { tr } from "../shared/i18n.js";
 import {
   appleString,
   isSelf,
@@ -65,9 +66,10 @@ export class ComputerController {
     const frontmost = await this.frontmostApp();
     if (isSelf(frontmost)) {
       throw new Error(
-        `当前最前面的应用是 AIClaw 自己（${frontmost}），已拒绝这次屏幕操作。` +
-          `computer use 用来驱动别的应用；点自己的窗口意味着可能在点审批弹窗。` +
-          `请先切到你要操作的那个应用。`,
+        tr(
+          "当前最前面的应用是 AIClaw 自己（{app}），已拒绝这次屏幕操作。computer use 用来驱动别的应用；点自己的窗口意味着可能在点审批弹窗。请先切到你要操作的那个应用。",
+          { app: frontmost },
+        ),
       );
     }
     return this.input(request);
@@ -84,8 +86,7 @@ export class ComputerController {
       const status = systemPreferences.getMediaAccessStatus("screen");
       if (status !== "granted") {
         throw new Error(
-          "没有屏幕录制权限，截不了屏。到「系统设置 → 隐私与安全性 → 屏幕录制」" +
-            "里勾上 AIClaw，然后重启应用。",
+          tr("没有屏幕录制权限，截不了屏。到「系统设置 → 隐私与安全性 → 屏幕录制」里勾上 AIClaw，然后重启应用。"),
         );
       }
     }
@@ -100,15 +101,16 @@ export class ComputerController {
     });
     const source = sources[0];
     if (!source || source.thumbnail.isEmpty()) {
-      throw new Error("没有取到屏幕画面。可能是屏幕录制权限刚授予、还没重启应用。");
+      throw new Error(tr("没有取到屏幕画面。可能是屏幕录制权限刚授予、还没重启应用。"));
     }
 
     return {
       // 明确告诉模型坐标系：它看到的图是物理像素，而点击用的是逻辑像素，
-      // 高分屏上这两个差一倍，不说清楚它会把坐标算错一倍。
+      // 高分屏上这两个差一倍，不说清楚它会把坐标算错一倍。前半句跟界面语言，
+      // 后半句教模型怎么给坐标，固定英文（与内核的工具说明同一口径）。
       text:
-        `已截屏。屏幕逻辑尺寸 ${width}×${height}，图片是 ${scale} 倍分辨率。` +
-        `点击坐标请按逻辑尺寸给，原点在左上角。`,
+        tr("已截屏。屏幕逻辑尺寸 {width}×{height}，图片是 {scale} 倍分辨率。", { width, height, scale }) +
+        " Give click coordinates in logical pixels, with the origin at the top-left.",
       imageBase64: source.thumbnail.toPNG().toString("base64"),
       width,
       height,
@@ -122,7 +124,7 @@ export class ComputerController {
       case "win32":
         return this.windowsInput(request);
       default:
-        throw new Error(`${process.platform} 上还没有实现屏幕输入；目前支持 macOS 与 Windows。`);
+        throw new Error(tr("{platform} 上还没有实现屏幕输入；目前支持 macOS 与 Windows。", { platform: process.platform }));
     }
   }
 
@@ -137,18 +139,15 @@ export class ComputerController {
    */
   private async macInput(request: ComputerRequest): Promise<ComputerResult> {
     if (!systemPreferences.isTrustedAccessibilityClient(false)) {
-      throw new Error(
-        "没有辅助功能权限，动不了鼠标键盘。到「系统设置 → 隐私与安全性 → 辅助功能」" +
-          "里勾上 AIClaw。",
-      );
+      throw new Error(tr("没有辅助功能权限，动不了鼠标键盘。到「系统设置 → 隐私与安全性 → 辅助功能」里勾上 AIClaw。"));
     }
     const script = this.macScript(request);
     try {
       await run("osascript", ["-e", script], { timeout: 15_000 });
     } catch (error) {
-      throw new Error(`屏幕操作失败：${describe(error)}`);
+      throw new Error(tr("屏幕操作失败：{error}", { error: describe(error) }));
     }
-    return { text: `已执行 ${request.action}。` };
+    return { text: tr("已执行 {action}。", { action: request.action }) };
   }
 
   private macScript(request: ComputerRequest): string {
@@ -171,7 +170,7 @@ export class ComputerController {
       case "move":
         // System Events 不能单独移动鼠标。这是这条实现路径的真实缺口，
         // 说清楚比假装做了强。
-        throw new Error("macOS 上暂不支持单独移动鼠标（AppleScript 没有这个能力）。");
+        throw new Error(tr("macOS 上暂不支持单独移动鼠标（AppleScript 没有这个能力）。"));
       case "type":
         return `tell application "System Events" to keystroke ${appleString(request.text ?? "")}`;
       case "key":
@@ -179,7 +178,7 @@ export class ComputerController {
       case "scroll":
         return `tell application "System Events" to scroll {${request.dx ?? 0}, ${request.dy ?? 0}}`;
       default:
-        throw new Error(`不认识的动作：${request.action}`);
+        throw new Error(tr("不认识的动作：{action}", { action: request.action }));
     }
   }
 
@@ -192,9 +191,9 @@ export class ComputerController {
         timeout: 15_000,
       });
     } catch (error) {
-      throw new Error(`屏幕操作失败：${describe(error)}`);
+      throw new Error(tr("屏幕操作失败：{error}", { error: describe(error) }));
     }
-    return { text: `已执行 ${request.action}。` };
+    return { text: tr("已执行 {action}。", { action: request.action }) };
   }
 
   /** 查最前面的应用名。查不到返回空串——查不到时不阻断，只是少一道防护。 */
@@ -262,7 +261,7 @@ function windowsScript(request: ComputerRequest): string {
     case "key":
       return prelude + `[System.Windows.Forms.SendKeys]::SendWait(${psString(windowsKeys(request.keys ?? ""))});`;
     default:
-      throw new Error(`不认识的动作：${request.action}`);
+      throw new Error(tr("不认识的动作：{action}", { action: request.action }));
   }
 }
 

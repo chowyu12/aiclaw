@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, type DeepReadonly } from "vue";
 import type { QuestionAnswer, QuestionPayload } from "../../shared/types";
+import { t } from "../i18n";
 
 /**
  * 模型提的一个问题（ask_user）：几个选项，也可以自己写，或者跳过。
@@ -51,10 +52,10 @@ function onKeydown(event: KeyboardEvent): void {
 </script>
 
 <template>
-  <div class="question" role="group" aria-label="AIClaw 的提问">
+  <div class="question" role="group" :aria-label="t(`AIClaw 的提问`)">
     <div class="head">
-      <span class="badge">等你回答</span>
-      <span class="hint">{{ question.multiSelect ? "可以选多个" : "选一个" }}，也可以自己写</span>
+      <span class="badge">{{ t("等你回答") }}</span>
+      <span class="hint">{{ question.multiSelect ? t("可以选多个，也可以自己写") : t("选一个，也可以自己写") }}</span>
     </div>
     <p class="text">{{ question.question }}</p>
     <div v-if="question.options.length > 0" class="options">
@@ -78,13 +79,13 @@ function onKeydown(event: KeyboardEvent): void {
       v-model="text"
       class="other"
       rows="1"
-      :placeholder="question.options.length > 0 ? '其他（可选）：直接写你的回答' : '写下你的回答'"
+      :placeholder="question.options.length > 0 ? t(`其他（可选）：直接写你的回答`) : t(`写下你的回答`)"
       @keydown="onKeydown"
     />
     <div class="actions">
-      <button type="button" class="skip" :disabled="sending" @click="skip">跳过</button>
+      <button type="button" class="skip" :disabled="sending" @click="skip">{{ t("跳过") }}</button>
       <button type="button" class="send" :disabled="!canSubmit" @click="submit">
-        {{ sending ? "已提交" : "提交" }}
+        {{ sending ? t("已提交") : t("提交") }}
       </button>
     </div>
   </div>

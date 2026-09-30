@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // 用量记录：每次打模型、每次调工具记一行，设置页的「用量」按时间段汇总。
@@ -393,7 +395,7 @@ func ToolSource(name string) string {
 // ensureUsageSchema 在已有的库上补上用量表（Open 调）。
 func ensureUsageSchema(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, usageSchema); err != nil {
-		return fmt.Errorf("初始化用量表失败：%w", err)
+		return fmt.Errorf("%s%w", i18n.D("初始化用量表失败："), err)
 	}
 	return nil
 }

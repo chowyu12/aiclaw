@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -41,7 +42,7 @@ type liteLLMEntry struct {
 func ParseLiteLLM(body []byte) (*Catalog, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("LiteLLM 的数据看不懂：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("LiteLLM 的数据看不懂："), err)
 	}
 	catalog := &Catalog{byName: map[string]Entry{}}
 	for key, value := range raw {

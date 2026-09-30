@@ -8,6 +8,7 @@
  * 在正在编辑的窗口里就是往文档里插字符。所以这两组表由 scripts/test-computer.ts
  * 钉着。
  */
+import { tr } from "../shared/i18n.js";
 
 /** 本应用在系统里的进程名。查「最前面是不是我」时比对它。 */
 // 三个名字对应三种跑法：开发期 `electron .` 的进程叫 Electron，app.setName
@@ -61,12 +62,12 @@ const MAC_KEY_CODES: Record<string, number> = {
 
 export function macKeyScript(combo: string): string {
   const parts = combo.split("+").map((part) => part.trim().toLowerCase()).filter(Boolean);
-  if (parts.length === 0) throw new Error("按键组合为空");
+  if (parts.length === 0) throw new Error(tr("按键组合为空"));
 
   const target = parts[parts.length - 1] ?? "";
   const modifiers = parts.slice(0, -1).map((part) => {
     const name = MAC_MODIFIERS[part];
-    if (!name) throw new Error(`不认识的修饰键：${part}`);
+    if (!name) throw new Error(tr("不认识的修饰键：{key}", { key: part }));
     return name;
   });
   const using = modifiers.length > 0 ? ` using {${modifiers.join(", ")}}` : "";
@@ -76,7 +77,7 @@ export function macKeyScript(combo: string): string {
     return `tell application "System Events" to key code ${code}${using}`;
   }
   if (target.length !== 1) {
-    throw new Error(`不认识的按键：${target}`);
+    throw new Error(tr("不认识的按键：{key}", { key: target }));
   }
   return `tell application "System Events" to keystroke ${appleString(target)}${using}`;
 }
@@ -111,15 +112,15 @@ const WINDOWS_MODIFIERS: Record<string, string> = {
 
 export function windowsKeys(combo: string): string {
   const parts = combo.split("+").map((part) => part.trim().toLowerCase()).filter(Boolean);
-  if (parts.length === 0) throw new Error("按键组合为空");
+  if (parts.length === 0) throw new Error(tr("按键组合为空"));
   const target = parts[parts.length - 1] ?? "";
   const modifiers = parts.slice(0, -1).map((part) => {
     const symbol = WINDOWS_MODIFIERS[part];
-    if (!symbol) throw new Error(`不认识的修饰键：${part}`);
+    if (!symbol) throw new Error(tr("不认识的修饰键：{key}", { key: part }));
     return symbol;
   });
   const key = WINDOWS_KEYS[target] ?? (target.length === 1 ? target : undefined);
-  if (key === undefined) throw new Error(`不认识的按键：${target}`);
+  if (key === undefined) throw new Error(tr("不认识的按键：{key}", { key: target }));
   return modifiers.join("") + key;
 }
 

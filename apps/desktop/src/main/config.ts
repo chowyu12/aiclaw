@@ -28,6 +28,8 @@ export interface RoleConfig {
 }
 
 export interface AppConfig {
+  /** 界面语言。新装默认英文，见 shared/i18n.ts。 */
+  language: "en" | "zh-CN";
   /** 新会话默认用的模型服务 id（aiclaw.db 里 providers 表的主键）；0 表示没选。 */
   providerId: number;
   model: string;

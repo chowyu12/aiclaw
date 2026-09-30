@@ -324,7 +324,7 @@ async function main(): Promise<number> {
     }
 
     // 子 agent：根会话 spawn_agent → 子会话在后台跑完 → 最终回答投回根会话的邮箱 → 根会话汇总。
-    // 同一个假模型服务按请求里有没有「你是子 agent」分辨是谁在问。
+    // 同一个假模型服务按请求里有没有「You are a sub-agent」分辨是谁在问。
     const sse = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\ndata: [DONE]\n\n`;
     const toolCall = (id: string, name: string, args: unknown) =>
       sse({ choices: [{ delta: { tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: "tool_calls" }] });
@@ -336,11 +336,11 @@ async function main(): Promise<number> {
         const messages = (JSON.parse(body) as { messages: { role: string; content?: unknown }[] }).messages;
         const all = messages.map((message) => (typeof message.content === "string" ? message.content : "")).join("\n");
         response.writeHead(200, { "Content-Type": "text/event-stream" });
-        if (all.includes("你是子 agent")) return void response.end(say("北京今天晴，25 度"));
+        if (all.includes("You are a sub-agent")) return void response.end(say("北京今天晴，25 度"));
         const tools = messages.filter((message) => message.role === "tool").length;
         if (tools === 0) return void response.end(toolCall("c1", "spawn_agent", { task_name: "weather", message: "查北京天气", fork_turns: "none" }));
         if (tools === 1) return void response.end(toolCall("c2", "wait_agent", { timeout_ms: 60000 }));
-        const got = /最终回答：\n([^\n]+)/.exec(all)?.[1] ?? "没收到";
+        const got = /Final answer from [^\n]*:\n([^\n]+)/.exec(all)?.[1] ?? "没收到";
         response.end(say(`汇总：${got}`));
       });
     });

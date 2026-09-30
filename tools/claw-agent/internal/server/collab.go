@@ -3,13 +3,13 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
@@ -80,7 +80,7 @@ func (h *collabHub) node(session *agent.Session) *collabNode {
 func (h *collabHub) resolve(caller *collabNode, target string) (*collabNode, error) {
 	target = strings.TrimSpace(strings.TrimSuffix(target, "/"))
 	if target == "" {
-		return nil, errors.New("target 不能为空")
+		return nil, i18n.E("target 不能为空：要给出 agent 的名字")
 	}
 	path := target
 	if !strings.HasPrefix(target, "/") {
@@ -93,13 +93,13 @@ func (h *collabHub) resolve(caller *collabNode, target string) (*collabNode, err
 			return node, nil
 		}
 	}
-	return nil, fmt.Errorf("没有叫 %s 的 agent（用 list_agents 看看有哪些）", path)
+	return nil, i18n.E("没有叫 {path} 的 agent（用 list_agents 看看有哪些）", "path", path)
 }
 
 func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request agent.SpawnRequest) (agent.SpawnResult, error) {
 	parentNode := h.node(parent)
 	if parentNode.depth+1 > maxAgentDepth {
-		return agent.SpawnResult{}, fmt.Errorf("子 agent 最多嵌套 %d 层；这件事自己做，或者交回给开你的 agent", maxAgentDepth)
+		return agent.SpawnResult{}, i18n.E("子 agent 最多嵌套 {depth} 层；这件事自己做，或者交回给开你的 agent", "depth", maxAgentDepth)
 	}
 	path := parentNode.path + "/" + request.TaskName
 	h.mu.Lock()
@@ -110,7 +110,7 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 		}
 		if node.path == path {
 			h.mu.Unlock()
-			return agent.SpawnResult{}, fmt.Errorf("已经有叫 %s 的 agent 了：换个 task_name，或者用 followup_task 给它派新活", path)
+			return agent.SpawnResult{}, i18n.E("已经有叫 {path} 的 agent 了：换个 task_name，或者用 followup_task 给它派新活", "path", path)
 		}
 		if node.depth > 0 && node.status == agent.AgentRunning {
 			live++
@@ -118,7 +118,7 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 	}
 	h.mu.Unlock()
 	if live >= maxLiveAgents {
-		return agent.SpawnResult{}, fmt.Errorf("同时在跑的子 agent 已经有 %d 个了，先等一些做完（wait_agent）", live)
+		return agent.SpawnResult{}, i18n.E("同时在跑的子 agent 已经有 {count} 个了，先等一些做完（wait_agent）", "count", live)
 	}
 
 	config := parent.Config()
@@ -129,7 +129,7 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 	// 建会话用服务的 ctx：MCP 连接要活得比这次工具调用长。
 	child, err := agent.New(h.context(), id, config, h.server.keyFor, h.server.sessionOptions(id)...)
 	if err != nil {
-		return agent.SpawnResult{}, fmt.Errorf("开子 agent 失败：%w", err)
+		return agent.SpawnResult{}, i18n.E("开子 agent 失败：{error}", "error", err)
 	}
 	child.ForkFrom(parent, request.ForkTurns)
 	h.server.guard(child)
@@ -150,8 +150,8 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 		h.server.options.Logf("保存子会话失败：%v", err)
 	}
 
-	task := fmt.Sprintf("（这是 %s 交给你的任务。你是子 agent，规范名 %s。做完时你的最终回答会自动交给它；"+
-		"中途要汇报或提问，用 send_message 发给 %s。）\n\n%s", parentNode.path, path, parentNode.path, request.Message)
+	task := fmt.Sprintf("(This task was assigned to you by %s. You are a sub-agent; your canonical name is %s. When you finish, your final answer is delivered to it automatically; "+
+		"to report progress or ask questions along the way, use send_message to %s.)\n\n%s", parentNode.path, path, parentNode.path, request.Message)
 	go h.runTurn(child, node, task)
 	return agent.SpawnResult{TaskName: path, Nickname: request.TaskName}, nil
 }
@@ -163,19 +163,19 @@ func (h *collabHub) Send(_ context.Context, from *agent.Session, target, message
 		return err
 	}
 	if node.sessionID == from.ID {
-		return errors.New("不能给自己发消息")
+		return i18n.E("不能给自己发消息")
 	}
 	if trigger && node.depth == 0 {
-		return errors.New("followup_task 只能发给子 agent；给根 agent 用 send_message")
+		return i18n.E("followup_task 只能发给子 agent；给根 agent 用 send_message")
 	}
 	session := h.server.session(node.sessionID)
 	if session == nil {
-		return fmt.Errorf("%s 已经不在了", node.path)
+		return i18n.E("{path} 已经不在了", "path", node.path)
 	}
 	text := fmt.Sprintf("<agent_message from=%q>\n%s\n</agent_message>", sender.path, message)
-	notice := fmt.Sprintf("📨 收到 %s 的消息", sender.path)
+	notice := i18n.D("📨 收到 {path} 的消息", "path", sender.path)
 	if trigger {
-		notice = fmt.Sprintf("📨 %s 派来新任务", sender.path)
+		notice = i18n.D("📨 {path} 派来新任务", "path", sender.path)
 	}
 	running := session.DeliverAgentMail(sender.path, text, notice)
 	if trigger && !running {
@@ -358,7 +358,8 @@ func (h *collabHub) runTurn(session *agent.Session, node *collabNode, text strin
 	}
 	status := agent.AgentCompleted
 	switch {
-	case watcher.err == "已中断":
+	// 「已中断」是 turn.go 写进 turn/completed 的标记；它可能跟着界面语言翻译，两种都认。
+	case watcher.err == i18n.T(i18n.Chinese, "已中断") || watcher.err == i18n.T(i18n.English, "已中断"):
 		status = agent.AgentInterrupted
 	case watcher.err != "":
 		status = agent.AgentErrored
@@ -379,15 +380,15 @@ func (h *collabHub) runTurn(session *agent.Session, node *collabNode, text strin
 	case agent.AgentCompleted:
 		answer := strings.TrimSpace(session.LastAnswer())
 		if answer == "" {
-			answer = "（它结束了这一轮，但没有给出文字回答）"
+			answer = "(It finished its turn without giving a text answer.)"
 		}
-		fmt.Fprintf(&body, "\n%s 的最终回答：\n%s", node.path, answer)
-		notice = fmt.Sprintf("✅ 子 agent %s 做完了", node.path)
+		fmt.Fprintf(&body, "\nFinal answer from %s:\n%s", node.path, answer)
+		notice = i18n.D("✅ 子 agent {path} 做完了", "path", node.path)
 	case agent.AgentInterrupted:
-		notice = fmt.Sprintf("⏹ 子 agent %s 被打断了", node.path)
+		notice = i18n.D("⏹ 子 agent {path} 被打断了", "path", node.path)
 	default:
-		fmt.Fprintf(&body, "\n出错：%s", watcher.err)
-		notice = fmt.Sprintf("⚠️ 子 agent %s 出错了", node.path)
+		fmt.Fprintf(&body, "\nError: %s", watcher.err)
+		notice = i18n.D("⚠️ 子 agent {path} 出错了", "path", node.path)
 	}
 	running := parent.DeliverAgentMail(node.path, body.String(), notice)
 	// 父 agent 闲着：开一轮让它接收结果，不然结果就搁在邮箱里没人看。被打断的不叫醒——

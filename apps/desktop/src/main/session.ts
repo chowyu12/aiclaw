@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { clipboard, shell } from "electron";
 import { toolPath } from "./shell-path.js";
+import { tr } from "../shared/i18n.js";
 import {
   ClawAgentClient,
   type AgentNotification,
@@ -65,32 +66,35 @@ export interface ProfileSpec {
   availableForScheduled: boolean;
 }
 
-export const PROFILES: ProfileSpec[] = [
-  {
-    id: "on-write",
-    label: "默认",
-    description: "执行命令和调用外部工具前请你确认；读文件、写工作目录内的文件不问。",
-    availableForScheduled: false,
-  },
-  {
-    id: "always",
-    label: "严格",
-    description: "所有有副作用的操作（含写文件）都先请你确认。",
-    availableForScheduled: false,
-  },
-  {
-    id: "never",
-    label: "无人值守",
-    description: "不弹确认；需要确认的操作直接失败。给定时任务与外部通道用，别在交互会话里选。",
-    availableForScheduled: true,
-  },
-  {
-    id: "bypass",
-    label: "全部放行",
-    description: "不弹确认；需要确认的操作直接执行（rm -rf / 这类危险命令仍硬拒绝）。只在完全信任当前任务时用。",
-    availableForScheduled: true,
-  },
-];
+/** 审批档位。名称与说明按当前界面语言给：界面上列出来让用户选。 */
+export function profileSpecs(): ProfileSpec[] {
+  return [
+    {
+      id: "on-write",
+      label: tr("默认"),
+      description: tr("执行命令和调用外部工具前请你确认；读文件、写工作目录内的文件不问。"),
+      availableForScheduled: false,
+    },
+    {
+      id: "always",
+      label: tr("严格"),
+      description: tr("所有有副作用的操作（含写文件）都先请你确认。"),
+      availableForScheduled: false,
+    },
+    {
+      id: "never",
+      label: tr("无人值守"),
+      description: tr("不弹确认；需要确认的操作直接失败。给定时任务与外部通道用，别在交互会话里选。"),
+      availableForScheduled: true,
+    },
+    {
+      id: "bypass",
+      label: tr("全部放行"),
+      description: tr("不弹确认；需要确认的操作直接执行（rm -rf / 这类危险命令仍硬拒绝）。只在完全信任当前任务时用。"),
+      availableForScheduled: true,
+    },
+  ];
+}
 
 /** 一个会话起来之后宿主需要知道的东西。 */
 export interface SessionInfo {
@@ -201,7 +205,8 @@ export class SessionManager extends EventEmitter {
     const client = new ClawAgentClient({
       command: this.agentBin,
       args: ["serve", `--data-home=${this.store.agentHome}`, `--app-db=${this.store.appDbPath}`],
-      env: { ...process.env, PATH: this.path },
+      // 界面语言：内核给人看的提示、报错按它出（切换后由 setKernelLocale 再告诉它）。
+      env: { ...process.env, PATH: this.path, AICLAW_LOCALE: this.store.readConfig().language },
     });
 
     client.on("notification", (n: AgentNotification) => this.emit("event", n.method, n.params));
@@ -267,6 +272,16 @@ export class SessionManager extends EventEmitter {
     }
   }
 
+  /** 切换界面语言后告诉内核：它给人看的提示、报错跟着换。内核没起来就算了，下次启动由环境变量带过去。 */
+  async setKernelLocale(locale: string): Promise<void> {
+    if (!this.client?.running) return;
+    try {
+      await this.client.configLocale(locale);
+    } catch (error) {
+      this.emit("log", "kernel", `同步界面语言失败：${String(error)}\n`);
+    }
+  }
+
   /**
    * 按配置启停与浏览器扩展的连接：开了浏览器工具、选了「用我的浏览器」才监听。
    * 第一次选时生成配对码。启动时与每次保存设置后调。
@@ -323,7 +338,7 @@ export class SessionManager extends EventEmitter {
     const browsers = installedBrowsers();
     // 没指定就用默认浏览器（排在第一个）。
     const browser = browserId ? browsers.find((item) => item.id === browserId) : browsers[0];
-    if (!browser) throw new Error(browserId ? "没找到这个浏览器" : "没找到能装扩展的浏览器（Chrome / Edge / Brave / Arc）");
+    if (!browser) throw new Error(browserId ? tr("没找到这个浏览器") : tr("没找到能装扩展的浏览器（Chrome / Edge / Brave / Arc）"));
     if (browser.storeUrl) {
       // 上架之后：打开商店页，用户点「获取」就装好了，之后自动弹配对页。
       await run("open", ["-a", browser.app, browser.storeUrl]);
@@ -549,6 +564,8 @@ export class SessionManager extends EventEmitter {
       enableBrowser: config.browser === true,
       roles: toRoles(config),
       modelSeesImages: await this.modelSeesImages(config),
+      // 界面语言：模型默认用它回复，内核给人看的提示也按它出。
+      locale: config.language,
     };
   }
 
@@ -648,6 +665,8 @@ export class SessionManager extends EventEmitter {
       approvalPolicy: config.profile,
       roles: toRoles(config),
       modelSeesImages: await this.modelSeesImages(config),
+      // 界面语言：模型默认用它回复，内核给人看的提示也按它出。
+      locale: config.language,
     };
   }
 
@@ -779,7 +798,7 @@ export class SessionManager extends EventEmitter {
    */
   async transcribeVoice(wav: Uint8Array): Promise<string> {
     const role = toRoles(this.store.readConfig()).stt;
-    if (!role) throw new Error("还没有配听写模型：到「配置 → 多模态」里给「听写」选一个模型（比如 qwen3-asr-flash、whisper-1）");
+    if (!role) throw new Error(tr("还没有配听写模型：到「配置 → 多模态」里给「听写」选一个模型（比如 qwen3-asr-flash、whisper-1）"));
     return this.requireClient().audioTranscribe({
       audio: Buffer.from(wav).toString("base64"),
       name: "voice.wav",
@@ -810,12 +829,12 @@ export class SessionManager extends EventEmitter {
   }
 
   static profiles(): ProfileSpec[] {
-    return PROFILES;
+    return profileSpecs();
   }
 
   private requireClient(): ClawAgentClient {
     if (!this.client) {
-      throw new Error("本地运行时未启动");
+      throw new Error(tr("本地运行时未启动"));
     }
     return this.client;
   }

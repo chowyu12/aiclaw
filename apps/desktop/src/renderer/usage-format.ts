@@ -1,3 +1,5 @@
+import { tr } from "../shared/i18n.js";
+
 /**
  * 用量页上的数字怎么写。纯函数单独成文件，为的是能在 node 里测（scripts/test-usage-format.ts）。
  */
@@ -33,11 +35,11 @@ export function sourceLabel(source: string): string {
   const parts: string[] = [];
   let rest = source;
   if (rest.startsWith("exec:")) {
-    parts.push("代码模式");
+    parts.push(tr("代码模式"));
     rest = rest.slice(5);
   }
   if (rest.startsWith("mcp:")) parts.push(`MCP · ${rest.slice(4)}`);
-  else if (rest === "builtin" || rest === "") parts.push("内置");
+  else if (rest === "builtin" || rest === "") parts.push(tr("内置"));
   else parts.push(rest);
   return parts.join(" · ");
 }

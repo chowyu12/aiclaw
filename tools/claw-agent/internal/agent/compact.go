@@ -2,11 +2,11 @@ package agent
 
 import (
 	"context"
-	"errors"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 	"strings"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
@@ -23,19 +23,22 @@ const (
 //
 // 写成「交接给另一个模型」而不是「总结一下」：后者会得到一段面向人的复述，
 // 前者才会把决定、约束、下一步这些接着干活需要的东西写出来。
-// 这是 Codex 压缩提示词的核心结构，换成中文以与本应用其余提示词一致。
-const summarizationPrompt = `现在要做一次上下文压缩。请写一份交接摘要，交给另一个模型接着完成这个任务。
+// 这是 Codex 压缩提示词的核心结构。
+const summarizationPrompt = `You are performing a context checkpoint compaction. Write a handoff summary for another model that will pick up and finish this task.
 
-需要包含：
-- 目前的进展，以及已经做出的关键决定
-- 重要的上下文、约束条件、用户偏好
-- 还剩什么没做（写成明确的下一步）
-- 继续工作所必需的关键数据、示例、路径、引用
+Include:
+- Current progress and the key decisions made so far
+- Important context, constraints and user preferences
+- What remains to be done (as clear next steps)
+- Any critical data, examples, paths or references needed to continue
 
-要简洁、有结构，只写对「接着干下去」有用的内容。`
+Be concise and structured; include only what helps the next model carry on with the work.`
 
 // summaryPrefix 是摘要在新历史里的开场白，告诉模型这段是怎么来的。
-const summaryPrefix = `上一个模型已经开始处理这个任务，并留下了它的思考过程摘要。你可以接着它的工作往下做，不要重复已经完成的部分。以下是它留下的摘要：`
+const summaryPrefix = `Another model already started working on this task and left a summary of its progress. Build on the work it has done and don't repeat what is already finished. Here is the summary it left:`
+
+// legacySummaryPrefix 是改成英文之前的开场白，只用来认出旧存档里的压缩摘要。
+const legacySummaryPrefix = `上一个模型已经开始处理这个任务，并留下了它的思考过程摘要。`
 
 // interruptMarker 在用户中断之后写进历史。
 //
@@ -46,7 +49,7 @@ const summaryPrefix = `上一个模型已经开始处理这个任务，并留下
 // 措辞要把「继续」与「换一件事」分开：早先写的是「继续之前请先确认当前状态」，
 // 用户中断后发来一张没配文字的图，模型把它当成了「继续吧」，接着去做被中断的
 // 那件事，对那张图一个字没提。**实际发生过。**
-const interruptMarker = `用户主动中断了上一轮。被中止的工具或命令可能已经部分执行过：如果要接着做，先确认当前的实际状态，不要假设它们没有生效。如果用户接下来说的是别的事，就按新的要求来，不要自己回头继续被中断的任务。`
+const interruptMarker = `The user interrupted the previous turn on purpose. Any tools or commands that were aborted may have partially executed: if you pick the work back up, verify the current state first and don't assume they had no effect. If the user's next message is about something else, follow the new request and don't go back to the interrupted task on your own.`
 
 // needsCompaction 报告当前历史是否已经逼近上下文窗口。
 //
@@ -71,7 +74,7 @@ func (s *Session) needsCompaction() bool {
 func (s *Session) compact(ctx context.Context, turnID string, emitter Emitter) error {
 	history := s.snapshotMessages()
 	if len(history) <= 1 {
-		return errors.New("历史为空，无从压缩")
+		return i18n.E("历史为空，无从压缩")
 	}
 
 	request := make([]llm.Message, 0, len(history)+1)
@@ -96,7 +99,7 @@ func (s *Session) compact(ctx context.Context, turnID string, emitter Emitter) e
 	}
 	summary := strings.TrimSpace(response.Content)
 	if summary == "" {
-		return errors.New("模型没有给出摘要")
+		return i18n.E("模型没有给出摘要")
 	}
 
 	compacted := buildCompactedHistory(history, summary)
@@ -105,7 +108,7 @@ func (s *Session) compact(ctx context.Context, turnID string, emitter Emitter) e
 	s.lastInputTokens = 0
 	s.mu.Unlock()
 
-	s.notify(emitter, turnID, "上下文接近上限，已压缩历史：保留了近期的用户消息和一份进度摘要。")
+	s.notify(emitter, turnID, i18n.D("上下文接近上限，已压缩历史：保留了近期的用户消息和一份进度摘要。"))
 	return nil
 }
 

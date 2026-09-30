@@ -200,6 +200,12 @@ export class ClawAgentClient extends EventEmitter {
     return this.transport.request<MCPProbeResult>("mcp/probe", { server });
   }
 
+  /** 界面语言：内核给人看的提示、报错跟着它。启动时由环境变量 AICLAW_LOCALE 带过去，切换时调这个。 */
+  async configLocale(locale: string): Promise<void> {
+    this.assertReady();
+    await this.transport.request("config/locale", { locale });
+  }
+
   // ---------- 模型服务 ----------
   //
   // 都是配置页上的同步操作。Key 从这里进（create / update），但永远不从这里出：

@@ -3,10 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
@@ -25,25 +24,25 @@ func (s *Session) registerScheduleTools() error {
 		return nil
 	}
 	ruleSchema := map[string]any{
-		"name":   map[string]any{"type": "string", "description": "任务名，短一点，比如「每日邮件汇总」"},
-		"prompt": map[string]any{"type": "string", "description": "到点时要执行的完整指令，当作用户那时发来的一条消息。要写清楚做什么、结果怎么给（比如「汇总今天的未读邮件，列出要我回复的」），不要依赖当前对话的上下文——那时是一个新会话"},
+		"name":   map[string]any{"type": "string", "description": "Task name, kept short, e.g. \"Daily email digest\""},
+		"prompt": map[string]any{"type": "string", "description": "The complete instruction to run when the task fires, treated as a message the user sends at that time. Spell out what to do and how to deliver the result (e.g. \"Summarize today's unread emails and list the ones I need to reply to\"). Don't rely on the current chat's context — it will run in a new chat"},
 		"kind": map[string]any{
 			"type": "string", "enum": []string{"daily", "weekdays", "weekly", "interval", "once"},
-			"description": "daily 每天；weekdays 每个工作日（周一到周五）；weekly 每周指定几天；interval 每隔 N 分钟；once 只跑一次",
+			"description": "daily: every day; weekdays: every weekday (Monday to Friday); weekly: on chosen days each week; interval: every N minutes; once: run a single time",
 		},
-		"time":          map[string]any{"type": "string", "description": "daily / weekdays / weekly 用：几点，24 小时制 HH:MM，按用户本机时间"},
-		"days":          map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "weekly 用：星期几，0 = 周日，1 = 周一 … 6 = 周六"},
-		"every_minutes": map[string]any{"type": "integer", "description": "interval 用：每隔多少分钟，至少 5"},
-		"at":            map[string]any{"type": "string", "description": "once 用：什么时候，ISO 8601，带时区（比如 2026-10-01T09:00:00+08:00）"},
-		"use_workspace": map[string]any{"type": "boolean", "description": "任务是否在当前会话的工作区里跑（要读写这里的文件时设 true）。默认 true"},
+		"time":          map[string]any{"type": "string", "description": "For daily / weekdays / weekly: time of day, 24-hour HH:MM, in the user's local time"},
+		"days":          map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "For weekly: days of the week, 0 = Sunday, 1 = Monday … 6 = Saturday"},
+		"every_minutes": map[string]any{"type": "integer", "description": "For interval: number of minutes between runs, at least 5"},
+		"at":            map[string]any{"type": "string", "description": "For once: when to run, ISO 8601 with a time zone (e.g. 2026-10-01T09:00:00+08:00)"},
+		"use_workspace": map[string]any{"type": "boolean", "description": "Whether the task runs in the current chat's workspace (set true if it needs to read or write files there). Default true"},
 	}
 	register := func(tool tools.Tool) error { return s.registry.Register(tool) }
 
 	if err := register(tools.Tool{
 		Name: "schedule_create",
-		Description: "建一个定时任务：到点时 AIClaw 自动开一个新会话，把 prompt 当作用户的消息执行。" +
-			"用户说「每天」「每周」「提醒我」「定时」「过一小时再」这类话时用。应用要开着才会跑；" +
-			"建之前会请用户确认。时间按用户本机时区。",
+		Description: "Create a scheduled task: when it fires, AIClaw automatically opens a new chat and runs the prompt as a user message. " +
+			"Use it when the user says things like \"every day\", \"every week\", \"remind me\", \"on a schedule\" or \"in an hour\". Tasks only run while the app is open; " +
+			"the user is asked to confirm before the task is created. Times are in the user's local time zone.",
 		Schema: schemaOf(ruleSchema, "name", "prompt", "kind"),
 		Effect: tools.EffectExternal,
 		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
@@ -61,7 +60,7 @@ func (s *Session) registerScheduleTools() error {
 				return "", err
 			}
 			if strings.TrimSpace(args.Name) == "" || strings.TrimSpace(args.Prompt) == "" {
-				return "", errors.New("name 与 prompt 都要给")
+				return "", i18n.E("name 与 prompt 都要给")
 			}
 			task := &protocol.ScheduleTaskInput{
 				Name: strings.TrimSpace(args.Name), Prompt: strings.TrimSpace(args.Prompt), Kind: args.Kind,
@@ -70,10 +69,12 @@ func (s *Session) registerScheduleTools() error {
 			if args.UseWorkspace == nil || *args.UseWorkspace {
 				task.Workspace = env.Workspace
 			}
-			detail := fmt.Sprintf("名称：%s\n时间：%s\n工作区：%s\n\n到点时执行：\n%s",
-				task.Name, describeTaskTime(task), orDash(task.Workspace), task.Prompt)
-			if err := env.RequestApproval(ctx, tools.EffectExternal, protocol.ApprovalTool, "新建定时任务", detail,
-				"到点时会在你不在场的情况下自动执行这条指令（执行中遇到要确认的操作仍会问你）"); err != nil {
+			detail := i18n.D("名称：{value}", "value", task.Name) + "\n" +
+				i18n.D("运行时间：{value}", "value", describeTaskTime(task)) + "\n" +
+				i18n.D("工作区：{value}", "value", orDash(task.Workspace)) + "\n\n" +
+				i18n.D("到点时执行：") + "\n" + task.Prompt
+			if err := env.RequestApproval(ctx, tools.EffectExternal, protocol.ApprovalTool, i18n.D("新建定时任务"), detail,
+				i18n.D("到点时会在你不在场的情况下自动执行这条指令（执行中遇到要确认的操作仍会问你）")); err != nil {
 				return "", err
 			}
 			return s.requestSchedule(ctx, env, protocol.ScheduleRequestParams{Action: "create", Task: task})
@@ -84,7 +85,7 @@ func (s *Session) registerScheduleTools() error {
 
 	if err := register(tools.Tool{
 		Name:        "schedule_list",
-		Description: "列出用户的定时任务：编号、名称、时间规则、下次运行、上次结果。",
+		Description: "List the user's scheduled tasks: id, name, schedule, next run and last result.",
 		Schema:      emptySchema(),
 		Effect:      tools.EffectRead,
 		Handler: func(ctx context.Context, _ json.RawMessage, env *tools.Env) (string, error) {
@@ -96,9 +97,9 @@ func (s *Session) registerScheduleTools() error {
 
 	return register(tools.Tool{
 		Name:        "schedule_delete",
-		Description: "删掉一个定时任务（编号来自 schedule_list）。删之前会请用户确认。",
+		Description: "Delete a scheduled task (id from schedule_list). The user is asked to confirm before it is deleted.",
 		Schema: schemaOf(map[string]any{
-			"id": map[string]any{"type": "string", "description": "schedule_list 给的编号"},
+			"id": map[string]any{"type": "string", "description": "Task id from schedule_list"},
 		}, "id"),
 		Effect: tools.EffectExternal,
 		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
@@ -109,9 +110,9 @@ func (s *Session) registerScheduleTools() error {
 				return "", err
 			}
 			if strings.TrimSpace(args.ID) == "" {
-				return "", errors.New("必须给出 id")
+				return "", i18n.E("必须给出定时任务的 id")
 			}
-			if err := env.RequestApproval(ctx, tools.EffectExternal, protocol.ApprovalTool, "删除定时任务", args.ID, ""); err != nil {
+			if err := env.RequestApproval(ctx, tools.EffectExternal, protocol.ApprovalTool, i18n.D("删除定时任务"), args.ID, ""); err != nil {
 				return "", err
 			}
 			return s.requestSchedule(ctx, env, protocol.ScheduleRequestParams{Action: "delete", ID: strings.TrimSpace(args.ID)})
@@ -122,7 +123,7 @@ func (s *Session) registerScheduleTools() error {
 func (s *Session) requestSchedule(ctx context.Context, env *tools.Env, params protocol.ScheduleRequestParams) (string, error) {
 	emitter := s.currentEmitter()
 	if emitter == nil {
-		return "", errors.New("没有进行中的轮次，无法管理定时任务")
+		return "", i18n.E("没有进行中的轮次，无法管理定时任务")
 	}
 	params.SessionID = env.SessionID
 	result, err := emitter.RequestSchedule(ctx, params)
@@ -134,12 +135,15 @@ func (s *Session) requestSchedule(ctx context.Context, env *tools.Env, params pr
 
 // describeTaskTime 给审批框一句人话。精确的写法由宿主决定，这里只求用户一眼看懂。
 func describeTaskTime(task *protocol.ScheduleTaskInput) string {
-	names := []string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}
+	names, separator := []string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}, "、"
+	if i18n.Default() == i18n.English {
+		names, separator = []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}, ", "
+	}
 	switch task.Kind {
 	case "daily":
-		return "每天 " + task.Time
+		return i18n.D("每天 {time}", "time", task.Time)
 	case "weekdays":
-		return "每个工作日 " + task.Time
+		return i18n.D("每个工作日 {time}", "time", task.Time)
 	case "weekly":
 		var days []string
 		for _, day := range task.Days {
@@ -147,11 +151,11 @@ func describeTaskTime(task *protocol.ScheduleTaskInput) string {
 				days = append(days, names[day])
 			}
 		}
-		return "每" + strings.Join(days, "、") + " " + task.Time
+		return i18n.D("每{days} {time}", "days", strings.Join(days, separator), "time", task.Time)
 	case "interval":
-		return fmt.Sprintf("每 %d 分钟", task.EveryMinutes)
+		return i18n.D("每 {minutes} 分钟", "minutes", task.EveryMinutes)
 	case "once":
-		return task.At + "（一次）"
+		return i18n.D("{when}（一次）", "when", task.At)
 	}
 	return task.Kind
 }

@@ -1,3 +1,5 @@
+import { tr } from "../shared/i18n.js";
+
 /**
  * 把异常整理成一句给人看的话。
  *
@@ -13,5 +15,5 @@ export function describeError(error: unknown): string {
   }
   // 可能还剩一层或多层 "Error: " 前缀。
   while (text.startsWith("Error: ")) text = text.slice(7);
-  return text.trim() || "未知错误";
+  return text.trim() || tr("未知错误");
 }

@@ -2,6 +2,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
+import { t } from "../i18n";
 import {
   classifyFile,
   readAudio,
@@ -73,9 +74,9 @@ let voiceTimer: ReturnType<typeof setInterval> | undefined;
 const sttReady = computed(() => Boolean(store.config?.roles?.stt?.providerId && store.config?.roles?.stt?.model));
 
 const voiceTitle = computed(() => {
-  if (voiceState.value === "recording") return "再点一下结束录音，转成文字";
-  if (voiceState.value === "transcribing") return "正在听写…";
-  return sttReady.value ? "语音输入：点一下开始说话" : "语音输入：先在「配置 → 多模态」里给「听写」选一个模型";
+  if (voiceState.value === "recording") return t("再点一下结束录音，转成文字");
+  if (voiceState.value === "transcribing") return t("正在听写…");
+  return sttReady.value ? t("语音输入：点一下开始说话") : t("语音输入：先在「配置 → 多模态」里给「听写」选一个模型");
 });
 
 async function toggleVoice(): Promise<void> {
@@ -83,12 +84,12 @@ async function toggleVoice(): Promise<void> {
   if (voiceState.value === "recording") return finishVoice();
   if (voiceState.value !== "idle") return;
   if (!sttReady.value) {
-    voiceError.value = "还没有配听写模型：到「配置 → 多模态」里给「听写」选一个模型。";
+    voiceError.value = t("还没有配听写模型：到「配置 → 多模态」里给「听写」选一个模型。");
     return;
   }
   const permission = (await window.aiclaw.voice.permission()) as string;
   if (permission !== "granted") {
-    voiceError.value = "没有麦克风权限：到「系统设置 → 隐私与安全性 → 麦克风」里打开 AIClaw，然后重新打开应用。";
+    voiceError.value = t("没有麦克风权限：到「系统设置 → 隐私与安全性 → 麦克风」里打开 AIClaw，然后重新打开应用。");
     return;
   }
   recorder = new VoiceRecorder();
@@ -96,7 +97,7 @@ async function toggleVoice(): Promise<void> {
     await recorder.start();
   } catch (error) {
     recorder = null;
-    voiceError.value = `打不开麦克风：${describeError(error)}`;
+    voiceError.value = t("打不开麦克风：{error}", { error: describeError(error) });
     return;
   }
   voiceState.value = "recording";
@@ -122,12 +123,12 @@ async function finishVoice(): Promise<void> {
   try {
     const recorded = await current.stop();
     if (!recorded) {
-      voiceError.value = "没有听到声音。检查一下麦克风，靠近一点再说一次。";
+      voiceError.value = t("没有听到声音。检查一下麦克风，靠近一点再说一次。");
       return;
     }
     const text = ((await window.aiclaw.voice.transcribe(recorded.wav)) as string).trim();
     if (!text) {
-      voiceError.value = "没听出内容，再说一次试试。";
+      voiceError.value = t("没听出内容，再说一次试试。");
       return;
     }
     insertAtCursor(text);
@@ -294,7 +295,7 @@ async function accept(files: FileList | File[] | null | undefined): Promise<void
       // 拒绝的要说出来。默默忽略的话，用户以为模型看过了那份文件。
       else attachError.value = verdict.reason;
     } catch (error) {
-      attachError.value = `${file.name} 读不了：${describeError(error)}`;
+      attachError.value = t("{name} 读不了：{error}", { name: file.name, error: describeError(error) });
     }
   }
 }
@@ -319,15 +320,15 @@ const workspaceOpen = ref(false);
 /** 工具条上只放最后一段目录名，全路径在 title 和菜单里。 */
 const workspaceLabel = computed(() => {
   const path = store.sessionInfo?.workspace ?? "";
-  if (!path) return "未设工作区";
+  if (!path) return t("未设工作区");
   const parts = path.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? path;
 });
 
 const workspaceTitle = computed(() =>
   store.sessionInfo?.workspace
-    ? `会话工作区：${store.sessionInfo.workspace}`
-    : "这个会话没有设置工作区，点一下可以指定",
+    ? t("会话工作区：{path}", { path: store.sessionInfo.workspace })
+    : t("这个会话没有设置工作区，点一下可以指定"),
 );
 
 /**
@@ -361,8 +362,8 @@ function removeAttachment(index: number): void {
 /** 附件上那行字。音频标出大小——转写按时长收费，用户该知道自己发了多大一段。 */
 function attachmentLabel(item: Attachment): string {
   if (item.kind === "image") return item.name;
-  if (item.kind === "audio") return `${item.name}（${(item.size / 1024 / 1024).toFixed(1)} MB）`;
-  return `${item.name}${item.truncated ? "（已截断）" : ""}`;
+  if (item.kind === "audio") return t("{name}（{size} MB）", { name: item.name, size: (item.size / 1024 / 1024).toFixed(1) });
+  return item.truncated ? t("{name}（已截断）", { name: item.name }) : item.name;
 }
 
 // 轮次进行中也允许发：内核会把输入排进那一轮，模型下一次开口前就看到了。
@@ -410,7 +411,7 @@ const policy = computed(() =>
 /** 窗口按量级换单位：272000 写成 272K 才读得出大小。 */
 function formatWindow(tokens: number): string {
   if (!tokens) return "";
-  return tokens >= 1000 ? `${Math.round(tokens / 1000)}K 上下文` : `${tokens} 上下文`;
+  return tokens >= 1000 ? t("{n}K 上下文", { n: Math.round(tokens / 1000) }) : t("{n} 上下文", { n: tokens });
 }
 
 /** 能选的模型：每个能用的模型服务下的每个模型。 */
@@ -481,9 +482,9 @@ function isMarked(key: string): boolean {
 }
 
 function copyLabel(key: string): string {
-  if (copiedKey.value === key) return "已复制";
-  if (failedKey.value === key) return "复制失败";
-  return "复制";
+  if (copiedKey.value === key) return t("已复制");
+  if (failedKey.value === key) return t("复制失败");
+  return t("复制");
 }
 
 /** 这一轮的回答说完了没有：还在流式输出的时候不给复制，复制到的是半句话。 */
@@ -534,10 +535,10 @@ function formatDuration(ms: number | undefined): string {
 
 /** 步骤块折叠时那一行：跑着的时候说在跑，跑完了说花了多久。 */
 function stepsSummary(turn: Turn): string {
-  if (turn.key === runningKey.value) return `执行中 · 已 ${turn.steps.length} 步`;
+  if (turn.key === runningKey.value) return t("执行中 · 已 {n} 步", { n: turn.steps.length });
   const elapsed = stepsElapsed(turn.steps);
-  const count = `${turn.steps.length} 个执行步骤`;
-  return elapsed ? `${count} · 用时 ${formatDuration(elapsed)}` : count;
+  const n = turn.steps.length;
+  return elapsed ? t("{n} 个执行步骤 · 用时 {time}", { n, time: formatDuration(elapsed) }) : t("{n} 个执行步骤", { n });
 }
 
 /**
@@ -549,10 +550,17 @@ function stepsSummary(turn: Turn): string {
 const mounts = computed(() => {
   const entries = Object.entries(store.sessionInfo?.mcpStatus ?? {});
   // 失败的排前面：面板会滚动，把唯一需要动手的那条埋在下面等于没显示。
-  return entries.sort((a, b) => Number(b[1].includes("失败")) - Number(a[1].includes("失败")));
+  return entries.sort((a, b) => Number(mountFailed(b[1])) - Number(mountFailed(a[1])));
 });
+/**
+ * 这一行是不是挂载失败。状态文字由内核按界面语言给出：中文带「失败」，英文带 "failed"
+ * （"Failed to mount: …"）。两种都认——切换语言之后，已经开着的会话里还是旧语言的文字。
+ */
+function mountFailed(status: string): boolean {
+  return status.includes("失败") || /\bfailed\b/i.test(status);
+}
 const failedMounts = computed(() =>
-  mounts.value.filter(([, status]) => status.includes("失败")),
+  mounts.value.filter(([, status]) => mountFailed(status)),
 );
 /** 代码模式下收进 exec 的那些也算：它们在脚本里照样能调。 */
 const folded = computed(() => store.sessionInfo?.foldedTools ?? []);
@@ -562,27 +570,27 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
 <template>
   <div class="chat">
     <div v-if="!configured" class="gate">
-      <h2>先完成配置</h2>
-      <p>到「模型服务」页添加一个端点、填上 Key、写上模型名，再回来选一个默认模型。</p>
+      <h2>{{ t("先完成配置") }}</h2>
+      <p>{{ t("到「模型服务」页添加一个端点、填上 Key、写上模型名，再回来选一个默认模型。") }}</p>
     </div>
 
     <template v-else>
       <!-- 应用启动时会自己把运行时拉起来，所以「启动中」是打开应用后最常见的
            一屏，不能再显示成「未启动」配一个按钮——那会让人以为要自己点。 -->
       <div v-if="store.runtime.state === 'starting'" class="gate">
-        <h2>正在启动本地运行时…</h2>
+        <h2>{{ t("正在启动本地运行时…") }}</h2>
         <p>
-          在本机拉起 Agent 执行内核。
+          {{ t("在本机拉起 Agent 执行内核。") }}
         </p>
       </div>
 
       <div v-else-if="store.runtime.state !== 'ready'" class="gate">
-        <h2>{{ store.runtime.state === "failed" ? "本地运行时启动失败" : "本地运行时未启动" }}</h2>
+        <h2>{{ store.runtime.state === "failed" ? t("本地运行时启动失败") : t("本地运行时未启动") }}</h2>
         <p>
-          启动后会在本机拉起 Agent 执行内核。命令会直接在这台电脑上执行，没有沙箱。
+          {{ t("启动后会在本机拉起 Agent 执行内核。命令会直接在这台电脑上执行，没有沙箱。") }}
         </p>
         <button class="primary" @click="actions.startRuntime()">
-          {{ store.runtime.state === "failed" ? "重试" : "启动并开始对话" }}
+          {{ store.runtime.state === "failed" ? t("重试") : t("启动并开始对话") }}
         </button>
       </div>
 
@@ -591,10 +599,10 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
           <!-- 切会话时先切过去、历史随后到：这几秒里要有话说，不能是「还没有内容」，
                那句话在一个有几十条记录的会话上是假的。 -->
           <p v-if="store.loadingSession === store.sessionId && store.timeline.length === 0" class="blank">
-            正在载入这个会话…
+            {{ t("正在载入这个会话…") }}
           </p>
           <p v-else-if="store.timeline.length === 0" class="blank">
-            这个会话还没有内容。说点什么开始。
+            {{ t("这个会话还没有内容。说点什么开始。") }}
           </p>
 
           <!-- 按轮渲染。一轮里步骤只出现一次，位置随状态走：
@@ -613,7 +621,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                     v-for="(shot, index) in turn.user.images"
                     :key="index"
                     :src="shot"
-                    alt="附带的图片"
+                    :alt="t(`附带的图片`)"
                   />
                 </div>
                 {{ turn.user.text }}
@@ -625,7 +633,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                 v-for="ref in turn.user.references"
                 :key="ref.id"
                 class="ref"
-                :title="`打开「${ref.title}」`"
+                :title="t(`打开「{title}」`, { title: ref.title })"
                 @click="actions.openSession(ref.id)"
               >
                 ↪ {{ ref.title }}
@@ -657,6 +665,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
               v-if="turn.steps.length > 0 && turn.key === runningKey"
               :turn="turn"
               :open="stepsOpen(turn)"
+              live
               :summary="stepsSummary(turn)"
               @toggle="toggleSteps(turn)"
             />
@@ -674,7 +683,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
             <div v-if="answerDone(turn)" class="msg-meta agent-meta" :class="{ pinned: isMarked(`a-${turn.key}`) }">
               <button
                 class="meta-copy"
-                :title="copiedKey === `a-${turn.key}` || failedKey === `a-${turn.key}` ? copyLabel(`a-${turn.key}`) : '复制回答（Markdown 原文）'"
+                :title="copiedKey === `a-${turn.key}` || failedKey === `a-${turn.key}` ? copyLabel(`a-${turn.key}`) : t(`复制回答（Markdown 原文）`)"
                 :aria-label="copyLabel(`a-${turn.key}`)"
                 @click="copyText(`a-${turn.key}`, answerText(turn.messages), renderMarkdown(answerText(turn.messages)))"
               >
@@ -735,18 +744,18 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                 <img v-if="item.kind === 'image'" :src="item.preview" alt="" />
                 <span v-else-if="item.kind === 'audio'" class="attach-icon">🎙</span>
                 <span class="attach-name">{{ attachmentLabel(item) }}</span>
-                <button class="attach-x" title="移除" @click="removeAttachment(index)">×</button>
+                <button class="attach-x" :title="t(`移除`)" @click="removeAttachment(index)">×</button>
               </div>
             </div>
             <p v-if="attachError" class="attach-error">{{ attachError }}</p>
             <p v-if="voiceError" class="attach-error">
               {{ voiceError }}
-              <button v-if="!sttReady" class="link" @click="actions.setView('settings')">去配置</button>
+              <button v-if="!sttReady" class="link" @click="actions.setView('settings')">{{ t("去配置") }}</button>
             </p>
 
             <!-- @ 引用会话的候选列表：浮在输入框上面。 -->
             <div v-if="mention && mentionList.length > 0" class="mention-menu" role="listbox">
-              <div class="mention-head">引用会话：模型会先读它，再回答你</div>
+              <div class="mention-head">{{ t("引用会话：模型会先读它，再回答你") }}</div>
               <button
                 v-for="(session, index) in mentionList"
                 :key="session.id"
@@ -757,8 +766,8 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                 @mousedown.prevent="pickMention(session)"
                 @mouseenter="mentionIndex = index"
               >
-                <span class="mention-title">{{ session.title || "未命名会话" }}</span>
-                <span class="mention-meta">{{ session.parentId ? "子 agent · " : "" }}{{ formatMessageTime(Date.parse(session.updatedAt)) }}</span>
+                <span class="mention-title">{{ session.title || t("未命名会话") }}</span>
+                <span class="mention-meta">{{ session.parentId ? t("子 agent · ") : "" }}{{ formatMessageTime(Date.parse(session.updatedAt)) }}</span>
               </button>
             </div>
             <textarea
@@ -772,8 +781,8 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
               @paste="onPaste"
               :placeholder="
                 store.busy
-                  ? '这一轮还在跑，现在发的会插进这一轮'
-                  : '随心输入…… Enter 发送，Shift+Enter 换行'
+                  ? t(`这一轮还在跑，现在发的会插进这一轮`)
+                  : t(`随心输入…… Enter 发送，Shift+Enter 换行`)
               "
               @keydown="onKeydown"
             />
@@ -787,13 +796,13 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
 
             <div class="bar">
               <div class="bar-left">
-                <button class="chip" title="贴图片或文本文件（也可以直接粘贴/拖进来）" @click="picker?.click()">
+                <button class="chip" :title="t(`贴图片或文本文件（也可以直接粘贴/拖进来）`)" @click="picker?.click()">
                   <span class="chip-icon">+</span>
-                  附件
+                  {{ t("附件") }}
                 </button>
-                <button class="chip" title="引用另一个会话：模型会先读它（也可以直接打 @）" @mousedown.prevent @click="startMention()">
+                <button class="chip" :title="t(`引用另一个会话：模型会先读它（也可以直接打 @）`)" @mousedown.prevent @click="startMention()">
                   <span class="chip-icon">@</span>
-                  引用会话
+                  {{ t("引用会话") }}
                 </button>
 
                 <!-- 工作区按会话设。摆在这里而不是配置页：它是「这次要在哪儿
@@ -803,21 +812,21 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                   {{ workspaceLabel }}
                 </button>
                 <div v-if="workspaceOpen" class="menu" @click.stop>
-                  <div class="menu-head"><span>会话工作区</span></div>
+                  <div class="menu-head"><span>{{ t("会话工作区") }}</span></div>
                   <div class="menu-note pad">
                     {{
                       store.sessionInfo?.workspace
                         ? store.sessionInfo.workspace
-                        : "没有设置。相对路径按主目录解析，任何写入都会先问你一次。"
+                        : t("没有设置。相对路径按主目录解析，任何写入都会先问你一次。")
                     }}
                   </div>
-                  <button class="menu-item" @click="chooseWorkspace()">选择目录…</button>
+                  <button class="menu-item" @click="chooseWorkspace()">{{ t("选择目录…") }}</button>
                   <button
                     v-if="store.sessionInfo?.workspace"
                     class="menu-item"
                     @click="clearWorkspace()"
                   >
-                    清除（回到未设置）
+                    {{ t("清除（回到未设置）") }}
                   </button>
                 </div>
                 <!-- 工具数是「这次能用什么」最直接的一个数；有挂载失败时标红。 -->
@@ -827,36 +836,36 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                   @click="statusOpen = !statusOpen"
                 >
                   <span class="chip-icon">{{ failedMounts.length > 0 ? "!" : "·" }}</span>
-                  工具 {{ toolCount }}
+                  {{ t("工具 {n}", { n: toolCount }) }}
                 </button>
                 <div v-if="statusOpen" class="menu status-menu" @click.stop>
-                  <div class="menu-head"><span>这个会话挂上了什么</span></div>
+                  <div class="menu-head"><span>{{ t("这个会话挂上了什么") }}</span></div>
                   <div class="status-row">
-                    <span class="menu-name">内置工具与插件</span>
-                    <span class="menu-note">{{ (store.sessionInfo?.tools ?? []).join("、") || "无" }}</span>
+                    <span class="menu-name">{{ t("内置工具与插件") }}</span>
+                    <span class="menu-note">{{ (store.sessionInfo?.tools ?? []).join(t("、")) || t("无") }}</span>
                   </div>
                   <!-- 代码模式：模型面前只有 exec 一个工具，但下面这些在脚本里
                        都能 tools.xxx() 调到。不列出来用户会以为 MCP 没挂上。 -->
                   <div v-if="folded.length > 0" class="status-row">
-                    <span class="menu-name">收进 exec 的工具（{{ folded.length }}）</span>
-                    <span class="menu-note">{{ folded.join("、") }}</span>
+                    <span class="menu-name">{{ t("收进 exec 的工具（{n}）", { n: folded.length }) }}</span>
+                    <span class="menu-note">{{ folded.join(t("、")) }}</span>
                   </div>
                   <div v-if="(store.sessionInfo?.skills ?? []).length > 0" class="status-row">
-                    <span class="menu-name">技能</span>
-                    <span class="menu-note">{{ (store.sessionInfo?.skills ?? []).join("、") }}</span>
+                    <span class="menu-name">{{ t("技能") }}</span>
+                    <span class="menu-note">{{ (store.sessionInfo?.skills ?? []).join(t("、")) }}</span>
                   </div>
                   <div v-for="[name, status] in mounts" :key="name" class="status-row">
-                    <span class="menu-name" :class="{ bad: status.includes('失败') }">{{ name }}</span>
+                    <span class="menu-name" :class="{ bad: mountFailed(status) }">{{ name }}</span>
                     <span class="menu-note">{{ status }}</span>
                   </div>
                   <p v-if="mounts.length === 0" class="menu-note pad">
-                    没有挂载任何 MCP server。到「MCP」页添加。
+                    {{ t("没有挂载任何 MCP server。到「MCP」页添加。") }}
                   </p>
                 </div>
 
                 <button class="chip" :data-policy="store.config?.profile" @click="policyOpen = !policyOpen">
                   <span class="chip-icon">!</span>
-                  {{ policy?.label ?? "审批" }}
+                  {{ policy?.label ?? t("审批") }}
                 </button>
                 <div v-if="policyOpen" class="menu" @click.stop>
                   <button
@@ -875,31 +884,31 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
               <div class="bar-right">
                 <div class="model">
                   <button class="model-button" @click="openModelMenu()">
-                    {{ store.model || "选择模型" }}
+                    {{ store.model || t("选择模型") }}
                     <span class="caret-down">⌄</span>
                   </button>
                   <div v-if="modelOpen" class="menu model-menu" @click.stop>
                     <div class="menu-head">
-                      <span>模型<em v-if="modelSearch">{{ choices.length }} / {{ allChoices.length }}</em></span>
-                      <button class="link" @click="actions.loadProviders()">刷新</button>
+                      <span>{{ t("模型") }}<em v-if="modelSearch">{{ choices.length }} / {{ allChoices.length }}</em></span>
+                      <button class="link" @click="actions.loadProviders()">{{ t("刷新") }}</button>
                     </div>
                     <input
                       ref="searchBox"
                       v-model="modelSearch"
                       class="menu-search"
-                      placeholder="搜索模型或服务名"
+                      :placeholder="t(`搜索模型或服务名`)"
                       @keydown.enter="choices[0] && pickModel(choices[0])"
                       @keydown.esc="modelOpen = false"
                     />
-                    <p v-if="store.providersLoading" class="menu-note pad">正在读取模型服务…</p>
+                    <p v-if="store.providersLoading" class="menu-note pad">{{ t("正在读取模型服务…") }}</p>
                     <p v-else-if="store.providersError" class="menu-note pad warn">
                       {{ store.providersError }}
                     </p>
                     <p v-else-if="allChoices.length === 0" class="menu-note pad">
-                      还没有能用的模型。到「模型服务」页添加端点、填 Key、写上模型名。
+                      {{ t("还没有能用的模型。到「模型服务」页添加端点、填 Key、写上模型名。") }}
                     </p>
                     <p v-else-if="choices.length === 0" class="menu-note pad">
-                      没有匹配「{{ modelSearch }}」的模型。
+                      {{ t("没有匹配「{query}」的模型。", { query: modelSearch }) }}
                     </p>
                     <button
                       v-for="choice in choices"
@@ -920,7 +929,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                 <span v-if="voiceState === 'recording'" class="voice-live">
                   <span class="voice-dot" :style="{ transform: `scale(${1 + voiceLevel * 0.9})` }"></span>
                   {{ formatVoiceTime(voiceElapsed) }}
-                  <button class="voice-cancel" title="丢掉这段（Esc）" @click="cancelVoice()">×</button>
+                  <button class="voice-cancel" :title="t(`丢掉这段（Esc）`)" @click="cancelVoice()">×</button>
                 </span>
                 <button
                   class="mic"
@@ -938,14 +947,14 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                   </svg>
                   <span v-else class="voice-spin" aria-hidden="true"></span>
                 </button>
-                <button v-if="store.busy" class="stop" title="停止" @click="actions.interrupt()">
+                <button v-if="store.busy" class="stop" :title="t(`停止`)" @click="actions.interrupt()">
                   ■
                 </button>
                 <button
                   v-else
                   class="send"
                   :disabled="!draft.trim()"
-                  title="发送"
+                  :title="t(`发送`)"
                   @click="submit()"
                 >
                   ↑

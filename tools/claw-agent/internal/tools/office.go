@@ -12,10 +12,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -88,13 +90,11 @@ func legacyOfficeError(name string) error {
 		".ppt": ".pptx", ".pps": ".pptx", ".pot": ".pptx",
 	}[ext]
 	if modern == "" {
-		modern = "新格式（docx/xlsx/pptx）"
+		modern = i18n.D("新格式（docx/xlsx/pptx）")
 	}
-	return fmt.Errorf(
-		"%s 是 97-2003 的旧二进制格式（%s），暂不支持读取。请用 Office/WPS 另存为 %s 后再读；"+
-			"也可以用本机的转换工具先转一下，例如 macOS 上 `textutil -convert docx 文件.doc`（仅限 Word），"+
-			"或装了 LibreOffice 时用 `soffice --headless --convert-to %s 文件%s`",
-		filepath.Base(name), ext, modern, strings.TrimPrefix(modern, "."), ext,
+	return i18n.E(
+		"{name} 是 97-2003 的旧二进制格式（{ext}），暂不支持读取。请用 Office/WPS 另存为 {modern} 后再读；也可以用本机的转换工具先转一下，例如 macOS 上 `textutil -convert docx 文件.doc`（仅限 Word），或装了 LibreOffice 时用 `soffice --headless --convert-to {format} 文件{ext}`",
+		"name", filepath.Base(name), "ext", ext, "modern", modern, "format", strings.TrimPrefix(modern, "."),
 	)
 }
 
@@ -117,26 +117,26 @@ func RegisterOfficeTools(registry *Registry) error {
 func readOfficeTool() Tool {
 	return Tool{
 		Name: "read_office",
-		Description: "读取 Word（.docx）、Excel（.xlsx/.xlsm）、PowerPoint（.pptx）文件的内容，转成 Markdown 文本。" +
-			"Word 给出标题层级、列表、表格；Excel 按工作表与区域给出表格（公式显示计算值并附公式）；" +
-			"PPT 按页给出标题、正文与演讲者备注。不支持 97-2003 的 .doc/.xls/.ppt。内容过长会截断并说明怎么读剩下的。",
+		Description: "Read the contents of a Word (.docx), Excel (.xlsx/.xlsm) or PowerPoint (.pptx) file as Markdown text. " +
+			"Word yields heading levels, lists and tables; Excel yields tables per sheet and range (formulas show the computed value plus the formula); " +
+			"PowerPoint yields each slide's title, body and speaker notes. The 97-2003 .doc/.xls/.ppt formats are not supported. Long content is truncated, with a note on how to read the rest.",
 		Effect: EffectRead,
 		Schema: schema(map[string]any{
 			"path": map[string]any{
-				"type": "string", "description": "文件路径。相对路径按工作区解析，也可以给绝对路径",
+				"type": "string", "description": "File path. Relative paths resolve against the workspace; absolute paths also work",
 			},
 			"sheet": map[string]any{
-				"type": "string", "description": "仅 Excel：工作表名称，不传读第一个",
+				"type": "string", "description": "Excel only: sheet name; omit to read the first sheet",
 			},
 			"range": map[string]any{
-				"type": "string", "description": "仅 Excel：读取区域，例如 A1:F200；不传读前 200 行",
+				"type": "string", "description": "Excel only: range to read, e.g. A1:F200; omit to read the first 200 rows",
 			},
 			"slides": map[string]any{
-				"type": "string", "description": "仅 PPT：页码范围，例如 3 或 3-8；不传读全部",
+				"type": "string", "description": "PowerPoint only: slide range, e.g. 3 or 3-8; omit to read all slides",
 			},
 			"offset": map[string]any{
 				"type": "integer", "minimum": 0,
-				"description": "仅 Word：从转换后文本的第几个字符开始返回，用于接着读被截断的部分",
+				"description": "Word only: character offset in the converted text to start from, for continuing past a truncation",
 			},
 		}, "path"),
 		Handler: func(_ context.Context, raw json.RawMessage, env *Env) (string, error) {
@@ -156,17 +156,17 @@ func readOfficeTool() Tool {
 			}
 			kind, legacy := officeKind(path)
 			if kind == "" {
-				return "", fmt.Errorf("%s 不是 Office 文件（支持 .docx/.xlsx/.xlsm/.pptx）；普通文本用 read_file", args.Path)
+				return "", i18n.E("{path} 不是 Office 文件（支持 .docx/.xlsx/.xlsm/.pptx）；普通文本用 read_file", "path", args.Path)
 			}
 			if legacy {
 				return "", legacyOfficeError(path)
 			}
 			info, err := os.Stat(path)
 			if err != nil {
-				return "", fmt.Errorf("读取失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
 			}
 			if info.IsDir() {
-				return "", fmt.Errorf("%s 是目录，不是文件", args.Path)
+				return "", i18n.E("{path} 是目录，不是文件", "path", args.Path)
 			}
 			if err := checkNotOLE(path); err != nil {
 				return "", err
@@ -188,7 +188,7 @@ func readOfficeTool() Tool {
 func checkNotOLE(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("读取失败：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
 	}
 	defer file.Close()
 	head := make([]byte, len(oleMagic))
@@ -211,7 +211,7 @@ type ooxmlPackage struct {
 func openPackage(path string) (*ooxmlPackage, error) {
 	reader, err := zip.OpenReader(path)
 	if err != nil {
-		return nil, fmt.Errorf("打不开 %s：不是有效的 Office 文件（%v）", filepath.Base(path), err)
+		return nil, i18n.E("打不开 {name}：不是有效的 Office 文件（{err}）", "name", filepath.Base(path), "err", err)
 	}
 	pkg := &ooxmlPackage{closer: reader, files: map[string]*zip.File{}}
 	for _, file := range reader.File {
@@ -232,19 +232,19 @@ func (p *ooxmlPackage) has(name string) bool {
 func (p *ooxmlPackage) read(name string) ([]byte, error) {
 	file, ok := p.files[strings.ToLower(strings.TrimPrefix(name, "/"))]
 	if !ok {
-		return nil, fmt.Errorf("包内缺少 %s：%w", name, os.ErrNotExist)
+		return nil, fmt.Errorf("%s: %w", i18n.D("包内缺少 {name}", "name", name), os.ErrNotExist)
 	}
 	reader, err := file.Open()
 	if err != nil {
-		return nil, fmt.Errorf("解压 %s 失败：%w", name, err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("解压 {name} 失败", "name", name), err)
 	}
 	defer reader.Close()
 	data, err := io.ReadAll(io.LimitReader(reader, maxOfficePart+1))
 	if err != nil {
-		return nil, fmt.Errorf("解压 %s 失败：%w", name, err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("解压 {name} 失败", "name", name), err)
 	}
 	if len(data) > maxOfficePart {
-		return nil, fmt.Errorf("%s 解压后超过 %d MB，不读", name, maxOfficePart>>20)
+		return nil, i18n.E("{name} 解压后超过 {mb} MB，不读", "name", name, "mb", maxOfficePart>>20)
 	}
 	return data, nil
 }
@@ -271,7 +271,7 @@ func (p *ooxmlPackage) relsOf(part string) (map[string]opcRel, error) {
 		Rels []opcRel `xml:"Relationship"`
 	}
 	if err := xml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("解析 %s 失败：%w", relsPathOf(part), err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("解析 {name} 失败", "name", relsPathOf(part)), err)
 	}
 	out := make(map[string]opcRel, len(doc.Rels))
 	for _, rel := range doc.Rels {
@@ -341,7 +341,7 @@ func parseXML(data []byte) (*xnode, error) {
 		}
 	}
 	if len(root.kids) == 0 {
-		return nil, errors.New("XML 为空")
+		return nil, i18n.E("XML 为空")
 	}
 	return root.kids[0], nil
 }
@@ -405,7 +405,35 @@ func clipOffice(text, hint string) string {
 	if !truncated {
 		return text
 	}
-	return kept + "\n\n[内容已截断：" + hint + "]"
+	return kept + "\n\n" + i18n.D("[内容已截断：{hint}]", "hint", hint)
+}
+
+// officeZh 表示界面语言是中文。列表分隔符、括号这类标点跟着语言走，
+// 不值得各占一条词条。
+func officeZh() bool { return i18n.Default() == i18n.Chinese }
+
+// officeListSep 是并列项之间的分隔符：中文用顿号，英文用逗号。
+func officeListSep() string {
+	if officeZh() {
+		return "、"
+	}
+	return ", "
+}
+
+// officeClauseSep 是分句之间的分隔符。
+func officeClauseSep() string {
+	if officeZh() {
+		return "；"
+	}
+	return "; "
+}
+
+// officeParen 给一段附注加括号：中文用全角括号紧贴，英文前面空一格。
+func officeParen(text string) string {
+	if officeZh() {
+		return "（" + text + "）"
+	}
+	return " (" + text + ")"
 }
 
 // clipText 按字节算上限、按 rune 边界切，避免把一个汉字切成半个。
@@ -510,7 +538,7 @@ func buildPackage(parts []zipPart) ([]byte, error) {
 // 要么是完整的新的。
 func writeFileAtomic(target string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return fmt.Errorf("创建父目录失败：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("创建父目录失败"), err)
 	}
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(target); err == nil {
@@ -518,22 +546,22 @@ func writeFileAtomic(target string, data []byte) error {
 	}
 	temp, err := os.CreateTemp(filepath.Dir(target), ".aiclaw-*"+filepath.Ext(target))
 	if err != nil {
-		return fmt.Errorf("写入失败：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 	}
 	tempName := temp.Name()
 	defer os.Remove(tempName) // 成功改名之后这里是空操作
 	if _, err := temp.Write(data); err != nil {
 		temp.Close()
-		return fmt.Errorf("写入失败：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 	}
 	if err := temp.Close(); err != nil {
-		return fmt.Errorf("写入失败：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 	}
 	if err := os.Chmod(tempName, mode); err != nil {
-		return fmt.Errorf("写入失败：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 	}
 	if err := os.Rename(tempName, target); err != nil {
-		return fmt.Errorf("写入失败：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 	}
 	return nil
 }
@@ -617,7 +645,11 @@ func requireExt(target string, allowed ...string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("文件扩展名必须是 %s，当前是 %q", strings.Join(allowed, " 或 "), ext)
+	or := " or "
+	if officeZh() {
+		or = " 或 "
+	}
+	return i18n.E("文件扩展名必须是 {allowed}，当前是 {ext}", "allowed", strings.Join(allowed, or), "ext", strconv.Quote(ext))
 }
 
 // approveOfficeWrite 与 write_file 同一套审批：工作区内不问，工作区外问一句，

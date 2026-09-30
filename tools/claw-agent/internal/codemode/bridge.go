@@ -1,11 +1,12 @@
 package codemode
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/dop251/goja"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 /*
@@ -90,14 +91,15 @@ func (b *toolBridge) Has(key string) bool {
 // 不返回 undefined 是因为那条路的报错（undefined is not a function）
 // 指向调用点，而真正错的是名字。
 func (b *toolBridge) missing(key string) goja.Value {
-	message := fmt.Sprintf("没有名为 %s 的工具", key)
+	// 英文是 "No such tool: …"，与系统提示词里说的 "no such tool" 对得上。
+	message := i18n.D("没有名为 {name} 的工具", "name", key)
 	if strings.HasPrefix(key, "tools.") {
-		message += "（tools[名字] 里的名字不带 tools. 前缀）"
+		message += i18n.D("（tools[名字] 里的名字不带 tools. 前缀）")
 	}
 	if candidates := b.suggest(key); len(candidates) > 0 {
-		message += "；最接近的是 " + strings.Join(candidates, "、")
+		message += i18n.D("；最接近的是 {candidates}", "candidates", strings.Join(candidates, i18n.D("、")))
 	} else {
-		message += "；用 ALL_TOOLS 查有哪些工具"
+		message += i18n.D("；用 ALL_TOOLS 查有哪些工具")
 	}
 	return b.vm.ToValue(func(goja.FunctionCall) goja.Value {
 		panic(b.vm.NewTypeError(message))

@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	"errors"
-	"fmt"
 	"mime"
 	"net"
 	"net/smtp"
@@ -16,6 +14,8 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	gomail "github.com/emersion/go-message/mail"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // Outgoing 是要发出去的一封信。
@@ -54,7 +54,7 @@ func ParseRecipients(values []string) ([]*gomail.Address, error) {
 		for _, piece := range splitRecipients(value) {
 			address, err := gomail.ParseAddress(piece)
 			if err != nil {
-				return nil, fmt.Errorf("收件地址不对：%q", piece)
+				return nil, i18n.E("收件地址不对：{address}", "address", strconv.Quote(piece))
 			}
 			result = append(result, address)
 		}
@@ -104,7 +104,7 @@ func Send(ctx context.Context, account Account, outgoing Outgoing) (SendResult, 
 		return SendResult{}, err
 	}
 	if len(to)+len(cc)+len(bcc) == 0 {
-		return SendResult{}, errors.New("没有收件人")
+		return SendResult{}, i18n.E("没有收件人")
 	}
 	message, messageID, err := compose(account, to, cc, outgoing)
 	if err != nil {
@@ -244,7 +244,7 @@ func smtpClientAt(ctx context.Context, account Account, host string) (*smtp.Clie
 		connection, err = dialer.DialContext(ctx, "tcp", address)
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("连不上发信服务器 %s：%w", address, err)
+		return nil, nil, wrapErr(i18n.D("连不上发信服务器 {address}", "address", address), err)
 	}
 	stop := make(chan struct{})
 	go func() {
@@ -259,7 +259,7 @@ func smtpClientAt(ctx context.Context, account Account, host string) (*smtp.Clie
 	if err != nil {
 		close(stop)
 		_ = connection.Close()
-		return nil, nil, fmt.Errorf("发信服务器 %s 没有正常应答：%w", address, err)
+		return nil, nil, wrapErr(i18n.D("发信服务器 {address} 没有正常应答", "address", address), err)
 	}
 	cleanup := func() {
 		close(stop)
@@ -267,21 +267,21 @@ func smtpClientAt(ctx context.Context, account Account, host string) (*smtp.Clie
 	}
 	if err := client.Hello("localhost"); err != nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("发信服务器握手失败：%w", err)
+		return nil, nil, wrapErr(i18n.D("发信服务器握手失败"), err)
 	}
 	if account.SMTPPort != 465 && !insecureForTest {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
 			cleanup()
-			return nil, nil, fmt.Errorf("发信服务器 %s 不支持加密连接，不能在明文上发密码", address)
+			return nil, nil, i18n.E("发信服务器 {address} 不支持加密连接，不能在明文上发密码", "address", address)
 		}
 		if err := client.StartTLS(&tls.Config{ServerName: account.SMTPHost}); err != nil {
 			cleanup()
-			return nil, nil, fmt.Errorf("发信服务器加密握手失败：%w", err)
+			return nil, nil, wrapErr(i18n.D("发信服务器加密握手失败"), err)
 		}
 	}
 	if err := client.Auth(loginAuth(account)); err != nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("发信服务器拒绝登录（%v）。%s", err, account.hint())
+		return nil, nil, i18n.E("发信服务器拒绝登录（{error}）。{hint}", "error", err, "hint", account.hint())
 	}
 	return client, cleanup, nil
 }
@@ -308,23 +308,23 @@ func deliver(ctx context.Context, account Account, recipients []string, message 
 	}
 	defer cleanup()
 	if err := client.Mail(account.Address); err != nil {
-		return fmt.Errorf("发信服务器不接受发件人 %s：%w", account.Address, err)
+		return wrapErr(i18n.D("发信服务器不接受发件人 {address}", "address", account.Address), err)
 	}
 	for _, recipient := range recipients {
 		if err := client.Rcpt(recipient); err != nil {
-			return fmt.Errorf("发信服务器不接受收件人 %s：%w", recipient, err)
+			return wrapErr(i18n.D("发信服务器不接受收件人 {address}", "address", recipient), err)
 		}
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return fmt.Errorf("发信失败：%w", err)
+		return wrapErr(i18n.D("发信失败"), err)
 	}
 	if _, err := writer.Write(message); err != nil {
 		_ = writer.Close()
-		return fmt.Errorf("发信失败：%w", err)
+		return wrapErr(i18n.D("发信失败"), err)
 	}
 	if err := writer.Close(); err != nil {
-		return fmt.Errorf("发信服务器没有收下这封信：%w", err)
+		return wrapErr(i18n.D("发信服务器没有收下这封信"), err)
 	}
 	return client.Quit()
 }
@@ -338,7 +338,7 @@ func saveSent(ctx context.Context, account Account, message []byte) (string, err
 	defer c.close()
 	folder := c.sentFolder()
 	if folder == "" {
-		return "", errors.New("没找到「已发送」信箱")
+		return "", i18n.E("没找到「已发送」信箱")
 	}
 	command := c.client.Append(folder, int64(len(message)), &imap.AppendOptions{Flags: []imap.Flag{imap.FlagSeen}, Time: time.Now()})
 	if _, err := command.Write(message); err != nil {

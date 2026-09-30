@@ -113,7 +113,7 @@ func TestCurrentTimeIsSpelledOutForTheModel(t *testing.T) {
 	// 星期与时区都要有：「最近一周」按周几算，时区错了整件事偏一天。
 	at := time.Date(2026, 9, 22, 14, 5, 0, 0, time.FixedZone("CST", 8*3600))
 	line := DescribeNow(at)
-	for _, want := range []string{"2026-09-22", "周二", "14:05", "CST", "UTC+8"} {
+	for _, want := range []string{"2026-09-22", "Tuesday", "14:05", "CST", "UTC+8"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("时间描述里缺 %q：%s", want, line)
 		}

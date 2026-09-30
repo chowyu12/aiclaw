@@ -12,13 +12,14 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 type Role string
@@ -132,13 +133,13 @@ type Client struct {
 func New(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
-		return nil, errors.New("模型端点未配置")
+		return nil, i18n.E("模型端点未配置")
 	}
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-		return nil, fmt.Errorf("模型端点必须是 http(s) 地址：%s", baseURL)
+		return nil, i18n.E("模型端点必须是 http(s) 地址：{url}", "url", baseURL)
 	}
 	if strings.TrimSpace(apiKey) == "" {
-		return nil, errors.New("模型 Key 未配置")
+		return nil, i18n.E("模型 Key 未配置")
 	}
 	if timeout <= 0 {
 		// 单次调用可能很长（长上下文 + 高推理档位），上限放宽；
@@ -297,7 +298,7 @@ func (c *Client) Stream(
 ) (Response, error) {
 	payload, err := json.Marshal(buildWireRequest(req))
 	if err != nil {
-		return Response{}, fmt.Errorf("编码请求失败：%w", err)
+		return Response{}, fmt.Errorf("%s: %w", i18n.D("编码请求失败"), err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(
@@ -312,7 +313,7 @@ func (c *Client) Stream(
 
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
-		return Response{}, &Error{Message: "调用模型失败：" + err.Error(), Err: err}
+		return Response{}, &Error{Message: i18n.D("调用模型失败：{error}", "error", err), Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -456,7 +457,7 @@ func consumeStream(body io.Reader, onDelta func(Delta)) (Response, error) {
 			// 流里带出来的错误没有 HTTP 状态码可依。当成传输层问题（可重试）：
 			// 上游把错误塞进流里通常是后端临时故障，而请求本身的问题
 			// （参数、鉴权、超窗）在建流之前就以 4xx 返回了。
-			return response, &Error{Message: "模型流式返回错误：" + chunk.Error.Message}
+			return response, &Error{Message: i18n.D("模型流式返回错误：{message}", "message", chunk.Error.Message)}
 		}
 		if chunk.Usage != nil {
 			response.Usage = Usage{
@@ -484,7 +485,7 @@ func consumeStream(body io.Reader, onDelta func(Delta)) (Response, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return response, &Error{Message: "读取模型流失败：" + err.Error(), Err: err}
+		return response, &Error{Message: i18n.D("读取模型流失败：{error}", "error", err), Err: err}
 	}
 
 	response.Content = content.String()

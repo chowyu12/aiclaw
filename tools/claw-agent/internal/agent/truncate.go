@@ -1,9 +1,10 @@
 package agent
 
 import (
-	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // maxToolOutputBytes 是单条工具结果进入历史时的上限。
@@ -31,10 +32,10 @@ func truncateForHistory(text string) string {
 	tail := trimFromCharBoundary(text[len(text)-half:])
 	omitted := len(text) - len(head) - len(tail)
 	lines := strings.Count(text, "\n") + 1
-	return fmt.Sprintf(
-		"%s\n\n…（输出过长已截断中间部分：共 %d 字节 / %d 行，省略 %d 字节）…\n\n%s",
-		head, len(text), lines, omitted, tail,
-	)
+	return head + "\n\n…" + i18n.D(
+		"（输出过长已截断中间部分：共 {bytes} 字节 / {lines} 行，省略 {omitted} 字节）",
+		"bytes", len(text), "lines", lines, "omitted", omitted,
+	) + "…\n\n" + tail
 }
 
 // trimToCharBoundary 把尾部半个 UTF-8 字符去掉。

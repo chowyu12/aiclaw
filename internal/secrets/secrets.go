@@ -19,10 +19,11 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // EnvKey 是主密钥的环境变量名。宿主想自己管密钥（比如从系统钥匙串取）就设它。
@@ -43,7 +44,7 @@ func Load(dir string) (*Cipher, error) {
 	if raw := strings.TrimSpace(os.Getenv(EnvKey)); raw != "" {
 		key, err := hex.DecodeString(raw)
 		if err != nil || len(key) != 32 {
-			return nil, fmt.Errorf("%s 必须是 64 位十六进制（32 字节）", EnvKey)
+			return nil, i18n.E("{env} 必须是 64 位十六进制（32 字节）", "env", EnvKey)
 		}
 		return New(key)
 	}
@@ -51,28 +52,28 @@ func Load(dir string) (*Cipher, error) {
 	if raw, err := os.ReadFile(path); err == nil {
 		key, err := hex.DecodeString(strings.TrimSpace(string(raw)))
 		if err != nil || len(key) != 32 {
-			return nil, fmt.Errorf("密钥文件 %s 内容不对（应为 64 位十六进制）", path)
+			return nil, i18n.E("密钥文件 {path} 内容不对（应为 64 位十六进制）", "path", path)
 		}
 		return New(key)
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("读取密钥文件失败：%w", err)
+		return nil, i18n.E("读取密钥文件失败：{error}", "error", err)
 	}
 
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
-		return nil, fmt.Errorf("生成主密钥失败：%w", err)
+		return nil, i18n.E("生成主密钥失败：{error}", "error", err)
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建密钥目录失败：%w", err)
+		return nil, i18n.E("创建密钥目录失败：{error}", "error", err)
 	}
 	// 0600：只有本账号能读。先写临时文件再改名，免得写一半崩了留下半个密钥。
 	temp := path + ".tmp"
 	if err := os.WriteFile(temp, []byte(hex.EncodeToString(key)+"\n"), 0o600); err != nil {
-		return nil, fmt.Errorf("写密钥文件失败：%w", err)
+		return nil, i18n.E("写密钥文件失败：{error}", "error", err)
 	}
 	if err := os.Rename(temp, path); err != nil {
 		_ = os.Remove(temp)
-		return nil, fmt.Errorf("写密钥文件失败：%w", err)
+		return nil, i18n.E("写密钥文件失败：{error}", "error", err)
 	}
 	return New(key)
 }
@@ -80,7 +81,7 @@ func Load(dir string) (*Cipher, error) {
 // New 用给定的 32 字节密钥建 Cipher。
 func New(key []byte) (*Cipher, error) {
 	if len(key) != 32 {
-		return nil, fmt.Errorf("主密钥必须是 32 字节，给了 %d", len(key))
+		return nil, i18n.E("主密钥必须是 32 字节，给了 {size}", "size", len(key))
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
@@ -111,8 +112,15 @@ func (c *Cipher) Seal(plain string) string {
 	return prefix + base64.StdEncoding.EncodeToString(sealed)
 }
 
-// ErrUnreadable 表示密文解不开：主密钥换了，或者值被改过。
-var ErrUnreadable = errors.New("凭据解不开：主密钥变了，或者库里的值被改过")
+// ErrUnreadable 表示密文解不开：主密钥换了，或者值被改过。文字在取用时才翻译
+// （跟着界面语言），errors.Is 照常能认。
+var ErrUnreadable error = unreadableError{}
+
+type unreadableError struct{}
+
+func (unreadableError) Error() string {
+	return i18n.D("凭据解不开：主密钥变了，或者库里的值被改过")
+}
 
 // Open 解一个存起来的值。没有密文前缀的当明文原样返回（老库里的值）。
 func (c *Cipher) Open(stored string) (string, error) {

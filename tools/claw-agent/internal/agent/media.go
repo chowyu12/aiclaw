@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 	"os"
 	"path/filepath"
@@ -64,14 +65,14 @@ func (s *Session) roleClient(role protocol.RoleModel) (*llm.Client, error) {
 func (s *Session) generateImageTool(role protocol.RoleModel) tools.Tool {
 	return tools.Tool{
 		Name: "generate_image",
-		Description: "按文字描述生成一张图，存进工作区的 " + generatedDir + "/ 并展示给用户。" +
-			"描述要具体：画面内容、风格、构图都写清楚，模型不会追问。",
+		Description: "Generate an image from a text description, save it under " + generatedDir + "/ in the workspace, and show it to the user. " +
+			"Be specific: spell out the content, style and composition — the image model won't ask follow-up questions.",
 		// 花钱、出网、在磁盘上留东西：默认档位下要确认。
 		Effect: tools.EffectExternal,
 		Schema: mediaSchema(map[string]any{
-			"prompt": map[string]any{"type": "string", "description": "画面描述，越具体越好"},
+			"prompt": map[string]any{"type": "string", "description": "Image description; the more specific the better"},
 			"size": map[string]any{
-				"type": "string", "description": "尺寸，形如 1024x1024；不传用服务的默认值",
+				"type": "string", "description": "Size, e.g. 1024x1024; omit to use the service default",
 			},
 		}, "prompt"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
@@ -80,14 +81,14 @@ func (s *Session) generateImageTool(role protocol.RoleModel) tools.Tool {
 				Size   string `json:"size"`
 			}
 			if err := json.Unmarshal(raw, &args); err != nil {
-				return "", fmt.Errorf("参数不是合法 JSON 对象：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("参数不是合法 JSON 对象"), err)
 			}
 			if strings.TrimSpace(args.Prompt) == "" {
-				return "", fmt.Errorf("prompt 不能为空")
+				return "", i18n.E("prompt 不能为空")
 			}
 			if err := env.RequestApproval(
 				ctx, tools.EffectExternal, protocol.ApprovalTool,
-				"用 "+role.Model+" 生成图片", args.Prompt, "会调用外部模型服务并产生费用",
+				i18n.D("用 {model} 生成图片", "model", role.Model), args.Prompt, i18n.D("会调用外部模型服务并产生费用"),
 			); err != nil {
 				return "", err
 			}
@@ -107,8 +108,8 @@ func (s *Session) generateImageTool(role protocol.RoleModel) tools.Tool {
 			env.Attach(data)
 			// 界面按这个路径把图画出来。
 			tools.Produce(ctx, path)
-			return fmt.Sprintf("已生成并保存到 %s（%.0f KB）。画面在下一条消息里。",
-				path, float64(len(data))/1024), nil
+			return i18n.D("已生成并保存到 {path}（{size} KB）。画面在下一条消息里。",
+				"path", path, "size", fmt.Sprintf("%.0f", float64(len(data))/1024)), nil
 		},
 	}
 }
@@ -116,18 +117,18 @@ func (s *Session) generateImageTool(role protocol.RoleModel) tools.Tool {
 func (s *Session) transcribeTool(role protocol.RoleModel) tools.Tool {
 	return tools.Tool{
 		Name: "transcribe_audio",
-		Description: "把一段音频转成文字（录音、会议、语音消息都行）。" +
-			"路径相对工作区解析，也可以给绝对路径。",
+		Description: "Transcribe an audio file to text (recordings, meetings, voice messages, etc.). " +
+			"Relative paths resolve against the workspace; absolute paths also work.",
 		Effect: tools.EffectExternal,
 		Schema: mediaSchema(map[string]any{
-			"path": map[string]any{"type": "string", "description": "音频文件路径"},
+			"path": map[string]any{"type": "string", "description": "Path to the audio file"},
 		}, "path"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
 			var args struct {
 				Path string `json:"path"`
 			}
 			if err := json.Unmarshal(raw, &args); err != nil {
-				return "", fmt.Errorf("参数不是合法 JSON 对象：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("参数不是合法 JSON 对象"), err)
 			}
 			path, err := env.ResolveRead(args.Path)
 			if err != nil {
@@ -135,13 +136,13 @@ func (s *Session) transcribeTool(role protocol.RoleModel) tools.Tool {
 			}
 			if err := env.RequestApproval(
 				ctx, tools.EffectExternal, protocol.ApprovalTool,
-				"转写 "+args.Path, path, "音频会被发到外部模型服务",
+				i18n.D("转写 {path}", "path", args.Path), path, i18n.D("音频会被发到外部模型服务"),
 			); err != nil {
 				return "", err
 			}
 			audio, err := os.ReadFile(path)
 			if err != nil {
-				return "", fmt.Errorf("读取失败：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
 			}
 			client, err := s.roleClient(role)
 			if err != nil {
@@ -152,7 +153,7 @@ func (s *Session) transcribeTool(role protocol.RoleModel) tools.Tool {
 				return "", err
 			}
 			if text == "" {
-				return "转写结果是空的——这段音频里可能没有语音。", nil
+				return i18n.D("转写结果是空的——这段音频里可能没有语音。"), nil
 			}
 			return text, nil
 		},
@@ -162,12 +163,12 @@ func (s *Session) transcribeTool(role protocol.RoleModel) tools.Tool {
 func (s *Session) speakTool(role protocol.RoleModel) tools.Tool {
 	return tools.Tool{
 		Name: "speak",
-		Description: "把一段文字读成语音，存进工作区的 " + generatedDir + "/ 并给用户一个可播放的文件。" +
-			"用户明确要「读出来」「生成音频」时才用，别每条回答都读。",
+		Description: "Convert text to speech, save it under " + generatedDir + "/ in the workspace, and give the user a playable file. " +
+			"Use it only when the user explicitly asks to \"read it aloud\" or \"generate audio\"; don't read out every answer.",
 		Effect: tools.EffectExternal,
 		Schema: mediaSchema(map[string]any{
-			"text":  map[string]any{"type": "string", "description": "要读的文字"},
-			"voice": map[string]any{"type": "string", "description": "音色名；不传用服务的默认值"},
+			"text":  map[string]any{"type": "string", "description": "Text to read"},
+			"voice": map[string]any{"type": "string", "description": "Voice name; omit to use the service default"},
 		}, "text"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
 			var args struct {
@@ -175,14 +176,14 @@ func (s *Session) speakTool(role protocol.RoleModel) tools.Tool {
 				Voice string `json:"voice"`
 			}
 			if err := json.Unmarshal(raw, &args); err != nil {
-				return "", fmt.Errorf("参数不是合法 JSON 对象：%w", err)
+				return "", fmt.Errorf("%s: %w", i18n.D("参数不是合法 JSON 对象"), err)
 			}
 			if strings.TrimSpace(args.Text) == "" {
-				return "", fmt.Errorf("text 不能为空")
+				return "", i18n.E("text 不能为空")
 			}
 			if err := env.RequestApproval(
 				ctx, tools.EffectExternal, protocol.ApprovalTool,
-				"用 "+role.Model+" 合成语音", firstLine(args.Text, 200), "会调用外部模型服务并产生费用",
+				i18n.D("用 {model} 合成语音", "model", role.Model), firstLine(args.Text, 200), i18n.D("会调用外部模型服务并产生费用"),
 			); err != nil {
 				return "", err
 			}
@@ -199,7 +200,7 @@ func (s *Session) speakTool(role protocol.RoleModel) tools.Tool {
 				return "", err
 			}
 			tools.Produce(ctx, path)
-			return fmt.Sprintf("已合成并保存到 %s（%.0f KB）。", path, float64(len(audio))/1024), nil
+			return i18n.D("已合成并保存到 {path}（{size} KB）。", "path", path, "size", fmt.Sprintf("%.0f", float64(len(audio))/1024)), nil
 		},
 	}
 }
@@ -215,30 +216,30 @@ func (s *Session) transcribeAttached(ctx context.Context, paths []string) string
 		return ""
 	}
 	if !role.Configured() {
-		return fmt.Sprintf("\n\n[附了 %d 段音频，但没有配听写模型，没能转成文字]", len(paths))
+		return fmt.Sprintf("\n\n[%d audio file(s) attached, but no speech-to-text model is configured, so they were not transcribed]", len(paths))
 	}
 	client, err := s.roleClient(role)
 	if err != nil {
-		return fmt.Sprintf("\n\n[附了 %d 段音频，但听写模型不可用：%v]", len(paths), err)
+		return fmt.Sprintf("\n\n[%d audio file(s) attached, but the speech-to-text model is unavailable: %v]", len(paths), err)
 	}
 	var out strings.Builder
 	for _, path := range paths {
 		name := filepath.Base(path)
 		audio, err := os.ReadFile(path)
 		if err != nil {
-			fmt.Fprintf(&out, "\n\n[音频 %s 读不了：%v]", name, err)
+			fmt.Fprintf(&out, "\n\n[Audio %s could not be read: %v]", name, err)
 			continue
 		}
 		text, err := client.Transcribe(ctx, role.Model, name, audio)
 		if err != nil {
-			fmt.Fprintf(&out, "\n\n[音频 %s 转写失败：%v]", name, err)
+			fmt.Fprintf(&out, "\n\n[Transcription of audio %s failed: %v]", name, err)
 			continue
 		}
 		if strings.TrimSpace(text) == "" {
-			fmt.Fprintf(&out, "\n\n[音频 %s 里没有听出语音]", name)
+			fmt.Fprintf(&out, "\n\n[No speech was detected in audio %s]", name)
 			continue
 		}
-		fmt.Fprintf(&out, "\n\n[音频 %s 的转写：\n%s]", name, text)
+		fmt.Fprintf(&out, "\n\n[Transcript of audio %s:\n%s]", name, text)
 	}
 	return out.String()
 }
@@ -255,12 +256,12 @@ func (s *Session) describeImages(ctx context.Context, images [][]byte) string {
 	}
 	client, err := s.roleClient(role)
 	if err != nil {
-		return fmt.Sprintf("\n\n[附带了 %d 张图，但视觉模型不可用：%v]", len(images), err)
+		return fmt.Sprintf("\n\n[%d image(s) attached, but the vision model is unavailable: %v]", len(images), err)
 	}
 	messages := []llm.Message{{
 		Role: llm.RoleUser,
-		Content: "详细描述这些图片里的内容：文字、数据、界面元素、错误信息都要写出来。" +
-			"这段描述会替代图片本身交给另一个模型，所以不要遗漏细节，也不要加入推测。",
+		Content: "Describe the contents of these images in detail, including any text, data, UI elements and error messages. " +
+			"This description will be given to another model in place of the images themselves, so don't leave out details and don't add speculation.",
 		Images: images,
 	}}
 	// 不流式往外发：这段转述是给模型看的中间结果，不该出现在用户的时间线上。
@@ -272,13 +273,13 @@ func (s *Session) describeImages(ctx context.Context, images [][]byte) string {
 		Failed: err != nil, DurationMS: time.Since(started).Milliseconds(),
 	})
 	if err != nil {
-		return fmt.Sprintf("\n\n[附带了 %d 张图，但转述失败：%v]", len(images), err)
+		return fmt.Sprintf("\n\n[%d image(s) attached, but describing them failed: %v]", len(images), err)
 	}
 	text := strings.TrimSpace(response.Content)
 	if text == "" {
 		return ""
 	}
-	return fmt.Sprintf("\n\n[以下是随消息附带的 %d 张图片的转述（由 %s 生成，你看到的不是原图）：\n%s]",
+	return fmt.Sprintf("\n\n[Description of the %d image(s) attached to this message (written by %s; you are not seeing the original images):\n%s]",
 		len(images), role.Model, text)
 }
 
@@ -293,10 +294,10 @@ func saveGenerated(env *tools.Env, kind, ext string, data []byte) (string, error
 		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return "", fmt.Errorf("建生成目录失败：%w", err)
+		return "", fmt.Errorf("%s: %w", i18n.D("建生成目录失败"), err)
 	}
 	if err := os.WriteFile(path, data, 0o644); err != nil {
-		return "", fmt.Errorf("保存失败：%w", err)
+		return "", fmt.Errorf("%s: %w", i18n.D("保存失败"), err)
 	}
 	return name, nil
 }

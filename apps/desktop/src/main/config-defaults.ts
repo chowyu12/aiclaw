@@ -18,6 +18,7 @@ const NO_ROLES: RoleConfig = {
  */
 
 export const DEFAULT_CONFIG: AppConfig = {
+  language: "en",
   providerId: 0,
   model: "",
   roles: NO_ROLES,
@@ -61,6 +62,8 @@ export function normalizeConfig(config: AppConfig): AppConfig {
   const providerId = Number(config.providerId);
   return {
     ...config,
+    // 语言是后加的：旧配置里没有，按默认（英文）；只认两种取值。
+    language: config.language === "zh-CN" ? "zh-CN" : "en",
     // 角色是后加的：旧 config.json 里根本没有这一项，缺了要补全四个角色，
     // 否则界面读 roles.vision.model 会在第一行就抛。
     roles: normalizeRoles(config.roles),

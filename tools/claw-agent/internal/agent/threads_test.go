@@ -17,8 +17,8 @@ func TestWithReferences(t *testing.T) {
 		{ID: "s_1", Title: "周报"}, {ID: "s_2", Title: "方案[草稿]"},
 	})
 	for _, want := range []string{
-		"## 引用的会话", `[{"threadId":"s_1"},{"threadId":"s_2"}]`, "必须先对每个被引用的会话调用 `read_thread`",
-		"## 我的请求", "[@周报](thread://s_1)", `[@方案[草稿\]](thread://s_2)`,
+		"## Referenced chats", `[{"threadId":"s_1"},{"threadId":"s_2"}]`, "You MUST call `read_thread` for each referenced chat",
+		"## My request", "[@周报](thread://s_1)", `[@方案[草稿\]](thread://s_2)`,
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("缺 %q：\n%s", want, text)

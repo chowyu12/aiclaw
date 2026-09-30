@@ -16,7 +16,7 @@ import (
 )
 
 // 子 agent 端到端：真的内核会话、真的工具循环，模型换成本机的假服务。
-// 同一个假服务同时扮演根 agent 与子 agent，按请求里有没有「你是子 agent」分辨。
+// 同一个假服务同时扮演根 agent 与子 agent，按请求里有没有「You are a sub-agent」分辨。
 
 func sseToolCall(id, name, args string) string {
 	chunk, _ := json.Marshal(map[string]any{
@@ -80,7 +80,7 @@ func (m *scriptedModel) handler(w http.ResponseWriter, r *http.Request) {
 	m.requests = append(m.requests, request)
 	m.mu.Unlock()
 	w.Header().Set("Content-Type", "text/event-stream")
-	if strings.Contains(request.text(), "你是子 agent") {
+	if strings.Contains(request.text(), "You are a sub-agent") {
 		_, _ = io.WriteString(w, m.child(request))
 		return
 	}
@@ -91,7 +91,7 @@ func (m *scriptedModel) lastRootRequest() wireRequest {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i := len(m.requests) - 1; i >= 0; i-- {
-		if !strings.Contains(m.requests[i].text(), "你是子 agent") {
+		if !strings.Contains(m.requests[i].text(), "You are a sub-agent") {
 			return m.requests[i]
 		}
 	}
@@ -405,7 +405,7 @@ func TestReadThreadAcrossSessions(t *testing.T) {
 	model := &scriptedModel{
 		root: func(step int, request wireRequest) string {
 			text := request.text()
-			if !strings.Contains(text, "## 引用的会话") {
+			if !strings.Contains(text, "## Referenced chats") {
 				return sseText("结论：用方案二")
 			}
 			if step == 0 {
@@ -434,7 +434,7 @@ func TestReadThreadAcrossSessions(t *testing.T) {
 		protocol.ThreadRef{ID: "s_root", Title: "定个方案"})
 
 	last := model.lastRootRequest().text()
-	for _, want := range []string{"## 引用的会话", "[@定个方案](thread://s_root)", "结论：用方案二", "不可信的资料"} {
+	for _, want := range []string{"## Referenced chats", "[@定个方案](thread://s_root)", "结论：用方案二", "untrusted data"} {
 		if !strings.Contains(last, want) {
 			t.Errorf("B 的最后一次请求里缺 %q", want)
 		}

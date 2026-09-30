@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { actions, store } from "../store";
 import { describeError } from "../errors";
+import { t } from "../i18n";
 import { formatWhen } from "../../shared/schedule";
 
 /**
@@ -39,7 +40,7 @@ const rows = computed(() => {
 });
 
 async function restore(session: Row): Promise<void> {
-  busy[session.id] = "恢复中…";
+  busy[session.id] = t("恢复中…");
   try {
     await actions.restoreSession(session.id);
   } catch (error) {
@@ -51,8 +52,12 @@ async function restore(session: Row): Promise<void> {
 
 async function remove(session: Row): Promise<void> {
   const children = childCount(session.id);
-  const extra = children > 0 ? `连同它开出的 ${children} 个子 agent 一起，` : "";
-  if (!confirm(`彻底删除「${session.title || "未命名会话"}」？${extra}对话记录会从本机移除，不可恢复。`)) return;
+  const title = session.title || t("未命名会话");
+  const question =
+    children > 0
+      ? t("彻底删除「{title}」？连同它开出的 {count} 个子 agent 一起，对话记录会从本机移除，不可恢复。", { title, count: children })
+      : t("彻底删除「{title}」？对话记录会从本机移除，不可恢复。", { title });
+  if (!confirm(question)) return;
   try {
     await actions.deleteSession(session.id);
     await actions.loadArchived();
@@ -62,7 +67,7 @@ async function remove(session: Row): Promise<void> {
 }
 
 function archivedText(session: Row): string {
-  return session.archivedAt ? `${formatWhen(new Date(session.archivedAt))} 归档` : "";
+  return session.archivedAt ? t("{when} 归档", { when: formatWhen(new Date(session.archivedAt)) }) : "";
 }
 </script>
 
@@ -70,32 +75,32 @@ function archivedText(session: Row): string {
   <div class="page">
     <section>
       <header>
-        <h2>已归档</h2>
+        <h2>{{ t("已归档") }}</h2>
         <p class="sub">
-          在侧边栏会话上点归档，它就收到这里：不占侧边栏，也不出现在搜索里；还在跑的会先停下。
-          恢复之后回到原来的分组，点开照常接着聊。开出过子 agent 的会话，子 agent 跟着一起归档、一起恢复。
+          {{ t("在侧边栏会话上点归档，它就收到这里：不占侧边栏，也不出现在搜索里；还在跑的会先停下。") }}
+          {{ t("恢复之后回到原来的分组，点开照常接着聊。开出过子 agent 的会话，子 agent 跟着一起归档、一起恢复。") }}
         </p>
       </header>
 
-      <input v-if="store.archived.length > 0" v-model="keyword" class="search" placeholder="按标题找" />
+      <input v-if="store.archived.length > 0" v-model="keyword" class="search" :placeholder="t(`按标题找`)" />
 
-      <p v-if="store.archived.length === 0" class="note">没有归档的会话。</p>
-      <p v-else-if="rows.length === 0" class="note">没有标题里含「{{ keyword }}」的。</p>
+      <p v-if="store.archived.length === 0" class="note">{{ t("没有归档的会话。") }}</p>
+      <p v-else-if="rows.length === 0" class="note">{{ t("没有标题里含「{keyword}」的。", { keyword }) }}</p>
 
       <article v-for="session in rows" :key="session.id" class="row">
         <div class="main">
-          <div class="title">{{ session.title || "未命名会话" }}</div>
+          <div class="title">{{ session.title || t("未命名会话") }}</div>
           <div class="meta">
             {{ archivedText(session) }}
-            <template v-if="session.turnCount"> · {{ session.turnCount }} 轮</template>
-            <template v-if="childCount(session.id)"> · 带着 {{ childCount(session.id) }} 个子 agent</template>
+            <template v-if="session.turnCount"> · {{ session.turnCount === 1 ? t("1 轮") : t("{n} 轮", { n: session.turnCount }) }}</template>
+            <template v-if="childCount(session.id)"> · {{ t("带着 {n} 个子 agent", { n: childCount(session.id) }) }}</template>
             <template v-if="session.model"> · {{ session.model }}</template>
           </div>
           <p v-if="busy[session.id]" class="hint">{{ busy[session.id] }}</p>
         </div>
         <div class="actions">
-          <button class="ghost small" @click="restore(session)">恢复</button>
-          <button class="ghost small danger" @click="remove(session)">删除</button>
+          <button class="ghost small" @click="restore(session)">{{ t("恢复") }}</button>
+          <button class="ghost small danger" @click="remove(session)">{{ t("删除") }}</button>
         </div>
       </article>
     </section>

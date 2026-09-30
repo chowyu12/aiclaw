@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -16,6 +17,8 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 	"golang.org/x/text/encoding/simplifiedchinese"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 func TestNormalizeFillsServers(t *testing.T) {
@@ -360,5 +363,18 @@ Content-Type: text/html; charset=utf-8
 	}
 	if _, err := Test(ctx, account); err != nil {
 		t.Fatalf("测试连接应当通过：%v", err)
+	}
+}
+
+// 界面是英文时报错跟着换成英文；包了原始错误的仍能 errors.Is。
+func TestErrorsFollowUILanguage(t *testing.T) {
+	i18n.SetDefault(i18n.English)
+	defer i18n.SetDefault(i18n.Chinese)
+	if _, err := (Account{Address: "not-an-address"}).Normalize(); err == nil || err.Error() != `Invalid email address: "not-an-address"` {
+		t.Fatalf("英文报错不对：%v", err)
+	}
+	wrapped := wrapErr(i18n.D("读信失败"), io.EOF)
+	if wrapped.Error() != "Couldn't read the email: EOF" || !errors.Is(wrapped, io.EOF) {
+		t.Fatalf("包一层之后的英文与 errors.Is：%v", wrapped)
 	}
 }

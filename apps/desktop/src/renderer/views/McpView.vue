@@ -3,6 +3,7 @@ import { reactive, ref } from "vue";
 import { actions, store } from "../store";
 import { describeError } from "../errors";
 import type { McpProbeView, McpServerView } from "../../shared/types";
+import { t } from "../i18n";
 
 /**
  * 自定义 MCP server 的管理。
@@ -55,7 +56,7 @@ async function patch(id: string, change: Partial<McpServerView>): Promise<void> 
 }
 
 async function remove(id: string, label: string): Promise<void> {
-  if (!confirm(`删除 MCP server「${label}」？下一个会话起它的工具就不再挂载。`)) return;
+  if (!confirm(t("删除 MCP server「{label}」？下一个会话起它的工具就不再挂载。", { label }))) return;
   await commit(actions.getMcpServers().filter((server) => server.id !== id));
   delete probes[id];
 }
@@ -85,10 +86,10 @@ async function probe(id: string): Promise<void> {
 /** 收起时那一行右边的状态字。 */
 function summary(server: ServerRow): string {
   const probed = probes[server.id];
-  if (probed?.loading) return "检测中…";
+  if (probed?.loading) return t("检测中…");
   if (!probed?.result) return server.transport === "http" ? server.url ?? "" : server.command ?? "";
-  if (!probed.result.ok) return "连不上";
-  return `${probed.result.tools?.length ?? 0} 个工具`;
+  if (!probed.result.ok) return t("连不上");
+  return t("{n} 个工具", { n: probed.result.tools?.length ?? 0 });
 }
 
 /** 参数按空格切。带空格的参数要用引号括起来。 */
@@ -120,34 +121,30 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
   <div class="page">
     <section>
       <header>
-        <h2>自定义 MCP server</h2>
+        <h2>{{ t("自定义 MCP server") }}</h2>
         <p class="sub">
-          挂第三方 MCP server 进来，它的工具会和内置工具一起交给模型。
-          本地的用 stdio（拉起一个进程），远程的用 HTTP。改动立刻在当前会话重挂一遍，
-          新会话也带上。
+          {{ t("挂第三方 MCP server 进来，它的工具会和内置工具一起交给模型。本地的用 stdio（拉起一个进程），远程的用 HTTP。改动立刻在当前会话重挂一遍，新会话也带上。") }}
         </p>
       </header>
 
       <p class="note warn">
-        第三方工具默认按<strong>有副作用</strong>处理，每次调用都会请你确认；
-        只有 server 自己声明了只读（<code>readOnlyHint</code>）的工具才不问。
-        本版本没有沙箱，不确定的时候宁可多问。
+        {{ t("第三方工具默认按") }}<strong>{{ t("有副作用") }}</strong>{{ t("处理，每次调用都会请你确认；只有 server 自己声明了只读（") }}<code>readOnlyHint</code>{{ t("）的工具才不问。本版本没有沙箱，不确定的时候宁可多问。") }}
       </p>
 
       <div class="add">
-        <button class="ghost" @click="add('stdio')">+ 本地（stdio）</button>
-        <button class="ghost" @click="add('http')">+ 远程（HTTP）</button>
+        <button class="ghost" @click="add('stdio')">{{ t("+ 本地（stdio）") }}</button>
+        <button class="ghost" @click="add('http')">{{ t("+ 远程（HTTP）") }}</button>
       </div>
 
       <p v-if="Object.keys(store.contributions.mcpServers).length > 0" class="note">
-        启用中的插件另外带了
+        {{ t("启用中的插件另外带了") }}
         <code v-for="(server, name) in store.contributions.mcpServers" :key="name" class="chip">{{ name }}</code>
-        ——那些在「插件」页管，这里列的是你自己配的。
+        {{ t("——那些在「插件」页管，这里列的是你自己配的。") }}
       </p>
 
       <p v-if="store.mcpServers.length === 0" class="note">
-        还没有配置。常见的本地 server 形如
-        <code>npx -y @modelcontextprotocol/server-filesystem /some/dir</code>。
+        {{ t("还没有配置。常见的本地 server 形如") }}
+        <code>npx -y @modelcontextprotocol/server-filesystem /some/dir</code>{{ t("。") }}
       </p>
 
       <article
@@ -159,7 +156,7 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
         <div class="card-head">
           <button class="disclose" :aria-expanded="expanded === server.id" @click="toggleExpand(server.id)">
             <span class="chevron">{{ expanded === server.id ? "▾" : "▸" }}</span>
-            <span class="name">{{ server.label || "未命名" }}</span>
+            <span class="name">{{ server.label || t("未命名") }}</span>
             <span class="badge">{{ server.transport === "http" ? "HTTP" : "stdio" }}</span>
             <span
               class="state"
@@ -172,9 +169,9 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
               :checked="server.enabled"
               @change="patch(server.id, { enabled: ($event.target as HTMLInputElement).checked })"
             />
-            启用
+            {{ t("启用") }}
           </label>
-          <button class="icon" title="删除" @click="remove(server.id, server.label)">×</button>
+          <button class="icon" :title="t(`删除`)" @click="remove(server.id, server.label)">×</button>
         </div>
 
         <template v-if="expanded === server.id">
@@ -182,22 +179,22 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
                想看的是「它能干什么」，不是再确认一遍地址。 -->
           <div class="tools">
             <div class="tools-head">
-              <span class="tools-title">工具</span>
+              <span class="tools-title">{{ t("工具") }}</span>
               <button
                 class="ghost small"
                 :disabled="probes[server.id]?.loading"
                 @click="probe(server.id)"
               >
-                {{ probes[server.id]?.loading ? "检测中…" : "重新检测" }}
+                {{ probes[server.id]?.loading ? t("检测中…") : t("重新检测") }}
               </button>
             </div>
 
-            <p v-if="probes[server.id]?.loading" class="hint">正在连接并拉取工具清单…</p>
+            <p v-if="probes[server.id]?.loading" class="hint">{{ t("正在连接并拉取工具清单…") }}</p>
             <p v-else-if="probes[server.id]?.result?.ok === false" class="note warn">
-              连不上：{{ probes[server.id]?.result?.error }}
+              {{ t("连不上：{error}", { error: probes[server.id]?.result?.error ?? "" }) }}
             </p>
             <p v-else-if="(probes[server.id]?.result?.tools?.length ?? 0) === 0" class="hint">
-              连上了，但这个 server 没有暴露任何工具。
+              {{ t("连上了，但这个 server 没有暴露任何工具。") }}
             </p>
             <div
               v-for="tool in probes[server.id]?.result?.tools ?? []"
@@ -206,24 +203,24 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
             >
               <div class="tool-head">
                 <code>{{ server.label || server.id }}__{{ tool.name }}</code>
-                <span class="badge">{{ tool.readOnly ? "只读 · 不问" : "要确认" }}</span>
+                <span class="badge">{{ tool.readOnly ? t("只读 · 不问") : t("要确认") }}</span>
               </div>
               <p v-if="tool.description" class="hint">{{ tool.description }}</p>
             </div>
           </div>
 
           <label>
-            <span>名字（也是工具名前缀）</span>
+            <span>{{ t("名字（也是工具名前缀）") }}</span>
             <input
               :value="server.label"
-              placeholder="名字（也是工具名前缀）"
+              :placeholder="t(`名字（也是工具名前缀）`)"
               @change="patch(server.id, { label: ($event.target as HTMLInputElement).value })"
             />
           </label>
 
           <template v-if="server.transport === 'stdio'">
             <label>
-              <span>命令</span>
+              <span>{{ t("命令") }}</span>
               <input
                 :value="server.command"
                 placeholder="npx"
@@ -231,7 +228,7 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
               />
             </label>
             <label>
-              <span>参数</span>
+              <span>{{ t("参数") }}</span>
               <input
                 :value="(server.args ?? []).join(' ')"
                 placeholder="-y @modelcontextprotocol/server-filesystem /some/dir"
@@ -239,11 +236,11 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
               />
             </label>
             <label>
-              <span>环境变量</span>
+              <span>{{ t("环境变量") }}</span>
               <textarea
                 rows="2"
                 :value="formatPairs(server.env)"
-                placeholder="KEY=value，一行一条"
+                :placeholder="t(`KEY=value，一行一条`)"
                 @change="patch(server.id, { env: parsePairs(($event.target as HTMLTextAreaElement).value) })"
               />
             </label>
@@ -251,7 +248,7 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
 
           <template v-else>
             <label>
-              <span>地址</span>
+              <span>{{ t("地址") }}</span>
               <input
                 :value="server.url"
                 placeholder="https://example.com/mcp"
@@ -259,24 +256,24 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
               />
             </label>
             <label>
-              <span>请求头</span>
+              <span>{{ t("请求头") }}</span>
               <textarea
                 rows="2"
                 :value="formatPairs(server.headers)"
-                placeholder="Authorization=Bearer xxx，一行一条"
+                :placeholder="t(`Authorization=Bearer xxx，一行一条`)"
                 @change="
                   patch(server.id, { headers: parsePairs(($event.target as HTMLTextAreaElement).value) })
                 "
               />
             </label>
             <p class="hint">
-              走 MCP 的 Streamable HTTP 传输（2025-03-26）。只支持 SSE 的旧版传输不支持。
+              {{ t("走 MCP 的 Streamable HTTP 传输（2025-03-26）。只支持 SSE 的旧版传输不支持。") }}
             </p>
           </template>
         </template>
       </article>
 
-      <p v-if="saving" class="note">保存中…</p>
+      <p v-if="saving" class="note">{{ t("保存中…") }}</p>
     </section>
   </div>
 </template>

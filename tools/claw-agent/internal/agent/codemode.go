@@ -4,10 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/codemode"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
@@ -48,7 +47,7 @@ func (s *Session) installCodeMode() int {
 				// 不能在这里捕获。
 				env, ok := ctx.Value(envKey{}).(*tools.Env)
 				if !ok {
-					return "", fmt.Errorf("内部错误：脚本里拿不到执行环境")
+					return "", i18n.E("内部错误：脚本里拿不到执行环境")
 				}
 				// 脚本里调的工具也记一笔用量：不记的话开了代码模式的会话，统计里全是 exec。
 				started := time.Now()
@@ -76,7 +75,7 @@ func (s *Session) installCodeMode() int {
 		Schema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
-				"code": {"type": "string", "description": "要执行的 JavaScript。顶层可以直接用 await 和 return。"}
+				"code": {"type": "string", "description": "The JavaScript to run. Top-level await and return are allowed."}
 			},
 			"required": ["code"],
 			"additionalProperties": false
@@ -89,14 +88,14 @@ func (s *Session) installCodeMode() int {
 				return "", errors.New(tools.ExplainBadArguments(string(raw), err))
 			}
 			if args.Code == "" {
-				return "", fmt.Errorf("code 不能为空")
+				return "", i18n.E("code 不能为空")
 			}
 			return runtime.Run(context.WithValue(ctx, envKey{}, env), args.Code)
 		},
 	})
 	if err != nil {
 		// 注册一个工具失败只可能是名字冲突，而这里的注册表是刚建的。
-		s.mcpStatus["代码模式"] = "启用失败：" + err.Error()
+		s.mcpStatus[i18n.D("代码模式")] = i18n.D("启用失败：{error}", "error", err)
 		return 0
 	}
 
@@ -143,9 +142,10 @@ type envKey struct{}
 // 只改成功挂载的那几行——挂载失败、重名被跳过的原文要留着，那才是要看的。
 func (s *Session) foldStatusIntoExec() {
 	for name, mounted := range s.mcpMounted {
-		if !strings.HasPrefix(s.mcpStatus[name], "已挂载 ") {
+		// 两种语言都认（isMountedStatus）：状态文字跟着界面语言走。
+		if !isMountedStatus(s.mcpStatus[name]) {
 			continue
 		}
-		s.mcpStatus[name] = fmt.Sprintf("已挂载 %d 个工具（已收进 exec，不单独占用上下文）", mounted)
+		s.mcpStatus[name] = i18n.D("已挂载 {n} 个工具（已收进 exec，不单独占用上下文）", "n", mounted)
 	}
 }

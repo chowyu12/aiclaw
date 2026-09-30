@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import type { BrowserBridgeView } from "../../shared/types";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
+import { locale, t } from "../i18n";
+import { LOCALES } from "../../shared/i18n";
 import {
   MODEL_ROLES,
   ROLE_HINTS,
@@ -90,7 +92,7 @@ async function repairToken(): Promise<void> {
     await window.aiclaw.browserBridge.repair();
     await actions.reloadConfig();
   } catch (error) {
-    actions.showError(`重新生成失败：${describeError(error)}`);
+    actions.showError(t("重新生成失败：{error}", { error: describeError(error) }));
   }
 }
 
@@ -98,7 +100,7 @@ async function openInBrowser(browserId: string): Promise<void> {
   try {
     await window.aiclaw.browserBridge.openPage(browserId);
   } catch (error) {
-    actions.showError(`打不开扩展页：${describeError(error)}`);
+    actions.showError(t("打不开扩展页：{error}", { error: describeError(error) }));
   }
 }
 
@@ -117,7 +119,7 @@ async function saveField(patch: Record<string, unknown>): Promise<void> {
   } catch (error) {
     // 存不下去要说出来。不接住的话它只是一条未处理的 promise 拒绝，
     // 界面上看起来就是「点了没反应」——而那正是这一页最难排查的故障。
-    actions.showError(`保存失败：${describeError(error)}`);
+    actions.showError(t("保存失败：{error}", { error: describeError(error) }));
   } finally {
     saving.value = false;
   }
@@ -189,7 +191,9 @@ async function pickModel(choice: { providerId: number; model: string; context: n
 /** 窗口按量级换单位：272000 写成 272K 才读得出大小。 */
 function formatWindow(tokens: number): string {
   if (!tokens) return "";
-  return tokens >= 1000 ? `${Math.round(tokens / 1000)}K 上下文` : `${tokens} 上下文`;
+  return tokens >= 1000
+    ? t("{n}K 上下文", { n: Math.round(tokens / 1000) })
+    : t("{n} 上下文", { n: tokens });
 }
 
 const candidates = computed(() =>
@@ -220,7 +224,7 @@ function rolePicked(role: ModelRole): { model: string; providerName: string } | 
   const current = store.config?.roles?.[role];
   if (!current?.providerId || !current.model) return null;
   const provider = store.providers.find((item) => item.id === current.providerId);
-  return { model: current.model, providerName: provider?.name ?? `服务 ${current.providerId}` };
+  return { model: current.model, providerName: provider?.name ?? t("服务 {id}", { id: current.providerId }) };
 }
 
 /** `providerId/model`，给选择器当值用。空串表示没配。 */
@@ -252,60 +256,78 @@ async function purge(): Promise<void> {
   <!-- config 为 null 只会是 bootstrap 失败。别留白屏——白屏没有任何线索。 -->
   <div class="settings" v-if="!store.config">
     <section>
-      <h2>配置未能加载</h2>
+      <h2>{{ t("配置未能加载") }}</h2>
       <p class="note warn">
-        本地配置没读出来，页面暂时不能用。具体原因见页面顶部的错误条；
-        没有错误条的话，重新执行 <code>make build</code> 再启动。
+        {{ t("本地配置没读出来，页面暂时不能用。具体原因见页面顶部的错误条；没有错误条的话，重新执行") }}
+        <code>make build</code> {{ t("再启动。") }}
       </p>
-      <button @click="actions.bootstrap()">重试</button>
+      <button @click="actions.bootstrap()">{{ t("重试") }}</button>
     </section>
   </div>
 
   <div class="settings" v-else>
+    <!-- 语言放在最上面：看不懂界面的人第一眼就得找得到它，所以选项用各自的语言写。 -->
     <section>
       <header>
-        <h2>模型</h2>
-        <p class="sub">新会话默认用哪个模型。端点、Key 与模型清单在「模型服务」页管理。</p>
+        <!-- 中文界面下带上英文：切错了语言的人也认得出这一节。 -->
+        <h2>{{ locale === "en" ? "Language" : "语言 · Language" }}</h2>
+        <p class="sub">{{ t("界面语言。切换后立即生效。") }}</p>
+      </header>
+      <label>
+        <span>{{ t("语言") }}</span>
+        <select
+          :value="store.config.language"
+          @change="saveField({ language: ($event.target as HTMLSelectElement).value })"
+        >
+          <option v-for="item in LOCALES" :key="item.id" :value="item.id">{{ item.label }}</option>
+        </select>
+      </label>
+    </section>
+
+    <section>
+      <header>
+        <h2>{{ t("模型") }}</h2>
+        <p class="sub">{{ t("新会话默认用哪个模型。端点、Key 与模型清单在「模型服务」页管理。") }}</p>
       </header>
 
       <p v-if="choices.length === 0 && !store.providersLoading" class="note warn">
-        还没有能用的模型服务。到「模型服务」页添加一个端点、填上 Key、写上模型名，回来再选。
-        <button class="link" @click="actions.setView('providers')">去添加</button>
+        {{ t("还没有能用的模型服务。到「模型服务」页添加一个端点、填上 Key、写上模型名，回来再选。") }}
+        <button class="link" @click="actions.setView('providers')">{{ t("去添加") }}</button>
       </p>
 
       <!-- 不用 <label> 包这个选择器。label 会把落在它里面非交互元素上的点击转发给
            第一个可标注的后代——也就是那个 field-button：点遮罩想关掉，转发一次
            又把它打开了，看起来就是「选了关不掉、整页点不动」。 -->
       <div class="field">
-        <span class="field-label">默认模型</span>
+        <span class="field-label">{{ t("默认模型") }}</span>
         <div class="picker">
           <button class="field-button" @click="openModelPicker($event)">
             <span v-if="store.config.model" class="picked-name">
               {{ store.config.model }}
               <em v-if="currentProvider"> · {{ currentProvider.name }}</em>
             </span>
-            <span v-else class="placeholder">从已配置的模型服务里选一个</span>
+            <span v-else class="placeholder">{{ t("从已配置的模型服务里选一个") }}</span>
             <span class="chev">⌄</span>
           </button>
 
           <div v-if="modelPickerOpen" class="backdrop" @click="modelPickerOpen = false" />
           <div v-if="modelPickerOpen" class="menu" :class="{ up: menuUp }">
             <div class="menu-head">
-              <span>模型<em v-if="modelSearch"> {{ choices.length }} / {{ allChoices.length }}</em></span>
-              <button class="link" @click="actions.loadProviders()">刷新</button>
+              <span>{{ t("模型") }}<em v-if="modelSearch"> {{ choices.length }} / {{ allChoices.length }}</em></span>
+              <button class="link" @click="actions.loadProviders()">{{ t("刷新") }}</button>
             </div>
             <input
               ref="searchBox"
               v-model="modelSearch"
               class="menu-search"
-              placeholder="搜索模型或服务名"
+              :placeholder="t(`搜索模型或服务名`)"
               @keydown.enter="choices[0] && pickModel(choices[0])"
               @keydown.esc="modelPickerOpen = false"
             />
-            <p v-if="store.providersLoading" class="menu-note">正在读取…</p>
+            <p v-if="store.providersLoading" class="menu-note">{{ t("正在读取…") }}</p>
             <p v-else-if="store.providersError" class="menu-note warn">{{ store.providersError }}</p>
-            <p v-else-if="allChoices.length === 0" class="menu-note">没有能用的模型。</p>
-            <p v-else-if="choices.length === 0" class="menu-note">没有匹配「{{ modelSearch }}」的模型。</p>
+            <p v-else-if="allChoices.length === 0" class="menu-note">{{ t("没有能用的模型。") }}</p>
+            <p v-else-if="choices.length === 0" class="menu-note">{{ t("没有匹配「{keyword}」的模型。", { keyword: modelSearch }) }}</p>
             <button
               v-for="choice in choices"
               :key="`${choice.providerId}/${choice.model}`"
@@ -321,13 +343,13 @@ async function purge(): Promise<void> {
           </div>
         </div>
         <span class="hint">
-          没设过的话第一次启动会自动挑一个。新会话用它；对话框上方切模型只影响那一个会话。
+          {{ t("没设过的话第一次启动会自动挑一个。新会话用它；对话框上方切模型只影响那一个会话。") }}
         </span>
       </div>
 
       <div class="pair">
         <label>
-          <span>推理档位</span>
+          <span>{{ t("推理档位") }}</span>
           <select
             :value="store.config.reasoningEffort"
             @change="saveField({ reasoningEffort: ($event.target as HTMLSelectElement).value })"
@@ -338,12 +360,12 @@ async function purge(): Promise<void> {
           </select>
         </label>
         <label>
-          <span>上下文窗口</span>
+          <span>{{ t("上下文窗口") }}</span>
           <input
             type="number"
             min="0"
             step="1000"
-            placeholder="选模型时自动填"
+            :placeholder="t(`选模型时自动填`)"
             :value="store.config.contextWindow || ''"
             @change="
               saveField({ contextWindow: Number(($event.target as HTMLInputElement).value) || 0 })
@@ -352,18 +374,16 @@ async function purge(): Promise<void> {
         </label>
       </div>
       <p class="note">
-        上下文窗口填了才能在撑满之前主动压缩历史；不填也能跑，只是要等上游报错再压，
-        白花一次请求。选模型时会用清单里记着的值自动填——那个值在「模型服务」页
-        点「按 models.dev 标记能力」时一并写进去。
+        {{ t("上下文窗口填了才能在撑满之前主动压缩历史；不填也能跑，只是要等上游报错再压，白花一次请求。") }}
+        {{ t("选模型时会用清单里记着的值自动填——那个值在「模型服务」页点「按 models.dev 标记能力」时一并写进去。") }}
       </p>
     </section>
 
     <section>
       <header>
-        <h2>多模态</h2>
+        <h2>{{ t("多模态") }}</h2>
         <p class="sub">
-          对话之外的几件事各自交给一个模型。候选来自「模型服务」页上勾过对应能力的模型——
-          没有哪个对话模型四样都好，而你手上往往各有一个便宜的专用模型。
+          {{ t("对话之外的几件事各自交给一个模型。候选来自「模型服务」页上勾过对应能力的模型——没有哪个对话模型四样都好，而你手上往往各有一个便宜的专用模型。") }}
         </p>
       </header>
 
@@ -381,7 +401,7 @@ async function purge(): Promise<void> {
               {{ rolePicked(role)!.model }}<em> · {{ rolePicked(role)!.providerName }}</em>
             </span>
             <span v-else class="placeholder">
-              {{ candidates[role].length === 0 ? "没有标记为「" + ROLE_LABELS[role] + "」的模型" : "不使用" }}
+              {{ candidates[role].length === 0 ? t("没有标记为「{role}」的模型", { role: ROLE_LABELS[role] }) : t("不使用") }}
             </span>
             <span class="chev">⌄</span>
           </button>
@@ -398,14 +418,14 @@ async function purge(): Promise<void> {
               ref="roleSearchBox"
               v-model="roleSearch"
               class="menu-search"
-              placeholder="搜索模型或服务名"
+              :placeholder="t(`搜索模型或服务名`)"
               @keydown.enter="roleChoices(role)[0] && pickRole(role, `${roleChoices(role)[0]!.providerId}/${roleChoices(role)[0]!.model}`)"
               @keydown.esc="rolePickerOpen = ''"
             />
             <button class="menu-item" :class="{ picked: !roleValue(role) }" @click="pickRole(role, '')">
-              <span class="menu-name">不使用</span>
+              <span class="menu-name">{{ t("不使用") }}</span>
             </button>
-            <p v-if="roleChoices(role).length === 0" class="menu-note">没有匹配「{{ roleSearch }}」的模型。</p>
+            <p v-if="roleChoices(role).length === 0" class="menu-note">{{ t("没有匹配「{keyword}」的模型。", { keyword: roleSearch }) }}</p>
             <button
               v-for="item in roleChoices(role)"
               :key="`${item.providerId}/${item.model}`"
@@ -424,28 +444,27 @@ async function purge(): Promise<void> {
       </div>
 
       <p class="note">
-        没配的角色对应的工具不会出现在会话里——给模型一个用不了的工具，它会调、
-        会失败、会重试，而失败原因它无从修复。看图是例外：它不是工具，而是在
-        对话模型不认图时替它读图。
+        {{ t("没配的角色对应的工具不会出现在会话里——给模型一个用不了的工具，它会调、会失败、会重试，而失败原因它无从修复。") }}
+        {{ t("看图是例外：它不是工具，而是在对话模型不认图时替它读图。") }}
       </p>
     </section>
 
     <section>
       <header>
-        <h2>执行</h2>
-        <p class="sub">Agent 在这台电脑上能碰什么、动手前问不问你。</p>
+        <h2>{{ t("执行") }}</h2>
+        <p class="sub">{{ t("Agent 在这台电脑上能碰什么、动手前问不问你。") }}</p>
       </header>
       <p class="note">
-        工作区是<strong>按会话</strong>设的，不在这里——在对话页顶部那个「工作区」上点一下就能改，
-        也可以不设。它决定相对路径按哪儿解析、写哪里不用问你。
+        {{ t("工作区是") }}<strong>{{ t("按会话") }}</strong>{{ t("设的，不在这里——在对话页顶部那个「工作区」上点一下就能改，也可以不设。") }}
+        {{ t("它决定相对路径按哪儿解析、写哪里不用问你。") }}
       </p>
       <p class="note warn">
-        本版本没有沙箱：Agent 的命令直接在你的电脑上执行。
-        危险命令（如 <code>rm -rf /</code>）硬拒绝；删除、提权、改系统设置这类会先问你；
-        普通命令不问。读文件不限于工作区，但涉及凭据的目录（<code>~/.ssh</code> 这些）一律拒绝。
+        {{ t("本版本没有沙箱：Agent 的命令直接在你的电脑上执行。") }}
+        {{ t("危险命令（如") }} <code>rm -rf /</code>{{ t("）硬拒绝；删除、提权、改系统设置这类会先问你；普通命令不问。") }}
+        {{ t("读文件不限于工作区，但涉及凭据的目录（") }}<code>~/.ssh</code> {{ t("这些）一律拒绝。") }}
       </p>
       <label>
-        <span>审批档位</span>
+        <span>{{ t("审批档位") }}</span>
         <select
           :value="store.config.profile"
           @change="saveField({ profile: ($event.target as HTMLSelectElement).value })"
@@ -467,13 +486,13 @@ async function purge(): Promise<void> {
             saveField({ sandboxCommands: ($event.target as HTMLInputElement).checked })
           "
         />
-        <span>没经过确认的命令跑在系统沙箱里（macOS）</span>
+        <span>{{ t("没经过确认的命令跑在系统沙箱里（macOS）") }}</span>
       </label>
       <p class="note">
-        开着的时候，不需要确认的命令由系统内核限制：只能写会话工作区与临时目录，
-        读不到 <code>~/.ssh</code> 这类凭据目录。<strong>你点过「允许」的命令不受限制</strong>——
-        那正是确认的含义。只有某个命令被沙箱挡了、而你确定它没问题时才需要关掉它。
-        Windows 上没有这一层。
+        {{ t("开着的时候，不需要确认的命令由系统内核限制：只能写会话工作区与临时目录，读不到") }}
+        <code>~/.ssh</code> {{ t("这类凭据目录。") }}<strong>{{ t("你点过「允许」的命令不受限制") }}</strong>{{ t("——那正是确认的含义。") }}
+        {{ t("只有某个命令被沙箱挡了、而你确定它没问题时才需要关掉它。") }}
+        {{ t("Windows 上没有这一层。") }}
       </p>
 
       <label class="switch">
@@ -482,16 +501,15 @@ async function purge(): Promise<void> {
           :checked="store.config.codeMode"
           @change="saveField({ codeMode: ($event.target as HTMLInputElement).checked })"
         />
-        <span>代码模式：工具收进一个 <code>exec</code>，模型写 JavaScript 调用</span>
+        <span>{{ t("代码模式：工具收进一个") }} <code>exec</code>{{ t("，模型写 JavaScript 调用") }}</span>
       </label>
       <p class="note">
-        <strong>工具多才划算</strong>：只有内置那几个工具时基本打平（exec 的说明本身有固定开销），
-        而 161 个接口的定义原本约 110KB，收进去之后是 7KB 左右，
-        而这部分<strong>每次请求都要重发、且不参与上下文压缩</strong>。
-        更大的收益是十几次查询可以写成一段循环，中间结果不再进上下文。
-        代价是模型得会写对代码——小模型在这上面更吃力，换模型之后值得再试一次。
-        脚本里的每次工具调用<strong>照常走审批</strong>，也照常受沙箱限制。
-        开了之后，对话页顶部「工具」菜单里会显示实际省了多少。改动下一个会话生效。
+        <strong>{{ t("工具多才划算") }}</strong>{{ t("：只有内置那几个工具时基本打平（exec 的说明本身有固定开销），而 161 个接口的定义原本约 110KB，收进去之后是 7KB 左右，而这部分") }}<strong>{{ t("每次请求都要重发、且不参与上下文压缩") }}</strong>{{ t("。") }}
+        {{ t("更大的收益是十几次查询可以写成一段循环，中间结果不再进上下文。") }}
+        {{ t("代价是模型得会写对代码——小模型在这上面更吃力，换模型之后值得再试一次。") }}
+        {{ t("脚本里的每次工具调用") }}<strong>{{ t("照常走审批") }}</strong>{{ t("，也照常受沙箱限制。") }}
+        {{ t("开了之后，对话页顶部「工具」菜单里会显示实际省了多少。") }}
+        {{ t("改动下一个会话生效。") }}
       </p>
       <label class="switch">
         <input
@@ -499,28 +517,33 @@ async function purge(): Promise<void> {
           :checked="store.config.browser"
           @change="saveField({ browser: ($event.target as HTMLInputElement).checked })"
         />
-        <span>浏览器：模型按元素编号打开网页、点、填、读（勾上后可以选用你自己的 Chrome / Edge）</span>
+        <span>{{ t("浏览器：模型按元素编号打开网页、点、填、读（勾上后可以选用你自己的 Chrome / Edge）") }}</span>
       </label>
       <div v-if="store.config.browser" class="field backend">
         <!-- 已连上：一行状态，外加改回去的入口。 -->
         <template v-if="store.config.browserBackend === 'extension' && bridge?.browser">
           <p class="bridge-status ok">
-            <span class="dot" />在你的 {{ bridge.browser }} 里操作：后台标签页、用你已有的登录、不抢鼠标
+            <span class="dot" />{{ t("在你的 {browser} 里操作：后台标签页、用你已有的登录、不抢鼠标", { browser: bridge.browser }) }}
           </p>
           <div class="row links">
-            <button class="link" @click="useBackend('builtin')">改回 AIClaw 自带窗口</button>
+            <button class="link" @click="useBackend('builtin')">{{ t("改回 AIClaw 自带窗口") }}</button>
           </div>
         </template>
 
         <!-- 自带窗口：一个按钮切过去。 -->
         <template v-else-if="store.config.browserBackend !== 'extension'">
           <p class="guide-lead">
-            现在用 AIClaw 自带的浏览器窗口（独立的登录，窗口可见）。也可以让它在你自己的浏览器里、
-            用你已有的登录、在后台标签页里操作：
+            {{ t("现在用 AIClaw 自带的浏览器窗口（独立的登录，窗口可见）。也可以让它在你自己的浏览器里、用你已有的登录、在后台标签页里操作：") }}
           </p>
           <div class="row">
             <button class="primary" :disabled="connecting" @click="connectMyBrowser()">
-              {{ connecting ? "正在打开…" : `连接我的浏览器${defaultBrowser ? `（${defaultBrowser.name}）` : ""}` }}
+              {{
+                connecting
+                  ? t("正在打开…")
+                  : defaultBrowser
+                    ? t("连接我的浏览器（{name}）", { name: defaultBrowser.name })
+                    : t("连接我的浏览器")
+              }}
             </button>
           </div>
         </template>
@@ -528,87 +551,87 @@ async function purge(): Promise<void> {
         <!-- 连接中：按步骤打勾。 -->
         <template v-else>
           <ol class="progress">
-            <li :class="bridge?.pairingCode ? 'done' : 'now'">安装扩展</li>
-            <li :class="bridge?.pairingCode ? 'now' : ''">在浏览器里确认配对</li>
-            <li>连上</li>
+            <li :class="bridge?.pairingCode ? 'done' : 'now'">{{ t("安装扩展") }}</li>
+            <li :class="bridge?.pairingCode ? 'now' : ''">{{ t("在浏览器里确认配对") }}</li>
+            <li>{{ t("连上") }}</li>
           </ol>
 
           <div v-if="bridge?.pairingCode" class="pairing">
             <span class="pair-code">{{ bridge.pairingCode }}</span>
-            <span>浏览器里弹出了配对页：核对代码一致，在<strong>浏览器里</strong>点「允许」。</span>
+            <span>{{ t("浏览器里弹出了配对页：核对代码一致，在") }}<strong>{{ t("浏览器里") }}</strong>{{ t("点「允许」。") }}</span>
           </div>
           <template v-else>
             <p v-if="defaultBrowser?.fromStore" class="guide-lead">
-              在打开的商店页点「获取」，装好后浏览器会自动弹出配对页。
+              {{ t("在打开的商店页点「获取」，装好后浏览器会自动弹出配对页。") }}
             </p>
             <p v-else-if="defaultBrowser" class="guide-lead">
-              {{ defaultBrowser.name }} 的扩展页已经打开，扩展目录的路径也复制好了：打开「开发者模式」→
-              点「加载已解压的扩展程序」→ 按 <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> 粘贴、回车、点「选择」。
-              装好后浏览器会自动弹出配对页。
+              {{ t("{name} 的扩展页已经打开，扩展目录的路径也复制好了：打开「开发者模式」→ 点「加载已解压的扩展程序」→ 按", { name: defaultBrowser.name }) }}
+              <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> {{ t("粘贴、回车、点「选择」。") }}
+              {{ t("装好后浏览器会自动弹出配对页。") }}
             </p>
             <p v-else class="guide-lead">
-              没找到 Chrome / Edge。在浏览器的扩展页里打开「开发者模式」，「加载已解压的扩展程序」选这个目录：
+              {{ t("没找到 Chrome / Edge。在浏览器的扩展页里打开「开发者模式」，「加载已解压的扩展程序」选这个目录：") }}
               <code class="path">{{ bridge?.extensionDir }}</code>
             </p>
             <div class="row links">
-              <button v-if="defaultBrowser" class="link" @click="openInBrowser(defaultBrowser.id)">重新打开扩展页</button>
+              <button v-if="defaultBrowser" class="link" @click="openInBrowser(defaultBrowser.id)">{{ t("重新打开扩展页") }}</button>
               <button
                 v-for="item in otherBrowsers"
                 :key="item.id"
                 class="link"
                 @click="openInBrowser(item.id)"
               >
-                改用 {{ item.name }}
+                {{ t("改用 {name}", { name: item.name }) }}
               </button>
-              <button class="link" @click="revealExtension">在访达中显示扩展目录</button>
+              <button class="link" @click="revealExtension">{{ t("在访达中显示扩展目录") }}</button>
             </div>
           </template>
           <p v-if="bridge?.error" class="bridge-status bad"><span class="dot" />{{ bridge.error }}</p>
           <div class="row links">
-            <button class="link" @click="useBackend('builtin')">取消，改回自带窗口</button>
+            <button class="link" @click="useBackend('builtin')">{{ t("取消，改回自带窗口") }}</button>
           </div>
         </template>
 
         <details v-if="store.config.browserBackend === 'extension'" class="manual">
-          <summary>它能做什么、怎么让它停下来</summary>
+          <summary>{{ t("它能做什么、怎么让它停下来") }}</summary>
           <p>
-            AIClaw 只在它自己开的后台标签页（「AIClaw」标签组）里操作，不切换你正在看的页面；要接管你已经打开的页面，
-            它会先在 AIClaw 里请你确认。操作期间浏览器顶部会显示「正在调试此浏览器」，点「取消」就能让它立刻停手；
-            空闲一分钟后提示条自己消失。
+            {{ t("AIClaw 只在它自己开的后台标签页（「AIClaw」标签组）里操作，不切换你正在看的页面；要接管你已经打开的页面，它会先在 AIClaw 里请你确认。") }}
+            {{ t("操作期间浏览器顶部会显示「正在调试此浏览器」，点「取消」就能让它立刻停手；空闲一分钟后提示条自己消失。") }}
           </p>
           <p>
-            配对页没弹出来？点浏览器工具栏上的 AIClaw 图标，把配对码粘进去：
+            {{ t("配对页没弹出来？点浏览器工具栏上的 AIClaw 图标，把配对码粘进去：") }}
             <span class="row token">
               <button :disabled="!store.config.browserPairToken" @click="copyToken">
-                {{ tokenCopied ? "已复制" : "复制配对码" }}
+                {{ tokenCopied ? t("已复制") : t("复制配对码") }}
               </button>
-              <button :disabled="!store.config.browserPairToken" @click="repairToken">重新生成</button>
+              <button :disabled="!store.config.browserPairToken" @click="repairToken">{{ t("重新生成") }}</button>
             </span>
-            配对码等于这个浏览器的钥匙，别发给别人。
+            {{ t("配对码等于这个浏览器的钥匙，别发给别人。") }}
           </p>
         </details>
       </div>
       <p class="note">
-        模型拿到的是页面上可交互元素的<strong>编号列表</strong>（链接、按钮、输入框），
-        按编号操作，不靠屏幕坐标——比截图便宜、比坐标可靠。窗口是可见的，登录、验证码
-        你随时能接手，登录态跨会话保留。<strong>打开网址会请你确认</strong>；页面里的点、填、滚不问，
-        严格档位下每一步都问。网页内容一律当作不可信的外部资料交给模型。改动下一个会话生效。
+        {{ t("模型拿到的是页面上可交互元素的") }}<strong>{{ t("编号列表") }}</strong>{{ t("（链接、按钮、输入框），按编号操作，不靠屏幕坐标——比截图便宜、比坐标可靠。") }}
+        {{ t("窗口是可见的，登录、验证码你随时能接手，登录态跨会话保留。") }}
+        <strong>{{ t("打开网址会请你确认") }}</strong>{{ t("；页面里的点、填、滚不问，严格档位下每一步都问。") }}
+        {{ t("网页内容一律当作不可信的外部资料交给模型。") }}
+        {{ t("改动下一个会话生效。") }}
       </p>
       <p class="note">
-        computer use（截屏 + 鼠标键盘）是一个插件，开关在「插件」页：启用即授权，
-        那一页写着它能碰什么。需要操作浏览器之外的应用时用它；只是上网的话浏览器工具更省更准。
+        {{ t("computer use（截屏 + 鼠标键盘）是一个插件，开关在「插件」页：启用即授权，那一页写着它能碰什么。") }}
+        {{ t("需要操作浏览器之外的应用时用它；只是上网的话浏览器工具更省更准。") }}
       </p>
 
     </section>
 
     <section>
       <header>
-        <h2>数据</h2>
-        <p class="sub">会话与执行记录全部留在本机，不回写云端。</p>
+        <h2>{{ t("数据") }}</h2>
+        <p class="sub">{{ t("会话与执行记录全部留在本机，不回写云端。") }}</p>
       </header>
-      <p class="note">模型服务那边只能看到发给它的请求。</p>
+      <p class="note">{{ t("模型服务那边只能看到发给它的请求。") }}</p>
       <label>
-        <span>会话保留天数</span>
+        <span>{{ t("会话保留天数") }}</span>
         <input
           type="number"
           min="0"
@@ -617,35 +640,35 @@ async function purge(): Promise<void> {
         />
       </label>
       <div v-if="!purgeConfirm">
-        <button class="danger" @click="purgeConfirm = true">清空全部本地数据</button>
+        <button class="danger" @click="purgeConfirm = true">{{ t("清空全部本地数据") }}</button>
       </div>
       <div v-else class="row">
-        <span class="note">会话记录、凭据、配置将一并清除，无法恢复。</span>
-        <button class="ghost" @click="purgeConfirm = false">取消</button>
-        <button class="danger" @click="purge()">确认清空</button>
+        <span class="note">{{ t("会话记录、凭据、配置将一并清除，无法恢复。") }}</span>
+        <button class="ghost" @click="purgeConfirm = false">{{ t("取消") }}</button>
+        <button class="danger" @click="purge()">{{ t("确认清空") }}</button>
       </div>
     </section>
 
     <section>
       <header>
-        <h2>诊断</h2>
+        <h2>{{ t("诊断") }}</h2>
         <p class="sub">
-          版本、平台、挂载结果与内核最近的输出，拼成一段可以直接贴给别人的文本。
-          凭据已经抹掉，只会显示「已配置 / 未配置」。
+          {{ t("版本、平台、挂载结果与内核最近的输出，拼成一段可以直接贴给别人的文本。") }}
+          {{ t("凭据已经抹掉，只会显示「已配置 / 未配置」。") }}
         </p>
       </header>
       <div class="row">
         <button class="ghost" @click="loadReport()">
-          {{ reportOpen ? "收起" : "查看诊断信息" }}
+          {{ reportOpen ? t("收起") : t("查看诊断信息") }}
         </button>
         <button v-if="reportOpen" class="ghost" @click="copyReport()">
-          {{ copied ? "已复制" : "复制" }}
+          {{ copied ? t("已复制") : t("复制") }}
         </button>
       </div>
       <pre v-if="reportOpen" class="report">{{ report }}</pre>
     </section>
 
-    <p class="saving" v-if="saving">保存中…</p>
+    <p class="saving" v-if="saving">{{ t("保存中…") }}</p>
   </div>
 </template>
 

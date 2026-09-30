@@ -11,6 +11,7 @@ import {
   UNTRUSTED_OPEN,
   type RawSnapshot,
 } from "../apps/desktop/src/main/browser-snapshot.ts";
+import { setCurrentLocale } from "../apps/desktop/src/shared/i18n.ts";
 
 /**
  * 浏览器工具给模型看的页面表示。
@@ -48,7 +49,26 @@ test("网页内容包在不可信边界里，编号有效期写明", () => {
   const close = text.indexOf(UNTRUSTED_CLOSE);
   assert.ok(open > 0 && close > open, "边界标记要把元素列表夹在中间");
   assert.ok(text.indexOf("[1] textbox") > open && text.indexOf("[1] textbox") < close);
-  assert.match(text, /编号只在这次快照里有效/);
+  // 写给模型的提示固定英文，不随界面语言变。
+  assert.match(text, /Numbers are only valid for this snapshot/);
+});
+
+test("复选框的选中状态按界面语言写；标签跟语言走，边界与提示固定英文", () => {
+  const boxes: RawSnapshot = {
+    ...page,
+    elements: [{ index: 1, tag: "input", role: "checkbox", text: "记住我", checked: true, inView: true }],
+    total: 1,
+  };
+  assert.match(formatSnapshot(boxes), /\[1\] checkbox "记住我" 值=已选/);
+  setCurrentLocale("en");
+  try {
+    const text = formatSnapshot(boxes);
+    assert.match(text, /^Page: 搜索结果$/m);
+    assert.match(text, /\[1\] checkbox "记住我" value=checked/);
+    assert.ok(text.includes(UNTRUSTED_OPEN) && text.includes("Numbers are only valid for this snapshot"));
+  } finally {
+    setCurrentLocale("zh-CN");
+  }
 });
 
 test("元素超过上限时说明只列了前面的", () => {

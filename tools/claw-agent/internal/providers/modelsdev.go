@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
@@ -100,7 +101,7 @@ func FetchCatalog(ctx context.Context) (*Catalog, error) {
 	wg.Wait()
 
 	if results[0].err != nil && results[1].err != nil {
-		return nil, fmt.Errorf("两份能力表都没拉到：%v；%v", results[0].err, results[1].err)
+		return nil, i18n.E("两份能力表都没拉到：{first}；{second}", "first", results[0].err, "second", results[1].err)
 	}
 	merged := &Catalog{byName: map[string]Entry{}}
 	for _, result := range results {
@@ -110,9 +111,9 @@ func FetchCatalog(ctx context.Context) (*Catalog, error) {
 	}
 	switch {
 	case results[0].err != nil:
-		merged.Note = "models.dev 没拉到（" + results[0].err.Error() + "），只按 LiteLLM 标记了"
+		merged.Note = i18n.D("models.dev 没拉到（{err}），只按 LiteLLM 标记了", "err", results[0].err)
 	case results[1].err != nil:
-		merged.Note = "LiteLLM 没拉到（" + results[1].err.Error() + "），只按 models.dev 标记了"
+		merged.Note = i18n.D("LiteLLM 没拉到（{err}），只按 models.dev 标记了", "err", results[1].err)
 	}
 	// 只缓存两份都齐的结果：缺一份的结果缓存 6 小时，用户重试也拿不到全的。
 	if merged.Note == "" {
@@ -143,15 +144,15 @@ func fetchOne(ctx context.Context, url string) ([]byte, error) {
 	}
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("连接失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("连接失败："), err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("返回 %d", response.StatusCode)
+		return nil, i18n.E("返回 {status}", "status", response.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, maxCatalogBytes))
 	if err != nil {
-		return nil, fmt.Errorf("读取失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("读取失败："), err)
 	}
 	return body, nil
 }
@@ -182,7 +183,7 @@ type catalogProvider struct {
 func ParseCatalog(body []byte) (*Catalog, error) {
 	var raw map[string]catalogProvider
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("models.dev 的数据看不懂：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("models.dev 的数据看不懂："), err)
 	}
 	catalog := &Catalog{byName: map[string]Entry{}}
 	for _, provider := range raw {
@@ -343,7 +344,7 @@ func hasRole(list []protocol.ModelRole, want protocol.ModelRole) bool {
 func (s *Store) AutoMark(ctx context.Context, id int64) (protocol.ProviderAutoMarkResult, error) {
 	item, err := s.db.GetProvider(ctx, id)
 	if err != nil {
-		return protocol.ProviderAutoMarkResult{}, fmt.Errorf("模型服务不存在（id=%d）：%w", id, err)
+		return protocol.ProviderAutoMarkResult{}, fmt.Errorf("%s%w", i18n.D("模型服务不存在（id={id}）：", "id", id), err)
 	}
 	catalog, err := FetchCatalog(ctx)
 	if err != nil {

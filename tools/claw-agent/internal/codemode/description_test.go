@@ -61,7 +61,7 @@ func TestDescriptionTeachesTheCallingConvention(t *testing.T) {
 		}
 	}
 	// 也要说清楚「别把中间结果全倒出来」——那是用它的全部理由。
-	if !strings.Contains(text, "只把需要的结果交出去") {
+	if !strings.Contains(text, "Return only the results you need") {
 		t.Errorf("没有强调只回必要结果：\n%s", text)
 	}
 }
@@ -77,7 +77,7 @@ func TestManyToolsAreNotAllDeclared(t *testing.T) {
 		))
 	}
 	text := Description(AssignIdentifiers(many))
-	if !strings.Contains(text, "ALL_TOOLS 按名字或说明搜") {
+	if !strings.Contains(text, "Search ALL_TOOLS by name or description") {
 		t.Errorf("没有引导模型去搜：\n%s", text[:400])
 	}
 	// 关键指标：整份描述要远小于把 161 个工具直挂的体积（实测约 110KB）。
@@ -92,7 +92,7 @@ func TestManyToolsAreNotAllDeclared(t *testing.T) {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Ident < sorted[j].Ident })
 	hidden := sorted[maxDeclared:]
 	first, last := hidden[0].Ident, hidden[len(hidden)-1].Ident
-	if !strings.Contains(text, "比如 tools."+first) || !strings.Contains(text, "tools."+last) {
+	if !strings.Contains(text, "e.g. tools."+first) || !strings.Contains(text, "tools."+last) {
 		t.Errorf("举例应覆盖到没列出部分的两头（%s … %s）：\n%s", first, last, text[len(text)-600:])
 	}
 }

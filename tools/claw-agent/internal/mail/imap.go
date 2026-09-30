@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -18,6 +17,8 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-message/charset"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // dialTimeout 是连服务器的上限。邮件服务器偶尔很慢，但半分钟还没握上手就是连不上。
@@ -60,7 +61,7 @@ func connect(ctx context.Context, account *Account) (*conn, error) {
 	}
 	if err != nil {
 		address := net.JoinHostPort(account.IMAPHost, strconv.Itoa(account.IMAPPort))
-		return nil, fmt.Errorf("连不上收信服务器 %s：%w", address, err)
+		return nil, wrapErr(i18n.D("连不上收信服务器 {address}", "address", address), err)
 	}
 	c := &conn{client: client, stop: make(chan struct{})}
 	go func() {
@@ -72,7 +73,7 @@ func connect(ctx context.Context, account *Account) (*conn, error) {
 	}()
 	if err := client.Login(account.Username, account.Password).Wait(); err != nil {
 		c.close()
-		return nil, fmt.Errorf("收信服务器拒绝登录（%v）。%s", err, account.hint())
+		return nil, i18n.E("收信服务器拒绝登录（{error}）。{hint}", "error", err, "hint", account.hint())
 	}
 	// 163 系不先报家门就拒绝选信箱（Unsafe Login）。别家支持 ID 的也无妨。
 	if client.Caps().Has(imap.CapID) {
@@ -106,9 +107,10 @@ func (c *conn) selectFolder(folder string, readOnly bool) error {
 	if _, err := c.client.Select(folder, &imap.SelectOptions{ReadOnly: readOnly}).Wait(); err != nil {
 		names, listErr := c.folders()
 		if listErr != nil || len(names) == 0 {
-			return fmt.Errorf("打不开信箱 %q：%w", folder, err)
+			return wrapErr(i18n.D("打不开信箱 {folder}", "folder", strconv.Quote(folder)), err)
 		}
-		return fmt.Errorf("打不开信箱 %q（%v）。有这些信箱：%s", folder, err, strings.Join(names, "、"))
+		return i18n.E("打不开信箱 {folder}（{error}）。有这些信箱：{folders}",
+			"folder", strconv.Quote(folder), "error", err, "folders", strings.Join(names, i18n.D("、")))
 	}
 	return nil
 }
@@ -139,6 +141,7 @@ func (c *conn) sentFolder() string {
 			return item.Mailbox
 		}
 	}
+	// 「已发送」是服务器上的信箱名，不是界面文字，不翻译。
 	for _, want := range []string{"Sent Messages", "Sent", "Sent Items", "已发送", "Sent Mail"} {
 		for _, item := range items {
 			if strings.EqualFold(item.Mailbox, want) {
@@ -244,7 +247,7 @@ func List(ctx context.Context, account Account, query ListQuery) (items []Summar
 	}
 	data, err := c.client.UIDSearch(criteria, nil).Wait()
 	if err != nil {
-		return nil, 0, fmt.Errorf("查信失败：%w", err)
+		return nil, 0, wrapErr(i18n.D("查信失败"), err)
 	}
 	uids := data.AllUIDs()
 	if !filterLocally {
@@ -275,7 +278,7 @@ func (c *conn) summaries(uids []imap.UID, limit int, match func(Summary) bool) (
 		UID: true, Envelope: true, Flags: true, BodyStructure: &imap.FetchItemBodyStructure{},
 	}).Collect()
 	if err != nil {
-		return nil, 0, fmt.Errorf("取信件列表失败：%w", err)
+		return nil, 0, wrapErr(i18n.D("取信件列表失败"), err)
 	}
 	items := make([]Summary, 0, len(messages))
 	for _, message := range messages {
@@ -369,10 +372,10 @@ func (c *conn) read(folder string, uid imap.UID, markSeen bool) (*Message, error
 		BodySection: []*imap.FetchItemBodySection{referencesSection},
 	}).Collect()
 	if err != nil {
-		return nil, fmt.Errorf("读信失败：%w", err)
+		return nil, wrapErr(i18n.D("读信失败"), err)
 	}
 	if len(found) == 0 || found[0].Envelope == nil {
-		return nil, fmt.Errorf("信箱 %s 里没有编号 %d 的信（编号来自 email_list，换了信箱要重新列）", folder, uid)
+		return nil, i18n.E("信箱 {folder} 里没有编号 {uid} 的信（编号来自 email_list，换了信箱要重新列）", "folder", folder, "uid", uid)
 	}
 	raw := found[0]
 	envelope := raw.Envelope
@@ -459,10 +462,10 @@ func (c *conn) section(uid imap.UID, path []int, whole bool, limit uint32) ([]by
 		UID: true, BodySection: []*imap.FetchItemBodySection{item},
 	}).Collect()
 	if err != nil {
-		return nil, false, fmt.Errorf("取信件内容失败：%w", err)
+		return nil, false, wrapErr(i18n.D("取信件内容失败"), err)
 	}
 	if len(found) == 0 {
-		return nil, false, errors.New("取信件内容失败：服务器没有返回")
+		return nil, false, i18n.E("取信件内容失败：服务器没有返回")
 	}
 	data := found[0].FindBodySection(item)
 	truncated := limit > 0 && uint32(len(data)) > limit
@@ -489,18 +492,19 @@ func FetchAttachment(ctx context.Context, account Account, folder string, uid ui
 		UID: true, BodyStructure: &imap.FetchItemBodyStructure{Extended: true},
 	}).Collect()
 	if err != nil {
-		return Attachment{}, nil, fmt.Errorf("读信失败：%w", err)
+		return Attachment{}, nil, wrapErr(i18n.D("读信失败"), err)
 	}
 	if len(found) == 0 || found[0].BodyStructure == nil {
-		return Attachment{}, nil, fmt.Errorf("信箱 %s 里没有编号 %d 的信", folder, uid)
+		return Attachment{}, nil, i18n.E("信箱 {folder} 里没有编号 {uid} 的信", "folder", folder, "uid", uid)
 	}
 	attachments := attachmentsOf(found[0].BodyStructure)
 	if index < 1 || index > len(attachments) {
-		return Attachment{}, nil, fmt.Errorf("这封信有 %d 个附件，没有第 %d 个", len(attachments), index)
+		return Attachment{}, nil, i18n.E("这封信有 {count} 个附件，没有第 {index} 个", "count", len(attachments), "index", index)
 	}
 	attachment := attachments[index-1]
 	if attachment.Size > maxAttachmentBytes*4/3 {
-		return Attachment{}, nil, fmt.Errorf("附件 %s 太大（约 %s），超过 %s 不下载", attachment.Name, humanSize(attachment.Size*3/4), humanSize(maxAttachmentBytes))
+		return Attachment{}, nil, i18n.E("附件 {name} 太大（约 {size}），超过 {limit} 不下载",
+			"name", attachment.Name, "size", humanSize(attachment.Size*3/4), "limit", humanSize(maxAttachmentBytes))
 	}
 	_, single := found[0].BodyStructure.(*imap.BodyStructureSinglePart)
 	data, _, err := c.section(imap.UID(uid), attachment.part, single, 0)
@@ -523,10 +527,10 @@ func attachmentsOf(structure imap.BodyStructure) []Attachment {
 			name = single.Params["name"]
 		}
 		if name == "" && single.MediaType() == "message/rfc822" {
-			name = "转发的邮件.eml"
+			name = i18n.D("转发的邮件.eml")
 		}
 		if name == "" {
-			name = fmt.Sprintf("附件%d", len(result)+1)
+			name = i18n.D("附件{n}", "n", len(result)+1)
 		}
 		result = append(result, Attachment{
 			Index: len(result) + 1, Name: name, Type: single.MediaType(), Size: single.Size,
@@ -633,5 +637,5 @@ func humanSize(size uint32) string {
 	case size >= 1<<10:
 		return fmt.Sprintf("%d KB", size>>10)
 	}
-	return fmt.Sprintf("%d 字节", size)
+	return i18n.D("{bytes} 字节", "bytes", size)
 }

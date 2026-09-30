@@ -9,6 +9,7 @@
  * 子进程随便写的，上游返回的错误里也可能回显 Authorization。所以每一行都过
  * 一遍 redact——这一步是纯函数，被 scripts/test-diagnostics.ts 钉着。
  */
+import { tr } from "../shared/i18n.js";
 
 /** 一行日志。 */
 export interface LogLine {
@@ -64,26 +65,26 @@ export function redact(text: string): string {
 /** 拼出给人看（和给人复制）的报告。 */
 export function buildReport(facts: ReportFacts, lines: LogLine[]): string {
   const rows: string[] = [];
-  rows.push("# AIClaw 诊断信息");
+  rows.push(`# ${tr("AIClaw 诊断信息")}`);
   rows.push("");
-  rows.push(`版本：${facts.version}　Electron ${facts.electron}　Node ${facts.node}`);
-  rows.push(`平台：${facts.platform} ${facts.arch}`);
+  rows.push(tr("版本：{version}　Electron {electron}　Node {node}", { version: facts.version, electron: facts.electron, node: facts.node }));
+  rows.push(tr("平台：{platform} {arch}", { platform: facts.platform, arch: facts.arch }));
   rows.push("");
 
   const section = (title: string, pairs: Record<string, string>): void => {
     rows.push(`## ${title}`);
     const entries = Object.entries(pairs);
-    if (entries.length === 0) rows.push("（无）");
-    for (const [key, value] of entries) rows.push(`- ${key}：${redact(value)}`);
+    if (entries.length === 0) rows.push(tr("（无）"));
+    for (const [key, value] of entries) rows.push(`- ${tr("{key}：{value}", { key, value: redact(value) })}`);
     rows.push("");
   };
 
-  section("运行时", facts.runtime);
-  section("挂载", facts.mounts);
-  section("目录", facts.paths);
+  section(tr("运行时"), facts.runtime);
+  section(tr("挂载"), facts.mounts);
+  section(tr("目录"), facts.paths);
 
-  rows.push(`## 最近日志（${lines.length} 行）`);
-  if (lines.length === 0) rows.push("（无）");
+  rows.push(`## ${tr("最近日志（{count} 行）", { count: lines.length })}`);
+  if (lines.length === 0) rows.push(tr("（无）"));
   for (const line of lines) {
     rows.push(`${new Date(line.at).toISOString()} [${line.source}] ${redact(line.text)}`);
   }

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 	"github.com/chowyu12/aiclaw/internal/plugins/bundled"
@@ -58,7 +59,7 @@ func New(ctx context.Context, db *gormstore.GormStore, root string, gateway plug
 	}
 	installer := pluginpkg.NewInstaller(db, root)
 	if err := installer.EnsureBuiltins(ctx, bundled.FS()); err != nil {
-		return nil, fmt.Errorf("同步内置插件失败：%w", err)
+		return nil, i18n.E("同步内置插件失败：{error}", "error", err)
 	}
 	config := pluginpkg.NewConfigService(db)
 	host, err := pluginpkg.NewHost(gateway, config, map[string]pluginpkg.ChannelFactory{
@@ -183,7 +184,7 @@ func (s *Service) view(ctx context.Context, item model.Plugin, skillItems []mode
 		})
 	}
 	if ready == 0 {
-		view.MissingConfig = []string{"至少一个可用的连接"}
+		view.MissingConfig = []string{i18n.D("至少一个可用的连接")}
 	}
 	return view, nil
 }
@@ -193,7 +194,7 @@ func (s *Service) view(ctx context.Context, item model.Plugin, skillItems []mode
 func (s *Service) Install(ctx context.Context, path string) (protocol.PluginView, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return protocol.PluginView{}, fmt.Errorf("没有给插件目录")
+		return protocol.PluginView{}, i18n.E("没有给插件目录")
 	}
 	installed, _, err := s.installer.Install(ctx, path)
 	if err != nil {
@@ -289,7 +290,7 @@ func (s *Service) SetConfig(ctx context.Context, uuid, connectionID, key, value 
 func (s *Service) checkConnection(ctx context.Context, item model.Plugin, connectionID string) error {
 	if connectionID == "" {
 		if pluginpkg.HasChannels(item) {
-			return fmt.Errorf("「%s」的配置是按连接存的：先选一个连接", item.Name)
+			return i18n.E("「{name}」的配置是按连接存的：先选一个连接", "name", item.Name)
 		}
 		return nil
 	}
@@ -298,7 +299,7 @@ func (s *Service) checkConnection(ctx context.Context, item model.Plugin, connec
 		return err
 	}
 	if connection.PluginUUID != item.UUID {
-		return fmt.Errorf("连接 %s 不属于「%s」", connectionID, item.Name)
+		return i18n.E("连接 {connection} 不属于「{name}」", "connection", connectionID, "name", item.Name)
 	}
 	return nil
 }
@@ -315,7 +316,7 @@ func (s *Service) connection(ctx context.Context, uuid string) (model.ChannelCon
 			return connection, nil
 		}
 	}
-	return model.ChannelConnection{}, fmt.Errorf("连接不存在：%s", uuid)
+	return model.ChannelConnection{}, i18n.E("连接不存在：{id}", "id", uuid)
 }
 
 // connectionNames 连接 id → 名字，给状态与放行记录显示。
@@ -339,7 +340,7 @@ func (s *Service) CreateConnection(ctx context.Context, pluginUUID, name string)
 		return protocol.ChannelConnectionView{}, err
 	}
 	if !pluginpkg.HasChannels(item) {
-		return protocol.ChannelConnectionView{}, fmt.Errorf("「%s」不是渠道插件，没有连接", item.Name)
+		return protocol.ChannelConnectionView{}, i18n.E("「{name}」不是渠道插件，没有连接", "name", item.Name)
 	}
 	connection, err := s.newConnection(ctx, item, name)
 	if err != nil {
@@ -359,6 +360,7 @@ func (s *Service) newConnection(ctx context.Context, item model.Plugin, name str
 		if err != nil {
 			return model.ChannelConnection{}, err
 		}
+		// 「连接器」是插件清单里名字的后缀，按原文去掉，不是界面文字。
 		name = fmt.Sprintf("%s %d", strings.TrimSuffix(item.Name, "连接器"), len(existing)+1)
 	}
 	suffix := make([]byte, 6)
@@ -376,7 +378,7 @@ func (s *Service) RenameConnection(ctx context.Context, uuid, name string) error
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("名字不能为空")
+		return i18n.E("连接名不能为空")
 	}
 	return s.db.RenameChannelConnection(ctx, uuid, name)
 }
@@ -475,7 +477,7 @@ func (s *Service) find(ctx context.Context, uuid string) (model.Plugin, error) {
 			return item, nil
 		}
 	}
-	return model.Plugin{}, fmt.Errorf("插件不存在：%s", uuid)
+	return model.Plugin{}, i18n.E("插件不存在：{id}", "id", uuid)
 }
 
 // ---------- 通道 ----------
@@ -532,7 +534,7 @@ func (s *Service) Authorize(ctx context.Context, params protocol.ChannelAuthoriz
 		return err
 	}
 	if params.ProviderID == 0 || strings.TrimSpace(params.Model) == "" {
-		return fmt.Errorf("放行前要先给这个会话选模型")
+		return i18n.E("放行前要先给这个会话选模型")
 	}
 	tools, err := json.Marshal(params.AllowedTools)
 	if err != nil {
@@ -559,7 +561,7 @@ func (s *Service) binding(ctx context.Context, key protocol.ChannelBindingKey) (
 		return nil, err
 	}
 	if binding == nil {
-		return nil, fmt.Errorf("通道里没有这个会话：%s", key.ExternalKey)
+		return nil, i18n.E("通道里没有这个会话：{key}", "key", key.ExternalKey)
 	}
 	return binding, nil
 }
@@ -586,7 +588,7 @@ func (s *Service) WeChatLoginPoll(ctx context.Context, params protocol.WeChatLog
 		return protocol.WeChatLoginPollResult{}, err
 	}
 	if item.PluginID != wechatPluginID {
-		return protocol.WeChatLoginPollResult{}, fmt.Errorf("「%s」不是微信插件", item.Name)
+		return protocol.WeChatLoginPollResult{}, i18n.E("「{name}」不是微信插件", "name", item.Name)
 	}
 	result, err := wechatlink.PollQRStatus(ctx, params.Token)
 	if err != nil {

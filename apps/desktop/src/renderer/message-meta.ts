@@ -3,6 +3,7 @@
  *
  * 纯函数单独成文件，为的是能在 node 里测（scripts/test-message-meta.ts）。
  */
+import { tr } from "../shared/i18n.js";
 
 /**
  * 消息时间的显示。
@@ -21,8 +22,10 @@ export function formatMessageTime(at: number | undefined, now: Date = new Date()
     time.getMonth() === now.getMonth() &&
     time.getDate() === now.getDate();
   if (sameDay) return clock;
-  if (time.getFullYear() === now.getFullYear()) return `${time.getMonth() + 1}月${time.getDate()}日 ${clock}`;
-  return `${time.getFullYear()}年${time.getMonth() + 1}月${time.getDate()}日 ${clock}`;
+  const month = time.getMonth() + 1;
+  const day = time.getDate();
+  if (time.getFullYear() === now.getFullYear()) return tr("{month}月{day}日 {clock}", { month, day, clock });
+  return tr("{year}年{month}月{day}日 {clock}", { year: time.getFullYear(), month, day, clock });
 }
 
 /** 悬停时的完整时间，精确到秒。 */

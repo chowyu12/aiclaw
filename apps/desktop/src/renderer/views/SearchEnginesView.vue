@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { actions, store } from "../store";
 import { describeError } from "../errors";
+import { t } from "../i18n";
 import type { SearchHitView } from "../../shared/types";
 
 /**
@@ -17,12 +18,24 @@ type EngineRow = (typeof store.searchEngines)[number];
 /** 各类型的显示名与默认端点。默认端点与内核 websearch 包一致，留空就用它。 */
 const PROVIDERS: { id: string; label: string; baseUrl: string; keyHint: string }[] = [
   { id: "tavily", label: "Tavily", baseUrl: "https://api.tavily.com/search", keyHint: "tvly-…" },
-  { id: "serpapi", label: "SerpAPI", baseUrl: "https://serpapi.com/search.json", keyHint: "SerpAPI 的 api_key" },
+  // 要翻译的字段写成 getter：每次读都按当前语言取。
+  {
+    id: "serpapi",
+    label: "SerpAPI",
+    baseUrl: "https://serpapi.com/search.json",
+    get keyHint() {
+      return t("SerpAPI 的 api_key");
+    },
+  },
   {
     id: "aliyun-iqs",
-    label: "阿里云 IQS",
+    get label() {
+      return t("阿里云 IQS");
+    },
     baseUrl: "https://cloud-iqs.aliyuncs.com/search/unified",
-    keyHint: "阿里云 IQS 的 API Key",
+    get keyHint() {
+      return t("阿里云 IQS 的 API Key");
+    },
   },
 ];
 
@@ -73,7 +86,7 @@ async function saveKey(id: number): Promise<void> {
 }
 
 async function remove(engine: EngineRow): Promise<void> {
-  if (!confirm(`删除搜索引擎「${engine.name}」？`)) return;
+  if (!confirm(t("删除搜索引擎「{name}」？", { name: engine.name }))) return;
   await run(() => actions.deleteSearchEngine(engine.id));
 }
 
@@ -89,11 +102,11 @@ async function test(engine: EngineRow): Promise<void> {
 
 /** 收起时那一行右边的状态字。 */
 function summary(engine: EngineRow): string {
-  if (!engine.apiKeySet) return "没配 Key";
+  if (!engine.apiKeySet) return t("没配 Key");
   const first = store.searchEngines.find((e) => e.enabled && e.apiKeySet);
-  if (engine.enabled && first?.id === engine.id) return "生效中";
-  if (engine.enabled) return "已启用（排在后面，不生效）";
-  return "已停用";
+  if (engine.enabled && first?.id === engine.id) return t("生效中");
+  if (engine.enabled) return t("已启用（排在后面，不生效）");
+  return t("已停用");
 }
 </script>
 
@@ -101,23 +114,23 @@ function summary(engine: EngineRow): string {
   <div class="page">
     <section>
       <header>
-        <h2>搜索引擎</h2>
+        <h2>{{ t("搜索引擎") }}</h2>
         <p class="sub">
-          配一个引擎、填上 Key、启用，模型就多一个 <code>web_search</code> 工具。
-          一次只用一个：列表里第一个启用且配了 Key 的。改动下一个会话生效。
+          {{ t("配一个引擎、填上 Key、启用，模型就多一个") }} <code>web_search</code> {{ t("工具。") }}
+          {{ t("一次只用一个：列表里第一个启用且配了 Key 的。改动下一个会话生效。") }}
         </p>
       </header>
 
-      <p class="note">搜索是只读的，调用时不会请你确认。Key 只存进本机的配置库，不回显。</p>
+      <p class="note">{{ t("搜索是只读的，调用时不会请你确认。Key 只存进本机的配置库，不回显。") }}</p>
 
       <div class="add">
-        <button class="ghost" @click="add()">+ 添加搜索引擎</button>
-        <button class="ghost" @click="actions.loadSearchEngines()">刷新</button>
+        <button class="ghost" @click="add()">+ {{ t("添加搜索引擎") }}</button>
+        <button class="ghost" @click="actions.loadSearchEngines()">{{ t("刷新") }}</button>
       </div>
 
       <p v-if="store.searchError" class="note warn">{{ store.searchError }}</p>
       <p v-else-if="store.searchEngines.length === 0 && !store.searchLoading" class="note">
-        还没有搜索引擎。没有它模型也能用，只是不能联网搜。
+        {{ t("还没有搜索引擎。没有它模型也能用，只是不能联网搜。") }}
       </p>
 
       <article
@@ -129,7 +142,7 @@ function summary(engine: EngineRow): string {
         <div class="card-head">
           <button class="disclose" :aria-expanded="expanded === engine.id" @click="expanded = expanded === engine.id ? 0 : engine.id">
             <span class="chevron">{{ expanded === engine.id ? "▾" : "▸" }}</span>
-            <span class="name">{{ engine.name || "未命名" }}</span>
+            <span class="name">{{ engine.name || t("未命名") }}</span>
             <span class="badge">{{ providerOf(engine)?.label ?? engine.provider }}</span>
             <span class="state" :class="{ bad: !engine.apiKeySet }">{{ summary(engine) }}</span>
           </button>
@@ -139,15 +152,15 @@ function summary(engine: EngineRow): string {
               :checked="engine.enabled"
               @change="patch(engine.id, { enabled: ($event.target as HTMLInputElement).checked })"
             />
-            启用
+            {{ t("启用") }}
           </label>
-          <button class="icon" title="删除" @click="remove(engine)">×</button>
+          <button class="icon" :title="t(`删除`)" @click="remove(engine)">×</button>
         </div>
 
         <template v-if="expanded === engine.id">
           <div class="pair">
             <label>
-              <span>类型</span>
+              <span>{{ t("类型") }}</span>
               <select
                 :value="engine.provider"
                 @change="patch(engine.id, { provider: ($event.target as HTMLSelectElement).value })"
@@ -156,7 +169,7 @@ function summary(engine: EngineRow): string {
               </select>
             </label>
             <label>
-              <span>名字</span>
+              <span>{{ t("名字") }}</span>
               <input
                 :value="engine.name"
                 @change="patch(engine.id, { name: ($event.target as HTMLInputElement).value })"
@@ -165,39 +178,39 @@ function summary(engine: EngineRow): string {
           </div>
 
           <label>
-            <span>端点</span>
+            <span>{{ t("端点") }}</span>
             <input
               :value="engine.baseUrl"
               :placeholder="providerOf(engine)?.baseUrl ?? ''"
               @change="patch(engine.id, { baseUrl: ($event.target as HTMLInputElement).value })"
             />
-            <span class="hint">留空用默认端点。自建代理或私有化部署才需要改。</span>
+            <span class="hint">{{ t("留空用默认端点。自建代理或私有化部署才需要改。") }}</span>
           </label>
 
           <label>
-            <span>Key<em v-if="engine.apiKeySet">已配置</em></span>
+            <span>Key<em v-if="engine.apiKeySet">{{ t("已配置") }}</em></span>
             <div class="key-row">
               <input
                 v-model="keyDrafts[engine.id]"
                 type="password"
-                :placeholder="engine.apiKeySet ? '留空表示不修改' : (providerOf(engine)?.keyHint ?? '')"
+                :placeholder="engine.apiKeySet ? t(`留空表示不修改`) : (providerOf(engine)?.keyHint ?? '')"
                 @keydown.enter="saveKey(engine.id)"
               />
-              <button class="ghost" :disabled="!keyDrafts[engine.id]" @click="saveKey(engine.id)">保存 Key</button>
+              <button class="ghost" :disabled="!keyDrafts[engine.id]" @click="saveKey(engine.id)">{{ t("保存 Key") }}</button>
             </div>
           </label>
 
           <div class="test">
             <div class="test-row">
-              <input v-model="testQuery" placeholder="搜点什么试试" @keydown.enter="test(engine)" />
+              <input v-model="testQuery" :placeholder="t(`搜点什么试试`)" @keydown.enter="test(engine)" />
               <button class="ghost small" :disabled="!engine.apiKeySet || tests[engine.id]?.loading" @click="test(engine)">
-                {{ tests[engine.id]?.loading ? "搜索中…" : "试一下" }}
+                {{ tests[engine.id]?.loading ? t("搜索中…") : t("试一下") }}
               </button>
             </div>
-            <p v-if="!engine.apiKeySet" class="hint">先保存 Key 才能试。</p>
+            <p v-if="!engine.apiKeySet" class="hint">{{ t("先保存 Key 才能试。") }}</p>
             <p v-else-if="tests[engine.id]?.error" class="hint bad">{{ tests[engine.id]?.error }}</p>
             <div v-else-if="tests[engine.id]?.results" class="hits">
-              <p v-if="tests[engine.id]?.results?.length === 0" class="hint">连上了，但没有结果。</p>
+              <p v-if="tests[engine.id]?.results?.length === 0" class="hint">{{ t("连上了，但没有结果。") }}</p>
               <div v-for="hit in tests[engine.id]?.results" :key="hit.url" class="hit">
                 <a :href="hit.url" target="_blank" rel="noreferrer">{{ hit.title || hit.url }}</a>
                 <p class="hint">{{ hit.snippet }}</p>
@@ -207,7 +220,7 @@ function summary(engine: EngineRow): string {
         </template>
       </article>
 
-      <p v-if="saving" class="note">保存中…</p>
+      <p v-if="saving" class="note">{{ t("保存中…") }}</p>
     </section>
   </div>
 </template>

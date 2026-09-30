@@ -11,7 +11,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/mcpclient"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/memory"
@@ -164,6 +164,7 @@ func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 		EnableBrowser:     config.EnableBrowser,
 		EnableEmail:       config.EnableEmail,
 		EnableSchedule:    config.EnableSchedule,
+		Locale:            config.Locale,
 		DisableSandbox:    config.DisableSandbox,
 		CodeMode:          config.CodeMode,
 		ApprovalPolicy:    config.ApprovalPolicy,
@@ -194,7 +195,7 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	// 却被一个配置项挡在门外。
 	if workspace := strings.TrimSpace(config.Workdir); workspace != "" {
 		if err := os.MkdirAll(workspace, 0o755); err != nil {
-			return nil, fmt.Errorf("创建工作区失败：%w", err)
+			return nil, fmt.Errorf("%s%w", i18n.D("创建工作区失败："), err)
 		}
 	}
 	if config.ApprovalPolicy == "" {
@@ -265,11 +266,11 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	// 留在外面是对的，模型读技能、点屏幕不需要写脚本。
 	if config.CodeMode {
 		if count := session.installCodeMode(); count > 0 {
-			session.mcpStatus["代码模式"] = fmt.Sprintf(
-				"已把 %d 个工具收进 exec（工具清单 %s → %s）",
-				count,
-				formatTokens(session.codeModeTokens[0]),
-				formatTokens(session.codeModeTokens[1]),
+			session.mcpStatus[i18n.D("代码模式")] = i18n.D(
+				"已把 {n} 个工具收进 exec（工具清单 {before} → {after}）",
+				"n", count,
+				"before", formatTokens(session.codeModeTokens[0]),
+				"after", formatTokens(session.codeModeTokens[1]),
 			)
 			session.foldStatusIntoExec()
 		}
@@ -312,7 +313,7 @@ func (s *Session) loadSkills(dirs []string) {
 	}
 	loaded, err := skills.Load(dirs)
 	if err != nil {
-		s.mcpStatus["技能"] = "加载失败：" + err.Error()
+		s.mcpStatus[i18n.D("技能")] = i18n.D("加载失败：{err}", "err", err)
 		return
 	}
 	for _, skill := range loaded {
@@ -330,13 +331,13 @@ func (s *Session) loadSkills(dirs []string) {
 	for _, skill := range s.skills {
 		promptBytes += len(skill.Name) + len([]rune(skill.Description)) + 8
 	}
-	s.mcpStatus["技能"] = fmt.Sprintf(
-		"已加载 %d 个（提示词约占 %s）", len(s.skills), formatTokens(promptBytes*10/32),
+	s.mcpStatus[i18n.D("技能")] = i18n.D(
+		"已加载 {n} 个（提示词约占 {tokens}）", "n", len(s.skills), "tokens", formatTokens(promptBytes*10/32),
 	)
 	if err := s.registry.Register(tools.Tool{
 		Name: "load_skill",
-		Description: "读取一个技能的完整说明。系统提示词里列出了可用技能的名字与用途，" +
-			"判断某个技能适用时用这个工具把它的正文取出来，再照着做。",
+		Description: "Load the full instructions of a skill. The system prompt lists the available skills " +
+			"with a short description of each; when a skill applies, call this tool to fetch its body, then follow it.",
 		// 只读本机已有文件，不需要审批。
 		Effect: tools.EffectRead,
 		Schema: skillToolSchema(s.skills),
@@ -345,20 +346,20 @@ func (s *Session) loadSkills(dirs []string) {
 				Name string `json:"name"`
 			}
 			if err := json.Unmarshal(args, &input); err != nil {
-				return "", errors.New("参数不是合法 JSON 对象")
+				return "", i18n.E("参数不是合法 JSON 对象")
 			}
 			for _, skill := range s.skills {
 				if skill.Name == input.Name {
 					// 带上目录：技能正文里常引用同目录下的脚本或模板，
 					// 模型需要知道去哪儿找它们。
-					return fmt.Sprintf("技能「%s」的说明（所在目录 %s）：\n\n%s",
+					return fmt.Sprintf("Instructions for skill \"%s\" (skill directory: %s):\n\n%s",
 						skill.Name, skill.Dir, skill.Body), nil
 				}
 			}
-			return "", fmt.Errorf("没有名为 %q 的技能；可用技能：%s", input.Name, s.skillNames())
+			return "", i18n.E("没有名为 {name} 的技能；可用技能：{skills}", "name", fmt.Sprintf("%q", input.Name), "skills", s.skillNames())
 		},
 	}); err != nil {
-		s.mcpStatus["技能"] = "注册失败：" + err.Error()
+		s.mcpStatus[i18n.D("技能")] = i18n.D("注册失败：{err}", "err", err)
 	}
 }
 
@@ -372,8 +373,8 @@ func (s *Session) loadSkills(dirs []string) {
 // 全局记忆文件在工作目录之外，不能走内置文件工具（那些工具的路径一律收敛在
 // 工作目录内，是没有沙箱之后仅剩的防护之一）。于是给一个只会写这两个文件的专用工具。
 func (s *Session) loadMemory(config protocol.SessionStartParams) {
-	s.globalMemory = s.loadMemoryFile(config.MemoryFile, "长期记忆")
-	s.workspaceMemory = s.loadMemoryFile(workspaceMemoryPath(config.Workdir), "工作区记忆")
+	s.globalMemory = s.loadMemoryFile(config.MemoryFile, i18n.D("长期记忆"))
+	s.workspaceMemory = s.loadMemoryFile(workspaceMemoryPath(config.Workdir), i18n.D("工作区记忆"))
 	// 两个落点都没有，就别给模型一个写不进任何地方的工具。
 	if strings.TrimSpace(config.MemoryFile) == "" && strings.TrimSpace(config.Workdir) == "" {
 		return
@@ -381,10 +382,12 @@ func (s *Session) loadMemory(config protocol.SessionStartParams) {
 
 	if err := s.registry.Register(tools.Tool{
 		Name: "remember",
-		Description: "把一条需要**跨会话**记住的事实写进长期记忆。只写结论，一句话；" +
-			"这里放的不是日志也不是原始内容。当前记忆已经在系统提示词里，重复的不用再写。" +
-			"scope 选 workspace（默认，有工作区时）记这个项目的约定与踩过的坑；" +
-			"只有跟项目无关、以后每个会话都用得上的（用户偏好、通用习惯）才选 global。",
+		Description: "Save a fact that must be remembered **across chats** to long-term memory. Write one sentence " +
+			"stating the conclusion — this is not a log and not a place for raw content. The current memory is already " +
+			"in the system prompt; don't save duplicates. " +
+			"Use scope=workspace (the default when a workspace is set) for this project's conventions and pitfalls; " +
+			"use scope=global only for things unrelated to the project that every future chat can use " +
+			"(user preferences, general habits).",
 		// 按 external 而不是 write。
 		//
 		// EffectWrite 在 on-write 档位下**不弹审批**，因为内置文件工具的路径
@@ -400,7 +403,7 @@ func (s *Session) loadMemory(config protocol.SessionStartParams) {
 				Scope string `json:"scope"`
 			}
 			if err := json.Unmarshal(args, &input); err != nil {
-				return "", errors.New("参数不是合法 JSON 对象")
+				return "", i18n.E("参数不是合法 JSON 对象")
 			}
 			s.mu.Lock()
 			workdir := s.config.Workdir
@@ -417,12 +420,12 @@ func (s *Session) loadMemory(config protocol.SessionStartParams) {
 			case "workspace":
 				path := workspaceMemoryPath(workdir)
 				if path == "" {
-					return "", errors.New("这个会话没有设置工作区，没有地方放工作区记忆；跟项目无关的话用 scope=global")
+					return "", i18n.E("这个会话没有设置工作区，没有地方放工作区记忆；跟项目无关的话用 scope=global")
 				}
 				// 落在工作区里：与写工作区文件同一档——on-write 不问，always 才问。
 				if err := env.RequestApproval(
 					ctx, tools.EffectWrite, protocol.ApprovalWrite,
-					"写入工作区记忆", input.Text, "记在 "+path,
+					i18n.D("写入工作区记忆"), input.Text, i18n.D("记在 {path}", "path", path),
 				); err != nil {
 					return "", err
 				}
@@ -433,15 +436,15 @@ func (s *Session) loadMemory(config protocol.SessionStartParams) {
 				s.mu.Lock()
 				s.workspaceMemory = strings.TrimSpace(updated)
 				s.mu.Unlock()
-				return "已记进这个工作区的记忆。", nil
+				return i18n.D("已记进这个工作区的记忆。"), nil
 			case "global":
 				if strings.TrimSpace(config.MemoryFile) == "" {
-					return "", errors.New("宿主没有配置全局记忆文件")
+					return "", i18n.E("宿主没有配置全局记忆文件")
 				}
 				// 这里传的 Effect 才是决定档位的那个；Tool.Effect 只是元信息。
 				if err := env.RequestApproval(
 					ctx, tools.EffectExternal, protocol.ApprovalWrite,
-					"写入长期记忆", input.Text, "这条会在以后每个会话里都带上",
+					i18n.D("写入长期记忆"), input.Text, i18n.D("这条会在以后每个会话里都带上"),
 				); err != nil {
 					return "", err
 				}
@@ -452,13 +455,13 @@ func (s *Session) loadMemory(config protocol.SessionStartParams) {
 				s.mu.Lock()
 				s.globalMemory = strings.TrimSpace(updated)
 				s.mu.Unlock()
-				return "已记住（全局）。", nil
+				return i18n.D("已记住（全局）。"), nil
 			default:
-				return "", fmt.Errorf("scope 只能是 workspace 或 global，给的是 %q", input.Scope)
+				return "", i18n.E("scope 只能是 workspace 或 global，给的是 {scope}", "scope", fmt.Sprintf("%q", input.Scope))
 			}
 		},
 	}); err != nil {
-		s.mcpStatus["长期记忆"] = "注册失败：" + err.Error()
+		s.mcpStatus[i18n.D("长期记忆")] = i18n.D("注册失败：{err}", "err", err)
 	}
 }
 
@@ -468,12 +471,12 @@ func rememberSchema() json.RawMessage {
 		"properties": map[string]any{
 			"text": map[string]any{
 				"type":        "string",
-				"description": "要记住的一句话。写结论，不写过程。",
+				"description": "The one sentence to remember. State the conclusion, not the process.",
 			},
 			"scope": map[string]any{
 				"type":        "string",
 				"enum":        []string{"workspace", "global"},
-				"description": "workspace：这个项目的事（默认，有工作区时）；global：跟项目无关、每个会话都用得上的事。",
+				"description": "workspace: about this project (default when a workspace is set); global: unrelated to the project and useful in every chat.",
 			},
 		},
 		"required":             []string{"text"},
@@ -502,7 +505,7 @@ func (s *Session) memoryText() string {
 		parts = append(parts, s.globalMemory)
 	}
 	if s.workspaceMemory != "" {
-		parts = append(parts, "【本工作区的记忆】\n"+s.workspaceMemory)
+		parts = append(parts, "[Workspace memory]\n"+s.workspaceMemory)
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -532,7 +535,7 @@ func (s *Session) skillNames() string {
 	for _, skill := range s.skills {
 		names = append(names, skill.Name)
 	}
-	return strings.Join(names, "、")
+	return strings.Join(names, i18n.D("、"))
 }
 
 // Skills 返回本次会话挂上的技能名，起会话时回给宿主展示。
@@ -558,7 +561,7 @@ func skillToolSchema(list []skills.Skill) json.RawMessage {
 		"properties": map[string]any{
 			"name": map[string]any{
 				"type": "string", "enum": names,
-				"description": "技能名，取自系统提示词里的可用技能清单",
+				"description": "Skill name, from the list of available skills in the system prompt",
 			},
 		},
 		"required":             []string{"name"},
@@ -660,13 +663,13 @@ func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.M
 		result := results[index]
 		s.mcpDials = append(s.mcpDials, MCPDial{Name: name, Took: result.took, Failed: result.err != nil})
 		if result.err != nil {
-			s.mcpStatus[name] = "挂载失败：" + result.err.Error()
+			s.mcpStatus[name] = i18n.D("挂载失败：{err}", "err", result.err)
 			continue
 		}
 		// 慢的那个要在界面上说出来。并发之后总耗时等于最慢的那一个，用户看到
 		// 「开会话卡了十几秒」时，第一个该知道的就是卡在谁身上。
 		if result.took >= slowDial {
-			s.mcpStatus[name] = fmt.Sprintf("连接用了 %.1fs（慢）", result.took.Seconds())
+			s.mcpStatus[name] = i18n.D("连接用了 {seconds}s（慢）", "seconds", fmt.Sprintf("%.1f", result.took.Seconds()))
 		}
 		s.mountMCP(name, servers[name], result.client, result.key)
 	}
@@ -725,7 +728,7 @@ func (s *Session) mountMCP(
 			Handler: func(ctx context.Context, args json.RawMessage, env *tools.Env) (string, error) {
 				if err := env.RequestApproval(
 					ctx, effect, protocol.ApprovalTool,
-					"调用工具 "+toolName, string(args), def.Description,
+					i18n.D("调用工具 {tool}", "tool", toolName), string(args), def.Description,
 				); err != nil {
 					return "", err
 				}
@@ -733,7 +736,7 @@ func (s *Session) mountMCP(
 			},
 		})
 		if err != nil {
-			s.mcpStatus[name] = "部分工具重名被跳过：" + err.Error()
+			s.mcpStatus[name] = i18n.D("部分工具重名被跳过：{err}", "err", err)
 			continue
 		}
 		mounted++
@@ -743,10 +746,18 @@ func (s *Session) mountMCP(
 	s.mcpMounted[name] = mounted
 	s.mcpKeys = append(s.mcpKeys, key)
 	if _, failed := s.mcpStatus[name]; !failed {
-		s.mcpStatus[name] = fmt.Sprintf(
-			"已挂载 %d 个工具（约占 %s 上下文）", mounted, formatTokens(mountedTokens),
+		s.mcpStatus[name] = i18n.D(
+			"已挂载 {n} 个工具（约占 {tokens} 上下文）", "n", mounted, "tokens", formatTokens(mountedTokens),
 		)
 	}
+}
+
+// isMountedStatus 认出「已挂载 N 个工具……」那种成功挂载的状态行。
+//
+// 状态文字跟着界面语言走，别拿「已挂载 」这样的字面量去比前缀：英文界面下
+// 那一行是 "Mounted …"。两种语言都认。
+func isMountedStatus(status string) bool {
+	return strings.HasPrefix(status, "已挂载 ") || strings.HasPrefix(status, "Mounted ")
 }
 
 // estimateToolTokens 估一组工具在请求里占多少 token。
@@ -804,6 +815,14 @@ func mcpToolEffect(trusted bool, def mcpclient.ToolDef) tools.Effect {
 	return tools.EffectExternal
 }
 
+// replyLanguage 是系统提示词里交代回复语言的那一句。
+func replyLanguage(locale string) string {
+	if locale == "en" {
+		return "The user's interface language is English. Reply in English by default; if the user writes in another language, reply in that language.\n"
+	}
+	return "Reply in Simplified Chinese by default; if the user writes in another language, reply in that language.\n"
+}
+
 func buildSystemPrompt(
 	config protocol.SessionStartParams,
 	registry *tools.Registry,
@@ -813,17 +832,20 @@ func buildSystemPrompt(
 	var builder strings.Builder
 	// 本地运行事实放最前面：模型不知道自己在谁的机器上、能碰哪个目录，
 	// 就容易提出它其实做不到的操作。
-	builder.WriteString("你运行在用户的本机电脑上，可以直接读写文件和执行命令。\n")
+	builder.WriteString("You are running on the user's own computer and can read and write files and run commands directly.\n")
 	// 当前时间写进提示词。模型只知道自己训练到什么时候，「最近三十期」「上个月」
 	// 这类要求会算错，而且错得很自信、没有任何报错。这一行管住大多数情况；
 	// 跨午夜或隔天再打开的会话由 current_time 工具兜住。
-	fmt.Fprintf(&builder, "当前时间：%s。\n", tools.DescribeNow(time.Now()))
+	fmt.Fprintf(&builder, "Current time: %s.\n", tools.DescribeNow(time.Now()))
+	// 回复用什么语言：这份提示词是中文写的，不说的话模型容易被它带着一律用中文回答，
+	// 而界面是英文的用户多半用英文提问、也想看英文。
+	builder.WriteString(replyLanguage(config.Locale))
 	// 说清楚「基准在哪、什么会被问」。模型不知道这两件事时，
 	// 要么不敢碰工作区外面的文件，要么写一堆会被拦下的路径。
 	if workspace := strings.TrimSpace(config.Workdir); workspace != "" {
 		fmt.Fprintf(&builder,
-			"会话工作区：%s。相对路径按它解析。**读文件不限于工作区**，"+
-				"工作区之外的路径也能读（涉及凭据的目录除外）；写到工作区之外会先请用户确认。\n",
+			"Session workspace: %s. Relative paths resolve against it. **Reading is not limited to the workspace**: "+
+				"you can read paths outside it too (except directories that hold credentials); writing outside the workspace asks the user for confirmation first.\n",
 			workspace,
 		)
 	} else {
@@ -831,72 +853,72 @@ func buildSystemPrompt(
 		// 模型会自己编一个——实测它编出了 /Users/bytedance，然后命令在一个
 		// 不存在的目录里执行，报错还指向别处。
 		fmt.Fprintf(&builder,
-			"这个会话**没有设置工作区**，相对路径按用户主目录（%s）解析。"+
-				"读文件不受限制（涉及凭据的目录除外）；任何写入都会先请用户确认。\n",
+			"This chat **has no workspace set**; relative paths resolve against the user's home directory (%s). "+
+				"Reading is unrestricted (except directories that hold credentials); every write asks the user for confirmation first.\n",
 			userHome(),
 		)
 		if !config.DisableSandbox && tools.SandboxAvailable() {
 			// 没有工作区时命令几乎什么都建不了，这件事要提前说，
 			// 否则模型会一遍遍重试同一个 mkdir（实测就是这样）。
 			builder.WriteString(
-				"注意：没有工作区时，**命令无法在主目录里创建文件**（沙箱只放开临时目录与" +
-					"工具链缓存）。需要新建东西时，先请用户在对话页顶部指定一个工作区，" +
-					"不要改用临时目录绕过去。\n",
+				"Note: without a workspace, **commands cannot create files in the home directory** (the sandbox only opens " +
+					"the temp directory and toolchain caches). When you need to create something, first ask the user to pick a " +
+					"workspace at the top of the chat; don't work around it by using the temp directory.\n",
 			)
 		}
 	}
 	if !config.DisableSandbox && tools.SandboxAvailable() {
 		builder.WriteString(
-			"没有经过确认的命令跑在系统沙箱里：只能写工作区与临时目录，读不到凭据目录。" +
-				"被拦下时不要反复重试同一条命令，换个落点或者告诉用户。\n",
+			"Commands that were not confirmed by the user run in an OS sandbox: they can only write to the workspace and the temp directory, and cannot read credential directories. " +
+				"When a command is blocked, don't keep retrying it; write somewhere else or tell the user.\n",
 		)
 	}
 	if !config.ModelSeesImages && config.Roles.Vision.Configured() {
 		builder.WriteString(
-			"你自己看不了图：用户发来的图片会先由另一个模型转成文字描述再交给你，" +
-				"所以你读到的是转述而不是原图。描述里没有的细节就是没有，不要凭空补。\n",
+			"You cannot see images yourself: images the user sends are first turned into text descriptions by another model, " +
+				"so what you read is a description, not the original image. If a detail isn't in the description, you don't have it; don't make it up.\n",
 		)
 	}
 	switch config.ApprovalPolicy {
 	case protocol.ApprovalNever:
-		builder.WriteString("当前为无人值守模式，没有人会回答确认请求；需要确认的操作会直接失败。\n")
+		builder.WriteString("Running unattended: nobody will answer confirmation requests, so any action that needs confirmation will fail.\n")
 	case protocol.ApprovalBypass:
-		builder.WriteString("当前为全部放行模式：操作不需要用户确认就会执行，所以动手前要格外确认意图；危险命令仍会被拒绝。\n")
+		builder.WriteString("Approve-all mode is on: actions run without user confirmation, so be extra sure of the user's intent before acting. Dangerous commands are still refused.\n")
 	case protocol.ApprovalAlways:
-		builder.WriteString("每个有副作用的操作都会先请用户确认。\n")
+		builder.WriteString("Every action with side effects asks the user for confirmation first.\n")
 	default:
 		builder.WriteString(
-			"普通命令不需要确认；删除、提权、改系统设置这类命令，以及调用外部工具，会先请用户确认。\n",
+			"Ordinary commands don't need confirmation; commands that delete, escalate privileges or change system settings, as well as calls to external tools, ask the user for confirmation first.\n",
 		)
 	}
 	if registry.Len() > 0 {
-		fmt.Fprintf(&builder, "可用工具：%s。\n", strings.Join(registry.Names(), "、"))
+		fmt.Fprintf(&builder, "Available tools: %s.\n", strings.Join(registry.Names(), ", "))
 		if _, hasExec := registry.Get("exec"); hasExec {
 			// 恢复会话时可能是刚开的代码模式：历史里满是 run_command 之类的直接调用，
 			// 模型照着历史写，连报「没有这个工具」。这句话放在提示词里，比错误信息早一步。
 			builder.WriteString(
-				"其余工具（读写文件、执行命令、MCP 等）都收在 exec 里，在脚本里用 tools.名字() 调用；" +
-					"历史里若有直接调用它们的记录，现在那样调会报「没有这个工具」。\n",
+				"All other tools (file reads/writes, commands, MCP, etc.) live inside exec; call them from a script as tools.<name>(). " +
+					"If the history shows them being called directly, calling them that way now fails with \"no such tool\".\n",
 			)
 		}
 	}
 	// 技能只列名字与用途，正文等 load_skill 取——十几个技能的正文加起来
 	// 能有几万 token，每轮都带着走会把上下文挤没。
 	if len(available) > 0 {
-		builder.WriteString("\n可用技能（判断适用时先用 load_skill 取出完整说明再照做）：\n")
+		builder.WriteString("\nAvailable skills (when one applies, first call load_skill to get its full instructions, then follow them):\n")
 		for _, skill := range available {
 			// 说明截断。技能现在是从 Claude Code、Codex、npm 等处一并发现的，
 			// 一台机器上二十来个很正常，而有些技能的 description 写了七八百字——
 			// 原样铺进提示词就是几千 token，每一轮都在付。判断「用不用得上」
 			// 不需要那么多字，真要用的时候 load_skill 会给出全文。
-			fmt.Fprintf(&builder, "- %s：%s\n", skill.Name, truncateRunes(skill.Description, 200))
+			fmt.Fprintf(&builder, "- %s: %s\n", skill.Name, truncateRunes(skill.Description, 200))
 		}
 	}
 
 	// 长期记忆原样进提示词。它是用户攒下来的事实，不做摘要也不做裁剪——
 	// 会话上下文撑满时压缩的是对话历史，不动这一段。
 	if remembered != "" {
-		builder.WriteString("\n关于用户与当前工作的长期记忆（以前的会话里记下来的）：\n")
+		builder.WriteString("\nLong-term memory about the user and the current work (saved in earlier chats):\n")
 		builder.WriteString(remembered)
 		builder.WriteString("\n")
 	}
@@ -923,10 +945,10 @@ func (s *Session) SetWorkspace(workspace string) error {
 	if trimmed != "" {
 		info, err := os.Stat(trimmed)
 		if err != nil {
-			return fmt.Errorf("工作区不可用：%w", err)
+			return fmt.Errorf("%s%w", i18n.D("工作区不可用："), err)
 		}
 		if !info.IsDir() {
-			return fmt.Errorf("工作区必须是一个目录：%s", trimmed)
+			return i18n.E("工作区必须是一个目录：{path}", "path", trimmed)
 		}
 	}
 	s.mu.Lock()
@@ -934,7 +956,7 @@ func (s *Session) SetWorkspace(workspace string) error {
 	s.config.Workdir = trimmed
 	s.applied = refreshOf(s.config)
 	// 工作区记忆跟着工作区走：换了目录就换一份。
-	s.workspaceMemory = s.loadMemoryFile(workspaceMemoryPath(trimmed), "工作区记忆")
+	s.workspaceMemory = s.loadMemoryFile(workspaceMemoryPath(trimmed), i18n.D("工作区记忆"))
 	// **提示词要跟着改。** 它是建会话那一刻生成的，里面写着「这个会话没有设置
 	// 工作区、相对路径按主目录解析」——用户后来指了工作区，这段话就成了假的。
 	// 实测里模型照着它说「在主目录里建目录会被沙箱拦住」，然后发现东西其实
@@ -1020,7 +1042,7 @@ func (s *Session) Workspace() string {
 
 func (s *Session) Configure(model protocol.ModelConfig) error {
 	if strings.TrimSpace(model.Model) == "" {
-		return errors.New("模型名为空")
+		return i18n.E("模型名为空")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1199,7 +1221,7 @@ func Load(
 	}
 	var config protocol.SessionStartParams
 	if err := json.Unmarshal(record.Config, &config); err != nil {
-		return nil, fmt.Errorf("会话配置损坏：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("会话配置损坏："), err)
 	}
 	// 存档里的 MCP server、技能、记忆、computer use 开关是**建会话那一刻**的。
 	// 而应用一启动就接着上次的会话：不拿当前配置盖掉的话，用户后来加的 MCP
@@ -1215,6 +1237,7 @@ func Load(
 		config.EnableBrowser = refresh.EnableBrowser
 		config.EnableEmail = refresh.EnableEmail
 		config.EnableSchedule = refresh.EnableSchedule
+		config.Locale = refresh.Locale
 		config.DisableSandbox = refresh.DisableSandbox
 		config.CodeMode = refresh.CodeMode
 		config.Roles = refresh.Roles
@@ -1226,7 +1249,7 @@ func Load(
 	var messages []llm.Message
 	if len(record.Messages) > 0 {
 		if err := json.Unmarshal(record.Messages, &messages); err != nil {
-			return nil, fmt.Errorf("会话历史损坏：%w", err)
+			return nil, fmt.Errorf("%s%w", i18n.D("会话历史损坏："), err)
 		}
 	}
 

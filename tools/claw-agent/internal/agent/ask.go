@@ -3,10 +3,9 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
@@ -34,25 +33,25 @@ func (s *Session) registerAskTool() error {
 	}
 	return s.registry.Register(tools.Tool{
 		Name: "ask_user",
-		Description: "向用户提一个问题并等他回答，这一轮停在这里、拿到回答后接着做。" +
-			"只在**需要用户拍板、而你无法从上下文判断**时用：要删哪些、用哪个方案、范围多大、" +
-			"有歧义的需求。能自己查到的不要问；一次只问一个问题。尽量给 2–4 个选项（用户点一下就行），" +
-			"用户也可以不选、自己写，或者跳过——跳过时按你的最佳判断继续，并说明你的假设。",
+		Description: "Ask the user a question and wait for the answer; the turn pauses here and continues once the answer arrives. " +
+			"Use it only when **the user has to decide and you cannot tell from context**: what to delete, which approach to take, how broad the scope is, " +
+			"or an ambiguous request. Don't ask about things you can look up yourself; ask one question at a time. Offer 2–4 options where possible (the user just clicks one); " +
+			"the user may also write their own answer or skip — if they skip, proceed with your best judgment and state your assumptions.",
 		Schema: schemaOf(map[string]any{
-			"question": map[string]any{"type": "string", "description": "要问的问题，一句话说清楚"},
+			"question": map[string]any{"type": "string", "description": "The question, stated clearly in one sentence"},
 			"options": map[string]any{
 				"type":        "array",
-				"description": "可选的回答，2–4 个为宜；不给就是开放式问题",
+				"description": "Suggested answers, ideally 2–4; omit for an open-ended question",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"label":       map[string]any{"type": "string", "description": "选项本身，简短"},
-						"description": map[string]any{"type": "string", "description": "选了它意味着什么（可选）"},
+						"label":       map[string]any{"type": "string", "description": "The option itself, short"},
+						"description": map[string]any{"type": "string", "description": "What choosing it means (optional)"},
 					},
 					"required": []string{"label"},
 				},
 			},
-			"multiSelect": map[string]any{"type": "boolean", "description": "可以选多个时为 true"},
+			"multiSelect": map[string]any{"type": "boolean", "description": "true if multiple options can be selected"},
 		}, "question"),
 		// 只是问，不改任何东西：任何档位都不需要先审批。
 		Effect: tools.EffectRead,
@@ -63,7 +62,7 @@ func (s *Session) registerAskTool() error {
 			}
 			emitter := s.currentEmitter()
 			if emitter == nil {
-				return "", errors.New("没有进行中的轮次，无法提问")
+				return "", i18n.E("没有进行中的轮次，无法提问")
 			}
 			request.SessionID = env.SessionID
 			request.TurnID = env.TurnID
@@ -83,11 +82,11 @@ func parseAsk(raw json.RawMessage) (protocol.UserInputRequestParams, error) {
 		MultiSelect bool                       `json:"multiSelect"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return protocol.UserInputRequestParams{}, errors.New("参数不是合法 JSON 对象")
+		return protocol.UserInputRequestParams{}, i18n.E("提问的参数不是合法 JSON 对象")
 	}
 	question := strings.TrimSpace(args.Question)
 	if question == "" {
-		return protocol.UserInputRequestParams{}, errors.New("question 不能为空")
+		return protocol.UserInputRequestParams{}, i18n.E("问题（question）不能为空")
 	}
 	if len([]rune(question)) > maxAskQuestion {
 		question = string([]rune(question)[:maxAskQuestion]) + "…"
@@ -115,17 +114,18 @@ func parseAsk(raw json.RawMessage) (protocol.UserInputRequestParams, error) {
 // describeAnswer 把回答写成模型读得懂的一句话。
 func describeAnswer(request protocol.UserInputRequestParams, response protocol.UserInputResponse) string {
 	if response.Skipped {
-		return "用户跳过了这个问题，没有回答。按你的最佳判断继续，并在回复里说明你做了什么假设。"
+		return i18n.D("用户跳过了这个问题，没有回答。按你的最佳判断继续，并在回复里说明你做了什么假设。")
 	}
 	var parts []string
 	if len(response.Selected) > 0 {
-		parts = append(parts, fmt.Sprintf("用户选了：%s", strings.Join(response.Selected, "、")))
+		// 「用户选了：」也是 scripts/smoke-kernel.ts 认的标记（它按默认的中文跑）。
+		parts = append(parts, i18n.D("用户选了：{options}", "options", strings.Join(response.Selected, i18n.D("、"))))
 	}
 	if text := strings.TrimSpace(response.Text); text != "" {
-		parts = append(parts, fmt.Sprintf("用户写道：%s", text))
+		parts = append(parts, i18n.D("用户写道：{text}", "text", text))
 	}
 	if len(parts) == 0 {
-		return "用户没有给出回答。按你的最佳判断继续，并说明你的假设。"
+		return i18n.D("用户没有给出回答。按你的最佳判断继续，并说明你的假设。")
 	}
 	return strings.Join(parts, "\n")
 }

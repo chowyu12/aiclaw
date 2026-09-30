@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -71,12 +72,12 @@ func riskyReason(command string) string {
 	// `xxx | sh` 这种把任意内容当脚本执行的形状要单独认出来。
 	for _, pipe := range []string{"| sh", "| bash", "| zsh", "|sh", "|bash"} {
 		if strings.Contains(normalized, pipe) {
-			return "把下载的内容直接交给 shell 执行"
+			return i18n.D("把下载的内容直接交给 shell 执行")
 		}
 	}
 	for _, pattern := range riskyCommands {
 		if strings.Contains(normalized, pattern) {
-			return fmt.Sprintf("命令里有 %s", strings.TrimSpace(pattern))
+			return i18n.D("命令里有 {pattern}", "pattern", strings.TrimSpace(pattern))
 		}
 	}
 	return transferRisk(normalized)
@@ -109,21 +110,21 @@ func transferRisk(normalized string) string {
 	sending := []string{" -d ", " --data", " -f ", " --form", " -t ", " --upload-file", " -x post", " -x put", " -x patch", " -x delete", " --post-data", " --post-file", " --method=post", " --method=put"}
 	for _, flag := range sending {
 		if strings.Contains(normalized+" ", flag) {
-			return "把数据发到外部地址"
+			return i18n.D("把数据发到外部地址")
 		}
 	}
 	saving := []string{" -o ", " --output", " --remote-name", " -j ", " --output-document"}
 	for _, flag := range saving {
 		if strings.Contains(normalized+" ", flag) {
-			return "把下载的内容写到磁盘"
+			return i18n.D("把下载的内容写到磁盘")
 		}
 	}
 	if isWget && !wgetToStdout(normalized) {
 		// wget 默认就是落盘（不带 -O- 的话）。
-		return "wget 默认把下载的内容写到磁盘"
+		return i18n.D("wget 默认把下载的内容写到磁盘")
 	}
 	if strings.Contains(normalized, " > ") || strings.Contains(normalized, " >> ") {
-		return "把下载的内容写到磁盘"
+		return i18n.D("把下载的内容写到磁盘")
 	}
 	return ""
 }
@@ -132,7 +133,7 @@ func checkDangerous(command string) error {
 	normalized := strings.ToLower(strings.Join(strings.Fields(command), " "))
 	for _, pattern := range dangerousCommands {
 		if strings.Contains(normalized, pattern) {
-			return fmt.Errorf("命令包含被禁止的操作（%s），已拒绝执行", strings.TrimSpace(pattern))
+			return i18n.E("命令包含被禁止的操作（{pattern}），已拒绝执行", "pattern", strings.TrimSpace(pattern))
 		}
 	}
 	return nil
@@ -142,27 +143,27 @@ func checkDangerous(command string) error {
 func RegisterExecTool(registry *Registry) error {
 	return registry.Register(Tool{
 		Name: "run_command",
-		Description: "执行一条 shell 命令并返回输出。命令在会话工作区里跑" +
-			"（没设工作区时在用户主目录），直接跑在用户本机。" +
-			"删除、提权、改系统设置这类命令执行前会请用户确认。" +
-			"需要连着做几步（cd 进去再跑、先 source 再跑）时用 session 参数，" +
-			"否则每条命令都是全新的 shell，上一条的 cd 不算数。",
+		Description: "Run a shell command and return its output. The command runs in the session workspace " +
+			"(the user's home directory when no workspace is set), directly on the user's machine. " +
+			"Commands that delete, escalate privileges or change system settings ask the user for confirmation first. " +
+			"When you need several steps in a row (cd somewhere and run, source a file and run), use the session parameter; " +
+			"otherwise every command gets a fresh shell and a previous cd has no effect.",
 		Effect: EffectExec,
 		Schema: schema(map[string]any{
-			"command": map[string]any{"type": "string", "description": "完整命令行"},
+			"command": map[string]any{"type": "string", "description": "The full command line"},
 			"cwd": map[string]any{
-				"type": "string", "description": "在哪个目录下执行；不传用会话工作区（没设则用主目录）",
+				"type": "string", "description": "Directory to run in; omit to use the session workspace (or the home directory if none is set)",
 			},
 			"timeout_seconds": map[string]any{
-				"type": "integer", "description": "超时秒数，默认 60，最大 600", "minimum": 1, "maximum": 600,
+				"type": "integer", "description": "Timeout in seconds, default 60, at most 600", "minimum": 1, "maximum": 600,
 			},
 			"reason": map[string]any{
-				"type": "string", "description": "一句话说明为什么要执行；会展示给用户帮助其决定是否放行",
+				"type": "string", "description": "One sentence on why you are running this; shown to the user to help them decide whether to allow it",
 			},
 			"session": map[string]any{
 				"type": "string",
-				"description": "常驻会话：传 \"new\" 开一个，或传上次返回的 id 继续用。" +
-					"同一个会话里 cd、export、source 都留着。不传就是一次性命令。",
+				"description": "Persistent shell session: pass \"new\" to open one, or the id returned last time to keep using it. " +
+					"cd, export and source persist within a session. Omit for a one-off command.",
 			},
 		}, "command"),
 		Handler: runCommand,
@@ -182,7 +183,7 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (string, err
 	}
 	command := strings.TrimSpace(args.Command)
 	if command == "" {
-		return "", errors.New("command 不能为空")
+		return "", i18n.E("command 不能为空")
 	}
 	if err := checkDangerous(command); err != nil {
 		return "", err
@@ -201,7 +202,7 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (string, err
 	// 而真正不存在的是工作目录。实测模型据此判断「sandbox-exec 没装」，
 	// 然后朝着完全错误的方向修了好几轮。
 	if info, statErr := os.Stat(cwd); statErr != nil || !info.IsDir() {
-		return "", fmt.Errorf("执行目录不存在：%s", cwd)
+		return "", i18n.E("执行目录不存在：{dir}", "dir", cwd)
 	}
 
 	// 只有看着危险的才问。理由：每条命令都弹框会把用户训练成闭眼点「允许」，
@@ -217,12 +218,12 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (string, err
 		if reason == "" {
 			reason = risk
 		} else {
-			reason = fmt.Sprintf("%s（%s）", reason, risk)
+			reason = i18n.D("{reason}（{risk}）", "reason", reason, "risk", risk)
 		}
 	}
 	if err := env.RequestApproval(
 		ctx, effect, protocol.ApprovalExec,
-		"执行命令", fmt.Sprintf("%s\n（在 %s 下执行）", command, cwd), reason,
+		i18n.D("执行命令"), command+"\n"+i18n.D("（在 {dir} 下执行）", "dir", cwd), reason,
 	); err != nil {
 		return "", err
 	}
@@ -238,13 +239,13 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (string, err
 	// 审批与危险名单在上面都已经走过了，这里只是换一种执行方式。
 	if session := strings.TrimSpace(args.Session); session != "" {
 		if env.Shells == nil {
-			return "", errors.New("当前环境不支持常驻 shell 会话")
+			return "", i18n.E("当前环境不支持常驻 shell 会话")
 		}
 		output, id, err := env.Shells.Run(ctx, session, command, env, timeout)
 		if err != nil {
 			return output, err
 		}
-		return fmt.Sprintf("%s\n（常驻会话 %s；下次传 session=\"%s\" 继续用它）", output, id, id), nil
+		return output + "\n" + i18n.D("（常驻会话 {id}；下次传 session=\"{id}\" 继续用它）", "id", id), nil
 	}
 
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -280,30 +281,28 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (string, err
 	if runErr != nil && sandboxed && strings.Contains(output, "Operation not permitted") {
 		// 沙箱拒绝时系统只说 "Operation not permitted"，看起来像权限配错了。
 		// 补一句说清是谁拦的、怎么办，否则模型会反复重试同一条命令。
-		output += "\n[沙箱] 这条命令想写工作区之外的地方，或者读凭据目录，已被拦下。" +
-			"（工具链缓存不在限制内，go/npm/cargo 照常可用。）" +
-			"要往别处写，请用户把会话工作区指到那儿，或者在「配置 → 执行」里临时关掉沙箱；" +
-			"**不要自己造一套临时目录绕过去**——那会让用户下次还得重来一遍。"
+		// 开头的「[沙箱]」随语言变（英文是 [Sandbox]）；只有测试认它，测试跑在默认的中文下。
+		output += "\n" + i18n.D("[沙箱] 这条命令想写工作区之外的地方，或者读凭据目录，已被拦下。（工具链缓存不在限制内，go/npm/cargo 照常可用。）要往别处写，请用户把会话工作区指到那儿，或者在「配置 → 执行」里临时关掉沙箱；**不要自己造一套临时目录绕过去**——那会让用户下次还得重来一遍。")
 	}
 	if errors.Is(runErr, exec.ErrWaitDelay) {
 		// 命令**本身已经结束**了，只是它拉起的后台进程还攥着输出管道。
 		// 这不是失败：该给的输出都在手上，接着等下去才是错的
 		//（踩过：一个挂着等凭据的 git 让那一步永远停在「执行中」）。
-		return output + "\n（命令已结束；它启动的后台进程还在跑，不再等它的输出）", nil
+		return output + "\n" + i18n.D("（命令已结束；它启动的后台进程还在跑，不再等它的输出）"), nil
 	}
 	if runErr != nil {
 		if errors.Is(execCtx.Err(), context.DeadlineExceeded) {
-			return output, fmt.Errorf("命令超过 %s 未结束，已终止", timeout)
+			return output, i18n.E("命令超过 {timeout} 未结束，已终止", "timeout", timeout)
 		}
 		var exitErr *exec.ExitError
 		if errors.As(runErr, &exitErr) {
 			// 非零退出不算工具故障：把退出码和输出一起给模型，它自己判断。
-			return fmt.Sprintf("%s\n[退出码 %d]", output, exitErr.ExitCode()), nil
+			return output + "\n" + i18n.D("[退出码 {code}]", "code", exitErr.ExitCode()), nil
 		}
-		return output, fmt.Errorf("启动命令失败：%w", runErr)
+		return output, fmt.Errorf("%s: %w", i18n.D("启动命令失败"), runErr)
 	}
 	if output == "" {
-		return "（命令执行完成，无输出）", nil
+		return i18n.D("（命令执行完成，无输出）"), nil
 	}
 	return output, nil
 }
@@ -371,14 +370,14 @@ func (w *limitedWriter) Write(p []byte) (int, error) {
 	remaining := w.limit - w.buffer.Len()
 	if remaining <= 0 {
 		if !w.truncated {
-			w.buffer.WriteString("\n[输出已截断]")
+			w.buffer.WriteString("\n" + i18n.D("[输出已截断]"))
 			w.truncated = true
 		}
 		return len(p), nil
 	}
 	if len(p) > remaining {
 		w.buffer.Write(p[:remaining])
-		w.buffer.WriteString("\n[输出已截断]")
+		w.buffer.WriteString("\n" + i18n.D("[输出已截断]"))
 		w.truncated = true
 		return len(p), nil
 	}

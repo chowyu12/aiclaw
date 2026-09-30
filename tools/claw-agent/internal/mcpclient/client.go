@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 const protocolVersion = "2025-03-26"
@@ -129,7 +131,7 @@ func Start(ctx context.Context, config Config) (*Client, error) {
 	case TransportHTTP:
 		conn, err = startHTTP(config)
 	default:
-		return nil, fmt.Errorf("不认识的 MCP 传输方式：%s", kind)
+		return nil, i18n.E("不认识的 MCP 传输方式：{kind}", "kind", kind)
 	}
 	if err != nil {
 		return nil, err
@@ -146,21 +148,21 @@ func Start(ctx context.Context, config Config) (*Client, error) {
 		"clientInfo":      map[string]any{"name": "claw-agent", "version": "0.1.0"},
 	}); err != nil {
 		client.Close()
-		return nil, fmt.Errorf("MCP 握手失败：%w%s", err, conn.Diagnostics())
+		return nil, fmt.Errorf("%s%w%s", i18n.D("MCP 握手失败："), err, conn.Diagnostics())
 	}
 	conn.Notify("notifications/initialized", nil)
 
 	raw, err := conn.Call(startCtx, "tools/list", map[string]any{})
 	if err != nil {
 		client.Close()
-		return nil, fmt.Errorf("拉取工具清单失败：%w%s", err, conn.Diagnostics())
+		return nil, fmt.Errorf("%s%w%s", i18n.D("拉取工具清单失败："), err, conn.Diagnostics())
 	}
 	var list struct {
 		Tools []ToolDef `json:"tools"`
 	}
 	if err := json.Unmarshal(raw, &list); err != nil {
 		client.Close()
-		return nil, fmt.Errorf("工具清单格式不对：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("工具清单格式不对："), err)
 	}
 	client.tools = list.Tools
 	return client, nil
@@ -191,7 +193,7 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMe
 		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return "", fmt.Errorf("工具结果格式不对：%w", err)
+		return "", fmt.Errorf("%s%w", i18n.D("工具结果格式不对："), err)
 	}
 	var builder strings.Builder
 	for _, item := range result.Content {
@@ -202,7 +204,7 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMe
 	text := builder.String()
 	if result.IsError {
 		if text == "" {
-			text = "工具执行失败"
+			text = i18n.D("工具执行失败")
 		}
 		return "", errors.New(text)
 	}

@@ -24,6 +24,8 @@ import (
 	"net/url"
 	"path"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // dialect 标记一个端点在对话之外的接口上说哪种方言。
@@ -129,7 +131,7 @@ func (c *Client) dashScopeGenerateImage(ctx context.Context, model, prompt, size
 			}
 		}
 	}
-	return nil, fmt.Errorf("图片服务没有返回任何图片")
+	return nil, i18n.E("图片服务没有返回任何图片")
 }
 
 // dashScopeSpeak 用 qwen-tts 系列朗读，返回 wav 字节。
@@ -154,7 +156,7 @@ func (c *Client) dashScopeSpeak(ctx context.Context, model, text, voice string) 
 	if data := parsed.Output.Audio.Data; data != "" {
 		decoded, err := base64.StdEncoding.DecodeString(data)
 		if err != nil {
-			return nil, "", fmt.Errorf("语音数据解不开：%w", err)
+			return nil, "", fmt.Errorf("%s: %w", i18n.D("语音数据解不开"), err)
 		}
 		return decoded, "wav", nil
 	}
@@ -169,7 +171,7 @@ func (c *Client) dashScopeSpeak(ctx context.Context, model, text, voice string) 
 		}
 		return audio, ext, nil
 	}
-	return nil, "", fmt.Errorf("语音服务既没给数据也没给地址")
+	return nil, "", i18n.E("语音服务既没给数据也没给地址")
 }
 
 // dashScopeTranscribe 用 qwen-asr 系列听写。音频以 data URI 内联送过去。
@@ -214,11 +216,11 @@ func (c *Client) dashScopeCall(ctx context.Context, payload []byte, into *dashSc
 		return err
 	}
 	if err := json.Unmarshal(raw, into); err != nil {
-		return fmt.Errorf("百炼的返回看不懂：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("百炼的返回看不懂"), err)
 	}
 	// 200 里也可能带业务错误码。
 	if into.Code != "" {
-		return fmt.Errorf("上游返回 %s：%s", into.Code, into.Message)
+		return i18n.E("上游返回 {status}：{message}", "status", into.Code, "message", into.Message)
 	}
 	return nil
 }

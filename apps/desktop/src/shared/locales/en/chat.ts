@@ -1,0 +1,149 @@
+/** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
+export const chat: Record<string, string> = {
+  // ---------- 对话页：未就绪 ----------
+  "先完成配置": "Finish setup first",
+  "到「模型服务」页添加一个端点、填上 Key、写上模型名，再回来选一个默认模型。":
+    "On the Model providers page, add an endpoint, enter its key and a model name, then come back and pick a default model.",
+  "正在启动本地运行时…": "Starting the local runtime…",
+  "在本机拉起 Agent 执行内核。": "Starting the agent kernel on this machine.",
+  "本地运行时启动失败": "The local runtime failed to start",
+  "本地运行时未启动": "The local runtime isn't running",
+  "启动后会在本机拉起 Agent 执行内核。命令会直接在这台电脑上执行，没有沙箱。":
+    "Starting it launches the agent kernel on this machine. Commands run directly on this computer, with no sandbox.",
+  "重试": "Retry",
+  "启动并开始对话": "Start and begin chatting",
+  "正在载入这个会话…": "Loading this session…",
+  "这个会话还没有内容。说点什么开始。": "Nothing here yet. Say something to get started.",
+
+  // ---------- 消息 ----------
+  "附带的图片": "Attached image",
+  "打开「{title}」": "Open “{title}”",
+  "已复制": "Copied",
+  "复制失败": "Copy failed",
+  "复制": "Copy",
+  "复制回答（Markdown 原文）": "Copy answer (Markdown)",
+  "{month}月{day}日 {clock}": "{month}/{day} {clock}",
+  "{year}年{month}月{day}日 {clock}": "{month}/{day}/{year} {clock}",
+
+  // ---------- 执行步骤 ----------
+  "执行中 · 已 {n} 步": "Running · {n} steps so far",
+  "{n} 个执行步骤 · 用时 {time}": "Steps: {n} · took {time}",
+  "{n} 个执行步骤": "Steps: {n}",
+  "提示": "notice",
+  "思考 {time}": "Thinking {time}",
+  "{n} 工具调用": "Tool calls: {n}",
+  "正在读取…": "Loading…",
+  "模型": "Model",
+  "运行出错": "Run failed",
+  "参数": "Arguments",
+  "结果": "Result",
+
+  // ---------- 输入框 ----------
+  "这一轮还在跑，现在发的会插进这一轮": "This turn is still running. Anything you send now joins it.",
+  "随心输入…… Enter 发送，Shift+Enter 换行": "Ask anything… Enter to send, Shift+Enter for a new line",
+  "贴图片或文本文件（也可以直接粘贴/拖进来）": "Attach images or text files (you can also paste or drag them in)",
+  "附件": "Attach",
+  "移除": "Remove",
+  "{name}（{size} MB）": "{name} ({size} MB)",
+  "{name}（已截断）": "{name} (truncated)",
+  "{name} 读不了：{error}": "Couldn't read {name}: {error}",
+  "发送": "Send",
+  "停止": "Stop",
+
+  // ---------- 附件判断 ----------
+  "一条消息最多 {n} 段音频": "Up to {n} audio clips per message",
+  "音频太大（超过 25MB）": "Audio is too large (over 25 MB)",
+  "一条消息最多 {n} 张图": "Up to {n} images per message",
+  "图片太大（超过 20MB）": "Image is too large (over 20 MB)",
+  "不支持这种文件（{name}）。把它放进工作目录，然后让我去读它。":
+    "This file type isn't supported ({name}). Put it in the working directory and ask me to read it.",
+  "浏览器没给出 2d 画布，无法处理图片": "The browser didn't provide a 2D canvas, so the image can't be processed",
+  "截图.jpg": "Screenshot.jpg",
+  "录音": "Recording",
+
+  // ---------- 引用会话 ----------
+  "引用另一个会话：模型会先读它（也可以直接打 @）": "Reference another session: the model reads it first (or just type @)",
+  "引用会话": "Reference",
+  "引用会话：模型会先读它，再回答你": "Reference a session: the model reads it before answering",
+  "未命名会话": "Untitled session",
+  "子 agent · ": "Sub-agent · ",
+
+  // ---------- 工作区 ----------
+  "未设工作区": "No workspace",
+  "会话工作区：{path}": "Session workspace: {path}",
+  "这个会话没有设置工作区，点一下可以指定": "This session has no workspace. Click to choose one.",
+  "会话工作区": "Session workspace",
+  "没有设置。相对路径按主目录解析，任何写入都会先问你一次。":
+    "Not set. Relative paths resolve against your home folder, and every write asks you first.",
+  "选择目录…": "Choose folder…",
+  "清除（回到未设置）": "Clear (back to not set)",
+
+  // ---------- 工具与挂载 ----------
+  "工具 {n}": "Tools {n}",
+  "这个会话挂上了什么": "What this session has loaded",
+  "内置工具与插件": "Built-in tools and plugins",
+  "、": ", ",
+  "无": "None",
+  "收进 exec 的工具（{n}）": "Tools folded into exec ({n})",
+  "技能": "Skills",
+  "没有挂载任何 MCP server。到「MCP」页添加。": "No MCP servers loaded. Add one on the MCP page.",
+  "审批": "Approvals",
+
+  // ---------- 模型选择 ----------
+  "选择模型": "Choose model",
+  "刷新": "Refresh",
+  "搜索模型或服务名": "Search models or providers",
+  "正在读取模型服务…": "Loading model providers…",
+  "还没有能用的模型。到「模型服务」页添加端点、填 Key、写上模型名。":
+    "No models available yet. On the Model providers page, add an endpoint, enter its key and a model name.",
+  "没有匹配「{query}」的模型。": "No models match “{query}”.",
+  "{n}K 上下文": "{n}K context",
+  "{n} 上下文": "{n} context",
+
+  // ---------- 语音输入 ----------
+  "再点一下结束录音，转成文字": "Click again to stop and transcribe",
+  "正在听写…": "Transcribing…",
+  "语音输入：点一下开始说话": "Voice input: click to start speaking",
+  "语音输入：先在「配置 → 多模态」里给「听写」选一个模型":
+    "Voice input: first choose a Transcription model in Settings → Multimodal",
+  "还没有配听写模型：到「配置 → 多模态」里给「听写」选一个模型。":
+    "No transcription model yet. Choose one for Transcription in Settings → Multimodal.",
+  "没有麦克风权限：到「系统设置 → 隐私与安全性 → 麦克风」里打开 AIClaw，然后重新打开应用。":
+    "No microphone access. Turn on AIClaw in System Settings → Privacy & Security → Microphone, then reopen the app.",
+  "打不开麦克风：{error}": "Couldn't open the microphone: {error}",
+  "没有听到声音。检查一下麦克风，靠近一点再说一次。":
+    "No sound detected. Check your microphone, move closer and try again.",
+  "没听出内容，再说一次试试。": "Couldn't make out any speech. Try again.",
+  "去配置": "Open settings",
+  "丢掉这段（Esc）": "Discard recording (Esc)",
+
+  // ---------- 提问卡片 ----------
+  "AIClaw 的提问": "Question from AIClaw",
+  "等你回答": "Waiting for you",
+  "可以选多个，也可以自己写": "Pick any, or write your own",
+  "选一个，也可以自己写": "Pick one, or write your own",
+  "其他（可选）：直接写你的回答": "Other (optional): write your own answer",
+  "写下你的回答": "Write your answer",
+  "跳过": "Skip",
+  "已提交": "Submitted",
+  "提交": "Submit",
+
+  // ---------- 审批弹窗 ----------
+  "另一个会话": "another session",
+  "执行命令": "Run command",
+  "写入文件": "Write file",
+  "调用外部工具": "Call external tool",
+  "这会直接在你的电脑上执行，不受沙箱限制。": "This runs directly on your computer, outside any sandbox.",
+  "这会写入你电脑上的文件。": "This writes to a file on your computer.",
+  "这个工具可能会改变外部系统的状态。只读的查询不会问你。":
+    "This tool may change the state of an external system. Read-only queries don't ask.",
+  "来自「{source}」": "From “{source}”",
+  "工作目录": "Working directory",
+  "本次会话内可以整个目录放行：": "You can allow the whole folder for this session:",
+  "拒绝": "Deny",
+  "本次会话都允许这个目录": "Allow this folder for the session",
+  "允许本次": "Allow once",
+
+  // ---------- 通用 ----------
+  "未知错误": "Unknown error",
+};

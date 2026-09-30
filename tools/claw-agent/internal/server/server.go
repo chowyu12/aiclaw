@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/appdb"
@@ -133,7 +134,7 @@ func (s *Server) keyFor(model *protocol.ModelConfig) (string, error) {
 		return s.options.APIKey, nil
 	}
 	if s.providers == nil {
-		return "", errors.New("没有打开模型配置库，无法按模型服务取 Key")
+		return "", i18n.E("没有打开模型配置库，无法按模型服务取 Key")
 	}
 	return s.providers.Resolve(context.Background(), model)
 }
@@ -320,7 +321,7 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		}
 		session := s.session(params.SessionID)
 		if session == nil {
-			s.writeError(f.ID, codeInvalidParams, "会话不存在或尚未恢复："+params.SessionID)
+			s.writeError(f.ID, codeInvalidParams, i18n.D("会话不存在或尚未恢复：{id}", "id", params.SessionID))
 			return
 		}
 		if params.Workspace != nil {
@@ -349,7 +350,7 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		}
 		session := s.session(params.SessionID)
 		if session == nil {
-			s.writeError(f.ID, codeInvalidParams, "会话不存在或尚未恢复："+params.SessionID)
+			s.writeError(f.ID, codeInvalidParams, i18n.D("会话不存在或尚未恢复：{id}", "id", params.SessionID))
 			return
 		}
 		s.writeResult(f.ID, protocol.SessionHistoryResult{Items: session.History()})
@@ -388,12 +389,12 @@ func (s *Server) handleAudioTranscribe(ctx context.Context, f frame) {
 		return
 	}
 	if !params.Role.Configured() {
-		s.writeError(f.ID, codeInvalidParams, "还没有配听写模型：到「配置 → 多模态」里选一个听写模型")
+		s.writeError(f.ID, codeInvalidParams, i18n.D("还没有配听写模型：到「配置 → 多模态」里选一个听写模型"))
 		return
 	}
 	audio, err := base64.StdEncoding.DecodeString(params.Audio)
 	if err != nil || len(audio) == 0 {
-		s.writeError(f.ID, codeInvalidParams, "音频数据不对")
+		s.writeError(f.ID, codeInvalidParams, i18n.D("音频数据不对"))
 		return
 	}
 	go func() {
@@ -414,7 +415,7 @@ func (s *Server) handleAudioTranscribe(ctx context.Context, f frame) {
 		}
 		text, err := client.Transcribe(ctx, params.Role.Model, name, audio)
 		if err != nil {
-			s.writeError(f.ID, codeInternal, "听写失败："+err.Error())
+			s.writeError(f.ID, codeInternal, i18n.D("听写失败：{err}", "err", err))
 			return
 		}
 		s.writeResult(f.ID, protocol.AudioTranscribeResult{Text: strings.TrimSpace(text)})
@@ -529,7 +530,7 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 	}
 	session := s.session(params.SessionID)
 	if session == nil {
-		s.writeError(f.ID, codeInvalidParams, "会话不存在或尚未恢复："+params.SessionID)
+		s.writeError(f.ID, codeInvalidParams, i18n.D("会话不存在或尚未恢复：{id}", "id", params.SessionID))
 		return
 	}
 	// 有轮次在跑就把输入排进去，不另起一轮：宿主拿到的是那一轮的 id，
@@ -638,7 +639,7 @@ func (s *Server) closeAll() {
 // handleSearch 处理 search/* 五个方法。搜索引擎的增删改查与试搜。
 func (s *Server) handleSearch(ctx context.Context, f frame) {
 	if s.search == nil {
-		s.writeError(f.ID, codeInternal, "没有打开应用库（启动时未传 --app-db）")
+		s.writeError(f.ID, codeInternal, i18n.D("没有打开应用库（启动时未传 --app-db）"))
 		return
 	}
 	switch f.Method {
@@ -705,7 +706,7 @@ func (s *Server) handleSearch(ctx context.Context, f frame) {
 // handlePlugin 处理 plugin/*、channel/*、wechat/* 方法。都是配置页上的操作。
 func (s *Server) handlePlugin(ctx context.Context, f frame) {
 	if s.plugins == nil {
-		s.writeError(f.ID, codeInternal, "没有打开应用库（启动时未传 --app-db）")
+		s.writeError(f.ID, codeInternal, i18n.D("没有打开应用库（启动时未传 --app-db）"))
 		return
 	}
 	fail := func(code int, err error) { s.writeError(f.ID, code, err.Error()) }
@@ -853,6 +854,16 @@ func (s *Server) handlePlugin(ctx context.Context, f frame) {
 			return
 		}
 		s.writeResult(f.ID, result)
+	case protocol.MethodConfigLocale:
+		var params protocol.ConfigLocaleParams
+		if err := json.Unmarshal(f.Params, &params); err != nil {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		i18n.SetDefault(params.Locale)
+		// 之后拉起的子进程（随内核分发的联网搜索 MCP server）跟着用新的语言。
+		_ = os.Setenv("AICLAW_LOCALE", i18n.Default())
+		s.writeResult(f.ID, struct{}{})
 	case protocol.MethodEmailTest:
 		var params protocol.PluginUUIDParams
 		if err := json.Unmarshal(f.Params, &params); err != nil || params.UUID == "" {
@@ -878,7 +889,7 @@ func (s *Server) handlePlugin(ctx context.Context, f frame) {
 // handleProvider 处理 provider/* 五个方法。都是配置页上的同步操作，没有会话上下文。
 func (s *Server) handleProvider(ctx context.Context, f frame) {
 	if s.providers == nil {
-		s.writeError(f.ID, codeInternal, "没有打开模型配置库（启动时未传 --app-db）")
+		s.writeError(f.ID, codeInternal, i18n.D("没有打开模型配置库（启动时未传 --app-db）"))
 		return
 	}
 	switch f.Method {
@@ -1024,13 +1035,13 @@ func (e *emitter) RequestApproval(
 	raw, err := e.server.requestHost(approvalCtx, protocol.RequestApproval, params)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return protocol.ApprovalResponse{}, errors.New("等待确认超时，已按拒绝处理")
+			return protocol.ApprovalResponse{}, i18n.E("等待确认超时，已按拒绝处理")
 		}
 		return protocol.ApprovalResponse{}, err
 	}
 	var response protocol.ApprovalResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return protocol.ApprovalResponse{}, fmt.Errorf("审批回应格式不对：%w", err)
+		return protocol.ApprovalResponse{}, fmt.Errorf("%s%w", i18n.D("审批回应格式不对："), err)
 	}
 	return response, nil
 }
@@ -1048,13 +1059,13 @@ func (e *emitter) RequestComputer(
 	raw, err := e.server.requestHost(actionCtx, protocol.RequestComputer, params)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return protocol.ComputerResult{}, errors.New("屏幕操作超时（60 秒）")
+			return protocol.ComputerResult{}, i18n.E("屏幕操作超时（60 秒）")
 		}
 		return protocol.ComputerResult{}, err
 	}
 	var result protocol.ComputerResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return protocol.ComputerResult{}, fmt.Errorf("屏幕操作回应格式不对：%w", err)
+		return protocol.ComputerResult{}, fmt.Errorf("%s%w", i18n.D("屏幕操作回应格式不对："), err)
 	}
 	return result, nil
 }
@@ -1071,13 +1082,13 @@ func (e *emitter) RequestBrowser(
 	raw, err := e.server.requestHost(actionCtx, protocol.RequestBrowser, params)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return protocol.BrowserResult{}, errors.New("浏览器操作超时（90 秒）")
+			return protocol.BrowserResult{}, i18n.E("浏览器操作超时（90 秒）")
 		}
 		return protocol.BrowserResult{}, err
 	}
 	var result protocol.BrowserResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return protocol.BrowserResult{}, fmt.Errorf("浏览器操作回应格式不对：%w", err)
+		return protocol.BrowserResult{}, fmt.Errorf("%s%w", i18n.D("浏览器操作回应格式不对："), err)
 	}
 	return result, nil
 }
@@ -1094,13 +1105,13 @@ func (e *emitter) RequestUserInput(
 	raw, err := e.server.requestHost(askCtx, protocol.RequestUserInput, params)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			return protocol.UserInputResponse{}, errors.New("等了 30 分钟用户没有回答")
+			return protocol.UserInputResponse{}, i18n.E("等了 30 分钟用户没有回答")
 		}
 		return protocol.UserInputResponse{}, err
 	}
 	var response protocol.UserInputResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return protocol.UserInputResponse{}, fmt.Errorf("回答的格式不对：%w", err)
+		return protocol.UserInputResponse{}, fmt.Errorf("%s%w", i18n.D("回答的格式不对："), err)
 	}
 	return response, nil
 }
@@ -1118,7 +1129,7 @@ func (e *emitter) RequestSchedule(
 	}
 	var result protocol.ScheduleResult
 	if err := json.Unmarshal(raw, &result); err != nil {
-		return protocol.ScheduleResult{}, fmt.Errorf("定时任务回应格式不对：%w", err)
+		return protocol.ScheduleResult{}, fmt.Errorf("%s%w", i18n.D("定时任务回应格式不对："), err)
 	}
 	return result, nil
 }

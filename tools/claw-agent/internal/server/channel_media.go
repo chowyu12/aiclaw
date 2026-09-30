@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
@@ -121,7 +122,7 @@ func (g *channelGateway) prepareAttachments(sessionID string, message pluginpkg.
 	}
 	for _, data := range message.Images {
 		if !addImage(data) {
-			notes = append(notes, "[用户发来一张图片，但格式不支持或太大，没能转交]")
+			notes = append(notes, "[The user sent an image, but it could not be passed on: unsupported format or too large]")
 		}
 	}
 
@@ -133,26 +134,26 @@ func (g *channelGateway) prepareAttachments(sessionID string, message pluginpkg.
 		if err != nil {
 			g.server.options.Logf("通道文件落盘失败：%v", err)
 		} else {
-			where = "，已存到 " + path
+			where = ", saved to " + path
 		}
 		size := humanSize(len(file.Data))
 
 		switch {
 		case imageExtensions[ext] && addImage(file.Data):
 			// 当文件发来的图片：照样交给视觉通道，用户的意思就是「看看这张图」。
-			notes = append(notes, fmt.Sprintf("[用户以文件形式发来图片 %s（%s）%s，已随消息附上]", name, size, where))
+			notes = append(notes, fmt.Sprintf("[The user sent image %s as a file (%s)%s; it is attached to this message]", name, size, where))
 		case audioExtensions[ext] && len(file.Data) <= maxAudioBytes && path != "":
 			audioPaths = append(audioPaths, path)
-			notes = append(notes, fmt.Sprintf("[用户发来音频 %s（%s）%s]", name, size, where))
+			notes = append(notes, fmt.Sprintf("[The user sent audio %s (%s)%s]", name, size, where))
 		case isText(ext, file.Data):
 			body, truncated := clampText(file.Data)
 			note := ""
 			if truncated {
-				note = fmt.Sprintf("（只贴了前 %dKB）", maxInlineTextBytes>>10)
+				note = fmt.Sprintf(" (only the first %dKB is included)", maxInlineTextBytes>>10)
 			}
-			notes = append(notes, fmt.Sprintf("附件 %s%s%s：\n```\n%s\n```", name, note, where, body))
+			notes = append(notes, fmt.Sprintf("Attachment %s%s%s:\n```\n%s\n```", name, note, where, body))
 		default:
-			notes = append(notes, fmt.Sprintf("[用户发来文件 %s（%s）%s]", name, size, where))
+			notes = append(notes, fmt.Sprintf("[The user sent file %s (%s)%s]", name, size, where))
 		}
 	}
 
@@ -267,14 +268,14 @@ func shrinkImage(data []byte) ([]byte, error) {
 		if len(data) > 0 && len(data) <= maxRawImageBytes {
 			return data, nil
 		}
-		return nil, fmt.Errorf("图片解不开：%w", err)
+		return nil, i18n.E("图片解不开：{error}", "error", err)
 	}
 	if len(data) <= keepImageBytes && config.Width <= maxImageEdge && config.Height <= maxImageEdge {
 		return data, nil
 	}
 	src, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("图片解不开：%w", err)
+		return nil, i18n.E("图片解不开：{error}", "error", err)
 	}
 	scaled := scaleDown(src, maxImageEdge)
 	var out bytes.Buffer

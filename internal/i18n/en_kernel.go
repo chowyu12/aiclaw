@@ -1,0 +1,174 @@
+package i18n
+
+// 内核主干的词条：会话与轮次（agent/session.go、turn.go、compact.go、history.go）、
+// 宿主协议（server/server.go）、会话库、模型服务、长期记忆、MCP 客户端、搜索引擎、
+// 应用库、技能、联网搜索 MCP server 与命令行入口。
+//
+// 以「：」结尾的键用来包一层原始错误：fmt.Errorf("%s%w", i18n.D("打开会话库失败："), err)，
+// 中文照旧是全角冒号，英文是 ": "。
+func init() {
+	register(map[string]string{
+		// ---------- 通用 ----------
+		"、": ", ",
+
+		// ---------- 会话：挂载状态 ----------
+		"代码模式":  "Code mode",
+		"技能":    "Skills",
+		"长期记忆":  "Long-term memory",
+		"工作区记忆": "Workspace memory",
+		"已把 {n} 个工具收进 exec（工具清单 {before} → {after}）": "Folded {n} tools into exec (tool list {before} → {after})",
+		"加载失败：{err}":                   "Failed to load: {err}",
+		"已加载 {n} 个（提示词约占 {tokens}）":    "{n} loaded (about {tokens} of prompt)",
+		"注册失败：{err}":                   "Failed to register: {err}",
+		"挂载失败：{err}":                   "Failed to mount: {err}",
+		"连接用了 {seconds}s（慢）":           "Connecting took {seconds}s (slow)",
+		"部分工具重名被跳过：{err}":              "Some tools were skipped because of duplicate names: {err}",
+		"已挂载 {n} 个工具（约占 {tokens} 上下文）": "Mounted {n} tools (about {tokens} of context)",
+
+		// ---------- 会话：工具与记忆 ----------
+		"创建工作区失败：":                      "Failed to create the workspace: ",
+		"参数不是合法 JSON 对象":                "Arguments are not a valid JSON object",
+		"没有名为 {name} 的技能；可用技能：{skills}": "No skill named {name}. Available skills: {skills}",
+		"这个会话没有设置工作区，没有地方放工作区记忆；跟项目无关的话用 scope=global": "This chat has no workspace, so there is nowhere to keep workspace memory. For things unrelated to the project, use scope=global.",
+		"写入工作区记忆":                                  "Save to workspace memory",
+		"记在 {path}":                                "Will be saved to {path}",
+		"已记进这个工作区的记忆。":                             "Saved to this workspace's memory.",
+		"宿主没有配置全局记忆文件":                             "The host has no global memory file configured",
+		"写入长期记忆":                                   "Save to long-term memory",
+		"这条会在以后每个会话里都带上":                           "This will be included in every future chat",
+		"已记住（全局）。":                                 "Remembered (global).",
+		"scope 只能是 workspace 或 global，给的是 {scope}": "scope must be workspace or global, got {scope}",
+		"调用工具 {tool}":                              "Call tool {tool}",
+		"工作区不可用：":                                  "Workspace unavailable: ",
+		"工作区必须是一个目录：{path}":                        "The workspace must be a directory: {path}",
+		"模型名为空":                                    "The model name is empty",
+		"会话配置损坏：":                                  "The session config is corrupted: ",
+		"会话历史损坏：":                                  "The session history is corrupted: ",
+
+		// ---------- 轮次 ----------
+		"回答在模型的输出长度上限处被截断了，后面的内容没有生成。可以让它接着说，或把问题拆小。":  "The reply was cut off at the model's output length limit, so the rest wasn't generated. Ask it to continue, or break the question into smaller parts.",
+		"单轮内工具调用超过 {n} 次，已停止；请把任务拆小":                   "Stopped after more than {n} tool calls in one turn. Please break the task into smaller parts.",
+		"历史超出模型上下文，正在压缩后重试。":                           "The history exceeds the model's context window. Compacting and retrying.",
+		"这个模型不支持推理档位参数，已去掉后重试。":                        "This model doesn't support the reasoning effort parameter. Retrying without it.",
+		"模型调用失败，马上重试（{attempt}/{max}）：{err}":           "Model call failed. Retrying now ({attempt}/{max}): {err}",
+		"模型调用失败，{seconds} 秒后重试（{attempt}/{max}）：{err}": "Model call failed. Retrying in {seconds}s ({attempt}/{max}): {err}",
+		"错误：{err}":      "Error: {err}",
+		"用户中断，这次调用未执行":  "Interrupted by the user; this call was not run",
+		"用户中断，这次调用未完成。": "Interrupted by the user; this call did not finish.",
+		"这次输出在第 {n} 个字符处撞上了模型的长度上限（finish_reason=length），这条调用的参数不完整，没有执行。把这一步拆成几次调用：先产出一部分、用 store() 存着，或者让工具自己去读文件而不是把内容写进参数。": "This output hit the model's length limit at character {n} (finish_reason=length), so the arguments of this call are incomplete and it was not run. Split this step into several calls: produce part of it first and keep it with store(), or let the tool read the file itself instead of putting the content in the arguments.",
+		"没有名为 {name} 的工具；可用工具：{tools}": "No tool named {name}. Available tools: {tools}",
+		"json 解析失败": "invalid JSON",
+
+		// 步骤摘要
+		"提问：{question}":             "Question: {question}",
+		"开子 agent {name}：{message}": "Start sub-agent {name}: {message}",
+		"→ {target}：{message}":      "→ {target}: {message}",
+		"等子 agent 的结果":              "Wait for sub-agent results",
+		"看看子 agent 们在干什么":           "Check what the sub-agents are doing",
+		"打断 {target}":               "Interrupt {target}",
+
+		// 压缩
+		"历史为空，无从压缩": "The history is empty; nothing to compact",
+		"模型没有给出摘要":  "The model returned no summary",
+		"上下文接近上限，已压缩历史：保留了近期的用户消息和一份进度摘要。": "The context was nearly full, so the history was compacted: recent user messages and a progress summary were kept.",
+
+		// ---------- 宿主协议 ----------
+		"没有打开模型配置库，无法按模型服务取 Key":       "The model config database isn't open, so the API key can't be looked up by provider",
+		"会话不存在或尚未恢复：{id}":              "Session not found or not restored yet: {id}",
+		"还没有配听写模型：到「配置 → 多模态」里选一个听写模型": "No transcription model yet. Choose one for Transcription in Settings → Multimodal.",
+		"音频数据不对":     "Invalid audio data",
+		"听写失败：{err}": "Transcription failed: {err}",
+		"没有打开应用库（启动时未传 --app-db）":   "The app database isn't open (--app-db was not passed at startup)",
+		"没有打开模型配置库（启动时未传 --app-db）": "The model config database isn't open (--app-db was not passed at startup)",
+		"等待确认超时，已按拒绝处理":             "Timed out waiting for approval; treated as denied",
+		"审批回应格式不对：":                 "Malformed approval response: ",
+		"屏幕操作超时（60 秒）":              "The screen action timed out (60s)",
+		"屏幕操作回应格式不对：":               "Malformed screen action response: ",
+		"浏览器操作超时（90 秒）":             "The browser action timed out (90s)",
+		"浏览器操作回应格式不对：":              "Malformed browser action response: ",
+		"等了 30 分钟用户没有回答":            "No answer from the user after 30 minutes",
+		"回答的格式不对：":                  "Malformed answer: ",
+		"定时任务回应格式不对：":               "Malformed scheduled task response: ",
+
+		// ---------- 会话库 ----------
+		"读取旧会话目录失败：":  "Failed to read the old sessions directory: ",
+		"创建数据目录失败：":   "Failed to create the data directory: ",
+		"打开会话库失败：":    "Failed to open the session database: ",
+		"初始化会话库失败：":   "Failed to initialize the session database: ",
+		"保存会话失败：":     "Failed to save the session: ",
+		"会话不存在":       "Session not found",
+		"读取会话失败：":     "Failed to read the session: ",
+		"读会话表结构失败：":   "Failed to read the session table schema: ",
+		"给会话表加归档列失败：": "Failed to add the archive column to the session table: ",
+		"列出会话失败：":     "Failed to list sessions: ",
+		"归档会话失败：":     "Failed to archive the session: ",
+		"搜索会话失败：":     "Failed to search sessions: ",
+		"删除会话失败：":     "Failed to delete the session: ",
+		"初始化用量表失败：":   "Failed to initialize the usage table: ",
+
+		// ---------- 模型服务 ----------
+		"LiteLLM 的数据看不懂：":                      "Couldn't parse the LiteLLM data: ",
+		"两份能力表都没拉到：{first}；{second}":           "Couldn't fetch either capability table: {first}; {second}",
+		"models.dev 没拉到（{err}），只按 LiteLLM 标记了": "Couldn't fetch models.dev ({err}); marked using LiteLLM only",
+		"LiteLLM 没拉到（{err}），只按 models.dev 标记了": "Couldn't fetch LiteLLM ({err}); marked using models.dev only",
+		"连接失败：":                     "Connection failed: ",
+		"返回 {status}":               "Returned HTTP {status}",
+		"读取失败：":                     "Read failed: ",
+		"models.dev 的数据看不懂：":        "Couldn't parse the models.dev data: ",
+		"模型服务不存在（id={id}）：":         "Provider not found (id={id}): ",
+		"名字不能为空":                    "Name is required",
+		"模型服务「{name}」已停用":           "Provider \"{name}\" is disabled",
+		"模型服务「{name}」没有填端点":         "Provider \"{name}\" has no endpoint",
+		"模型服务「{name}」没有配置 Key":      "Provider \"{name}\" has no API key",
+		"连接模型服务失败：":                 "Failed to connect to the provider: ",
+		"模型服务返回 {status}：{message}": "The provider returned {status}: {message}",
+		"模型列表不是预期的格式：":              "Unexpected model list format: ",
+
+		// ---------- 长期记忆 ----------
+		"读取长期记忆失败：":              "Failed to read long-term memory: ",
+		"长期记忆超过 {n} 字节，只读取了前面部分": "Long-term memory exceeds {n} bytes; only the beginning was read",
+		"记忆内容为空":                 "The memory text is empty",
+		"单条记忆超过 {n} 字节；长期记忆放的是结论，不是原始内容":      "A single memory entry exceeds {n} bytes. Long-term memory is for conclusions, not raw content.",
+		"长期记忆已接近 {n} 字节上限，这条没有写入；请先整理 {path}": "Long-term memory is close to its {n}-byte limit, so this entry wasn't saved. Tidy up {path} first.",
+		"创建记忆目录失败：": "Failed to create the memory directory: ",
+		"写入长期记忆失败：": "Failed to write long-term memory: ",
+
+		// ---------- MCP 客户端 ----------
+		"不认识的 MCP 传输方式：{kind}":                 "Unknown MCP transport: {kind}",
+		"MCP 握手失败：":                            "MCP handshake failed: ",
+		"拉取工具清单失败：":                            "Failed to fetch the tool list: ",
+		"工具清单格式不对：":                            "Malformed tool list: ",
+		"工具结果格式不对：":                            "Malformed tool result: ",
+		"工具执行失败":                               "The tool failed",
+		"MCP server 地址为空":                      "The MCP server URL is empty",
+		"MCP server 地址必须是 http(s)：{url}":       "The MCP server URL must be http(s): {url}",
+		"MCP server 已关闭":                       "The MCP server is closed",
+		"请求失败：{err}":                           "Request failed: {err}",
+		"连接 MCP server 失败：":                    "Failed to connect to the MCP server: ",
+		"MCP server 返回 HTTP {status}：{detail}": "The MCP server returned HTTP {status}: {detail}",
+		"读取 MCP server 响应失败：":                  "Failed to read the MCP server response: ",
+		"MCP server 响应不是合法 JSON-RPC：":          "The MCP server response is not valid JSON-RPC: ",
+		"读取 MCP 事件流失败：":                        "Failed to read the MCP event stream: ",
+		"MCP 事件流结束但没有收到对应的响应":                  "The MCP event stream ended without the expected response",
+		"MCP server 命令为空":                      "The MCP server command is empty",
+		"启动 MCP server 失败：":                    "Failed to start the MCP server: ",
+		"MCP server 输出已关闭":                     "The MCP server output was closed",
+
+		// ---------- 搜索引擎 ----------
+		"不支持的搜索引擎类型：{provider}": "Unsupported search engine type: {provider}",
+		"搜索引擎不存在（id={id}）：":     "Search engine not found (id={id}): ",
+		"这个引擎还没配 Key":           "This engine has no API key yet",
+		"阿里云 IQS":               "Alibaba Cloud IQS",
+		"读搜索引擎配置失败：{err}":       "Failed to read the search engine settings: {err}",
+		"没有启用中的搜索引擎。到「搜索引擎」页启用一个并填上 Key。": "No search engine is enabled. Enable one on the Search engines page and add its API key.",
+		"搜索失败（{engine}）：{err}":            "Search failed ({engine}): {err}",
+
+		// ---------- 应用库、技能、命令行 ----------
+		"创建应用数据目录失败：":            "Failed to create the app data directory: ",
+		"准备凭据密钥失败：":              "Failed to prepare the credential key: ",
+		"打开应用库失败：":               "Failed to open the app database: ",
+		"加密库里已有的凭据失败：":           "Failed to encrypt the existing credentials in the database: ",
+		"SKILL.md 超过 {n} 字节":     "SKILL.md exceeds {n} bytes",
+		"mcp-search 需要 --app-db": "mcp-search requires --app-db",
+	})
+}

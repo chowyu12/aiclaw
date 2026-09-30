@@ -2,7 +2,9 @@ import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
+import { tr } from "../shared/i18n.js";
 import {
+  describeRule,
   dueState,
   formatWhen,
   toView,
@@ -87,8 +89,8 @@ export class Scheduler extends EventEmitter {
   save(input: ScheduledTaskInput): ScheduledTaskView {
     const name = input.name.trim();
     const prompt = input.prompt.trim();
-    if (!name) throw new Error("给任务起个名字");
-    if (!prompt) throw new Error("写上到点时要做什么");
+    if (!name) throw new Error(tr("给任务起个名字"));
+    if (!prompt) throw new Error(tr("写上到点时要做什么"));
     const problem = validateRule(input.rule);
     if (problem) throw new Error(problem);
     const rule = normalizeRule(input.rule);
@@ -139,7 +141,7 @@ export class Scheduler extends EventEmitter {
   /** 立刻跑一次，不影响原来的排期。 */
   async runNow(id: string): Promise<string> {
     const task = this.read().find((item) => item.id === id);
-    if (!task) throw new Error("没有这个任务");
+    if (!task) throw new Error(tr("没有这个任务"));
     return this.fire(task, false);
   }
 
@@ -163,7 +165,7 @@ export class Scheduler extends EventEmitter {
         this.update(task.id, (item) => {
           item.anchorAt = now.toISOString();
           item.lastStatus = "missed";
-          item.lastError = "应用没开着，错过了太久，没有补跑";
+          item.lastError = tr("应用没开着，错过了太久，没有补跑");
         });
       } else if (state === "due") {
         await this.fire(task, true).catch(() => undefined);
@@ -214,7 +216,7 @@ export class Scheduler extends EventEmitter {
     this.host.notify(task, !error, error ?? "");
   }
 
-  /** 模型经 schedule_* 工具发来的请求。回一段给模型看的话。 */
+  /** 模型经 schedule_* 工具发来的请求。回一段给模型看的话；它也显示在界面的步骤详情里，跟界面语言走。 */
   handleModelRequest(request: {
     action: string;
     id?: string;
@@ -223,18 +225,24 @@ export class Scheduler extends EventEmitter {
     switch (request.action) {
       case "list": {
         const tasks = this.list();
-        if (tasks.length === 0) return "还没有定时任务。";
+        if (tasks.length === 0) return tr("还没有定时任务。");
         return tasks
           .map((task) => {
-            const next = task.nextRunAt ? `下次 ${formatWhen(new Date(task.nextRunAt))}` : task.enabled ? "没有下一次了" : "已停用";
-            const last = task.lastRunAt ? ` · 上次 ${formatWhen(new Date(task.lastRunAt))} ${statusText(task.lastStatus)}` : "";
-            return `[${task.id}] ${task.name} · ${task.describe} · ${next}${last}\n    ${firstLine(task.prompt)}`;
+            const next = task.nextRunAt
+              ? tr("下次 {when}", { when: when(task.nextRunAt) })
+              : task.enabled
+                ? tr("没有下一次了")
+                : tr("已停用");
+            const last = task.lastRunAt
+              ? ` · ${tr("上次 {when} {status}", { when: when(task.lastRunAt), status: statusText(task.lastStatus) })}`
+              : "";
+            return `[${task.id}] ${task.name} · ${describeRule(task.rule)} · ${next}${last}\n    ${firstLine(task.prompt)}`;
           })
           .join("\n");
       }
       case "create": {
         const input = request.task;
-        if (!input) throw new Error("缺少任务内容");
+        if (!input) throw new Error(tr("缺少任务内容"));
         const rule: ScheduleRule = {
           kind: input.kind as ScheduleRule["kind"],
           time: input.time,
@@ -243,19 +251,21 @@ export class Scheduler extends EventEmitter {
           at: input.at,
         };
         const saved = this.save({ name: input.name, prompt: input.prompt, rule, workspace: input.workspace ?? "" });
-        const next = saved.nextRunAt ? formatWhen(new Date(saved.nextRunAt)) : "（没有下一次）";
-        return `已建好定时任务「${saved.name}」（编号 ${saved.id}）：${saved.describe}，下次 ${next}。` +
-          "到点时 AIClaw 要开着才会跑；用户可以在「设置 → 定时任务」里查看、暂停或修改。";
+        const next = saved.nextRunAt ? when(saved.nextRunAt) : tr("（没有下一次）");
+        return tr(
+          "已建好定时任务「{name}」（编号 {id}）：{rule}，下次 {next}。到点时 AIClaw 要开着才会跑；用户可以在「设置 → 定时任务」里查看、暂停或修改。",
+          { name: saved.name, id: saved.id, rule: describeRule(saved.rule), next },
+        );
       }
       case "delete": {
         const id = (request.id ?? "").trim();
         const task = this.read().find((item) => item.id === id);
-        if (!task) throw new Error(`没有编号为 ${id} 的定时任务（先用 schedule_list 看看）`);
+        if (!task) throw new Error(tr("没有编号为 {id} 的定时任务（先用 schedule_list 看看）", { id }));
         this.remove(id);
-        return `已删掉定时任务「${task.name}」。`;
+        return tr("已删掉定时任务「{name}」。", { name: task.name });
       }
     }
-    throw new Error(`不认识的操作：${request.action}`);
+    throw new Error(tr("不认识的操作：{action}", { action: request.action }));
   }
 }
 
@@ -282,16 +292,21 @@ function padTime(value: string): string {
 function statusText(status: ScheduledTask["lastStatus"]): string {
   switch (status) {
     case "running":
-      return "正在跑";
+      return tr("正在跑");
     case "ok":
-      return "完成";
+      return tr("完成");
     case "failed":
-      return "失败";
+      return tr("失败");
     case "missed":
-      return "错过了";
+      return tr("错过了");
     default:
       return "";
   }
+}
+
+/** 回给模型（也显示在步骤详情里）的时间，跟界面语言。 */
+function when(iso: string): string {
+  return formatWhen(new Date(iso), new Date());
 }
 
 function firstLine(text: string): string {

@@ -296,6 +296,8 @@ export interface RoleConfigView {
 }
 
 export interface AppConfigView {
+  /** 界面语言。 */
+  language: "en" | "zh-CN";
   /** 新会话默认用的模型服务 id；0 表示没选。 */
   providerId: number;
   model: string;

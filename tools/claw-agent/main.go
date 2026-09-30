@@ -27,6 +27,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/searchmcp"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/server"
 )
@@ -41,6 +42,11 @@ func main() {
 }
 
 func run(args []string) error {
+	// 界面语言：桌面端启动时带过来，之后切换走 config/locale。没带（命令行、测试）就还是中文。
+	// 放在分派之前：联网搜索 MCP server（mcp-search）回给模型的报错也跟着它。
+	if locale := os.Getenv("AICLAW_LOCALE"); locale != "" {
+		i18n.SetDefault(locale)
+	}
 	if len(args) == 0 {
 		return usageError()
 	}
@@ -62,13 +68,13 @@ func run(args []string) error {
 
 func runServe(args []string) error {
 	flags := flag.NewFlagSet("serve", flag.ContinueOnError)
-	dataHome := flags.String("data-home", server.DefaultDataHome(), "会话文件目录")
-	appDB := flags.String("app-db", server.DefaultAppDB(), "模型配置库（SQLite）路径；空表示不开")
+	dataHome := flags.String("data-home", server.DefaultDataHome(), "session data directory")
+	appDB := flags.String("app-db", server.DefaultAppDB(), "path to the app database (SQLite); empty disables it")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(*dataHome, 0o755); err != nil {
-		return fmt.Errorf("创建数据目录失败：%w", err)
+		return fmt.Errorf("%s%w", i18n.D("创建数据目录失败："), err)
 	}
 
 	// 没有 Key 也不在这里失败：正常路径是会话按模型服务到库里取 Key，
@@ -98,12 +104,12 @@ func runServe(args []string) error {
 
 func runSearchMCP(args []string) error {
 	flags := flag.NewFlagSet("mcp-search", flag.ContinueOnError)
-	appDB := flags.String("app-db", server.DefaultAppDB(), "应用库（SQLite）路径")
+	appDB := flags.String("app-db", server.DefaultAppDB(), "path to the app database (SQLite)")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*appDB) == "" {
-		return fmt.Errorf("mcp-search 需要 --app-db")
+		return i18n.E("mcp-search 需要 --app-db")
 	}
 	return searchmcp.Serve(*appDB, version)
 }
@@ -115,14 +121,15 @@ func usageError() error {
 }
 
 func printUsage(w interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintf(w, `claw-agent —— AIClaw 的 Agent 执行内核
+	fmt.Fprintf(w, `claw-agent — the AIClaw agent kernel
 
-用法：
-  claw-agent serve [--data-home=<目录>] [--app-db=<aiclaw.db>]
+Usage:
+  claw-agent serve [--data-home=<dir>] [--app-db=<aiclaw.db>]
   claw-agent mcp-search [--app-db=<aiclaw.db>]
   claw-agent version
 
-环境变量：
-  AICLAW_LLM_KEY   兜底的模型 Key（会话没指定模型服务时使用）
+Environment:
+  AICLAW_LLM_KEY   fallback model key (used when a session names no provider)
+  AICLAW_LOCALE    UI language for messages: en or zh-CN
 `)
 }

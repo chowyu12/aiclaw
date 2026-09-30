@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -653,5 +654,26 @@ func TestPlainGetWithCurlDoesNotAsk(t *testing.T) {
 		if len(*asked) != 0 {
 			t.Errorf("%q 是只读的 GET，不该弹审批：%+v", command, *asked)
 		}
+	}
+}
+
+// 界面切到英文时，工具结果与报错跟着变；ErrProtected 照样认得出来。
+func TestMessagesFollowUILanguage(t *testing.T) {
+	i18n.SetDefault(i18n.English)
+	defer i18n.SetDefault(i18n.Chinese)
+
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
+	registry := fullRegistry(t)
+	out, err := call(t, registry, "write_file", `{"path":"a.txt","content":"x x x"}`, env)
+	if err != nil || out != "Wrote a.txt (5 bytes)" {
+		t.Errorf("写入结果应当是英文：%q %v", out, err)
+	}
+	_, err = call(t, registry, "edit_file", `{"path":"a.txt","old_text":"x","new_text":"y"}`, env)
+	if err == nil || !strings.Contains(err.Error(), "appears 3 times") {
+		t.Errorf("报错应当是英文：%v", err)
+	}
+	_, err = env.ResolveRead(filepath.Join(env.Home, ".ssh", "id_rsa"))
+	if !errors.Is(err, ErrProtected) || !strings.Contains(err.Error(), "credentials") {
+		t.Errorf("凭据路径的报错应当是英文且仍是 ErrProtected：%v", err)
 	}
 }

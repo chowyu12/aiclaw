@@ -3,10 +3,10 @@ package pluginhost
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strconv"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/mail"
@@ -43,7 +43,7 @@ func (s *Service) EmailAccount(ctx context.Context) (mail.Account, error) {
 			return s.emailAccountOf(ctx, item)
 		}
 	}
-	return mail.Account{}, errors.New("邮件插件已停用：要用的话请用户到「插件」页启用「邮件」")
+	return mail.Account{}, i18n.E("邮件插件已停用：要用的话请用户到「插件」页启用「邮件」")
 }
 
 func (s *Service) emailAccountOf(ctx context.Context, item model.Plugin) (mail.Account, error) {
@@ -66,7 +66,7 @@ func (s *Service) emailAccountOf(ctx context.Context, item model.Plugin) (mail.A
 		SMTPPort: port("smtp_port"),
 	}
 	if strings.TrimSpace(account.Address) == "" {
-		return account, errors.New("还没填邮箱地址")
+		return account, i18n.E("还没填邮箱地址")
 	}
 	// 自己域名的企业邮箱：没填服务器时按 DNS 找出托管在哪家（见 mail.Discover）。
 	return mail.Discover(ctx, account).Normalize()
@@ -79,14 +79,14 @@ func (s *Service) TestEmail(ctx context.Context, uuid string) protocol.EmailTest
 		return protocol.EmailTestResult{Error: err.Error()}
 	}
 	if !providesEmail(item) {
-		return protocol.EmailTestResult{Error: "这个插件不是邮件插件"}
+		return protocol.EmailTestResult{Error: i18n.D("这个插件不是邮件插件")}
 	}
 	account, err := s.emailAccountOf(ctx, item)
 	if err != nil {
 		return protocol.EmailTestResult{Error: err.Error()}
 	}
 	if account.Password == "" {
-		return protocol.EmailTestResult{Error: "还没填授权码"}
+		return protocol.EmailTestResult{Error: i18n.D("还没填授权码")}
 	}
 	used, err := mail.Test(ctx, account)
 	result := protocol.EmailTestResult{

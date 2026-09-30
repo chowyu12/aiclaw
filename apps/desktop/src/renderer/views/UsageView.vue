@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import { actions } from "../store";
 import { describeError } from "../errors";
+import { t } from "../i18n";
 import type { UsageSummaryView } from "../../shared/types";
 import { formatCount, formatDuration, sourceLabel } from "../usage-format";
 
@@ -13,11 +14,7 @@ import { formatCount, formatDuration, sourceLabel } from "../usage-format";
  * 多少」变少。记录从 3.6 开始，更早的没有。
  */
 
-const PERIODS = [
-  { days: 7, label: "7 天" },
-  { days: 30, label: "30 天" },
-  { days: 90, label: "90 天" },
-] as const;
+const PERIODS = [7, 30, 90] as const;
 
 const days = ref<number>(30);
 const summary = ref<UsageSummaryView | null>(null);
@@ -30,7 +27,7 @@ async function load(): Promise<void> {
   try {
     summary.value = (await window.aiclaw.usage.summary(days.value)) as UsageSummaryView;
   } catch (err) {
-    error.value = `读不到用量：${describeError(err)}`;
+    error.value = t("读不到用量：{error}", { error: describeError(err) });
   } finally {
     loading.value = false;
   }
@@ -51,7 +48,7 @@ const startedLate = computed(() => {
   const value = summary.value;
   if (!value || value.firstAt === 0 || value.firstAt <= value.since) return "";
   const date = new Date(value.firstAt);
-  return `用量从 ${date.getMonth() + 1} 月 ${date.getDate()} 日开始记录，更早的没有数据。`;
+  return t("用量从 {month} 月 {day} 日开始记录，更早的没有数据。", { month: date.getMonth() + 1, day: date.getDate() });
 });
 
 // ---------- 每日柱状图 ----------
@@ -74,7 +71,13 @@ const chart = computed(() => {
       input,
       output,
       label: index % every === 0 || index === list.length - 1 ? `${Number(month)}/${Number(date)}` : "",
-      title: `${day.day}：输入 ${formatCount(day.input)}，输出 ${formatCount(day.output)}，模型 ${day.modelCalls} 次，工具 ${day.toolCalls} 次`,
+      title: t("{day}：输入 {input}，输出 {output}，模型 {models} 次，工具 {tools} 次", {
+        day: day.day,
+        input: formatCount(day.input),
+        output: formatCount(day.output),
+        models: day.modelCalls,
+        tools: day.toolCalls,
+      }),
     };
   });
 });
@@ -97,59 +100,59 @@ async function openSession(id: string): Promise<void> {
     <section>
       <header class="top">
         <div>
-          <h2>用量</h2>
-          <p class="sub">token、模型调用、工具与技能。所有会话都算，包括微信、企业微信的通道会话。</p>
+          <h2>{{ t("用量") }}</h2>
+          <p class="sub">{{ t("token、模型调用、工具与技能。所有会话都算，包括微信、企业微信的通道会话。") }}</p>
         </div>
-        <div class="periods" role="group" aria-label="时间范围">
+        <div class="periods" role="group" :aria-label="t(`时间范围`)">
           <button
             v-for="period in PERIODS"
-            :key="period.days"
-            :class="{ on: days === period.days }"
+            :key="period"
+            :class="{ on: days === period }"
             :disabled="loading"
-            @click="pick(period.days)"
+            @click="pick(period)"
           >
-            {{ period.label }}
+            {{ t("{n} 天", { n: period }) }}
           </button>
         </div>
       </header>
 
       <p v-if="error" class="note warn">{{ error }}</p>
-      <p v-else-if="empty" class="note">还没有记录。用量从这个版本开始记，聊过几轮之后这里就有数了。</p>
+      <p v-else-if="empty" class="note">{{ t("还没有记录。用量从这个版本开始记，聊过几轮之后这里就有数了。") }}</p>
 
       <template v-if="summary && !empty">
         <p v-if="startedLate" class="note">{{ startedLate }}</p>
 
         <div class="cards">
           <div class="card">
-            <span class="k">输入 token</span>
+            <span class="k">{{ t("输入 token") }}</span>
             <span class="v">{{ formatCount(summary.totals.input) }}</span>
           </div>
           <div class="card">
-            <span class="k">输出 token</span>
+            <span class="k">{{ t("输出 token") }}</span>
             <span class="v">{{ formatCount(summary.totals.output) }}</span>
           </div>
           <div class="card">
-            <span class="k">模型调用</span>
+            <span class="k">{{ t("模型调用") }}</span>
             <span class="v">{{ formatCount(summary.totals.modelCalls) }}</span>
-            <span v-if="summary.totals.modelFailed" class="bad">失败 {{ summary.totals.modelFailed }}</span>
+            <span v-if="summary.totals.modelFailed" class="bad">{{ t("失败 {n}", { n: summary.totals.modelFailed }) }}</span>
           </div>
           <div class="card">
-            <span class="k">工具调用</span>
+            <span class="k">{{ t("工具调用") }}</span>
             <span class="v">{{ formatCount(summary.totals.toolCalls) }}</span>
-            <span v-if="summary.totals.toolFailed" class="bad">失败 {{ summary.totals.toolFailed }}</span>
+            <span v-if="summary.totals.toolFailed" class="bad">{{ t("失败 {n}", { n: summary.totals.toolFailed }) }}</span>
           </div>
           <div class="card">
-            <span class="k">会话</span>
+            <span class="k">{{ t("会话") }}</span>
             <span class="v">{{ summary.totals.sessions }}</span>
           </div>
         </div>
 
         <div class="block">
           <div class="block-head">
-            <h3>每天的 token</h3>
-            <span class="legend"><i class="in" />输入 <i class="out" />输出</span>
+            <h3>{{ t("每天的 token") }}</h3>
+            <span class="legend"><i class="in" />{{ t("输入") }} <i class="out" />{{ t("输出") }}</span>
           </div>
-          <svg class="chart" :viewBox="`0 0 100 ${CHART_HEIGHT + 14}`" preserveAspectRatio="none" role="img" aria-label="每天的 token 用量">
+          <svg class="chart" :viewBox="`0 0 100 ${CHART_HEIGHT + 14}`" preserveAspectRatio="none" role="img" :aria-label="t(`每天的 token 用量`)">
             <g v-for="bar in chart" :key="bar.key">
               <title>{{ bar.title }}</title>
               <rect :x="bar.x" :y="CHART_HEIGHT - bar.input - bar.output" :width="bar.width" :height="bar.output" class="out" />
@@ -162,14 +165,14 @@ async function openSession(id: string): Promise<void> {
         </div>
 
         <div class="block">
-          <h3>按模型</h3>
+          <h3>{{ t("按模型") }}</h3>
           <table v-if="summary.models.length">
             <thead>
-              <tr><th>模型</th><th class="n">调用</th><th class="n">输入</th><th class="n">输出</th><th class="n">失败率</th></tr>
+              <tr><th>{{ t("模型") }}</th><th class="n">{{ t("调用") }}</th><th class="n">{{ t("输入") }}</th><th class="n">{{ t("输出") }}</th><th class="n">{{ t("失败率") }}</th></tr>
             </thead>
             <tbody>
               <tr v-for="row in summary.models" :key="row.model">
-                <td class="name">{{ row.model || "（未知）" }}</td>
+                <td class="name">{{ row.model || t("（未知）") }}</td>
                 <td class="n">{{ formatCount(row.calls) }}</td>
                 <td class="n">{{ formatCount(row.input) }}</td>
                 <td class="n">{{ formatCount(row.output) }}</td>
@@ -177,14 +180,14 @@ async function openSession(id: string): Promise<void> {
               </tr>
             </tbody>
           </table>
-          <p v-else class="none">这段时间没有模型调用。</p>
+          <p v-else class="none">{{ t("这段时间没有模型调用。") }}</p>
         </div>
 
         <div class="block">
-          <h3>按工具</h3>
+          <h3>{{ t("按工具") }}</h3>
           <table v-if="summary.tools.length">
             <thead>
-              <tr><th>工具</th><th>来源</th><th class="n">调用</th><th class="n">失败率</th><th class="n">平均耗时</th></tr>
+              <tr><th>{{ t("工具") }}</th><th>{{ t("来源") }}</th><th class="n">{{ t("调用") }}</th><th class="n">{{ t("失败率") }}</th><th class="n">{{ t("平均耗时") }}</th></tr>
             </thead>
             <tbody>
               <tr v-for="row in summary.tools" :key="`${row.tool}|${row.source}`">
@@ -196,33 +199,33 @@ async function openSession(id: string): Promise<void> {
               </tr>
             </tbody>
           </table>
-          <p v-else class="none">这段时间没有工具调用。</p>
+          <p v-else class="none">{{ t("这段时间没有工具调用。") }}</p>
         </div>
 
         <div class="split">
           <div class="block">
-            <h3>技能</h3>
+            <h3>{{ t("技能") }}</h3>
             <table v-if="summary.skills.length">
               <tbody>
                 <tr v-for="row in summary.skills" :key="row.skill">
                   <td class="name">{{ row.skill }}</td>
-                  <td class="n">{{ row.uses }} 次</td>
+                  <td class="n">{{ t("{n} 次", { n: row.uses }) }}</td>
                 </tr>
               </tbody>
             </table>
-            <p v-else class="none">这段时间没有取用技能。</p>
+            <p v-else class="none">{{ t("这段时间没有取用技能。") }}</p>
           </div>
           <div class="block">
-            <h3>最耗 token 的会话</h3>
+            <h3>{{ t("最耗 token 的会话") }}</h3>
             <table v-if="summary.sessions.length">
               <tbody>
                 <tr v-for="row in summary.sessions" :key="row.sessionId" class="link" @click="openSession(row.sessionId)">
-                  <td class="name">{{ row.title || "（已删除的会话）" }}</td>
+                  <td class="name">{{ row.title || t("（已删除的会话）") }}</td>
                   <td class="n">{{ formatCount(row.total) }}</td>
                 </tr>
               </tbody>
             </table>
-            <p v-else class="none">这段时间没有会话。</p>
+            <p v-else class="none">{{ t("这段时间没有会话。") }}</p>
           </div>
         </div>
       </template>

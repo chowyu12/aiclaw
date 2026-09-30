@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
@@ -104,7 +105,7 @@ func (s *Session) History() []protocol.Item {
 					// 没有结果说明那次调用没跑完（中断过）。标成失败而不是留空，
 					// 免得看起来像执行成功但什么都没返回。
 					ToolResult: output,
-					ToolFailed: !answered || strings.HasPrefix(output, "错误："),
+					ToolFailed: !answered || isToolErrorResult(output),
 					Summary:    summarizeCall(llm.ToolCall{Name: call.Name, Arguments: call.Arguments}),
 					Seq:        seq,
 				})
@@ -114,11 +115,30 @@ func (s *Session) History() []protocol.Item {
 	return items
 }
 
+// toolErrorResult 是工具失败时回给模型、也进历史的那条结果：按界面语言加「错误：」前缀。
+func toolErrorResult(text string) string {
+	return i18n.D("错误：{err}", "err", text)
+}
+
+// isToolErrorResult 认出失败的工具结果。两种语言的前缀都认：界面语言可以随时切换，
+// 旧存档里的一律是中文前缀。
+func isToolErrorResult(output string) bool {
+	return strings.HasPrefix(output, "错误：") ||
+		strings.HasPrefix(output, i18n.T(i18n.English, "错误：{err}", "err", ""))
+}
+
+// IsInterrupted 认出轮次收尾时「用户中断」的那个 error 文本（turn/completed 的 error）。
+// 那句话跟着界面语言走，比较时两种语言都认，别拿字面量去比。
+func IsInterrupted(text string) bool {
+	return text == i18n.T(i18n.Chinese, "已中断") || text == i18n.T(i18n.English, "已中断")
+}
+
 // legacySynthetic 认出 Shown 出现之前存下的合成消息：中断标记、压缩摘要、截屏
 // 画面。它们以 user 消息送给模型，但不是用户说的；旧存档里没有 Hidden 标记，
 // 只能按开头认。中断标记改过措辞，所以按不变的第一句认。
 func legacySynthetic(content string) bool {
 	return strings.HasPrefix(content, "用户主动中断了上一轮。") ||
+		strings.HasPrefix(content, legacySummaryPrefix) ||
 		strings.HasPrefix(content, summaryPrefix) ||
 		content == "（上一步截屏的画面）"
 }

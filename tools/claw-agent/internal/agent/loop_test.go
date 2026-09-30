@@ -304,7 +304,7 @@ func TestInterruptLeavesHistoryReusable(t *testing.T) {
 		t.Fatalf("每个 tool_call 都要有结果，实际：%v", answered)
 	}
 	last := session.messages[len(session.messages)-1]
-	if last.Role != llm.RoleUser || !strings.Contains(last.Content, "用户主动中断") {
+	if last.Role != llm.RoleUser || !strings.Contains(last.Content, "The user interrupted") {
 		t.Errorf("中断说明应当排在历史最后：%+v", last)
 	}
 }
@@ -447,7 +447,7 @@ func TestHistoryRebuildsTimeline(t *testing.T) {
 
 	// 系统提示词是内核拼的，不是对话的一部分，显示出来只会让用户困惑。
 	for _, item := range items {
-		if strings.Contains(item.Text, "你运行在用户的本机电脑上") {
+		if strings.Contains(item.Text, "You are running on the user's own computer") {
 			t.Fatalf("系统提示词不该出现在时间线里：%+v", item)
 		}
 	}
@@ -627,7 +627,7 @@ func TestMemoryGoesIntoPromptAndRememberAppends(t *testing.T) {
 		t.Errorf("默认应记进工作区记忆：%q", local)
 	}
 	// 两层都要进提示词，且分得清。
-	if prompt := session.Memory(); !strings.Contains(prompt, "【本工作区的记忆】") || !strings.Contains(prompt, "make check") {
+	if prompt := session.Memory(); !strings.Contains(prompt, "[Workspace memory]") || !strings.Contains(prompt, "make check") {
 		t.Errorf("提示词里应带上工作区记忆：%q", prompt)
 	}
 }
@@ -1157,7 +1157,7 @@ func TestLongSkillDescriptionsAreTruncatedInPrompt(t *testing.T) {
 	prompt := buildSystemPrompt(session.config, session.registry, session.skills, "")
 	line := ""
 	for _, candidate := range strings.Split(prompt, "\n") {
-		if strings.HasPrefix(candidate, "- 啰嗦技能：") {
+		if strings.HasPrefix(candidate, "- 啰嗦技能: ") {
 			line = candidate
 		}
 	}
@@ -1239,7 +1239,7 @@ func TestCodeModePromptExplainsWhereToolsWent(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(session.Close)
-	if !strings.Contains(session.messages[0].Content, "收在 exec 里") {
+	if !strings.Contains(session.messages[0].Content, "live inside exec") {
 		t.Errorf("提示词应说明工具收在 exec 里：%q", session.messages[0].Content)
 	}
 }
@@ -1307,7 +1307,7 @@ func TestHistoryRestoresWhatTheUserSentNotTheTranscript(t *testing.T) {
 	if len(model.requests) < 2 {
 		t.Fatalf("应先打视觉模型再打对话模型，实际 %d 次", len(model.requests))
 	}
-	if chat, _ := json.Marshal(model.requests[1]); !strings.Contains(string(chat), "转述") {
+	if chat, _ := json.Marshal(model.requests[1]); !strings.Contains(string(chat), "Description of the") {
 		t.Errorf("对话模型应看到转述：%s", chat)
 	}
 
@@ -1357,11 +1357,11 @@ func TestSetMediaRolesEnablesVisionBypass(t *testing.T) {
 		config.BaseURL = baseURL
 		return "sk-test", nil
 	}
-	if strings.Contains(session.snapshotMessages()[0].Content, "你自己看不了图") {
+	if strings.Contains(session.snapshotMessages()[0].Content, "You cannot see images yourself") {
 		t.Fatal("还没配视觉模型时不该这么说")
 	}
 	session.SetMediaRoles(protocol.RoleModel{ProviderID: 1, Model: "qwen3-vl-plus"}, protocol.RoleModel{}, false)
-	if !strings.Contains(session.snapshotMessages()[0].Content, "你自己看不了图") {
+	if !strings.Contains(session.snapshotMessages()[0].Content, "You cannot see images yourself") {
 		t.Error("换成不认图的模型后，系统提示词应跟着改")
 	}
 
@@ -1372,7 +1372,7 @@ func TestSetMediaRolesEnablesVisionBypass(t *testing.T) {
 	if first, _ := json.Marshal(model.requests[0]); !strings.Contains(string(first), "qwen3-vl-plus") {
 		t.Errorf("第一次应打视觉模型：%s", first)
 	}
-	if chat, _ := json.Marshal(model.requests[1]); strings.Contains(string(chat), "image_url") || !strings.Contains(string(chat), "转述") {
+	if chat, _ := json.Marshal(model.requests[1]); strings.Contains(string(chat), "image_url") || !strings.Contains(string(chat), "Description of the") {
 		t.Errorf("对话模型应只收到转述，不收到原图：%s", chat)
 	}
 }
@@ -1405,10 +1405,10 @@ func TestImageOnlyMessageIsLabelledAsNew(t *testing.T) {
 	session.RunTurn(context.Background(), "t1", "", [][]byte{image}, nil, &recordingEmitter{approve: true})
 
 	request, _ := json.Marshal(model.requests[0])
-	if !strings.Contains(string(request), "没有附文字") {
+	if !strings.Contains(string(request), "with no text") {
 		t.Errorf("只有图的消息应说明这是一条新消息：%s", request)
 	}
-	if !strings.Contains(string(request), "按新的要求来") {
+	if !strings.Contains(string(request), "follow the new request") {
 		t.Errorf("中断标记应说明换了事就按新的来：%s", request)
 	}
 	var user *protocol.Item

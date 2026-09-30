@@ -6,6 +6,8 @@
  * 他墙上的钟，不是 UTC。
  */
 
+import { currentLocale, translate, tr, type Locale, type Params } from "./i18n.js";
+
 export type ScheduleKind = "daily" | "weekdays" | "weekly" | "interval" | "once";
 
 export interface ScheduleRule {
@@ -23,7 +25,21 @@ export interface ScheduleRule {
 /** 间隔最短 5 分钟：再短就是轮询了，模型每跑一次都要花钱。 */
 export const MIN_INTERVAL_MINUTES = 5;
 
-const WEEKDAY_NAMES = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+/**
+ * 按指定语言翻译的 t()。describeRule / formatWhen 默认用当前语言；调度器回给模型的话
+ * 固定传 zh-CN——那是给模型读的，不随界面语言变。
+ */
+function translator(locale: Locale): (source: string, params?: Params) => string {
+  return (source, params) => translate(locale, source, params);
+}
+
+function weekdayName(day: number, t: (source: string) => string): string {
+  return [t("周日"), t("周一"), t("周二"), t("周三"), t("周四"), t("周五"), t("周六")][day] ?? "";
+}
+
+function monthName(month: number, t: (source: string) => string): string {
+  return [t("1月"), t("2月"), t("3月"), t("4月"), t("5月"), t("6月"), t("7月"), t("8月"), t("9月"), t("10月"), t("11月"), t("12月")][month] ?? "";
+}
 
 /** 解析 "HH:MM"。不合法返回 null。 */
 export function parseTime(value: string | undefined): { hour: number; minute: number } | null {
@@ -40,20 +56,20 @@ export function validateRule(rule: ScheduleRule): string {
   switch (rule.kind) {
     case "daily":
     case "weekdays":
-      return parseTime(rule.time) ? "" : "时间要写成 09:00 这样";
+      return parseTime(rule.time) ? "" : tr("时间要写成 09:00 这样");
     case "weekly":
-      if (!parseTime(rule.time)) return "时间要写成 09:00 这样";
-      if (!rule.days || rule.days.length === 0) return "至少选一天";
-      return rule.days.every((day) => Number.isInteger(day) && day >= 0 && day <= 6) ? "" : "星期几不对";
+      if (!parseTime(rule.time)) return tr("时间要写成 09:00 这样");
+      if (!rule.days || rule.days.length === 0) return tr("至少选一天");
+      return rule.days.every((day) => Number.isInteger(day) && day >= 0 && day <= 6) ? "" : tr("星期几不对");
     case "interval":
       if (!Number.isFinite(rule.everyMinutes) || (rule.everyMinutes ?? 0) < MIN_INTERVAL_MINUTES) {
-        return `间隔至少 ${MIN_INTERVAL_MINUTES} 分钟`;
+        return tr("间隔至少 {minutes} 分钟", { minutes: MIN_INTERVAL_MINUTES });
       }
       return "";
     case "once":
-      return rule.at && !Number.isNaN(Date.parse(rule.at)) ? "" : "要给一个具体的时间";
+      return rule.at && !Number.isNaN(Date.parse(rule.at)) ? "" : tr("要给一个具体的时间");
     default:
-      return "不认识的规则";
+      return tr("不认识的规则");
   }
 }
 
@@ -91,38 +107,44 @@ export function nextRun(rule: ScheduleRule, after: Date, anchor?: Date): Date | 
 }
 
 /** 规则写成人话：「每个工作日 09:00」「每 30 分钟」。 */
-export function describeRule(rule: ScheduleRule): string {
+export function describeRule(rule: ScheduleRule, locale: Locale = currentLocale()): string {
+  const t = translator(locale);
+  const time = rule.time ?? "";
   switch (rule.kind) {
     case "daily":
-      return `每天 ${rule.time}`;
+      return t("每天 {time}", { time });
     case "weekdays":
-      return `每个工作日 ${rule.time}`;
+      return t("每个工作日 {time}", { time });
     case "weekly": {
       const days = [...(rule.days ?? [])].sort((a, b) => ((a + 6) % 7) - ((b + 6) % 7));
-      return `每${days.map((day) => WEEKDAY_NAMES[day]).join("、")} ${rule.time}`;
+      return t("每{days} {time}", { days: days.map((day) => weekdayName(day, t)).join(t("、")), time });
     }
     case "interval": {
       const minutes = rule.everyMinutes ?? 0;
-      if (minutes % 60 === 0) return `每 ${minutes / 60} 小时`;
-      return `每 ${minutes} 分钟`;
+      if (minutes === 60) return t("每 1 小时");
+      if (minutes % 60 === 0) return t("每 {hours} 小时", { hours: minutes / 60 });
+      return t("每 {minutes} 分钟", { minutes });
     }
     case "once":
-      return rule.at ? `${formatWhen(new Date(rule.at))}（一次）` : "一次";
+      return rule.at ? t("{when}（一次）", { when: formatWhen(new Date(rule.at), new Date(), locale) }) : t("一次");
     default:
       return "";
   }
 }
 
 /** 「今天 09:00」「明天 09:00」「10月3日 09:00」。 */
-export function formatWhen(when: Date, now = new Date()): string {
+export function formatWhen(when: Date, now = new Date(), locale: Locale = currentLocale()): string {
+  const t = translator(locale);
   const time = `${String(when.getHours()).padStart(2, "0")}:${String(when.getMinutes()).padStart(2, "0")}`;
   const day = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
   const diff = Math.round((day(when) - day(now)) / 86_400_000);
-  if (diff === 0) return `今天 ${time}`;
-  if (diff === 1) return `明天 ${time}`;
-  if (diff === -1) return `昨天 ${time}`;
-  const date = `${when.getMonth() + 1}月${when.getDate()}日`;
-  return when.getFullYear() === now.getFullYear() ? `${date} ${time}` : `${when.getFullYear()}年${date} ${time}`;
+  if (diff === 0) return t("今天 {time}", { time });
+  if (diff === 1) return t("明天 {time}", { time });
+  if (diff === -1) return t("昨天 {time}", { time });
+  const date = t("{month}{day}日", { month: monthName(when.getMonth(), t), day: when.getDate() });
+  return when.getFullYear() === now.getFullYear()
+    ? t("{date} {time}", { date, time })
+    : t("{year}年{date} {time}", { year: when.getFullYear(), date, time });
 }
 
 /**

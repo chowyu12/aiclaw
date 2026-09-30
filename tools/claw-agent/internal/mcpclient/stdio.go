@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 type stdioTransport struct {
@@ -30,7 +31,7 @@ type stdioTransport struct {
 
 func startStdio(config Config) (*stdioTransport, error) {
 	if strings.TrimSpace(config.Command) == "" {
-		return nil, errors.New("MCP server 命令为空")
+		return nil, i18n.E("MCP server 命令为空")
 	}
 	cmd := exec.Command(config.Command, config.Args...)
 	cmd.Env = os.Environ()
@@ -50,7 +51,7 @@ func startStdio(config Config) (*stdioTransport, error) {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("启动 MCP server 失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("启动 MCP server 失败："), err)
 	}
 
 	t := &stdioTransport{
@@ -87,7 +88,7 @@ func (t *stdioTransport) Call(ctx context.Context, method string, params any) (j
 		t.removePending(id)
 		return nil, ctx.Err()
 	case <-t.done:
-		return nil, errors.New("MCP server 已关闭")
+		return nil, i18n.E("MCP server 已关闭")
 	}
 }
 
@@ -117,7 +118,7 @@ func (t *stdioTransport) Close() {
 			<-finished
 		}
 	}
-	t.failAll(errors.New("MCP server 已关闭"))
+	t.failAll(i18n.E("MCP server 已关闭"))
 }
 
 // Diagnostics 返回子进程 stderr 的尾巴。
@@ -168,7 +169,7 @@ func (t *stdioTransport) readLoop(stdout io.Reader) {
 			ch <- resp
 		}
 	}
-	t.failAll(errors.New("MCP server 输出已关闭"))
+	t.failAll(i18n.E("MCP server 输出已关闭"))
 }
 
 func (t *stdioTransport) drainStderr(stderr io.Reader) {

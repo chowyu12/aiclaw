@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { actions, store } from "../store";
+import { locale, t } from "../i18n";
 import BrandLogo from "./BrandLogo.vue";
 import type { SessionSummaryView } from "../../shared/types";
 
@@ -12,17 +13,20 @@ import type { SessionSummaryView } from "../../shared/types";
  */
 
 /** 设置态下左栏显示的导航。与会话行同一套样式，是同一个列表位置上的两种内容。 */
-const NAV = [
-  { id: "settings", label: "配置", note: "默认模型、审批档位、数据" },
-  { id: "providers", label: "模型服务", note: "端点、Key、模型清单" },
-  { id: "search", label: "搜索引擎", note: "Tavily、SerpAPI、阿里云 IQS，启用后模型能联网搜" },
-  { id: "plugins", label: "插件", note: "邮件、computer use、微信、企业微信，以及从目录装的" },
-  { id: "mcp", label: "MCP", note: "第三方 MCP server，stdio 或 HTTP" },
-  { id: "skills", label: "技能", note: "本地 SKILL.md，也认 Claude Code / Codex 的" },
-  { id: "schedules", label: "定时任务", note: "到点自动开一个会话去做：日报、提醒、巡检" },
-  { id: "archived", label: "已归档", note: "收起来的会话，可以恢复或彻底删除" },
-  { id: "usage", label: "用量", note: "token、模型调用、工具与技能" },
-] as const;
+const NAV = computed(
+  () =>
+    [
+      { id: "settings", label: t("配置"), note: t("默认模型、审批档位、数据") },
+      { id: "providers", label: t("模型服务"), note: t("端点、Key、模型清单") },
+      { id: "search", label: t("搜索引擎"), note: t("Tavily、SerpAPI、阿里云 IQS，启用后模型能联网搜") },
+      { id: "plugins", label: t("插件"), note: t("邮件、computer use、微信、企业微信，以及从目录装的") },
+      { id: "mcp", label: "MCP", note: t("第三方 MCP server，stdio 或 HTTP") },
+      { id: "skills", label: t("技能"), note: t("本地 SKILL.md，也认 Claude Code / Codex 的") },
+      { id: "schedules", label: t("定时任务"), note: t("到点自动开一个会话去做：日报、提醒、巡检") },
+      { id: "archived", label: t("已归档"), note: t("收起来的会话，可以恢复或彻底删除") },
+      { id: "usage", label: t("用量"), note: t("token、模型调用、工具与技能") },
+    ] as const,
+);
 
 /**
  * 搜索关键词。防抖 200ms 再打内核——每个按键都查一次的话，
@@ -147,11 +151,11 @@ const buckets = computed<Bucket[]>(() => {
   const channels = byGroup.get(CHANNELS) ?? [];
   const scheduled = byGroup.get(SCHEDULED) ?? [];
   if (loose.length > 0 || (result.length === 0 && channels.length === 0 && scheduled.length === 0)) {
-    result.push({ id: UNGROUPED, name: "未分组", sessions: loose });
+    result.push({ id: UNGROUPED, name: t("未分组"), sessions: loose });
   }
-  if (scheduled.length > 0) result.push({ id: SCHEDULED, name: "定时任务", sessions: scheduled });
+  if (scheduled.length > 0) result.push({ id: SCHEDULED, name: t("定时任务"), sessions: scheduled });
   // 渠道会话排最后：它们默认折叠，自己的会话在前面。
-  if (channels.length > 0) result.push({ id: CHANNELS, name: "渠道会话", sessions: channels });
+  if (channels.length > 0) result.push({ id: CHANNELS, name: t("渠道会话"), sessions: channels });
   return result;
 });
 
@@ -199,7 +203,7 @@ watch(
 );
 
 async function newGroup(): Promise<void> {
-  await actions.createGroup(`分组 ${store.groups.groups.length + 1}`);
+  await actions.createGroup(t("分组 {n}", { n: store.groups.groups.length + 1 }));
 }
 
 function startRename(groupId: string, current: string): void {
@@ -215,15 +219,19 @@ async function commitRename(): Promise<void> {
 
 async function removeGroup(groupId: string, name: string): Promise<void> {
   // 说清楚会话不会跟着没：这是用户在这里最怕的事。
-  if (!confirm(`删除分组「${name}」？里面的会话会回到「未分组」，不会被删除。`)) return;
+  if (!confirm(t("删除分组「{name}」？里面的会话会回到「未分组」，不会被删除。", { name }))) return;
   await actions.deleteGroup(groupId);
 }
 
 async function removeSession(session: SessionSummaryView): Promise<void> {
   // 子 agent 跟着父会话一起删：留下一串孤儿子会话，谁也说不清它们是干什么的。
   const children = descendants(session.id).length;
-  const extra = children > 0 ? `连同它开出的 ${children} 个子 agent 一起，` : "";
-  if (!confirm(`删除会话「${session.title || "未命名"}」？${extra}对话记录会从本机移除，不可恢复。`)) {
+  const title = session.title || t("未命名");
+  const question =
+    children > 0
+      ? t("删除会话「{title}」？连同它开出的 {count} 个子 agent 一起，对话记录会从本机移除，不可恢复。", { title, count: children })
+      : t("删除会话「{title}」？对话记录会从本机移除，不可恢复。", { title });
+  if (!confirm(question)) {
     return;
   }
   await actions.deleteSession(session.id);
@@ -238,36 +246,36 @@ async function moveTo(sessionId: string, groupId: string | null): Promise<void> 
 const updateLabel = computed(() => {
   const update = store.update;
   if (!update?.hasUpdate) return "";
-  if (store.updating) return "正在更新…";
+  if (store.updating) return t("正在更新…");
   if (store.updateDownloading) {
-    return store.updateProgress >= 0 ? `下载 ${store.updateProgress}%` : "下载中…";
+    return store.updateProgress >= 0 ? t("下载 {percent}%", { percent: store.updateProgress }) : t("下载中…");
   }
   // 侧边栏只有两百来像素宽：按钮文字要短，版本号放在悬停说明里。
-  if (store.updateReady) return "重启更新";
-  return update.canInstall ? `更新到 ${update.latest}` : `新版 ${update.latest}`;
+  if (store.updateReady) return t("重启更新");
+  return update.canInstall ? t("更新到 {version}", { version: update.latest }) : t("新版 {version}", { version: update.latest });
 });
 
 /** 悬停时的完整说明：按钮上只放得下几个字。 */
 const updateTitle = computed(() => {
   const update = store.update;
   if (!update?.hasUpdate) return "";
-  if (store.updateReady) return `新版本 ${update.latest} 已下载好，点一下替换并重启`;
-  if (store.updateDownloading) return `正在后台下载 ${update.latest}`;
+  if (store.updateReady) return t("新版本 {version} 已下载好，点一下替换并重启", { version: update.latest });
+  if (store.updateDownloading) return t("正在后台下载 {version}", { version: update.latest });
   return update.canInstall
-    ? `当前 ${update.current}，新版本 ${update.latest}：${update.installLabel}`
-    : `当前 ${update.current}，新版本 ${update.latest}：打开发布页下载`;
+    ? t("当前 {current}，新版本 {latest}：{action}", { current: update.current, latest: update.latest, action: update.installLabel ?? "" })
+    : t("当前 {current}，新版本 {latest}：打开发布页下载", { current: update.current, latest: update.latest });
 });
 
 const runtimeLabel = computed(() => {
   switch (store.runtime.state) {
     case "ready":
-      return "运行中";
+      return t("运行中");
     case "starting":
-      return "启动中";
+      return t("启动中");
     case "failed":
-      return "启动失败";
+      return t("启动失败");
     default:
-      return "未启动";
+      return t("未启动");
   }
 });
 
@@ -276,13 +284,13 @@ function when(iso: string): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return "";
   const minutes = Math.floor((Date.now() - then) / 60000);
-  if (minutes < 1) return "刚刚";
-  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 1) return t("刚刚");
+  if (minutes < 60) return t("{n} 分钟前", { n: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
+  if (hours < 24) return t("{n} 小时前", { n: hours });
   const days = Math.floor(hours / 24);
-  if (days < 30) return `${days} 天前`;
-  return new Date(then).toLocaleDateString("zh-CN");
+  if (days < 30) return t("{n} 天前", { n: days });
+  return new Date(then).toLocaleDateString(locale.value === "en" ? "en-US" : "zh-CN");
 }
 </script>
 
@@ -293,19 +301,19 @@ function when(iso: string): string {
     <div class="head">
       <template v-if="store.view === 'chat'">
         <button class="new" :disabled="store.runtime.state !== 'ready'" @click="actions.newSession()">
-          <span class="plus">+</span> 新对话
+          <span class="plus">+</span> {{ t("新对话") }}
         </button>
-        <button class="icon" title="新建分组" @click="newGroup()">▤</button>
+        <button class="icon" :title="t(`新建分组`)" @click="newGroup()">▤</button>
       </template>
       <button v-else class="new" @click="actions.setView('chat')">
-        <span class="plus">‹</span> 返回对话
+        <span class="plus">‹</span> {{ t("返回对话") }}
       </button>
     </div>
 
     <!-- 搜索只在对话态出现：设置态那个列表是固定的四项，搜它没有意义。 -->
     <div v-if="store.view === 'chat'" class="search">
-      <input v-model="keyword" placeholder="搜索会话与内容" />
-      <button v-if="keyword" class="icon tiny" title="清空" @click="keyword = ''">×</button>
+      <input v-model="keyword" :placeholder="t(`搜索会话与内容`)" />
+      <button v-if="keyword" class="icon tiny" :title="t(`清空`)" @click="keyword = ''">×</button>
     </div>
 
     <!-- 同一个列表位置，两种内容：对话态是会话，设置态是导航。
@@ -328,9 +336,9 @@ function when(iso: string): string {
     <!-- 搜索态下不分组：分组是「平时怎么归档」，而搜索是「现在要找哪一条」，
          把 3 个命中拆进 5 个分组里反而更难看清。 -->
     <div v-else-if="searching" class="list">
-      <p v-if="store.sessionSearch.loading" class="empty">搜索中…</p>
+      <p v-if="store.sessionSearch.loading" class="empty">{{ t("搜索中…") }}</p>
       <p v-else-if="store.sessionSearch.results.length === 0" class="empty">
-        没有匹配「{{ keyword }}」的会话。标题和对话正文都找过了。
+        {{ t("没有匹配「{keyword}」的会话。标题和对话正文都找过了。", { keyword }) }}
       </p>
       <div
         v-for="session in store.sessionSearch.results"
@@ -341,16 +349,16 @@ function when(iso: string): string {
       >
         <div class="item-main">
           <div class="title">
-            <span v-if="waiting(session.id)" class="asking" title="模型在等你回答一个问题">待回答</span>
-            <span v-else-if="store.live[session.id]?.busy" class="running" title="正在执行"></span>
-            {{ session.title || "未命名会话" }}
+            <span v-if="waiting(session.id)" class="asking" :title="t(`模型在等你回答一个问题`)">{{ t("待回答") }}</span>
+            <span v-else-if="store.live[session.id]?.busy" class="running" :title="t(`正在执行`)"></span>
+            {{ session.title || t("未命名会话") }}
           </div>
           <!-- 命中片段是搜索结果里最有用的一行：一列「未命名会话」挑不出来，
                看见命中的那句话就能认出是哪次。 -->
           <div v-if="session.snippet" class="snippet">{{ session.snippet }}</div>
           <div class="meta">
             {{ when(session.updatedAt) }}
-            <template v-if="session.turnCount"> · {{ session.turnCount }} 轮</template>
+            <template v-if="session.turnCount"> · {{ session.turnCount === 1 ? t("1 轮") : t("{n} 轮", { n: session.turnCount }) }}</template>
           </div>
         </div>
       </div>
@@ -360,8 +368,8 @@ function when(iso: string): string {
       <p v-if="store.sessions.length === 0" class="empty">
         {{
           store.runtime.state === "ready"
-            ? "还没有会话。"
-            : "运行时未启动。启动后这里会列出本机的会话记录。"
+            ? t("还没有会话。")
+            : t("运行时未启动。启动后这里会列出本机的会话记录。")
         }}
       </p>
 
@@ -374,7 +382,7 @@ function when(iso: string): string {
         <header class="bucket-head" :class="{ collapsed: isCollapsed(bucket), current: isCollapsed(bucket) && holdsCurrent(bucket) }">
           <button
             class="fold"
-            :title="isCollapsed(bucket) ? '展开' : '折叠'"
+            :title="isCollapsed(bucket) ? t(`展开`) : t(`折叠`)"
             :aria-expanded="!isCollapsed(bucket)"
             @click="toggleBucket(bucket)"
           >
@@ -392,7 +400,7 @@ function when(iso: string): string {
           <template v-else>
             <span
               class="bucket-name"
-              :title="isCollapsed(bucket) && holdsCurrent(bucket) ? '正在看的会话在这个分组里' : undefined"
+              :title="isCollapsed(bucket) && holdsCurrent(bucket) ? t(`正在看的会话在这个分组里`) : undefined"
               @click="toggleBucket(bucket)"
               @dblclick="!isBuiltin(bucket.id) && startRename(bucket.id, bucket.name)"
             >
@@ -400,14 +408,14 @@ function when(iso: string): string {
             </span>
             <span class="count">{{ bucket.sessions.length }}</span>
             <!-- 折叠时：有新消息给个数，有会话在跑 / 在等回答亮个点。 -->
-            <span v-if="isCollapsed(bucket) && unread(bucket) > 0" class="unread" :title="`上次看过之后有 ${unread(bucket)} 个会话有新消息`">
-              {{ unread(bucket) }} 新
+            <span v-if="isCollapsed(bucket) && unread(bucket) > 0" class="unread" :title="t(`上次看过之后有 {n} 个会话有新消息`, { n: unread(bucket) })">
+              {{ t("{n} 新", { n: unread(bucket) }) }}
             </span>
-            <span v-if="isCollapsed(bucket) && active(bucket)" class="running" title="有会话正在执行或在等你回答"></span>
+            <span v-if="isCollapsed(bucket) && active(bucket)" class="running" :title="t(`有会话正在执行或在等你回答`)"></span>
             <button
               v-if="!isBuiltin(bucket.id)"
               class="icon tiny"
-              title="删除分组（会话会回到未分组）"
+              :title="t(`删除分组（会话会回到未分组）`)"
               @click="removeGroup(bucket.id, bucket.name)"
             >
               ×
@@ -424,13 +432,13 @@ function when(iso: string): string {
           <div class="item-main">
             <div class="title">
               <!-- 后台还在跑的会话点亮一个点：切走之后它没停，用户得看得见它在哪。 -->
-              <span v-if="waiting(session.id)" class="asking" title="模型在等你回答一个问题">待回答</span>
-            <span v-else-if="store.live[session.id]?.busy" class="running" title="正在执行"></span>
-              {{ session.title || "未命名会话" }}
+              <span v-if="waiting(session.id)" class="asking" :title="t(`模型在等你回答一个问题`)">{{ t("待回答") }}</span>
+            <span v-else-if="store.live[session.id]?.busy" class="running" :title="t(`正在执行`)"></span>
+              {{ session.title || t("未命名会话") }}
             </div>
             <div class="meta">
               {{ when(session.updatedAt) }}
-              <template v-if="session.turnCount"> · {{ session.turnCount }} 轮</template>
+              <template v-if="session.turnCount"> · {{ session.turnCount === 1 ? t("1 轮") : t("{n} 轮", { n: session.turnCount }) }}</template>
               <template v-if="session.model"> · {{ session.model }}</template>
             </div>
             <!-- 开出过子 agent 的会话：一个折叠开关，默认收着。 -->
@@ -441,24 +449,24 @@ function when(iso: string): string {
               :aria-expanded="!agentsCollapsed(session.id)"
               @click.stop="toggleAgents(session.id)"
             >
-              {{ agentsCollapsed(session.id) ? "▸" : "▾" }} {{ descendants(session.id).length }} 个子 agent
-              <span v-if="agentsCollapsed(session.id) && agentsBusy(session.id)" class="running" title="有子 agent 正在执行"></span>
+              {{ agentsCollapsed(session.id) ? "▸" : "▾" }} {{ t("{n} 个子 agent", { n: descendants(session.id).length }) }}
+              <span v-if="agentsCollapsed(session.id) && agentsBusy(session.id)" class="running" :title="t(`有子 agent 正在执行`)"></span>
             </button>
           </div>
           <div class="item-actions" @click.stop>
             <button
               class="icon tiny"
-              title="移动到分组"
+              :title="t(`移动到分组`)"
               @click="moving = moving === session.id ? '' : session.id"
             >
               ⤴
             </button>
-            <button class="icon tiny" title="归档（设置 → 已归档里能恢复）" aria-label="归档" @click="archiveSession(session)">
+            <button class="icon tiny" :title="t(`归档（设置 → 已归档里能恢复）`)" :aria-label="t(`归档`)" @click="archiveSession(session)">
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                 <path fill="currentColor" d="M2 2.5h12a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Zm0 5h12v5.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5Zm4 1.8v.9h4v-.9H6Z" />
               </svg>
             </button>
-            <button class="icon tiny" title="删除会话" @click="removeSession(session)">×</button>
+            <button class="icon tiny" :title="t(`删除会话`)" @click="removeSession(session)">×</button>
           </div>
 
           <div v-if="moving === session.id" class="move" @click.stop>
@@ -471,10 +479,10 @@ function when(iso: string): string {
               {{ group.name }}
             </button>
             <button class="move-option" @click="moveTo(session.id, null)">
-              {{ isChannelSession(session) ? "渠道会话" : "未分组" }}
+              {{ isChannelSession(session) ? t("渠道会话") : t("未分组") }}
             </button>
             <p v-if="store.groups.groups.length === 0" class="move-hint">
-              还没有分组，先用右上角的 ▤ 建一个。
+              {{ t("还没有分组，先用右上角的 ▤ 建一个。") }}
             </p>
           </div>
         </div>
@@ -490,18 +498,18 @@ function when(iso: string): string {
         >
           <div class="item-main">
             <div class="title">
-              <span v-if="waiting(child.session.id)" class="asking" title="模型在等你回答一个问题">待回答</span>
-              <span v-else-if="store.live[child.session.id]?.busy" class="running" title="正在执行"></span>
-              {{ child.session.title || "子 agent" }}
+              <span v-if="waiting(child.session.id)" class="asking" :title="t(`模型在等你回答一个问题`)">{{ t("待回答") }}</span>
+              <span v-else-if="store.live[child.session.id]?.busy" class="running" :title="t(`正在执行`)"></span>
+              {{ child.session.title || t("子 agent") }}
             </div>
           </div>
           <div class="item-actions" @click.stop>
-            <button class="icon tiny" title="归档" aria-label="归档" @click="archiveSession(child.session)">
+            <button class="icon tiny" :title="t(`归档`)" :aria-label="t(`归档`)" @click="archiveSession(child.session)">
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                 <path fill="currentColor" d="M2 2.5h12a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Zm0 5h12v5.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5Zm4 1.8v.9h4v-.9H6Z" />
               </svg>
             </button>
-            <button class="icon tiny" title="删除会话" @click="removeSession(child.session)">×</button>
+            <button class="icon tiny" :title="t(`删除会话`)" @click="removeSession(child.session)">×</button>
           </div>
         </div>
         </template>
@@ -531,7 +539,7 @@ function when(iso: string): string {
       <button
         class="icon gear"
         :class="{ on: store.view !== 'chat' }"
-        title="设置"
+        :title="t(`设置`)"
         @click="actions.setView('settings')"
       >
         ⚙

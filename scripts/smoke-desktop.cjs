@@ -214,8 +214,18 @@ app.whenReady().then(async () => {
       /点了:abc/.test(extracted.text) && /正文段落/.test(extracted.text),
       extracted.text.replace(/\s+/g, " ").slice(0, 120),
     );
-    const shot = await browser.perform({ action: "screenshot" });
-    check("浏览器：截图有数据", typeof shot.imageBase64 === "string" && shot.imageBase64.length > 100 && shot.width > 0);
+    // CI 的虚拟显示（xvfb）上偶尔会截到一帧空白：重试几次再下结论。已经两次让发版流水线
+    // 卡在这一条上，而那两次代码都没问题——要验的是「截得出来」，不是「第一帧就截得出来」。
+    let shot = null;
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      shot = await browser.perform({ action: "screenshot" }).catch(() => null);
+      if (shot && typeof shot.imageBase64 === "string" && shot.imageBase64.length > 100 && shot.width > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+    }
+    check(
+      "浏览器：截图有数据",
+      Boolean(shot) && typeof shot.imageBase64 === "string" && shot.imageBase64.length > 100 && shot.width > 0,
+    );
     let refused = "";
     try {
       await browser.perform({ action: "navigate", url: "file:///etc/hosts" });

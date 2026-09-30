@@ -2,6 +2,8 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
 
+import { tr } from "../shared/i18n.js";
+
 /**
  * 界面要显示的两类文件：用户发出去的音频、模型生成的图与音频。
  *
@@ -61,7 +63,7 @@ export function readMedia(
   options: { base: string; protectedPaths: string[] },
 ): MediaFile {
   const text = raw.trim();
-  if (!text) throw new Error("路径是空的");
+  if (!text) throw new Error(tr("路径是空的"));
 
   const home = homedir();
   const expanded = text === "~" || text.startsWith("~/") ? join(home, text.slice(1)) : text;
@@ -73,7 +75,7 @@ export function readMedia(
   for (const guarded of options.protectedPaths) {
     const root = resolve(guarded);
     if (path === root || path.startsWith(root + "/")) {
-      throw new Error("这个目录里的文件不能显示");
+      throw new Error(tr("这个目录里的文件不能显示"));
     }
   }
 
@@ -83,13 +85,13 @@ export function readMedia(
   if (!image && !audio) {
     // 说清楚而不是静默返回空：界面上一个不显示的图和一个加载失败的图，
     // 用户看到的是同一件事，但原因完全不同。
-    throw new Error(`不支持内联显示 ${extension || "这种文件"}`);
+    throw new Error(tr("不支持内联显示 {type}", { type: extension || tr("这种文件") }));
   }
 
   const info = statSync(path);
-  if (!info.isFile()) throw new Error("这不是一个文件");
+  if (!info.isFile()) throw new Error(tr("这不是一个文件"));
   if (info.size > MAX_INLINE_BYTES) {
-    throw new Error(`文件太大（${(info.size / (1 << 20)).toFixed(1)} MB），在访达里打开看吧`);
+    throw new Error(tr("文件太大（{size} MB），在访达里打开看吧", { size: (info.size / (1 << 20)).toFixed(1) }));
   }
 
   const type = image ?? audio!;
@@ -110,13 +112,13 @@ export function readMedia(
  */
 export function stageAudio(name: string, base64: string): string {
   const data = Buffer.from(base64, "base64");
-  if (data.length === 0) throw new Error("音频是空的");
+  if (data.length === 0) throw new Error(tr("音频是空的"));
   if (data.length > MAX_AUDIO_BYTES) {
-    throw new Error(`音频太大（${(data.length / (1 << 20)).toFixed(1)} MB，上限 25 MB）`);
+    throw new Error(tr("音频太大（{size} MB，上限 25 MB）", { size: (data.length / (1 << 20)).toFixed(1) }));
   }
   const extension = extname(name).toLowerCase();
   if (!AUDIO_EXTENSIONS.has(extension)) {
-    throw new Error(`不支持这种音频格式（${extension || name}）`);
+    throw new Error(tr("不支持这种音频格式（{format}）", { format: extension || name }));
   }
   // 一次一个目录：同名文件不会互相覆盖，而用文件名加时间戳仍然可能撞上。
   const directory = mkdtempSync(join(tmpdir(), "aiclaw-audio-"));

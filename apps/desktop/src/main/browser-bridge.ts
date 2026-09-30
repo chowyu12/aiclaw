@@ -3,6 +3,8 @@ import { EventEmitter } from "node:events";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Duplex } from "node:stream";
 
+import { tr } from "../shared/i18n.js";
+
 /**
  * 与「AIClaw 浏览器助手」扩展（apps/browser-extension）之间的连接。
  *
@@ -265,8 +267,8 @@ export class ExtensionBridge extends EventEmitter {
       server.once("error", (error: NodeJS.ErrnoException) => {
         this.error =
           error.code === "EADDRINUSE"
-            ? `端口 ${this.port} 被别的程序占着，浏览器扩展连不上来`
-            : `没能开始监听：${error.message}`;
+            ? tr("端口 {port} 被别的程序占着，浏览器扩展连不上来", { port: this.port })
+            : tr("没能开始监听：{error}", { error: error.message });
         this.server = null;
         this.emit("status");
         resolve();
@@ -292,7 +294,7 @@ export class ExtensionBridge extends EventEmitter {
     this.peer = null;
     this.server?.close();
     this.server = null;
-    this.failAll("浏览器扩展的连接已关闭");
+    this.failAll(tr("浏览器扩展的连接已关闭"));
   }
 
   /** 断开当前扩展（比如用户重新生成了配对码）。 */
@@ -304,13 +306,13 @@ export class ExtensionBridge extends EventEmitter {
   request<T = unknown>(op: string, args: Record<string, unknown> = {}, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
     const peer = this.peer;
     if (!peer) {
-      return Promise.reject(new Error(NOT_CONNECTED));
+      return Promise.reject(new Error(notConnected()));
     }
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`浏览器扩展 ${Math.round(timeoutMs / 1000)} 秒没有回应（${op}）`));
+        reject(new Error(tr("浏览器扩展 {seconds} 秒没有回应（{op}）", { seconds: Math.round(timeoutMs / 1000), op })));
       }, timeoutMs);
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timer });
       peer.connection.send(JSON.stringify({ id, op, args }));
@@ -412,7 +414,7 @@ export class ExtensionBridge extends EventEmitter {
       }
       if (this.peer?.connection === connection) {
         this.peer = null;
-        this.failAll("浏览器扩展断开了");
+        this.failAll(tr("浏览器扩展断开了"));
         this.log("浏览器扩展断开了");
         this.emit("status");
       }
@@ -479,7 +481,7 @@ export class ExtensionBridge extends EventEmitter {
     const previous = this.peer;
     this.peer = peer;
     if (previous) {
-      this.failAll("换成了另一个浏览器里的扩展");
+      this.failAll(tr("换成了另一个浏览器里的扩展"));
       previous.connection.close(4002, "replaced");
     }
     this.emit("status");
@@ -498,7 +500,7 @@ export class ExtensionBridge extends EventEmitter {
     this.pending.delete(id);
     clearTimeout(pending.timer);
     if (message.ok === true) pending.resolve(message.result);
-    else pending.reject(new Error(String(message.error ?? "浏览器扩展报错")));
+    else pending.reject(new Error(String(message.error ?? tr("浏览器扩展报错"))));
   }
 
   /** 心跳：让扩展的后台脚本保持醒着，也发现悄悄断掉的连接。 */
@@ -523,5 +525,7 @@ export class ExtensionBridge extends EventEmitter {
   }
 }
 
-export const NOT_CONNECTED =
-  "浏览器扩展没连上：确认 Chrome / Edge 里装了「AIClaw 浏览器助手」并填了配对码（设置 → 浏览器）。";
+/** 扩展没连上时的报错。写成函数：模块加载时界面语言还没设，要到用的时候再翻译。 */
+export function notConnected(): string {
+  return tr("浏览器扩展没连上：确认 Chrome / Edge 里装了「AIClaw 浏览器助手」并填了配对码（设置 → 浏览器）。");
+}

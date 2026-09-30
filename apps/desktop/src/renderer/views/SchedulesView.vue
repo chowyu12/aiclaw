@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { actions, store } from "../store";
 import { describeError } from "../errors";
+import { t } from "../i18n";
 import {
   describeRule,
   formatWhen,
@@ -20,24 +21,24 @@ import {
 
 type TaskRow = (typeof store.schedules)[number];
 
-const KINDS: { id: ScheduleKind; label: string }[] = [
-  { id: "daily", label: "每天" },
-  { id: "weekdays", label: "每个工作日" },
-  { id: "weekly", label: "每周几" },
-  { id: "interval", label: "每隔一段时间" },
-  { id: "once", label: "只跑一次" },
-];
+const KINDS = computed<{ id: ScheduleKind; label: string }[]>(() => [
+  { id: "daily", label: t("每天") },
+  { id: "weekdays", label: t("每个工作日") },
+  { id: "weekly", label: t("每周几") },
+  { id: "interval", label: t("每隔一段时间") },
+  { id: "once", label: t("只跑一次") },
+]);
 
 /** 周一在前，与日历一致；存的时候 0 = 周日。 */
-const WEEK = [
-  { day: 1, label: "一" },
-  { day: 2, label: "二" },
-  { day: 3, label: "三" },
-  { day: 4, label: "四" },
-  { day: 5, label: "五" },
-  { day: 6, label: "六" },
-  { day: 0, label: "日" },
-];
+const WEEK = computed(() => [
+  { day: 1, label: t("周一") },
+  { day: 2, label: t("周二") },
+  { day: 3, label: t("周三") },
+  { day: 4, label: t("周四") },
+  { day: 5, label: t("周五") },
+  { day: 6, label: t("周六") },
+  { day: 0, label: t("周日") },
+]);
 
 interface Draft {
   id: string;
@@ -155,12 +156,12 @@ async function save(): Promise<void> {
 }
 
 async function remove(task: TaskRow): Promise<void> {
-  if (!confirm(`删除定时任务「${task.name}」？它之前跑出来的会话留着。`)) return;
+  if (!confirm(t("删除定时任务「{name}」？它之前跑出来的会话留着。", { name: task.name }))) return;
   await actions.deleteSchedule(task.id);
 }
 
 async function runNow(task: TaskRow): Promise<void> {
-  busy[task.id] = "正在开会话…";
+  busy[task.id] = t("正在开会话…");
   try {
     const sessionId = await actions.runScheduleNow(task.id);
     busy[task.id] = "";
@@ -171,22 +172,22 @@ async function runNow(task: TaskRow): Promise<void> {
 }
 
 function nextText(task: TaskRow): string {
-  if (!task.enabled) return task.rule.kind === "once" && task.lastRunAt ? "已跑过" : "已暂停";
-  return task.nextRunAt ? `下次 ${formatWhen(new Date(task.nextRunAt))}` : "没有下一次了";
+  if (!task.enabled) return task.rule.kind === "once" && task.lastRunAt ? t("已跑过") : t("已暂停");
+  return task.nextRunAt ? t("下次 {when}", { when: formatWhen(new Date(task.nextRunAt)) }) : t("没有下一次了");
 }
 
 function lastText(task: TaskRow): string {
-  if (!task.lastRunAt) return "还没跑过";
+  if (!task.lastRunAt) return t("还没跑过");
   const when = formatWhen(new Date(task.lastRunAt));
   switch (task.lastStatus) {
     case "running":
-      return `${when} 开始，正在跑`;
+      return t("{when} 开始，正在跑", { when });
     case "ok":
-      return `${when} 完成`;
+      return t("{when} 完成", { when });
     case "failed":
-      return `${when} 失败：${task.lastError ?? ""}`;
+      return t("{when} 失败：{error}", { when, error: task.lastError ?? "" });
     case "missed":
-      return `错过了：${task.lastError ?? ""}`;
+      return t("错过了：{error}", { error: task.lastError ?? "" });
     default:
       return when;
   }
@@ -197,59 +198,59 @@ function lastText(task: TaskRow): string {
   <div class="page">
     <section>
       <header>
-        <h2>定时任务</h2>
+        <h2>{{ t("定时任务") }}</h2>
         <p class="sub">
-          到点时 AIClaw 自动开一个新会话，把「要做什么」当作你的一条消息发出去——模型、MCP、技能都按那时的设置。
-          跑出来的会话归在侧边栏的「定时任务」分组里，跑完会发一条系统通知。
+          {{ t("到点时 AIClaw 自动开一个新会话，把「要做什么」当作你的一条消息发出去——模型、MCP、技能都按那时的设置。") }}
+          {{ t("跑出来的会话归在侧边栏的「定时任务」分组里，跑完会发一条系统通知。") }}
         </p>
       </header>
 
       <p class="note">
-        也可以在对话里直接说「每个工作日早上 9 点帮我汇总未读邮件」，模型会建一个（建之前请你确认）。
-        <strong>AIClaw 要开着才会跑</strong>；错过 12 小时以内的，下次打开时补跑一次。执行中遇到要确认的操作仍会停下来等你。
+        {{ t("也可以在对话里直接说「每个工作日早上 9 点帮我汇总未读邮件」，模型会建一个（建之前请你确认）。") }}
+        <strong>{{ t("AIClaw 要开着才会跑") }}</strong>{{ t("；错过 12 小时以内的，下次打开时补跑一次。执行中遇到要确认的操作仍会停下来等你。") }}
       </p>
 
       <div class="add">
-        <button class="ghost" @click="editing = blank(); formError = ''">+ 新建定时任务</button>
+        <button class="ghost" @click="editing = blank(); formError = ''">+ {{ t("新建定时任务") }}</button>
       </div>
 
       <!-- 新建 / 修改 -->
       <article v-if="editing" class="card editor">
         <label>
-          <span>名称</span>
-          <input v-model="editing.name" placeholder="比如：每日邮件汇总" />
+          <span>{{ t("名称") }}</span>
+          <input v-model="editing.name" :placeholder="t(`比如：每日邮件汇总`)" />
         </label>
         <label>
-          <span>要做什么</span>
+          <span>{{ t("要做什么") }}</span>
           <textarea
             v-model="editing.prompt"
             rows="4"
-            placeholder="到点时当作你发的一条消息。写清楚做什么、结果怎么给，比如：汇总今天的未读邮件，列出需要我回复的，每封一句话。"
+            :placeholder="t(`到点时当作你发的一条消息。写清楚做什么、结果怎么给，比如：汇总今天的未读邮件，列出需要我回复的，每封一句话。`)"
           />
         </label>
         <div class="pair">
           <label>
-            <span>什么时候</span>
+            <span>{{ t("什么时候") }}</span>
             <select v-model="editing.kind">
               <option v-for="kind in KINDS" :key="kind.id" :value="kind.id">{{ kind.label }}</option>
             </select>
           </label>
           <label v-if="editing.kind === 'daily' || editing.kind === 'weekdays' || editing.kind === 'weekly'">
-            <span>几点</span>
+            <span>{{ t("几点") }}</span>
             <input v-model="editing.time" type="time" />
           </label>
           <label v-else-if="editing.kind === 'interval'">
-            <span>每隔</span>
+            <span>{{ t("每隔") }}</span>
             <div class="inline">
               <input v-model.number="editing.every" type="number" :min="editing.unit === 'hours' ? 1 : MIN_INTERVAL_MINUTES" />
               <select v-model="editing.unit">
-                <option value="minutes">分钟</option>
-                <option value="hours">小时</option>
+                <option value="minutes">{{ t("分钟") }}</option>
+                <option value="hours">{{ t("小时") }}</option>
               </select>
             </div>
           </label>
           <label v-else>
-            <span>时间</span>
+            <span>{{ t("时间") }}</span>
             <input v-model="editing.at" type="datetime-local" />
           </label>
         </div>
@@ -261,31 +262,31 @@ function lastText(task: TaskRow): string {
             :class="{ on: editing.days.includes(item.day) }"
             @click="toggleDay(item.day)"
           >
-            周{{ item.label }}
+            {{ item.label }}
           </button>
         </div>
         <label>
-          <span>工作区</span>
+          <span>{{ t("工作区") }}</span>
           <div class="inline">
-            <input v-model="editing.workspace" placeholder="不设：相对路径按主目录解析，写文件前会问你" />
-            <button class="ghost small" @click="pickWorkspace()">选择…</button>
+            <input v-model="editing.workspace" :placeholder="t(`不设：相对路径按主目录解析，写文件前会问你`)" />
+            <button class="ghost small" @click="pickWorkspace()">{{ t("选择…") }}</button>
           </div>
         </label>
         <p class="hint" :class="{ bad: !!validateRule(ruleOf(editing)) }">{{ preview }}</p>
         <div class="actions">
-          <button class="primary" :disabled="saving" @click="save()">{{ editing.id ? "保存" : "建好" }}</button>
-          <button class="ghost" @click="editing = null">取消</button>
+          <button class="primary" :disabled="saving" @click="save()">{{ editing.id ? t("保存") : t("建好") }}</button>
+          <button class="ghost" @click="editing = null">{{ t("取消") }}</button>
           <span v-if="formError" class="hint bad">{{ formError }}</span>
         </div>
       </article>
 
-      <p v-if="tasks.length === 0 && !editing" class="note">还没有定时任务。</p>
+      <p v-if="tasks.length === 0 && !editing" class="note">{{ t("还没有定时任务。") }}</p>
 
       <article v-for="task in tasks" :key="task.id" class="card" :class="{ off: !task.enabled }">
         <div class="card-head">
           <div class="title">
             <span class="name">{{ task.name }}</span>
-            <span class="badge">{{ task.describe }}</span>
+            <span class="badge">{{ describeRule(task.rule as ScheduleRule) }}</span>
             <span class="state">{{ nextText(task) }}</span>
           </div>
           <label class="toggle">
@@ -294,19 +295,19 @@ function lastText(task: TaskRow): string {
               :checked="task.enabled"
               @change="actions.toggleSchedule(task.id, ($event.target as HTMLInputElement).checked)"
             />
-            启用
+            {{ t("启用") }}
           </label>
-          <button class="icon" title="删除" @click="remove(task)">×</button>
+          <button class="icon" :title="t(`删除`)" @click="remove(task)">×</button>
         </div>
         <p class="prompt">{{ task.prompt }}</p>
         <p class="hint" :class="{ bad: task.lastStatus === 'failed' }">
-          上次：{{ lastText(task) }}
-          <button v-if="task.lastSessionId" class="link" @click="actions.openSession(task.lastSessionId)">打开会话</button>
+          {{ t("上次：{text}", { text: lastText(task) }) }}
+          <button v-if="task.lastSessionId" class="link" @click="actions.openSession(task.lastSessionId)">{{ t("打开会话") }}</button>
         </p>
-        <p v-if="task.workspace" class="hint">工作区：<code>{{ task.workspace }}</code></p>
+        <p v-if="task.workspace" class="hint">{{ t("工作区：") }}<code>{{ task.workspace }}</code></p>
         <div class="actions">
-          <button class="ghost small" :disabled="!!busy[task.id] && busy[task.id] === '正在开会话…'" @click="runNow(task)">立即运行</button>
-          <button class="ghost small" @click="edit(task)">修改</button>
+          <button class="ghost small" :disabled="!!busy[task.id] && busy[task.id] === t(`正在开会话…`)" @click="runNow(task)">{{ t("立即运行") }}</button>
+          <button class="ghost small" @click="edit(task)">{{ t("修改") }}</button>
           <span v-if="busy[task.id]" class="hint">{{ busy[task.id] }}</span>
         </div>
       </article>

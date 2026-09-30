@@ -160,7 +160,7 @@ func renderEnum(values []any) string {
 	// 有几千字，而模型需要的是「这里填列名」这个事实。
 	const maxEnum = 24
 	if len(parts) > maxEnum {
-		return strings.Join(parts[:maxEnum], " | ") + fmt.Sprintf(" | string /* 共 %d 个取值 */", len(parts))
+		return strings.Join(parts[:maxEnum], " | ") + fmt.Sprintf(" | string /* %d values in total */", len(parts))
 	}
 	return strings.Join(parts, " | ")
 }

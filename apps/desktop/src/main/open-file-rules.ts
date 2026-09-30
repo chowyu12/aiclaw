@@ -1,5 +1,7 @@
 import { join, sep } from "node:path";
 
+import { tr } from "../shared/i18n.js";
+
 /**
  * 「能不能直接打开」的判断规则。
  *
@@ -77,15 +79,15 @@ export function classifyOpen(
   ];
   for (const candidate of candidates) {
     if (candidate && within(candidate, path)) {
-      return { action: "refuse", reason: "这是存放凭据的位置，不能从对话里打开" };
+      return { action: "refuse", reason: tr("这是存放凭据的位置，不能从对话里打开") };
     }
   }
   const extension = extensionOf(path);
   if (EXECUTABLE_EXTENSIONS.has(extension)) {
-    return { action: "reveal", reason: `.${extension} 文件打开就等于执行，先在访达里给你标出来` };
+    return { action: "reveal", reason: tr(".{extension} 文件打开就等于执行，先在访达里给你标出来", { extension }) };
   }
   if (options.executable) {
-    return { action: "reveal", reason: "这个文件带可执行权限，打开就等于执行，先在访达里给你标出来" };
+    return { action: "reveal", reason: tr("这个文件带可执行权限，打开就等于执行，先在访达里给你标出来") };
   }
   return { action: "open" };
 }

@@ -21,8 +21,8 @@ current_time：现在几点、今天几号。
 func currentTimeTool() Tool {
 	return Tool{
 		Name: "current_time",
-		Description: "取本机当前的日期与时间（含星期与时区）。" +
-			"凡是要算「今天/昨天/最近 N 天」「这个月」这类相对时间，先调它，不要猜。",
+		Description: "Get the local machine's current date and time (including weekday and time zone). " +
+			"Whenever you need to work out a relative date such as \"today/yesterday/the last N days\" or \"this month\", call this first instead of guessing.",
 		Effect: EffectRead,
 		Schema: schema(map[string]any{}),
 		Handler: func(_ context.Context, _ json.RawMessage, _ *Env) (string, error) {
@@ -36,12 +36,11 @@ func currentTimeTool() Tool {
 // 导出是因为系统提示词也用它——两处用同一种写法，模型不用适应两种格式。
 // 带上星期与时区：「最近一周」按周几算，而时区错了整件事就偏一天。
 func DescribeNow(now time.Time) string {
-	weekdays := [...]string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}
 	zone, offset := now.Zone()
 	return fmt.Sprintf(
-		"%s %s %s（时区 %s，UTC%+d）",
+		"%s %s %s (time zone %s, UTC%+d)",
 		now.Format("2006-01-02"),
-		weekdays[int(now.Weekday())],
+		now.Weekday().String(),
 		now.Format("15:04"),
 		zone,
 		offset/3600,

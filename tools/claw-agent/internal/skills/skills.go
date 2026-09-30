@@ -12,11 +12,12 @@
 package skills
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 // Skill 是一个已加载的技能。
@@ -85,7 +86,7 @@ func loadOne(dir, fallbackName string) (Skill, error) {
 		return Skill{}, err
 	}
 	if info.Size() > maxBodyBytes {
-		return Skill{}, fmt.Errorf("SKILL.md 超过 %d 字节", maxBodyBytes)
+		return Skill{}, i18n.E("SKILL.md 超过 {n} 字节", "n", maxBodyBytes)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {

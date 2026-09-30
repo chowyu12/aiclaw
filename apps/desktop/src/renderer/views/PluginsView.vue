@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import { actions, modelChoices, pluginConfigKey, store } from "../store";
 import { describeError } from "../errors";
+import { t } from "../i18n";
 
 /**
  * 插件页：随应用分发的几个（computer use、邮件、微信、企业微信）加用户从目录装的。
@@ -20,27 +21,37 @@ type BindingRow = (typeof store.bindings)[number];
 type ConnectionRow = PluginRow["connections"][number];
 
 /** 权限名给人看的说法。表在内核那边（internal/skills 的常量），这里只做翻译。 */
-const PERMISSION_LABELS: Record<string, string> = {
-  "computer.control": "操作屏幕（截屏、鼠标、键盘）",
-  "filesystem.read": "读文件",
-  "filesystem.write": "写文件",
-  "network.access": "访问网络",
-  "channel.receive": "接收外部消息",
-  "channel.send": "向外部发消息",
-  "secrets.read": "读取自己的秘密配置",
-  "shell.exec": "执行命令",
+const PERMISSION_LABELS: Record<string, () => string> = {
+  "computer.control": () => t("操作屏幕（截屏、鼠标、键盘）"),
+  "filesystem.read": () => t("读文件"),
+  "filesystem.write": () => t("写文件"),
+  "network.access": () => t("访问网络"),
+  "channel.receive": () => t("接收外部消息"),
+  "channel.send": () => t("向外部发消息"),
+  "secrets.read": () => t("读取自己的秘密配置"),
+  "shell.exec": () => t("执行命令"),
 };
 
 /** 外部会话可以额外放开的内置工具。只读的那些默认就有，不用选。 */
 const ACTING_TOOLS = [
-  { name: "write_file", label: "写文件" },
-  { name: "edit_file", label: "改文件" },
-  { name: "write_docx", label: "写 Word" },
-  { name: "edit_docx", label: "改 Word" },
-  { name: "write_xlsx", label: "写 Excel" },
-  { name: "write_pptx", label: "写 PPT" },
-  { name: "run_command", label: "执行命令" },
+  { name: "write_file", label: () => t("写文件") },
+  { name: "edit_file", label: () => t("改文件") },
+  { name: "write_docx", label: () => t("写 Word") },
+  { name: "edit_docx", label: () => t("改 Word") },
+  { name: "write_xlsx", label: () => t("写 Excel") },
+  { name: "write_pptx", label: () => t("写 PPT") },
+  { name: "run_command", label: () => t("执行命令") },
 ];
+
+/**
+ * 内置插件的名字、说明与配置项说明来自内核里的 plugin.json，是中文写的。
+ * 这几条在词典里有英文，就按当前语言换掉；清单改了、词典没跟上时原样显示中文。
+ * 用户自己装的插件不动——那是人家写的文字。
+ */
+function manifestText(plugin: PluginRow, text: string | undefined): string {
+  if (!text) return "";
+  return plugin.source === "builtin" ? t(text) : text;
+}
 
 const expanded = ref("");
 const saving = ref(false);
@@ -64,15 +75,15 @@ let pollTimer: ReturnType<typeof setTimeout> | undefined;
 // 邮箱的配置项有八个，大半不用填（服务器按邮箱域名自动识别），按原始键名一行行摆
 // 出来太吓人：这里给它一张专门的表单，地址与授权码在前，其余收进「高级」。
 
-const EMAIL_FIELDS: { key: string; label: string; placeholder: string; advanced?: boolean }[] = [
-  { key: "address", label: "邮箱地址", placeholder: "name@qq.com" },
-  { key: "password", label: "授权码", placeholder: "不是登录密码" },
-  { key: "name", label: "发件人名字", placeholder: "留空只显示地址" },
-  { key: "username", label: "登录名", placeholder: "留空用邮箱地址", advanced: true },
-  { key: "imap_host", label: "收信服务器（IMAP）", placeholder: "留空自动识别", advanced: true },
-  { key: "imap_port", label: "收信端口", placeholder: "993", advanced: true },
-  { key: "smtp_host", label: "发信服务器（SMTP）", placeholder: "留空自动识别", advanced: true },
-  { key: "smtp_port", label: "发信端口", placeholder: "465（587 走 STARTTLS）", advanced: true },
+const EMAIL_FIELDS: { key: string; label: () => string; placeholder: () => string; advanced?: boolean }[] = [
+  { key: "address", label: () => t("邮箱地址"), placeholder: () => "name@qq.com" },
+  { key: "password", label: () => t("授权码"), placeholder: () => t("不是登录密码") },
+  { key: "name", label: () => t("发件人名字"), placeholder: () => t("留空只显示地址") },
+  { key: "username", label: () => t("登录名"), placeholder: () => t("留空用邮箱地址"), advanced: true },
+  { key: "imap_host", label: () => t("收信服务器（IMAP）"), placeholder: () => t("留空自动识别"), advanced: true },
+  { key: "imap_port", label: () => t("收信端口"), placeholder: () => "993", advanced: true },
+  { key: "smtp_host", label: () => t("发信服务器（SMTP）"), placeholder: () => t("留空自动识别"), advanced: true },
+  { key: "smtp_port", label: () => t("发信端口"), placeholder: () => t("465（587 走 STARTTLS）"), advanced: true },
 ];
 /** 邮件表单的草稿：打开卡片时从已存的配置填进来，秘密项除外。 */
 const emailDrafts = reactive<Record<string, string>>({});
@@ -112,24 +123,27 @@ async function saveEmail(plugin: PluginRow): Promise<void> {
   const hasAddress = (changes.address ?? emailField(plugin, "address")?.value ?? "") !== "";
   const hasPassword = Boolean(changes.password) || Boolean(emailField(plugin, "password")?.isSet);
   if (!hasAddress || !hasPassword) {
-    emailResult.value = { ok: false, text: "邮箱地址和授权码都要填" };
+    emailResult.value = { ok: false, text: t("邮箱地址和授权码都要填") };
     return;
   }
   emailBusy.value = true;
-  emailResult.value = { ok: true, text: "正在连接邮箱…" };
+  emailResult.value = { ok: true, text: t("正在连接邮箱…") };
   try {
     await actions.saveEmailConfig(plugin.uuid, changes);
     emailDrafts.password = "";
     const result = await actions.testEmail(plugin.uuid);
     if (!result.ok) {
-      emailResult.value = { ok: false, text: result.error || "连不上" };
+      emailResult.value = { ok: false, text: result.error || t("连不上") };
       return;
     }
-    const servers = `收信 ${result.imapHost}:${result.imapPort} · 发信 ${result.smtpHost}:${result.smtpPort}`;
-    let text = `已连上（${servers}）`;
+    const servers = t("收信 {imap} · 发信 {smtp}", {
+      imap: `${result.imapHost}:${result.imapPort}`,
+      smtp: `${result.smtpHost}:${result.smtpPort}`,
+    });
+    let text = t("已连上（{servers}）", { servers });
     if (!plugin.enabled) {
       await actions.togglePlugin(plugin.uuid, true);
-      text = `已连上并启用（${servers}）。助手现在就能收发邮件了。`;
+      text = t("已连上并启用（{servers}）。助手现在就能收发邮件了。", { servers });
     }
     // 重新从库里填一遍草稿：自动识别出来的服务器不回填，留空就是「自动」。
     await openEmailForm(store.plugins.find((item) => item.uuid === plugin.uuid) ?? plugin);
@@ -169,7 +183,7 @@ onUnmounted(() => clearTimeout(pollTimer));
 const choices = computed(() => modelChoices(store.providers));
 
 function labelOf(permission: string): string {
-  return PERMISSION_LABELS[permission] ?? permission;
+  return PERMISSION_LABELS[permission]?.() ?? permission;
 }
 
 function isChannel(plugin: PluginRow): boolean {
@@ -201,12 +215,15 @@ function bindingKey(binding: BindingRow): string {
 /** 连接那一行的状态字。 */
 function connectionState(plugin: PluginRow, connection: ConnectionRow): { text: string; kind: string } {
   if (connection.missingConfig.length > 0) {
-    return { text: isWeChat(plugin) ? "还没登录" : `缺 ${connection.missingConfig.join("、")}`, kind: "bad" };
+    return {
+      text: isWeChat(plugin) ? t("还没登录") : t("缺 {keys}", { keys: connection.missingConfig.join(t("、")) }),
+      kind: "bad",
+    };
   }
-  if (!plugin.enabled) return { text: "插件停用中", kind: "" };
+  if (!plugin.enabled) return { text: t("插件停用中"), kind: "" };
   const status = statusOf(connection);
-  if (!status) return { text: "未启动", kind: "" };
-  return { text: STATE_LABELS[status.state] ?? status.state, kind: status.state };
+  if (!status) return { text: t("未启动"), kind: "" };
+  return { text: STATE_LABELS[status.state]?.() ?? status.state, kind: status.state };
 }
 
 function configOf(plugin: PluginRow, connectionId = "") {
@@ -217,29 +234,31 @@ function configOf(plugin: PluginRow, connectionId = "") {
 function summary(plugin: PluginRow): string {
   if (isChannel(plugin)) {
     const total = plugin.connections.length;
-    if (total === 0) return "还没有连接";
+    if (total === 0) return t("还没有连接");
     const running = channelsOf(plugin).filter((c) => c.state === "running").length;
-    return plugin.enabled ? `${total} 个连接 · ${running} 个已连接` : `${total} 个连接`;
+    return plugin.enabled
+      ? t("{total} 个连接 · {running} 个已连接", { total, running })
+      : t("{total} 个连接", { total });
   }
   if (isEmail(plugin)) {
-    if (plugin.missingConfig.length > 0) return "还没填邮箱";
-    return emailField(plugin, "address")?.value || "已配置邮箱";
+    if (plugin.missingConfig.length > 0) return t("还没填邮箱");
+    return emailField(plugin, "address")?.value || t("已配置邮箱");
   }
-  if (plugin.missingConfig.length > 0) return `缺 ${plugin.missingConfig.join("、")}`;
+  if (plugin.missingConfig.length > 0) return t("缺 {keys}", { keys: plugin.missingConfig.join(t("、")) });
   const parts: string[] = [];
-  if (plugin.tools > 0) parts.push("宿主能力");
-  if (plugin.channels > 0) parts.push("通道");
-  if (plugin.skills > 0) parts.push(`${plugin.skills} 个技能`);
-  if (plugin.mcp > 0) parts.push(`${plugin.mcp} 个 MCP`);
+  if (plugin.tools > 0) parts.push(t("宿主能力"));
+  if (plugin.channels > 0) parts.push(t("通道"));
+  if (plugin.skills > 0) parts.push(t("{n} 个技能", { n: plugin.skills }));
+  if (plugin.mcp > 0) parts.push(t("{n} 个 MCP", { n: plugin.mcp }));
   return parts.join(" · ");
 }
 
-const STATE_LABELS: Record<string, string> = {
-  starting: "连接中",
-  running: "已连接",
-  retrying: "重连中",
-  failed: "连接失败",
-  stopped: "已停止",
+const STATE_LABELS: Record<string, () => string> = {
+  starting: () => t("连接中"),
+  running: () => t("已连接"),
+  retrying: () => t("重连中"),
+  failed: () => t("连接失败"),
+  stopped: () => t("已停止"),
 };
 
 async function run(task: () => Promise<unknown>): Promise<void> {
@@ -308,12 +327,12 @@ async function finishRename(connection: ConnectionRow): Promise<void> {
 }
 
 async function removeConnection(connection: ConnectionRow): Promise<void> {
-  if (!confirm(`删除连接「${connection.name}」？它的凭据和放行记录一起删掉，已有的会话留着。`)) return;
+  if (!confirm(t("删除连接「{name}」？它的凭据和放行记录一起删掉，已有的会话留着。", { name: connection.name }))) return;
   await run(() => actions.deleteConnection(connection.uuid));
 }
 
 async function remove(plugin: PluginRow): Promise<void> {
-  if (!confirm(`删除插件「${plugin.name}」？它带的技能、MCP server 与通道授权一起删除。`)) return;
+  if (!confirm(t("删除插件「{name}」？它带的技能、MCP server 与通道授权一起删除。", { name: plugin.name }))) return;
   await run(() => actions.deletePlugin(plugin.uuid));
 }
 
@@ -338,7 +357,7 @@ async function authorize(binding: BindingRow): Promise<void> {
   const [providerId, ...rest] = draft.choice.split("/");
   const model = rest.join("/");
   if (!providerId || !model) {
-    actions.showError("放行前先给这个会话选一个模型。");
+    actions.showError(t("放行前先给这个会话选一个模型。"));
     return;
   }
   await run(() =>
@@ -375,11 +394,11 @@ function formatTime(iso?: string): string {
 
 async function startWeChatLogin(plugin: PluginRow, connectionId: string): Promise<void> {
   clearTimeout(pollTimer);
-  wechatStatus.value = "正在向中继要二维码…";
+  wechatStatus.value = t("正在向中继要二维码…");
   try {
     const qr = await actions.wechatLoginStart();
     wechatQR.value = { uuid: plugin.uuid, connectionId, token: qr.token, image: qr.image };
-    wechatStatus.value = "用微信扫一扫";
+    wechatStatus.value = t("用微信扫一扫");
     void pollWeChat();
   } catch (error) {
     wechatQR.value = null;
@@ -399,19 +418,19 @@ async function pollWeChat(): Promise<void> {
     if (wechatQR.value?.token !== current.token) return;
     if (result.saved) {
       wechatStatus.value = current.connectionId
-        ? "已重新登录，连接用新凭据重连。"
-        : "已登录，加好了一个微信号。插件启用着的话它马上就连上。";
+        ? t("已重新登录，连接用新凭据重连。")
+        : t("已登录，加好了一个微信号。插件启用着的话它马上就连上。");
       wechatQR.value = null;
       await actions.loadPlugins();
       await actions.refreshChannels();
       return;
     }
     if (result.status === "expired") {
-      wechatStatus.value = "二维码已过期，点「重新获取」。";
+      wechatStatus.value = t("二维码已过期，点「重新获取」。");
       wechatQR.value = null;
       return;
     }
-    wechatStatus.value = result.status === "scaned" ? "已扫码，请在手机上确认" : "用微信扫一扫";
+    wechatStatus.value = result.status === "scaned" ? t("已扫码，请在手机上确认") : t("用微信扫一扫");
     pollTimer = setTimeout(() => void pollWeChat(), 1000);
   } catch (error) {
     wechatStatus.value = describeError(error);
@@ -424,17 +443,15 @@ async function pollWeChat(): Promise<void> {
   <div class="page">
     <section>
       <header>
-        <h2>插件</h2>
+        <h2>{{ t("插件") }}</h2>
         <p class="sub">
-          一个插件是一个带 <code>plugin.json</code> 的目录，声明它要的权限、配置项，
-          以及它带来的东西：技能、MCP server、宿主能力（computer use）、通道（微信、企业微信）。
-          装好是停用的——<strong>启用那一步才把声明的权限交出去</strong>。
+          {{ t("一个插件是一个带") }} <code>plugin.json</code> {{ t("的目录，声明它要的权限、配置项，以及它带来的东西：技能、MCP server、宿主能力（computer use）、通道（微信、企业微信）。装好是停用的——") }}<strong>{{ t("启用那一步才把声明的权限交出去") }}</strong>{{ t("。") }}
         </p>
       </header>
 
       <div class="add">
-        <button class="ghost" @click="actions.installPluginFromDirectory()">+ 从目录安装</button>
-        <button class="ghost" @click="actions.loadPlugins()">刷新</button>
+        <button class="ghost" @click="actions.installPluginFromDirectory()">{{ t("+ 从目录安装") }}</button>
+        <button class="ghost" @click="actions.loadPlugins()">{{ t("刷新") }}</button>
       </div>
 
       <p v-if="store.pluginsError" class="note warn">{{ store.pluginsError }}</p>
@@ -448,8 +465,8 @@ async function pollWeChat(): Promise<void> {
         <div class="card-head">
           <button class="disclose" :aria-expanded="expanded === plugin.uuid" @click="toggleExpand(plugin)">
             <span class="chevron">{{ expanded === plugin.uuid ? "▾" : "▸" }}</span>
-            <span class="name">{{ plugin.name }}</span>
-            <span class="badge">{{ plugin.source === "builtin" ? "内置" : "本地" }}</span>
+            <span class="name">{{ manifestText(plugin, plugin.name) }}</span>
+            <span class="badge">{{ plugin.source === "builtin" ? t("内置") : t("本地") }}</span>
             <span class="state" :class="{ bad: plugin.missingConfig.length > 0 }">{{ summary(plugin) }}</span>
           </button>
           <label class="toggle">
@@ -458,100 +475,94 @@ async function pollWeChat(): Promise<void> {
               :checked="plugin.enabled"
               @change="onToggle(plugin, $event)"
             />
-            启用
+            {{ t("启用") }}
           </label>
           <!-- 内置的只能停用：删了下次启动又会回来。 -->
-          <button v-if="plugin.source !== 'builtin'" class="icon" title="删除" @click="remove(plugin)">×</button>
+          <button v-if="plugin.source !== 'builtin'" class="icon" :title="t(`删除`)" @click="remove(plugin)">×</button>
         </div>
 
         <template v-if="expanded === plugin.uuid">
-          <p class="desc">{{ plugin.description || "（没有说明）" }}<span v-if="plugin.version" class="version"> v{{ plugin.version }}</span></p>
+          <p class="desc">{{ manifestText(plugin, plugin.description) || t("（没有说明）") }}<span v-if="plugin.version" class="version"> v{{ plugin.version }}</span></p>
 
           <!-- 权限清单是启用前该看的东西，排在配置前面。 -->
           <div class="block">
-            <div class="block-head"><span class="block-title">启用后获得的权限</span></div>
-            <p v-if="plugin.permissions.length === 0" class="hint">不需要任何权限。</p>
+            <div class="block-head"><span class="block-title">{{ t("启用后获得的权限") }}</span></div>
+            <p v-if="plugin.permissions.length === 0" class="hint">{{ t("不需要任何权限。") }}</p>
             <ul v-else class="perms">
               <li v-for="permission in plugin.permissions" :key="permission">
                 {{ labelOf(permission) }}<code>{{ permission }}</code>
               </li>
             </ul>
             <p v-if="isComputerUse(plugin)" class="note warn">
-              启用后模型能<strong>看见并操作整个屏幕</strong>，不只是工作目录——包括别的应用、
-              系统设置、以及本应用自己的窗口。除截屏外每个动作都会请你确认；最前面的应用是
-              AIClaw 自己时直接拒绝。macOS 还要在「隐私与安全性」里给屏幕录制与辅助功能授权，
-              且模型得看得懂图。这是这里权限最大的一项，不用就关掉。
+              {{ t("启用后模型能") }}<strong>{{ t("看见并操作整个屏幕") }}</strong>{{ t("，不只是工作目录——包括别的应用、系统设置、以及本应用自己的窗口。除截屏外每个动作都会请你确认；最前面的应用是 AIClaw 自己时直接拒绝。macOS 还要在「隐私与安全性」里给屏幕录制与辅助功能授权，且模型得看得懂图。这是这里权限最大的一项，不用就关掉。") }}
             </p>
           </div>
 
           <!-- 邮件：一张专门的表单，填完「测试并启用」。 -->
           <div v-if="isEmail(plugin)" class="block">
-            <div class="block-head"><span class="block-title">邮箱</span></div>
-            <p v-if="needsSetup === plugin.uuid && !plugin.enabled" class="note">先填好邮箱地址和授权码，点「测试并启用」。</p>
+            <div class="block-head"><span class="block-title">{{ t("邮箱") }}</span></div>
+            <p v-if="needsSetup === plugin.uuid && !plugin.enabled" class="note">{{ t("先填好邮箱地址和授权码，点「测试并启用」。") }}</p>
             <div class="email-form">
               <label v-for="field in EMAIL_FIELDS.filter((item) => !item.advanced)" :key="field.key">
                 <span>
-                  {{ field.label }}
-                  <em v-if="field.key === 'password' && emailField(plugin, 'password')?.isSet" class="set">已配置</em>
+                  {{ field.label() }}
+                  <em v-if="field.key === 'password' && emailField(plugin, 'password')?.isSet" class="set">{{ t("已配置") }}</em>
                 </span>
                 <input
                   v-model="emailDrafts[field.key]"
                   :type="field.key === 'password' ? 'password' : 'text'"
-                  :placeholder="field.key === 'password' && emailField(plugin, 'password')?.isSet ? '留空表示不修改' : field.placeholder"
+                  :placeholder="field.key === 'password' && emailField(plugin, 'password')?.isSet ? t(`留空表示不修改`) : field.placeholder()"
                   :autocomplete="field.key === 'password' ? 'new-password' : 'off'"
                   @keydown.enter="saveEmail(plugin)"
                 />
               </label>
               <p class="hint">
-                QQ、163、126 邮箱：在网页版「设置」里开启 IMAP/SMTP 服务，按提示生成授权码填在这里。
-                Gmail、iCloud、Outlook：生成「应用专用密码」。公司邮箱（网易、腾讯、阿里企业邮等）
-                会按域名自动找到服务器，开了安全登录的填「客户端专用密码」。授权码只保存在本机，加密存放。
+                {{ t("QQ、163、126 邮箱：在网页版「设置」里开启 IMAP/SMTP 服务，按提示生成授权码填在这里。Gmail、iCloud、Outlook：生成「应用专用密码」。公司邮箱（网易、腾讯、阿里企业邮等）会按域名自动找到服务器，开了安全登录的填「客户端专用密码」。授权码只保存在本机，加密存放。") }}
               </p>
               <details class="advanced">
-                <summary>高级：服务器与端口（一般不用填）</summary>
+                <summary>{{ t("高级：服务器与端口（一般不用填）") }}</summary>
                 <label v-for="field in EMAIL_FIELDS.filter((item) => item.advanced)" :key="field.key">
-                  <span>{{ field.label }}</span>
-                  <input v-model="emailDrafts[field.key]" type="text" :placeholder="field.placeholder" autocomplete="off" />
+                  <span>{{ field.label() }}</span>
+                  <input v-model="emailDrafts[field.key]" type="text" :placeholder="field.placeholder()" autocomplete="off" />
                 </label>
               </details>
               <div class="row">
                 <button class="primary small" :disabled="emailBusy" @click="saveEmail(plugin)">
-                  {{ emailBusy ? "正在连接…" : plugin.enabled ? "保存并测试" : "测试并启用" }}
+                  {{ emailBusy ? t("正在连接…") : plugin.enabled ? t("保存并测试") : t("测试并启用") }}
                 </button>
                 <span v-if="emailResult" class="result" :class="{ bad: !emailResult.ok }">{{ emailResult.text }}</span>
               </div>
             </div>
             <p class="hint">
-              助手能列信、读信（读过的标成已读）、把附件存进工作区、发新信、回信。
-              <strong>每次发信、回信都会先请你确认</strong>收件人与内容；信里的内容一律当作外部资料，不当指令。
-              只在你自己的对话里可用，微信、企业微信那边来的会话碰不到你的邮箱。
+              {{ t("助手能列信、读信（读过的标成已读）、把附件存进工作区、发新信、回信。") }}
+              <strong>{{ t("每次发信、回信都会先请你确认") }}</strong>{{ t("收件人与内容；信里的内容一律当作外部资料，不当指令。只在你自己的对话里可用，微信、企业微信那边来的会话碰不到你的邮箱。") }}
             </p>
           </div>
 
           <!-- 配置项：秘密只进不出。渠道插件的配置在各自的连接里。 -->
           <div v-if="!isChannel(plugin) && !isEmail(plugin) && configOf(plugin).length > 0" class="block">
-            <div class="block-head"><span class="block-title">配置</span></div>
-            <p v-if="needsSetup === plugin.uuid && !plugin.enabled" class="note">先填好标着「必填」的几项，再启用。</p>
+            <div class="block-head"><span class="block-title">{{ t("配置") }}</span></div>
+            <p v-if="needsSetup === plugin.uuid && !plugin.enabled" class="note">{{ t("先填好标着「必填」的几项，再启用。") }}</p>
             <div v-for="field in configOf(plugin)" :key="field.key" class="field">
               <label>
                 <span>
                   {{ field.key }}
-                  <em v-if="field.required" class="req">必填</em>
-                  <em v-if="field.isSet" class="set">已配置</em>
+                  <em v-if="field.required" class="req">{{ t("必填") }}</em>
+                  <em v-if="field.isSet" class="set">{{ t("已配置") }}</em>
                 </span>
                 <div class="key-row">
                   <input
                     v-model="drafts[draftKeyOf(plugin, field.key)]"
                     :type="field.secret ? 'password' : 'text'"
-                    :placeholder="field.secret ? (field.isSet ? '留空表示不修改' : '填入后只保存在本机') : (field.value || field.description || '')"
+                    :placeholder="field.secret ? (field.isSet ? t(`留空表示不修改`) : t(`填入后只保存在本机`)) : (field.value || manifestText(plugin, field.description) || '')"
                     @keydown.enter="saveField(plugin, field.key)"
                   />
                   <button class="ghost small" :disabled="!drafts[draftKeyOf(plugin, field.key)]" @click="saveField(plugin, field.key)">
-                    保存
+                    {{ t("保存") }}
                   </button>
-                  <button v-if="field.isSet" class="ghost small" @click="clearField(plugin, field.key)">清掉</button>
+                  <button v-if="field.isSet" class="ghost small" @click="clearField(plugin, field.key)">{{ t("清掉") }}</button>
                 </div>
-                <span v-if="field.description" class="hint">{{ field.description }}</span>
+                <span v-if="field.description" class="hint">{{ manifestText(plugin, field.description) }}</span>
               </label>
             </div>
           </div>
@@ -559,28 +570,28 @@ async function pollWeChat(): Promise<void> {
           <!-- 渠道插件：一个连接（一个微信号、一个企微机器人）一张卡片。 -->
           <div v-if="isChannel(plugin)" class="block">
             <div class="block-head">
-              <span class="block-title">连接</span>
+              <span class="block-title">{{ t("连接") }}</span>
               <span class="actions">
-                <button class="ghost small" @click="actions.refreshChannels()">刷新</button>
+                <button class="ghost small" @click="actions.refreshChannels()">{{ t("刷新") }}</button>
                 <button class="primary small" @click="addConnection(plugin)">
-                  {{ isWeChat(plugin) ? "+ 添加微信号（扫码）" : "+ 添加机器人" }}
+                  {{ isWeChat(plugin) ? t("+ 添加微信号（扫码）") : t("+ 添加机器人") }}
                 </button>
               </span>
             </div>
             <p class="hint">
-              每个连接各自一套凭据、各自在线；同一个人找不同的连接，是不同的会话。
-              <template v-if="isWeChat(plugin)">登录走第三方中继（iLink），可用性与账号风险由你自己承担。</template>
+              {{ t("每个连接各自一套凭据、各自在线；同一个人找不同的连接，是不同的会话。") }}
+              <template v-if="isWeChat(plugin)">{{ t("登录走第三方中继（iLink），可用性与账号风险由你自己承担。") }}</template>
             </p>
 
             <!-- 添加微信号时的二维码（还没有连接，扫完才建）。 -->
             <div v-if="wechatQR?.uuid === plugin.uuid && !wechatQR.connectionId" class="qr-box">
-              <img class="qr" :src="wechatQR.image" alt="微信登录二维码" />
+              <img class="qr" :src="wechatQR.image" :alt="t(`微信登录二维码`)" />
               <p class="hint">{{ wechatStatus }}</p>
             </div>
             <p v-else-if="wechatStatus && isWeChat(plugin) && !wechatQR" class="hint">{{ wechatStatus }}</p>
 
             <p v-if="plugin.connections.length === 0" class="hint">
-              还没有连接。{{ isWeChat(plugin) ? "点「添加微信号」用微信扫码登录。" : "点「添加机器人」填入企业微信智能机器人的 bot_id 与 secret。" }}
+              {{ isWeChat(plugin) ? t("还没有连接。点「添加微信号」用微信扫码登录。") : t("还没有连接。点「添加机器人」填入企业微信智能机器人的 bot_id 与 secret。") }}
             </p>
 
             <div v-for="connection in plugin.connections" :key="connection.uuid" class="connection">
@@ -594,22 +605,22 @@ async function pollWeChat(): Promise<void> {
                   @keydown.esc="delete renaming[connection.uuid]"
                   @blur="finishRename(connection)"
                 />
-                <span v-else class="conn-name" title="双击改名" @dblclick="startRename(connection)">{{ connection.name }}</span>
+                <span v-else class="conn-name" :title="t(`双击改名`)" @dblclick="startRename(connection)">{{ connection.name }}</span>
                 <span class="conn-state" :class="connectionState(plugin, connection).kind">{{ connectionState(plugin, connection).text }}</span>
                 <span v-if="statusOf(connection)?.lastError" class="hint bad">{{ statusOf(connection)?.lastError }}</span>
                 <span class="actions">
-                  <button class="ghost small" @click="startRename(connection)">改名</button>
-                  <button v-if="isWeChat(plugin)" class="ghost small" @click="startWeChatLogin(plugin, connection.uuid)">重新扫码</button>
+                  <button class="ghost small" @click="startRename(connection)">{{ t("改名") }}</button>
+                  <button v-if="isWeChat(plugin)" class="ghost small" @click="startWeChatLogin(plugin, connection.uuid)">{{ t("重新扫码") }}</button>
                   <button v-else class="ghost small" @click="editing[connection.uuid] = !editing[connection.uuid]">
-                    {{ editing[connection.uuid] ? "收起凭据" : "凭据" }}
+                    {{ editing[connection.uuid] ? t("收起凭据") : t("凭据") }}
                   </button>
-                  <button class="icon" title="删除这个连接" @click="removeConnection(connection)">×</button>
+                  <button class="icon" :title="t(`删除这个连接`)" @click="removeConnection(connection)">×</button>
                 </span>
               </div>
 
               <!-- 给这个连接重新登录的二维码。 -->
               <div v-if="wechatQR?.connectionId === connection.uuid" class="qr-box">
-                <img class="qr" :src="wechatQR.image" alt="微信登录二维码" />
+                <img class="qr" :src="wechatQR.image" :alt="t(`微信登录二维码`)" />
                 <p class="hint">{{ wechatStatus }}</p>
               </div>
 
@@ -619,14 +630,14 @@ async function pollWeChat(): Promise<void> {
                   <label>
                     <span>
                       {{ field.key }}
-                      <em v-if="field.required" class="req">必填</em>
-                      <em v-if="field.isSet" class="set">已配置</em>
+                      <em v-if="field.required" class="req">{{ t("必填") }}</em>
+                      <em v-if="field.isSet" class="set">{{ t("已配置") }}</em>
                     </span>
                     <div class="key-row">
                       <input
                         v-model="drafts[draftKeyOf(plugin, field.key, connection.uuid)]"
                         :type="field.secret ? 'password' : 'text'"
-                        :placeholder="field.secret ? (field.isSet ? '留空表示不修改' : '填入后只保存在本机') : (field.value || field.description || '')"
+                        :placeholder="field.secret ? (field.isSet ? t(`留空表示不修改`) : t(`填入后只保存在本机`)) : (field.value || manifestText(plugin, field.description) || '')"
                         @keydown.enter="saveField(plugin, field.key, connection.uuid)"
                       />
                       <button
@@ -634,9 +645,9 @@ async function pollWeChat(): Promise<void> {
                         :disabled="!drafts[draftKeyOf(plugin, field.key, connection.uuid)]"
                         @click="saveField(plugin, field.key, connection.uuid)"
                       >
-                        保存
+                        {{ t("保存") }}
                       </button>
-                      <button v-if="field.isSet" class="ghost small" @click="clearField(plugin, field.key, connection.uuid)">清掉</button>
+                      <button v-if="field.isSet" class="ghost small" @click="clearField(plugin, field.key, connection.uuid)">{{ t("清掉") }}</button>
                     </div>
                   </label>
                 </div>
@@ -644,7 +655,7 @@ async function pollWeChat(): Promise<void> {
 
               <!-- 谁在通过这个连接找它。 -->
               <div class="conn-bindings">
-                <p v-if="bindingsOf(plugin, connection).length === 0" class="hint">还没有人通过这个连接发过消息。</p>
+                <p v-if="bindingsOf(plugin, connection).length === 0" class="hint">{{ t("还没有人通过这个连接发过消息。") }}</p>
                 <div
                   v-for="binding in bindingsOf(plugin, connection)"
                   :key="bindingKey(binding)"
@@ -654,12 +665,12 @@ async function pollWeChat(): Promise<void> {
                   <div class="binding-head">
                     <span class="name">{{ binding.displayName || binding.externalKey }}</span>
                     <code class="ext">{{ binding.externalKey }}</code>
-                    <span class="badge" :class="{ ok: binding.allowed }">{{ binding.allowed ? "已放行" : "待放行" }}</span>
-                    <span v-if="binding.lastMessage" class="hint">最近 {{ formatTime(binding.lastMessage) }}</span>
+                    <span class="badge" :class="{ ok: binding.allowed }">{{ binding.allowed ? t("已放行") : t("待放行") }}</span>
+                    <span v-if="binding.lastMessage" class="hint">{{ t("最近 {time}", { time: formatTime(binding.lastMessage) }) }}</span>
                   </div>
                   <div class="binding-form">
                     <select v-model="authDraft(binding).choice">
-                      <option value="">选模型…</option>
+                      <option value="">{{ t("选模型…") }}</option>
                       <option v-for="c in choices" :key="`${c.providerId}/${c.model}`" :value="`${c.providerId}/${c.model}`">
                         {{ c.model }} · {{ c.providerName }}
                       </option>
@@ -670,25 +681,24 @@ async function pollWeChat(): Promise<void> {
                         :checked="authDraft(binding).tools.includes(tool.name)"
                         @change="toggleTool(binding, tool.name, ($event.target as HTMLInputElement).checked)"
                       />
-                      {{ tool.label }}
+                      {{ tool.label() }}
                     </label>
                     <button class="primary small" @click="authorize(binding)">
-                      {{ binding.allowed ? "更新" : "放行" }}
+                      {{ binding.allowed ? t("更新") : t("放行") }}
                     </button>
-                    <button v-if="binding.allowed" class="ghost small" @click="revoke(binding)">收回</button>
+                    <button v-if="binding.allowed" class="ghost small" @click="revoke(binding)">{{ t("收回") }}</button>
                   </div>
                 </div>
               </div>
             </div>
             <p class="hint">
-              外部会话（群或单聊）第一次发消息只会被记下，<strong>不会</strong>触发回答；你放行之后它才能用。
-              放行时选模型、选它能动的工具——默认只有只读工具，因为发消息的人不是你。
+              {{ t("外部会话（群或单聊）第一次发消息只会被记下，") }}<strong>{{ t("不会") }}</strong>{{ t("触发回答；你放行之后它才能用。放行时选模型、选它能动的工具——默认只有只读工具，因为发消息的人不是你。") }}
             </p>
           </div>
         </template>
       </article>
 
-      <p v-if="saving || store.pluginsLoading" class="note">{{ saving ? "保存中…" : "读取中…" }}</p>
+      <p v-if="saving || store.pluginsLoading" class="note">{{ saving ? t("保存中…") : t("读取中…") }}</p>
     </section>
   </div>
 </template>

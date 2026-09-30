@@ -4,6 +4,7 @@ import { basename, dirname, join } from "node:path";
 import type { ConfigStore } from "./config.js";
 import { dedupeByName, discoverSkills, type FoundSkill } from "./skill-roots.js";
 import { parseFrontmatter } from "./skill-frontmatter.js";
+import { tr } from "../shared/i18n.js";
 
 /**
  * 本地技能的管理：列出、启停、删除。
@@ -148,7 +149,7 @@ export class SkillManager {
     if (!skill) return this.list();
     if (!skill.writable) {
       // 别人的目录不归我们删。说清楚它在哪儿，用户自己去处理。
-      throw new Error(`「${skill.name}」来自${skill.source}（${skill.dir}），请到那边删除。`);
+      throw new Error(tr("「{name}」来自{source}（{dir}），请到那边删除。", { name: skill.name, source: sourceLabel(skill.source), dir: skill.dir }));
     }
     rmSync(this.resolve(skill.dirName), { recursive: true, force: true });
     const off = this.disabledSet();
@@ -179,9 +180,19 @@ export class SkillManager {
   /** 解析目录名并确认它没跑出技能目录。界面传来的值也不能无条件相信。 */
   private resolve(dirName: string): string {
     const clean = sanitizeDirName(dirName);
-    if (!clean) throw new Error("技能名为空");
+    if (!clean) throw new Error(tr("技能名为空"));
     return join(this.dir, clean);
   }
+}
+
+/**
+ * 来源标签（skill-roots.ts 里的「通用」「项目」「插件 · 名字」……）按界面语言写出来。
+ * 标签本身是界面拿来比对分组的，不能改，只在拼进报错时翻译。
+ */
+function sourceLabel(source: string): string {
+  const plugin = "插件 · ";
+  if (source.startsWith(plugin)) return tr("插件 · {name}", { name: source.slice(plugin.length) });
+  return tr(source);
 }
 
 /** 目录名只保留安全字符，顺带挡掉 `..` 与分隔符。 */

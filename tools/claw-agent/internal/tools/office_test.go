@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -751,5 +752,27 @@ func TestOfficeToolEffects(t *testing.T) {
 		if err := json.Unmarshal(tool.Schema, &decoded); err != nil {
 			t.Errorf("%s 的 schema 不是合法 JSON：%v", name, err)
 		}
+	}
+}
+
+// 界面语言切到英文时，工具结果、提取出的结构标记和报错都跟着变。
+func TestOfficeFollowsUILanguage(t *testing.T) {
+	i18n.SetDefault(i18n.English)
+	defer i18n.SetDefault(i18n.Chinese)
+	env, _ := newEnv(t, protocol.ApprovalBypass, true)
+	registry := officeRegistry(t)
+	result, err := callJSON(t, registry, "write_pptx", pptxArgs("en.pptx"), env)
+	if err != nil {
+		t.Fatalf("write_pptx：%v", err)
+	}
+	mustContain(t, result, "Wrote en.pptx (3 slides")
+	text, err := callJSON(t, registry, "read_office", map[string]any{"path": "en.pptx", "slides": "2"}, env)
+	if err != nil {
+		t.Fatalf("read_office：%v", err)
+	}
+	mustContain(t, text, "3 slides in total; showing slides 2–2", "## Slide 2: 第二页标题", "Notes:\n第二页备注")
+	_, err = callJSON(t, registry, "read_office", map[string]any{"path": "en.pptx", "slides": "9"}, env)
+	if err == nil || !strings.Contains(err.Error(), "Slide 9 doesn't exist") {
+		t.Errorf("英文报错：%v", err)
 	}
 }

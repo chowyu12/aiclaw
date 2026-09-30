@@ -3,6 +3,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { shell } from "electron";
 
+import { tr } from "../shared/i18n.js";
+
 import { classifyOpen, type OpenVerdict } from "./open-file-rules.js";
 
 /**
@@ -32,7 +34,7 @@ export async function openFromChat(
   options: { base: string; protectedPaths: string[] },
 ): Promise<OpenResult> {
   const text = raw.trim();
-  if (!text) return { ok: false, action: "missing", detail: "路径是空的" };
+  if (!text) return { ok: false, action: "missing", detail: tr("路径是空的") };
 
   const home = homedir();
   const expanded = text === "~" || text.startsWith("~/") ? join(home, text.slice(1)) : text;
@@ -40,7 +42,7 @@ export async function openFromChat(
   const path = isAbsolute(expanded) ? resolve(expanded) : resolve(base, expanded);
 
   if (!existsSync(path)) {
-    return { ok: false, action: "missing", detail: `找不到 ${path}` };
+    return { ok: false, action: "missing", detail: tr("找不到 {path}", { path }) };
   }
 
   let executable = false;
@@ -66,7 +68,7 @@ export async function openFromChat(
   if (error) {
     // 打不开（没有默认程序之类）退回到在访达里选中，总比什么都没发生强。
     shell.showItemInFolder(path);
-    return { ok: true, action: "reveal", detail: `系统打不开它（${error}），已在访达里标出来` };
+    return { ok: true, action: "reveal", detail: tr("系统打不开它（{error}），已在访达里标出来", { error }) };
   }
   return { ok: true, action: "open", detail: path };
 }

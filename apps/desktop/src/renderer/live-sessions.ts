@@ -11,7 +11,11 @@
  * 容器放进 reactive() 之后再调用，响应式由代理负责。
  */
 
+import { tr } from "../shared/i18n.js";
 import type { AgentEventPayload, HistoryItemView } from "../shared/types";
+
+/** 用户点停止之后 turn/completed 带的 error：内核按界面语言给出，两种都认。 */
+const INTERRUPTED = new Set(["已中断", "Interrupted"]);
 
 /**
  * 时间线上的一条。
@@ -215,7 +219,7 @@ export function applyAgentEvent(
             record,
             id,
             "llm",
-            typeof item.summary === "string" ? item.summary : "模型",
+            typeof item.summary === "string" ? item.summary : tr("模型"),
             "running",
             "",
             stepStats(item),
@@ -277,7 +281,7 @@ export function applyAgentEvent(
         }
         case "llm": {
           const stats = stepStats(item);
-          const title = typeof item.summary === "string" ? item.summary : "模型";
+          const title = typeof item.summary === "string" ? item.summary : tr("模型");
           const entry = findEntry(record, id);
           if (!entry || entry.kind !== "step") {
             pushStep(record, id, "llm", title, item.toolFailed ? "failed" : "done", "", stats);
@@ -324,13 +328,14 @@ export function applyAgentEvent(
         else if (entry.kind === "step" && entry.state === "running") entry.state = "done";
       }
       const error = params.error;
-      // 「已中断」是用户自己点的停止，不算错误，不弹红条。
-      if (typeof error === "string" && error && error !== "已中断") applied.error = error;
+      // 「已中断」是用户自己点的停止，不算错误，不弹红条。内核按界面语言给出这句话，
+      // 两种语言都认（英文是 "Interrupted"）。
+      if (typeof error === "string" && error && !INTERRUPTED.has(error)) applied.error = error;
       return applied;
     }
     case "error":
       record.busy = false;
-      applied.error = String(params.message ?? "运行出错");
+      applied.error = String(params.message ?? tr("运行出错"));
       return applied;
     default:
       return applied;
@@ -348,8 +353,8 @@ export function toolDetail(item: Record<string, unknown>): string {
   const result = typeof item.toolResult === "string" ? item.toolResult : "";
   const sections: string[] = [];
   // 空参数不占地方：一个 {} 挤在上面只会把结果推下去。
-  if (args && args !== "{}") sections.push(`参数\n${prettyJson(args)}`);
-  if (result) sections.push(`结果\n${result}`);
+  if (args && args !== "{}") sections.push(`${tr("参数")}\n${prettyJson(args)}`);
+  if (result) sections.push(`${tr("结果")}\n${result}`);
   return sections.join("\n\n");
 }
 
@@ -407,7 +412,7 @@ export function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
           kind: "step",
           id: item.id,
           step: "llm",
-          title: item.summary || "模型",
+          title: item.summary || tr("模型"),
           detail: "",
           state: "done",
           ...stepStats(item as unknown as Record<string, unknown>),

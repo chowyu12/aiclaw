@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 /*
@@ -74,7 +75,7 @@ func (p *ShellPool) Run(
 	if runtime.GOOS == "windows" {
 		// powershell 也能这么玩，但我们没有 Windows 机器验证，
 		// 而一个没验证过的「卡住不返回」比没有这个功能糟。
-		return "", "", errors.New("Windows 上暂不支持常驻 shell 会话，请用一次性命令")
+		return "", "", i18n.E("Windows 上暂不支持常驻 shell 会话，请用一次性命令")
 	}
 
 	session, err := p.acquire(id, env)
@@ -118,13 +119,13 @@ func (p *ShellPool) acquire(id string, env *Env) (*shellSession, error) {
 		session, ok := p.sessions[id]
 		if !ok {
 			// 说清楚是「这个会话没了」而不是别的错，模型才知道要重开一个。
-			return nil, fmt.Errorf("常驻会话 %s 不存在或已结束，传 session=\"new\" 开一个新的", id)
+			return nil, i18n.E("常驻会话 {id} 不存在或已结束，传 session=\"new\" 开一个新的", "id", id)
 		}
 		return session, nil
 	}
 
 	if len(p.sessions) >= maxShellSessions {
-		return nil, fmt.Errorf("常驻会话已达上限 %d 个，先用现有的", maxShellSessions)
+		return nil, i18n.E("常驻会话已达上限 {max} 个，先用现有的", "max", maxShellSessions)
 	}
 	session, err := startShellSession(env)
 	if err != nil {
@@ -157,7 +158,7 @@ func (p *ShellPool) reapLocked() {
 func startShellSession(env *Env) (*shellSession, error) {
 	nonce := make([]byte, 8)
 	if _, err := rand.Read(nonce); err != nil {
-		return nil, fmt.Errorf("生成会话标记失败：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("生成会话标记失败"), err)
 	}
 	sentinel := "__AICLAW_DONE_" + hex.EncodeToString(nonce) + "__"
 
@@ -180,17 +181,17 @@ func startShellSession(env *Env) (*shellSession, error) {
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, fmt.Errorf("建立常驻会话失败：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("建立常驻会话失败"), err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, fmt.Errorf("建立常驻会话失败：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("建立常驻会话失败"), err)
 	}
 	// stderr 并进 stdout：两条管子分开读的话，哪一行先到就成了竞态，
 	// 而用户看到的顺序会和真实发生的顺序对不上。
 	cmd.Stderr = cmd.Stdout
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("建立常驻会话失败：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("建立常驻会话失败"), err)
 	}
 
 	id := "sh_" + hex.EncodeToString(nonce[:4])
@@ -209,7 +210,7 @@ func (s *shellSession) run(ctx context.Context, command string, timeout time.Dur
 	// 否则一条失败的命令会让这次读取一直等到超时。
 	script := fmt.Sprintf("%s\nprintf '\\n%s %%s\\n' \"$?\"\n", command, s.sentinel)
 	if _, err := io.WriteString(s.stdin, script); err != nil {
-		return "", fmt.Errorf("常驻会话已经结束：%w", err)
+		return "", fmt.Errorf("%s: %w", i18n.D("常驻会话已经结束"), err)
 	}
 
 	type result struct {
@@ -236,7 +237,7 @@ func (s *shellSession) run(ctx context.Context, command string, timeout time.Dur
 			if builder.Len() > maxExecOutput {
 				// 刷屏的命令不该把上下文撑爆。这里只截断给模型看的部分，
 				// 剩下的仍要读完，否则哨兵永远等不到。
-				builder.WriteString("\n…（输出过长已截断）\n")
+				builder.WriteString("\n…" + i18n.D("（输出过长已截断）") + "\n")
 				for {
 					next, readErr := s.output.ReadString('\n')
 					if strings.Contains(next, s.sentinel) || readErr != nil {
@@ -254,20 +255,20 @@ func (s *shellSession) run(ctx context.Context, command string, timeout time.Dur
 	case <-time.After(timeout):
 		// 超时只能连 shell 一起杀：没有 PTY 就没有进程组可以单独收，
 		// 而留着一个正在跑的命令，下一次调用读到的会是它的输出。
-		return "", fmt.Errorf("命令超过 %s 未结束，已终止整个常驻会话", timeout)
+		return "", i18n.E("命令超过 {timeout} 未结束，已终止整个常驻会话", "timeout", timeout)
 	case got := <-done:
 		text := strings.TrimRight(got.text, "\n")
 		if got.err != nil && text == "" {
-			return "", fmt.Errorf("常驻会话已经结束：%w", got.err)
+			return "", fmt.Errorf("%s: %w", i18n.D("常驻会话已经结束"), got.err)
 		}
 		if got.code != "" && got.code != "0" {
 			if text == "" {
-				return fmt.Sprintf("（无输出，退出码 %s）", got.code), nil
+				return i18n.D("（无输出，退出码 {code}）", "code", got.code), nil
 			}
-			return text + fmt.Sprintf("\n（退出码 %s）", got.code), nil
+			return text + "\n" + i18n.D("（退出码 {code}）", "code", got.code), nil
 		}
 		if text == "" {
-			return "（命令执行完成，无输出）", nil
+			return i18n.D("（命令执行完成，无输出）"), nil
 		}
 		return text, nil
 	}

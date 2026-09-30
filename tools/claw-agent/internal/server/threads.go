@@ -2,9 +2,8 @@ package server
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
 )
 
@@ -20,7 +19,7 @@ func (t threadSource) ReadThread(ctx context.Context, id string) (agent.ThreadSn
 	}
 	record, err := t.server.db.Load(ctx, id)
 	if err != nil {
-		return agent.ThreadSnapshot{}, fmt.Errorf("没有这个会话（%s）：可能已经删了", id)
+		return agent.ThreadSnapshot{}, i18n.E("没有这个会话（{id}）：可能已经删了", "id", id)
 	}
 	archived := false
 	if list, err := agent.ListArchived(ctx, t.server.db); err == nil {
@@ -40,7 +39,7 @@ func (t threadSource) ListThreads(ctx context.Context, limit int) ([]agent.Threa
 		return nil, err
 	}
 	if summaries == nil {
-		return nil, errors.New("读不到会话列表")
+		return nil, i18n.E("读不到会话列表")
 	}
 	result := make([]agent.ThreadSummary, 0, limit)
 	for _, item := range summaries {

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -149,10 +150,10 @@ func (e *Env) requestApprovalScoped(
 		return nil
 	}
 	if e.Policy == protocol.ApprovalNever {
-		return fmt.Errorf("%s 需要确认，而当前是无人值守模式，不执行", title)
+		return i18n.E("{title} 需要确认，而当前是无人值守模式，不执行", "title", title)
 	}
 	if e.Approve == nil {
-		return fmt.Errorf("%s 需要确认，但当前没有可用的审批通道", title)
+		return i18n.E("{title} 需要确认，但当前没有可用的审批通道", "title", title)
 	}
 	response, err := e.Approve(ctx, protocol.ApprovalRequestParams{
 		SessionID: e.SessionID,
@@ -165,7 +166,7 @@ func (e *Env) requestApprovalScoped(
 		ScopePath: scopePath,
 	})
 	if err != nil {
-		return fmt.Errorf("请求确认失败：%w", err)
+		return fmt.Errorf("%s: %w", i18n.D("请求确认失败"), err)
 	}
 	if response.Approved && response.Scope == protocol.ApprovalScopeSession &&
 		scopePath != "" && e.Grant != nil {
@@ -173,7 +174,7 @@ func (e *Env) requestApprovalScoped(
 	}
 	approved := response.Approved
 	if !approved {
-		return errors.New("用户拒绝了这次操作")
+		return i18n.E("用户拒绝了这次操作")
 	}
 	return nil
 }
@@ -212,12 +213,12 @@ func NewRegistry() *Registry {
 
 func (r *Registry) Register(tool Tool) error {
 	if tool.Name == "" {
-		return errors.New("工具名为空")
+		return i18n.E("工具名为空")
 	}
 	if _, exists := r.tools[tool.Name]; exists {
 		// 重名报错而不是覆盖：静默遮蔽会让「两个 MCP server 暴露了同名工具」
 		// 变成难查的怪问题。
-		return fmt.Errorf("工具 %q 重复注册", tool.Name)
+		return i18n.E("工具 {name} 重复注册", "name", fmt.Sprintf("%q", tool.Name))
 	}
 	r.tools[tool.Name] = tool
 	r.order = append(r.order, tool.Name)
@@ -257,7 +258,7 @@ func within(root, target string) bool {
 }
 
 func outsideError(raw, workdir string) error {
-	return fmt.Errorf("路径 %s 在工作目录之外；当前工作目录是 %s", raw, workdir)
+	return i18n.E("路径 {path} 在工作目录之外；当前工作目录是 {workdir}", "path", raw, "workdir", workdir)
 }
 
 // decodeArgs 解析工具参数。
@@ -280,13 +281,12 @@ func decodeArgs(raw json.RawMessage, out any) error {
 func ExplainBadArguments(raw string, err error) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed != "" && !strings.HasSuffix(trimmed, "}") && !strings.HasSuffix(trimmed, "]") {
-		return fmt.Sprintf(
-			"工具参数在第 %d 个字符处被截断（结尾是 %q），多半是这次输出超出了长度上限。"+
-				"把这一步拆成几次调用：先产出一部分、用 store() 存着，或者让工具自己去读文件而不是把内容写进参数。",
-			len([]rune(trimmed)), tailRunes(trimmed, 12),
+		return i18n.D(
+			"工具参数在第 {n} 个字符处被截断（结尾是 {tail}），多半是这次输出超出了长度上限。把这一步拆成几次调用：先产出一部分、用 store() 存着，或者让工具自己去读文件而不是把内容写进参数。",
+			"n", len([]rune(trimmed)), "tail", fmt.Sprintf("%q", tailRunes(trimmed, 12)),
 		)
 	}
-	return fmt.Sprintf("参数不是合法 JSON 对象：%v", err)
+	return i18n.D("参数不是合法 JSON 对象：{error}", "error", err)
 }
 
 func tailRunes(text string, n int) string {

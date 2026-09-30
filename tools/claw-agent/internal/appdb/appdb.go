@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/chowyu12/aiclaw/internal/config"
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/secrets"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 )
@@ -23,20 +24,20 @@ import (
 func Open(path string) (*gormstore.GormStore, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, fmt.Errorf("创建应用数据目录失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("创建应用数据目录失败："), err)
 	}
 	cipher, err := secrets.Load(dir)
 	if err != nil {
-		return nil, fmt.Errorf("准备凭据密钥失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("准备凭据密钥失败："), err)
 	}
 	db, err := gormstore.New(config.DatabaseConfig{Driver: "sqlite", DSN: path})
 	if err != nil {
-		return nil, fmt.Errorf("打开应用库失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("打开应用库失败："), err)
 	}
 	db.UseCipher(cipher)
 	if _, err := db.MigrateSecrets(context.Background()); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("加密库里已有的凭据失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("加密库里已有的凭据失败："), err)
 	}
 	return db, nil
 }

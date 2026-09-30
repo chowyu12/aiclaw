@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"encoding/xml"
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 const (
@@ -36,7 +37,7 @@ func readPptx(target, slideRange string) (string, error) {
 		return "", err
 	}
 	if len(slides) == 0 {
-		return "（演示文稿里没有幻灯片）", nil
+		return i18n.D("（演示文稿里没有幻灯片）"), nil
 	}
 	from, to, err := parsePageRange(slideRange, len(slides))
 	if err != nil {
@@ -44,9 +45,10 @@ func readPptx(target, slideRange string) (string, error) {
 	}
 
 	var out strings.Builder
-	fmt.Fprintf(&out, "共 %d 页", len(slides))
 	if from != 1 || to != len(slides) {
-		fmt.Fprintf(&out, "，以下是第 %d–%d 页", from, to)
+		out.WriteString(i18n.D("共 {total} 页，以下是第 {from}–{to} 页", "total", len(slides), "from", from, "to", to))
+	} else {
+		out.WriteString(i18n.D("共 {total} 页", "total", len(slides)))
 	}
 	out.WriteString("\n")
 	// 按页累加，超出上限时停在整页边界上，并告诉模型从哪一页接着读——
@@ -57,12 +59,13 @@ func readPptx(target, slideRange string) (string, error) {
 			return "", err
 		}
 		if out.Len()+len(text) > maxOfficeText && number > from {
-			fmt.Fprintf(&out, "\n\n[内容已截断：只返回到第 %d 页；用 slides=%d-%d 接着读]", number-1, number, to)
+			out.WriteString("\n\n" + i18n.D("[内容已截断：只返回到第 {last} 页；用 slides={next} 接着读]",
+				"last", number-1, "next", fmt.Sprintf("%d-%d", number, to)))
 			return out.String(), nil
 		}
 		out.WriteString("\n" + text)
 	}
-	return clipOffice(out.String(), "单页内容过长；可以缩小 slides 范围逐页读"), nil
+	return clipOffice(out.String(), i18n.D("单页内容过长；可以缩小 slides 范围逐页读")), nil
 }
 
 // pptxSlideOrder 按 presentation.xml 里 sldIdLst 的顺序给出幻灯片部件名。
@@ -78,7 +81,7 @@ func pptxSlideOrder(pkg *ooxmlPackage) ([]string, error) {
 	}
 	root, err := parseXML(data)
 	if err != nil {
-		return nil, fmt.Errorf("解析 %s 失败：%w", main, err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("解析 {name} 失败", "name", main), err)
 	}
 	rels, err := pkg.relsOf(main)
 	if err != nil {
@@ -121,18 +124,18 @@ func parsePageRange(text string, total int) (int, int, error) {
 	parts := strings.SplitN(strings.NewReplacer("–", "-", "~", "-", "～", "-").Replace(text), "-", 2)
 	from, err := strconv.Atoi(strings.TrimSpace(parts[0]))
 	if err != nil || from < 1 {
-		return 0, 0, fmt.Errorf("slides %q 不合法，应当形如 3 或 3-8", text)
+		return 0, 0, i18n.E("slides {slides} 不合法，应当形如 3 或 3-8", "slides", strconv.Quote(text))
 	}
 	to := from
 	if len(parts) == 2 {
 		if strings.TrimSpace(parts[1]) == "" {
 			to = total
 		} else if to, err = strconv.Atoi(strings.TrimSpace(parts[1])); err != nil || to < from {
-			return 0, 0, fmt.Errorf("slides %q 不合法，应当形如 3 或 3-8", text)
+			return 0, 0, i18n.E("slides {slides} 不合法，应当形如 3 或 3-8", "slides", strconv.Quote(text))
 		}
 	}
 	if from > total {
-		return 0, 0, fmt.Errorf("第 %d 页不存在，演示文稿共 %d 页", from, total)
+		return 0, 0, i18n.E("第 {n} 页不存在，演示文稿共 {total} 页", "n", from, "total", total)
 	}
 	return from, min(to, total), nil
 }
@@ -145,18 +148,19 @@ func pptxSlideText(pkg *ooxmlPackage, part string, number int) (string, error) {
 	}
 	root, err := parseXML(data)
 	if err != nil {
-		return "", fmt.Errorf("解析 %s 失败：%w", part, err)
+		return "", fmt.Errorf("%s: %w", i18n.D("解析 {name} 失败", "name", part), err)
 	}
 	collector := &pptxCollector{}
 	collector.walk(root.find("cSld", "spTree"))
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "## 第 %d 页", number)
 	if collector.title != "" {
-		b.WriteString("：" + strings.ReplaceAll(collector.title, "\n", " "))
+		b.WriteString(i18n.D("## 第 {n} 页：{title}", "n", number, "title", strings.ReplaceAll(collector.title, "\n", " ")))
+	} else {
+		b.WriteString(i18n.D("## 第 {n} 页", "n", number))
 	}
 	if root.attr("show") == "0" {
-		b.WriteString("（已隐藏）")
+		b.WriteString(i18n.D("（已隐藏）"))
 	}
 	b.WriteString("\n")
 	if len(collector.lines) > 0 {
@@ -169,7 +173,7 @@ func pptxSlideText(pkg *ooxmlPackage, part string, number int) (string, error) {
 				continue
 			}
 			if notes := pptxNotes(pkg, rel.Target); notes != "" {
-				b.WriteString("\n备注：\n" + notes + "\n")
+				b.WriteString("\n" + i18n.D("备注：") + "\n" + notes + "\n")
 			}
 		}
 	}
@@ -347,24 +351,24 @@ type pptxSlideSpec struct {
 func writePptxTool() Tool {
 	return Tool{
 		Name: "write_pptx",
-		Description: "生成一个 PowerPoint 演示文稿（.pptx，16:9），已有同名文件会被覆盖。每页给标题、要点列表和可选的演讲者备注；" +
-			"layout=title 是封面页（大标题 + 副标题，bullets 当副标题行），默认是「标题 + 要点」。" +
-			"要点前面缩进两个空格为下一级。写到工作区之外会先请用户确认。",
+		Description: "Create a PowerPoint presentation (.pptx, 16:9); an existing file with the same name is overwritten. Give each slide a title, a bullet list and optional speaker notes; " +
+			"layout=title is a cover slide (large title + subtitle, with bullets as subtitle lines); the default is \"title + bullets\". " +
+			"Indent a bullet with two spaces for the next level. Writing outside the workspace asks the user for confirmation first.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
-			"path":  map[string]any{"type": "string", "description": "输出路径，扩展名 .pptx。相对路径按工作区解析"},
-			"title": map[string]any{"type": "string", "description": "文档属性里的标题，可不传"},
+			"path":  map[string]any{"type": "string", "description": "Output path with a .pptx extension. Relative paths resolve against the workspace"},
+			"title": map[string]any{"type": "string", "description": "Title in the document properties; optional"},
 			"slides": map[string]any{
-				"type": "array", "minItems": 1, "description": "按顺序给出的每一页",
+				"type": "array", "minItems": 1, "description": "The slides, in order",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"title":   map[string]any{"type": "string", "description": "本页标题"},
-						"bullets": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "要点，每项一行"},
-						"notes":   map[string]any{"type": "string", "description": "演讲者备注，可多行"},
+						"title":   map[string]any{"type": "string", "description": "Slide title"},
+						"bullets": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Bullet points, one per item"},
+						"notes":   map[string]any{"type": "string", "description": "Speaker notes; may span multiple lines"},
 						"layout": map[string]any{
 							"type": "string", "enum": []string{"content", "title"},
-							"description": "content：标题 + 要点（默认）；title：封面页",
+							"description": "content: title + bullets (default); title: cover slide",
 						},
 					},
 					"additionalProperties": false,
@@ -384,25 +388,25 @@ func writePptxTool() Tool {
 				return "", err
 			}
 			if len(args.Slides) == 0 {
-				return "", errors.New("slides 不能为空")
+				return "", i18n.E("slides 不能为空")
 			}
 			for index, slide := range args.Slides {
 				if slide.Layout != "" && slide.Layout != "content" && slide.Layout != "title" {
-					return "", fmt.Errorf("第 %d 页的 layout 只能是 content 或 title，收到 %q", index+1, slide.Layout)
+					return "", i18n.E("第 {n} 页的 layout 只能是 content 或 title，收到 {layout}", "n", index+1, "layout", strconv.Quote(slide.Layout))
 				}
 			}
 			data, err := buildPptx(args.Slides, args.Title)
 			if err != nil {
 				return "", err
 			}
-			target, err := approveOfficeWrite(ctx, env, args.Path, "写入 PPT 演示文稿", nil)
+			target, err := approveOfficeWrite(ctx, env, args.Path, i18n.D("写入 PPT 演示文稿"), nil)
 			if err != nil {
 				return "", err
 			}
 			if err := writeFileAtomic(target, data); err != nil {
 				return "", err
 			}
-			return fmt.Sprintf("已写入 %s（%d 页，%d 字节）", args.Path, len(args.Slides), len(data)), nil
+			return i18n.D("已写入 {path}（{slides} 页，{bytes} 字节）", "path", args.Path, "slides", len(args.Slides), "bytes", len(data)), nil
 		},
 	}
 }
@@ -552,7 +556,7 @@ func buildPptx(slides []pptxSlideSpec, title string) ([]byte, error) {
 	parts = append([]zipPart{{"[Content_Types].xml", []byte(contentTypesXML(overrides))}}, parts...)
 	data, err := buildPackage(parts)
 	if err != nil {
-		return nil, fmt.Errorf("打包 pptx 失败：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("打包 pptx 失败"), err)
 	}
 	return data, nil
 }

@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	_ "github.com/glebarez/go-sqlite"
 )
 
@@ -84,7 +85,7 @@ CREATE INDEX IF NOT EXISTS sessions_updated_at ON sessions (updated_at DESC);
 // Open 打开（必要时创建）data home 下的会话库。
 func Open(dataHome string) (*Store, error) {
 	if err := os.MkdirAll(dataHome, 0o755); err != nil {
-		return nil, fmt.Errorf("创建数据目录失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("创建数据目录失败："), err)
 	}
 	path := filepath.Join(dataHome, "sessions.db")
 
@@ -95,7 +96,7 @@ func Open(dataHome string) (*Store, error) {
 	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("打开会话库失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("打开会话库失败："), err)
 	}
 	// 单连接。modernc 的驱动本身是并发安全的，但把写串起来能彻底避开
 	// SQLITE_BUSY；这个库的写入量是「每轮一次」，不值得为并发写调优。
@@ -103,7 +104,7 @@ func Open(dataHome string) (*Store, error) {
 
 	if _, err := db.ExecContext(context.Background(), schema); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("初始化会话库失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("初始化会话库失败："), err)
 	}
 	if err := ensureUsageSchema(context.Background(), db); err != nil {
 		db.Close()
@@ -149,13 +150,18 @@ ON CONFLICT(id) DO UPDATE SET
 		string(session.Config), string(session.Messages),
 	)
 	if err != nil {
-		return fmt.Errorf("保存会话失败：%w", err)
+		return fmt.Errorf("%s%w", i18n.D("保存会话失败："), err)
 	}
 	return nil
 }
 
 // ErrNotFound 表示库里没有这个会话。
-var ErrNotFound = fmt.Errorf("会话不存在")
+var ErrNotFound error = notFoundError{}
+
+// notFoundError 在取文字时才翻译：包级变量初始化时界面语言还没定下来。
+type notFoundError struct{}
+
+func (notFoundError) Error() string { return i18n.D("会话不存在") }
 
 func (s *Store) Load(ctx context.Context, id string) (Session, error) {
 	row := s.db.QueryRowContext(ctx, `
@@ -171,7 +177,7 @@ FROM sessions WHERE id = ?`, id)
 		return Session{}, ErrNotFound
 	}
 	if err != nil {
-		return Session{}, fmt.Errorf("读取会话失败：%w", err)
+		return Session{}, fmt.Errorf("%s%w", i18n.D("读取会话失败："), err)
 	}
 	session.CreatedAt = time.UnixMilli(created)
 	session.UpdatedAt = time.UnixMilli(updated)
@@ -184,7 +190,7 @@ FROM sessions WHERE id = ?`, id)
 func ensureArchiveColumn(ctx context.Context, db *sql.DB) error {
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(sessions)`)
 	if err != nil {
-		return fmt.Errorf("读会话表结构失败：%w", err)
+		return fmt.Errorf("%s%w", i18n.D("读会话表结构失败："), err)
 	}
 	has := false
 	for rows.Next() {
@@ -198,7 +204,7 @@ func ensureArchiveColumn(ctx context.Context, db *sql.DB) error {
 		)
 		if err := rows.Scan(&cid, &name, &kind, &notNull, &fallback, &primary); err != nil {
 			rows.Close()
-			return fmt.Errorf("读会话表结构失败：%w", err)
+			return fmt.Errorf("%s%w", i18n.D("读会话表结构失败："), err)
 		}
 		has = has || name == "archived_at"
 	}
@@ -207,7 +213,7 @@ func ensureArchiveColumn(ctx context.Context, db *sql.DB) error {
 		return nil
 	}
 	if _, err := db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`); err != nil {
-		return fmt.Errorf("给会话表加归档列失败：%w", err)
+		return fmt.Errorf("%s%w", i18n.D("给会话表加归档列失败："), err)
 	}
 	return nil
 }
@@ -233,7 +239,7 @@ SELECT id, title, created_at, updated_at, workdir, model, turn_count,
   COALESCE(json_extract(config, '$.parentId'), ''), archived_at
 FROM sessions WHERE `+where+` ORDER BY `+order)
 	if err != nil {
-		return nil, fmt.Errorf("列出会话失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("列出会话失败："), err)
 	}
 	defer rows.Close()
 
@@ -243,7 +249,7 @@ FROM sessions WHERE `+where+` ORDER BY `+order)
 		var created, updated, archived int64
 		if err := rows.Scan(&summary.ID, &summary.Title, &created, &updated,
 			&summary.Workdir, &summary.Model, &summary.TurnCount, &summary.ParentID, &archived); err != nil {
-			return nil, fmt.Errorf("列出会话失败：%w", err)
+			return nil, fmt.Errorf("%s%w", i18n.D("列出会话失败："), err)
 		}
 		summary.CreatedAt = time.UnixMilli(created)
 		summary.UpdatedAt = time.UnixMilli(updated)
@@ -263,7 +269,7 @@ func (s *Store) SetArchived(ctx context.Context, ids []string, at time.Time) err
 	}
 	for _, id := range ids {
 		if _, err := s.db.ExecContext(ctx, `UPDATE sessions SET archived_at = ? WHERE id = ?`, value, id); err != nil {
-			return fmt.Errorf("归档会话失败：%w", err)
+			return fmt.Errorf("%s%w", i18n.D("归档会话失败："), err)
 		}
 	}
 	return nil
@@ -296,7 +302,7 @@ FROM sessions
 WHERE archived_at = 0 AND (title LIKE ? ESCAPE '\' OR messages LIKE ? ESCAPE '\')
 ORDER BY updated_at DESC LIMIT ?`, pattern, pattern, limit)
 	if err != nil {
-		return nil, fmt.Errorf("搜索会话失败：%w", err)
+		return nil, fmt.Errorf("%s%w", i18n.D("搜索会话失败："), err)
 	}
 	defer rows.Close()
 
@@ -307,7 +313,7 @@ ORDER BY updated_at DESC LIMIT ?`, pattern, pattern, limit)
 		var messages string
 		if err := rows.Scan(&summary.ID, &summary.Title, &created, &updated,
 			&summary.Workdir, &summary.Model, &summary.TurnCount, &messages, &summary.ParentID); err != nil {
-			return nil, fmt.Errorf("搜索会话失败：%w", err)
+			return nil, fmt.Errorf("%s%w", i18n.D("搜索会话失败："), err)
 		}
 		summary.CreatedAt = time.UnixMilli(created)
 		summary.UpdatedAt = time.UnixMilli(updated)
@@ -365,7 +371,7 @@ func snippet(messages, keyword string) string {
 // Delete 删除一个会话。不存在时不算错误——调用方多半只是想确保它没了。
 func (s *Store) Delete(ctx context.Context, id string) error {
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id); err != nil {
-		return fmt.Errorf("删除会话失败：%w", err)
+		return fmt.Errorf("%s%w", i18n.D("删除会话失败："), err)
 	}
 	return nil
 }

@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import type { ApprovalPayload } from "../../shared/types";
 import { store } from "../store";
+import { t } from "../i18n";
 
 const props = defineProps<{ request: ApprovalPayload }>();
 const emit = defineEmits<{ respond: [approved: boolean, scope?: "once" | "session"] }>();
@@ -15,17 +16,17 @@ const denyButton = ref<HTMLButtonElement | null>(null);
 const source = computed(() => {
   if (!props.request.sessionId || props.request.sessionId === store.sessionId) return "";
   const session = store.sessions.find((item) => item.id === props.request.sessionId);
-  return session?.title || "另一个会话";
+  return session?.title || t("另一个会话");
 });
 
 // 默认焦点在「拒绝」。没有沙箱之后审批是最后一道闸，回车不该等于同意。
 onMounted(() => denyButton.value?.focus());
 
-const KIND_LABEL: Record<ApprovalPayload["kind"], string> = {
-  exec: "执行命令",
-  write: "写入文件",
-  tool: "调用外部工具",
-};
+function kindLabel(kind: ApprovalPayload["kind"]): string {
+  if (kind === "exec") return t("执行命令");
+  if (kind === "write") return t("写入文件");
+  return t("调用外部工具");
+}
 
 /**
  * 警告按类型说实话。
@@ -34,50 +35,50 @@ const KIND_LABEL: Record<ApprovalPayload["kind"], string> = {
  * MCP 的只读查询来说那句话是错的。弹窗上写错话比不写更糟：用户核对几次发现
  * 对不上，之后就不看了。
  */
-const KIND_WARNING: Record<ApprovalPayload["kind"], string> = {
-  exec: "这会直接在你的电脑上执行，不受沙箱限制。",
-  write: "这会写入你电脑上的文件。",
-  tool: "这个工具可能会改变外部系统的状态。只读的查询不会问你。",
-};
+function kindWarning(kind: ApprovalPayload["kind"]): string {
+  if (kind === "exec") return t("这会直接在你的电脑上执行，不受沙箱限制。");
+  if (kind === "write") return t("这会写入你电脑上的文件。");
+  return t("这个工具可能会改变外部系统的状态。只读的查询不会问你。");
+}
 </script>
 
 <template>
   <div class="backdrop">
     <div class="card" role="dialog" aria-modal="true">
       <div class="head">
-        <span class="badge">{{ KIND_LABEL[request.kind] }}</span>
+        <span class="badge">{{ kindLabel(request.kind) }}</span>
         <h2>{{ request.title }}</h2>
       </div>
-      <p v-if="source" class="source">来自「{{ source }}」</p>
+      <p v-if="source" class="source">{{ t("来自「{source}」", { source }) }}</p>
 
       <p v-if="request.reason" class="reason">{{ request.reason }}</p>
 
       <pre class="detail">{{ request.detail }}</pre>
 
       <dl v-if="request.cwd">
-        <dt>工作目录</dt>
+        <dt>{{ t("工作目录") }}</dt>
         <dd>{{ request.cwd }}</dd>
       </dl>
 
-      <p class="warn">{{ KIND_WARNING[request.kind] }}</p>
+      <p class="warn">{{ kindWarning(request.kind) }}</p>
 
       <!-- 有目录范围时多给一档：没设工作区的会话里，每写一个文件都问一次，
            用户很快会被训练成闭眼点「允许」——那比少问一次危险。按目录批准是
            折中：范围说得清楚，一次点击覆盖接下来的一串写。 -->
       <p v-if="request.scopePath" class="scope">
-        本次会话内可以整个目录放行：<code>{{ request.scopePath }}</code>
+        {{ t("本次会话内可以整个目录放行：") }}<code>{{ request.scopePath }}</code>
       </p>
 
       <div class="buttons">
-        <button ref="denyButton" class="deny" @click="emit('respond', false)">拒绝</button>
+        <button ref="denyButton" class="deny" @click="emit('respond', false)">{{ t("拒绝") }}</button>
         <button
           v-if="request.scopePath"
           class="ghost"
           @click="emit('respond', true, 'session')"
         >
-          本次会话都允许这个目录
+          {{ t("本次会话都允许这个目录") }}
         </button>
-        <button class="allow" @click="emit('respond', true, 'once')">允许本次</button>
+        <button class="allow" @click="emit('respond', true, 'once')">{{ t("允许本次") }}</button>
       </div>
     </div>
   </div>

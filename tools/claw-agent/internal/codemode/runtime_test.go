@@ -316,7 +316,7 @@ func TestTimersAreDocumentedAsAbsent(t *testing.T) {
 	if out != "undefined" {
 		t.Skip("这个 goja 版本带了定时器，描述可以相应放开")
 	}
-	if !strings.Contains(Description(nil), "没有 setTimeout") {
+	if !strings.Contains(Description(nil), "no timers such as setTimeout") {
 		t.Error("描述里要说明没有定时器")
 	}
 }

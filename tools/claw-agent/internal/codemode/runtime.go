@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/dop251/goja"
+
+	"github.com/chowyu12/aiclaw/internal/i18n"
 )
 
 /*
@@ -93,7 +95,7 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 		}
 		if output.Len()+len(text) > r.limits.MaxOutput {
 			output.WriteString(text[:max(0, r.limits.MaxOutput-output.Len())])
-			output.WriteString("\n…（输出过长已截断）")
+			output.WriteString("\n…" + i18n.D("（输出过长已截断）"))
 			truncated = true
 			return
 		}
@@ -124,7 +126,7 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 			case <-done:
 				return
 			case <-ctx.Done():
-				vm.Interrupt("上层已取消")
+				vm.Interrupt(i18n.D("上层已取消"))
 				return
 			case <-ticker.C:
 				waiting := time.Duration(0)
@@ -133,7 +135,7 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 				}
 				spent := time.Since(started) - time.Duration(toolNanos.Load()) - waiting
 				if spent > r.limits.Budget {
-					vm.Interrupt(fmt.Sprintf("脚本运行超过 %s，已中断", r.limits.Budget))
+					vm.Interrupt(i18n.D("脚本运行超过 {budget}，已中断", "budget", r.limits.Budget))
 					return
 				}
 			}
@@ -150,7 +152,7 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 	promise, ok := value.Export().(*goja.Promise)
 	if !ok {
 		// 理论上不会：上面包成了 async 函数。真出现就如实说，别装作成功。
-		return output.String(), errors.New("脚本没有返回预期的结果")
+		return output.String(), i18n.E("脚本没有返回预期的结果")
 	}
 	switch promise.State() {
 	case goja.PromiseStateRejected:
@@ -158,10 +160,10 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 		if isExit(reason) {
 			return finish(output.String(), calls.Load()), nil
 		}
-		return output.String(), fmt.Errorf("脚本抛出异常：%s", describe(reason))
+		return output.String(), i18n.E("脚本抛出异常：{error}", "error", describe(reason))
 	case goja.PromiseStatePending:
 		// await 了一个永远不会完成的东西。说清楚，别让模型以为是工具的问题。
-		return output.String(), errors.New("脚本结束时仍有未完成的等待，可能 await 了一个不会返回的东西")
+		return output.String(), i18n.E("脚本结束时仍有未完成的等待，可能 await 了一个不会返回的东西")
 	}
 
 	if result := promise.Result(); result != nil && !goja.IsUndefined(result) && !goja.IsNull(result) {
@@ -173,7 +175,7 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 func finish(text string, calls int64) string {
 	text = strings.TrimRight(text, "\n")
 	if text == "" {
-		return fmt.Sprintf("（脚本执行完成，没有输出；调用了 %d 次工具）", calls)
+		return i18n.D("（脚本执行完成，没有输出；调用了 {calls} 次工具）", "calls", calls)
 	}
 	return text
 }
@@ -197,7 +199,7 @@ func (r *Runtime) install(
 			promise, resolve, reject := vm.NewPromise()
 
 			if calls.Add(1) > int64(r.limits.MaxCalls) {
-				_ = reject(vm.ToValue(fmt.Sprintf("工具调用次数超过上限 %d", r.limits.MaxCalls)))
+				_ = reject(vm.ToValue(i18n.D("工具调用次数超过上限 {max}", "max", r.limits.MaxCalls)))
 				return vm.ToValue(promise)
 			}
 
@@ -275,14 +277,14 @@ func encodeArguments(vm *goja.Runtime, value goja.Value) (json.RawMessage, error
 		if strings.HasPrefix(trimmed, "{") && json.Valid([]byte(trimmed)) {
 			return json.RawMessage(trimmed), nil
 		}
-		return nil, fmt.Errorf("工具参数要传一个对象，收到的是字符串：%s", firstChars(text, 40))
+		return nil, i18n.E("工具参数要传一个对象，收到的是字符串：{text}", "text", firstChars(text, 40))
 	}
 	encoded, err := json.Marshal(value.Export())
 	if err != nil {
-		return nil, fmt.Errorf("参数没法转成 JSON：%w", err)
+		return nil, fmt.Errorf("%s: %w", i18n.D("参数没法转成 JSON"), err)
 	}
 	if len(encoded) == 0 || encoded[0] != '{' {
-		return nil, errors.New("工具参数必须是一个对象")
+		return nil, i18n.E("工具参数必须是一个对象")
 	}
 	return encoded, nil
 }
@@ -385,7 +387,7 @@ func stringify(value goja.Value) string {
 
 func describe(value goja.Value) string {
 	if value == nil {
-		return "未知错误"
+		return i18n.D("未知错误")
 	}
 	if object, ok := value.Export().(map[string]any); ok {
 		if message, ok := object["message"].(string); ok {
@@ -411,7 +413,7 @@ func scriptError(err error) error {
 			return nil
 		}
 		// 带上 goja 的栈：模型要靠它定位自己写错的那一行。
-		return fmt.Errorf("脚本出错：%s", exception.String())
+		return i18n.E("脚本出错：{error}", "error", exception.String())
 	}
-	return fmt.Errorf("脚本无法执行：%w", err)
+	return fmt.Errorf("%s: %w", i18n.D("脚本无法执行"), err)
 }

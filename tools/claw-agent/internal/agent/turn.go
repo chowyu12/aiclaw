@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
@@ -89,7 +90,7 @@ func (s *Session) RunTurn(
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			s.recordInterruption()
-			completed.Error = "已中断"
+			completed.Error = i18n.D("已中断")
 		} else {
 			completed.Error = err.Error()
 		}
@@ -123,7 +124,7 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 	if strings.TrimSpace(content) == "" && len(images) > 0 {
 		// 只发了图、没配文字：明说这是一条新消息。空着的话模型看到的是一条没有
 		// 正文的 user 消息，常常当成「继续」接着做上一件事（见 interruptMarker）。
-		content = fmt.Sprintf("（用户发来 %d 张图片，没有附文字。）", len(images))
+		content = fmt.Sprintf("(The user sent %d image(s) with no text.)", len(images))
 	}
 	message := llm.Message{Role: llm.RoleUser, Content: content, Images: images}
 	if len(images) > 0 && !s.config.ModelSeesImages {
@@ -269,7 +270,7 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		// 不完整，让它的结果说明原因——即便截断处恰好凑成了合法 JSON。
 		cut := response.FinishReason == "length"
 		if cut && len(response.ToolCalls) == 0 {
-			s.notify(emitter, turnID, "回答在模型的输出长度上限处被截断了，后面的内容没有生成。可以让它接着说，或把问题拆小。")
+			s.notify(emitter, turnID, i18n.D("回答在模型的输出长度上限处被截断了，后面的内容没有生成。可以让它接着说，或把问题拆小。"))
 		}
 
 		if len(response.ToolCalls) == 0 {
@@ -296,7 +297,7 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		if images := env.TakeAttachments(); len(images) > 0 {
 			s.appendMessage(llm.Message{
 				Role:    llm.RoleUser,
-				Content: "（上一步截屏的画面）",
+				Content: "(Screenshot from the previous step)",
 				Images:  images,
 				Shown:   &llm.Shown{Hidden: true},
 			})
@@ -305,7 +306,7 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			return total, ctx.Err()
 		}
 	}
-	return total, fmt.Errorf("单轮内工具调用超过 %d 次，已停止；请把任务拆小", maxIterations)
+	return total, i18n.E("单轮内工具调用超过 {n} 次，已停止；请把任务拆小", "n", maxIterations)
 }
 
 // sample 打一次模型，按失败的类型决定重试、压缩还是直接放弃。
@@ -356,7 +357,7 @@ func (s *Session) sample(
 		case isAPIErr && apiErr.ContextWindowExceeded():
 			// 历史塞不下。先压一次；压过还超就从头丢，直到丢无可丢。
 			if !compacted {
-				s.notify(emitter, turnID, "历史超出模型上下文，正在压缩后重试。")
+				s.notify(emitter, turnID, i18n.D("历史超出模型上下文，正在压缩后重试。"))
 				if cerr := s.compact(ctx, turnID, emitter); cerr != nil {
 					return response, err
 				}
@@ -370,7 +371,7 @@ func (s *Session) sample(
 		case isAPIErr && apiErr.RejectsReasoningEffort() && s.dropReasoningEffort():
 			// 不认推理档位的上游（非推理模型、Azure）：去掉它重发一次，这个会话之后都不带。
 			// 不算一次重试——请求本身变了，不是在赌网络。
-			s.notify(emitter, turnID, "这个模型不支持推理档位参数，已去掉后重试。")
+			s.notify(emitter, turnID, i18n.D("这个模型不支持推理档位参数，已去掉后重试。"))
 			continue
 		case isAPIErr && !apiErr.Retryable():
 			return response, err
@@ -384,9 +385,7 @@ func (s *Session) sample(
 		if isAPIErr && apiErr.RetryAfter > delay {
 			delay = min(apiErr.RetryAfter, maxRetryAfter)
 		}
-		s.notify(emitter, turnID, fmt.Sprintf(
-			"模型调用失败，%s后重试（%d/%d）：%s", humanDelay(delay), attempt, maxModelRetries, err.Error(),
-		))
+		s.notify(emitter, turnID, retryNotice(delay, attempt, err))
 		if werr := sleepCtx(ctx, delay); werr != nil {
 			return response, werr
 		}
@@ -396,11 +395,14 @@ func (s *Session) sample(
 // maxRetryAfter 是听从上游 Retry-After 的上限。
 const maxRetryAfter = 2 * time.Minute
 
-func humanDelay(d time.Duration) string {
+// retryNotice 是「模型调用失败、过一会儿重试」那条提示。
+func retryNotice(d time.Duration, attempt int, err error) string {
 	if d < time.Second {
-		return "马上"
+		return i18n.D("模型调用失败，马上重试（{attempt}/{max}）：{err}",
+			"attempt", attempt, "max", maxModelRetries, "err", err)
 	}
-	return fmt.Sprintf(" %d 秒", int(d.Round(time.Second)/time.Second))
+	return i18n.D("模型调用失败，{seconds} 秒后重试（{attempt}/{max}）：{err}",
+		"seconds", int(d.Round(time.Second)/time.Second), "attempt", attempt, "max", maxModelRetries, "err", err)
 }
 
 // dropReasoningEffort 去掉这个会话的推理档位。已经没有了返回 false（再失败就不是它的事）。
@@ -659,7 +661,7 @@ func (s *Session) executeOne(
 		item.ToolFailed = true
 		item.ToolResult = err.Error()
 		// 失败原因回给模型，它据此改参数重试；这和 MCP 的 isError 语义一致。
-		output = "错误：" + err.Error()
+		output = toolErrorResult(err.Error())
 	} else {
 		item.ToolResult = output
 	}
@@ -679,18 +681,17 @@ func (s *Session) runTool(ctx context.Context, call llm.ToolCall, env *tools.Env
 	// 取消之后仍然会走到这里（一批调用里排在后面的那些）。提前退出，
 	// 但仍旧返回一条结果，让历史保持完整。
 	if ctx.Err() != nil {
-		return "", errors.New("用户中断，这次调用未执行")
+		return "", i18n.E("用户中断，这次调用未执行")
 	}
 	if id, _ := ctx.Value(truncatedCallKey{}).(string); id != "" && id == call.ID {
-		return "", fmt.Errorf(
-			"这次输出在第 %d 个字符处撞上了模型的长度上限（finish_reason=length），这条调用的参数不完整，没有执行。"+
-				"把这一步拆成几次调用：先产出一部分、用 store() 存着，或者让工具自己去读文件而不是把内容写进参数。",
-			len([]rune(call.Arguments)),
+		return "", i18n.E(
+			"这次输出在第 {n} 个字符处撞上了模型的长度上限（finish_reason=length），这条调用的参数不完整，没有执行。把这一步拆成几次调用：先产出一部分、用 store() 存着，或者让工具自己去读文件而不是把内容写进参数。",
+			"n", len([]rune(call.Arguments)),
 		)
 	}
 	tool, ok := s.registry.Get(call.Name)
 	if !ok {
-		return "", fmt.Errorf("没有名为 %q 的工具；可用工具：%s", call.Name, strings.Join(s.registry.Names(), "、"))
+		return "", i18n.E("没有名为 {name} 的工具；可用工具：{tools}", "name", fmt.Sprintf("%q", call.Name), "tools", strings.Join(s.registry.Names(), i18n.D("、")))
 	}
 	var args json.RawMessage
 	if strings.TrimSpace(call.Arguments) == "" {
@@ -698,7 +699,7 @@ func (s *Session) runTool(ctx context.Context, call llm.ToolCall, env *tools.Env
 	} else {
 		args = json.RawMessage(call.Arguments)
 		if !json.Valid(args) {
-			return "", errors.New(tools.ExplainBadArguments(call.Arguments, errors.New("json 解析失败")))
+			return "", errors.New(tools.ExplainBadArguments(call.Arguments, i18n.E("json 解析失败")))
 		}
 	}
 	// 单个工具的墙钟上限。exec 有自己更短的超时，这里防的是没有自身上限的工具
@@ -737,7 +738,7 @@ func (s *Session) recordInterruption() {
 			missing = append(missing, llm.Message{
 				Role:       llm.RoleTool,
 				ToolCallID: call.ID,
-				Content:    "错误：用户中断，这次调用未完成。",
+				Content:    toolErrorResult(i18n.D("用户中断，这次调用未完成。")),
 			})
 		}
 	}
@@ -808,17 +809,17 @@ func summarizeCall(call llm.ToolCall) string {
 	case "search_files":
 		return pick("pattern")
 	case "ask_user":
-		return "提问：" + firstLine(pick("question"), 100)
+		return i18n.D("提问：{question}", "question", firstLine(pick("question"), 100))
 	case "spawn_agent":
-		return "开子 agent " + pick("task_name") + "：" + firstLine(pick("message"), 80)
+		return i18n.D("开子 agent {name}：{message}", "name", pick("task_name"), "message", firstLine(pick("message"), 80))
 	case "send_message", "followup_task":
-		return "→ " + pick("target") + "：" + firstLine(pick("message"), 80)
+		return i18n.D("→ {target}：{message}", "target", pick("target"), "message", firstLine(pick("message"), 80))
 	case "wait_agent":
-		return "等子 agent 的结果"
+		return i18n.D("等子 agent 的结果")
 	case "list_agents":
-		return "看看子 agent 们在干什么"
+		return i18n.D("看看子 agent 们在干什么")
 	case "interrupt_agent":
-		return "打断 " + pick("target")
+		return i18n.D("打断 {target}", "target", pick("target"))
 	case "exec":
 		// 代码模式下参数是整段脚本。压成一行的话，步骤标题会变成一坨
 		// 带着 \n 的代码；只取第一行有内容的，完整脚本在展开的详情里。

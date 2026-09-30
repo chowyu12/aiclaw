@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/chowyu12/aiclaw/internal/i18n"
 	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 	"github.com/chowyu12/aiclaw/internal/plugins/connector"
 	"github.com/chowyu12/aiclaw/pkg/wechatlink"
@@ -88,7 +89,7 @@ func (c *Channel) Run(ctx context.Context, deps pluginpkg.ChannelDeps) error {
 		})
 		if !accepted {
 			_ = remote.SendText(ctx, message.FromUserID, message.ContextToken,
-				"当前正在处理其他会话，请稍后再发一次。")
+				i18n.D("当前正在处理其他会话，请稍后再发一次。"))
 		}
 	})
 	dispatcher.Wait()
@@ -98,7 +99,11 @@ func (c *Channel) Run(ctx context.Context, deps pluginpkg.ChannelDeps) error {
 	if listenErr != nil {
 		// 凭据失效是这里最常见的原因，而它只有重新扫码才能修——把话说全，
 		// 用户在插件页看到的就是这一句。
-		return fmt.Errorf("微信长轮询中断（凭据可能已失效，重新扫码登录）：%w", listenErr)
+		separator := "："
+		if i18n.Default() == i18n.English {
+			separator = ": "
+		}
+		return fmt.Errorf("%s%s%w", i18n.D("微信长轮询中断（凭据可能已失效，重新扫码登录）"), separator, listenErr)
 	}
 	return fmt.Errorf("wechat message loop stopped")
 }
@@ -114,7 +119,7 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, remote 
 		ChannelID:    ChannelID,
 		ConnectionID: deps.ConnectionID,
 		ExternalKey:  message.FromUserID,
-		DisplayName:  "微信 " + message.FromUserID,
+		DisplayName:  i18n.D("微信 {id}", "id", message.FromUserID),
 		SenderID:     message.FromUserID,
 		Text:         strings.TrimSpace(message.Text),
 	}
@@ -127,14 +132,14 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, remote 
 	text := ""
 	switch {
 	case errors.Is(err, pluginpkg.ErrBindingNotAllowed):
-		text = "这个会话还没有被授权访问助手，请在桌面端的插件设置里放行后再试。"
+		text = i18n.D("这个会话还没有被授权访问助手，请在桌面端的插件设置里放行后再试。")
 	case err != nil:
 		deps.Log("wechat turn failed for %s: %v", message.FromUserID, err)
 		// The error may name internal paths or configuration; the sender gets
 		// an acknowledgement rather than the detail.
-		text = "处理这条消息时出错了，请稍后再试。"
+		text = i18n.D("处理这条消息时出错了，请稍后再试。")
 	case reply.Failed() || strings.TrimSpace(reply.Text()) == "":
-		text = "这次没有得到可用的回复，请换个说法再试一次。"
+		text = i18n.D("这次没有得到可用的回复，请换个说法再试一次。")
 	default:
 		text = reply.Text()
 	}
@@ -161,7 +166,7 @@ func (c *Channel) attachMedia(ctx context.Context, deps pluginpkg.ChannelDeps, m
 		data, err := downloadImage(ctx, image)
 		if err != nil {
 			deps.Log("wechat image download failed for %s: %v", message.FromUserID, err)
-			notes = append(notes, "[用户发来一张图片，但下载失败了]")
+			notes = append(notes, "[The user sent an image, but downloading it failed]")
 			continue
 		}
 		inbound.Images = append(inbound.Images, data)
@@ -174,7 +179,7 @@ func (c *Channel) attachMedia(ctx context.Context, deps pluginpkg.ChannelDeps, m
 		data, err := downloadFile(ctx, file)
 		if err != nil {
 			deps.Log("wechat file download failed for %s: %v", message.FromUserID, err)
-			notes = append(notes, fmt.Sprintf("[用户发来文件 %s，但下载失败了]", name))
+			notes = append(notes, fmt.Sprintf("[The user sent file %s, but downloading it failed]", name))
 			continue
 		}
 		inbound.Files = append(inbound.Files, pluginpkg.InboundFile{Name: name, Data: data})

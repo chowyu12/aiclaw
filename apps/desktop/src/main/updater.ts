@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { app, shell } from "electron";
 
+import { tr } from "../shared/i18n.js";
 import { isNewer, normalizeVersion } from "./version.js";
 
 /**
@@ -68,7 +69,7 @@ export class Updater {
   async check(): Promise<UpdateStatus> {
     const current = app.getVersion();
     const canInstall = true;
-    const installLabel = process.platform === "darwin" ? "升级并重启" : "下载新版本";
+    const installLabel = process.platform === "darwin" ? tr("升级并重启") : tr("下载新版本");
     try {
       const response = await fetch(LATEST_RELEASE, {
         signal: AbortSignal.timeout(10_000),
@@ -110,7 +111,7 @@ export class Updater {
     onProgress?: (received: number, total: number) => void,
   ): Promise<{ ready: boolean; version: string; detail: string }> {
     if (process.platform !== "darwin") {
-      return { ready: false, version: "", detail: "这个平台不支持自动下载" };
+      return { ready: false, version: "", detail: tr("这个平台不支持自动下载") };
     }
     const status = await this.check();
     if (!status.hasUpdate || !status.latest) {
@@ -142,7 +143,7 @@ export class Updater {
     onProgress?: (received: number, total: number) => void,
   ): Promise<string> {
     const url = this.assets.get(file);
-    if (!url) throw new Error(`最新版本里没有 ${file}`);
+    if (!url) throw new Error(tr("最新版本里没有 {file}", { file }));
     const response = await fetch(url, { signal: AbortSignal.timeout(600_000) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const total = Number(response.headers.get("content-length") ?? 0);
@@ -151,7 +152,7 @@ export class Updater {
     const chunks: Uint8Array[] = [];
     let received = 0;
     const reader = response.body?.getReader();
-    if (!reader) throw new Error("这个平台的 fetch 不支持流式读取");
+    if (!reader) throw new Error(tr("这个平台的 fetch 不支持流式读取"));
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -181,12 +182,12 @@ export class Updater {
   ): Promise<{ started: boolean; detail: string }> {
     if (process.platform !== "darwin") return this.downloadOnly(onProgress);
     if (!app.isPackaged) {
-      return { started: false, detail: "开发模式下不替换自己；打好的包才能一键升级。" };
+      return { started: false, detail: tr("开发模式下不替换自己；打好的包才能一键升级。") };
     }
     try {
       const status = await this.check();
       const tag = status.latest ? `v${status.latest}` : "";
-      if (!tag) throw new Error(status.error || "查不到最新版本");
+      if (!tag) throw new Error(status.error || tr("查不到最新版本"));
       // 后台已经下好同一个版本就直接用，别再下一遍。
       const zip =
         this.prepared.tag === tag && existsSync(this.prepared.path)
@@ -194,12 +195,12 @@ export class Updater {
           : await this.download(assetName(tag), onProgress);
       this.replaceAndRelaunch(zip);
       app.quit();
-      return { started: true, detail: "已下载完成，正在替换并重新打开。" };
+      return { started: true, detail: tr("已下载完成，正在替换并重新打开。") };
     } catch (error) {
       await shell.openExternal(RELEASES_PAGE);
       return {
         started: false,
-        detail: `自动升级失败（${error instanceof Error ? error.message : String(error)}），已打开发布页。`,
+        detail: tr("自动升级失败（{error}），已打开发布页。", { error: error instanceof Error ? error.message : String(error) }),
       };
     }
   }
@@ -237,18 +238,18 @@ export class Updater {
     try {
       const status = await this.check();
       const tag = status.latest ? `v${status.latest}` : "";
-      if (!tag) throw new Error(status.error || "查不到最新版本");
+      if (!tag) throw new Error(status.error || tr("查不到最新版本"));
       const name = assetName(tag);
       const downloaded = await this.download(name, onProgress);
       const target = join(app.getPath("downloads"), name);
       await copyFile(downloaded, target);
       shell.showItemInFolder(target);
-      return { started: false, detail: `已下载到 ${target}。退出 AIClaw 后解压覆盖原目录即可。` };
+      return { started: false, detail: tr("已下载到 {path}。退出 AIClaw 后解压覆盖原目录即可。", { path: target }) };
     } catch (error) {
       await shell.openExternal(RELEASES_PAGE);
       return {
         started: false,
-        detail: `自动下载失败（${error instanceof Error ? error.message : String(error)}），已打开发布页。`,
+        detail: tr("自动下载失败（{error}），已打开发布页。", { error: error instanceof Error ? error.message : String(error) }),
       };
     }
   }
