@@ -142,6 +142,20 @@ async function main(): Promise<number> {
       ["email_list", "email_read", "email_attachment", "email_send", "email_reply"].every((name) => mailSession.tools.includes(name)),
       mailSession.tools.filter((name) => name.startsWith("email_")).join(", "),
     );
+    // 已经开着的会话：启用邮件插件后宿主会带着 enableEmail 重挂当前会话，工具要当场出现。
+    const earlier = await client.sessionStart({
+      model: { providerId: provider.id, baseUrl: "", model: "m1" },
+      approvalPolicy: "never",
+    });
+    const remounted = await client.sessionResume(earlier.sessionId, {
+      mcpServers: {}, skillDirs: [], memoryFile: "", enableComputerUse: false,
+      disableSandbox: false, codeMode: false, approvalPolicy: "never", enableEmail: true,
+    });
+    record(
+      "启用邮件插件后，当前会话重挂即可用",
+      !earlier.tools.includes("email_send") && remounted.tools.includes("email_send"),
+      `之前 ${earlier.tools.filter((n) => n.startsWith("email_")).length} 个 → 之后 ${remounted.tools.filter((n) => n.startsWith("email_")).length} 个`,
+    );
 
     // 会话按 providerId 选模型服务；端点打不通，但错误应在开会话之后（挂载阶段不打模型）。
     const session = await client.sessionStart({
