@@ -226,6 +226,15 @@ func TestIdleParentWakesForChildResult(t *testing.T) {
 	if root.LastAnswer() != "已经派出去了" {
 		t.Fatalf("第一轮的回答不对：%q", root.LastAnswer())
 	}
+	// 子 agent 还在跑（卡在 release 上），会话列表里就应当看得到它。
+	list, err := agent.List(context.Background(), server.db)
+	found := false
+	for _, item := range list {
+		found = found || (item.ParentID == "s_root" && item.Title == "↳ slow")
+	}
+	if err != nil || !found {
+		t.Errorf("还在跑的子 agent 应当已经在会话列表里：%v %+v", err, list)
+	}
 	close(release)
 	eventually(t, "根 agent 被叫醒处理结果", func() bool { return root.LastAnswer() == "收到结果了" })
 }

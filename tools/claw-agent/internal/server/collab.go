@@ -144,6 +144,11 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 	h.mu.Lock()
 	h.nodes[id] = node
 	h.mu.Unlock()
+	// 开出来就存一次档：会话列表是从库里读的，不存的话它跑完之前侧边栏里看不到，
+	// 用户没法点进去看它在干什么——跑得久的时候看上去就像没动静。
+	if err := child.Save(h.context(), h.server.db); err != nil {
+		h.server.options.Logf("保存子会话失败：%v", err)
+	}
 
 	task := fmt.Sprintf("（这是 %s 交给你的任务。你是子 agent，规范名 %s。做完时你的最终回答会自动交给它；"+
 		"中途要汇报或提问，用 send_message 发给 %s。）\n\n%s", parentNode.path, path, parentNode.path, request.Message)
