@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 import { DEFAULT_CONFIG, normalizeConfig } from "./config-defaults.js";
+import { migrateSkillDir } from "./skill-migrate.js";
 
 /**
  * config.json 只放非敏感配置，明文，用户可以直接看、直接改。
@@ -197,9 +198,28 @@ export class ConfigStore {
     return dir;
   }
 
-  /** 技能目录：一个子目录一个技能，里面放 SKILL.md。 */
+  /**
+   * 技能目录：一个子目录一个技能，里面放 SKILL.md。
+   *
+   * 用 `~/.agents/skills`——`npx skills add -g` 装的「通用」位置，Codex、Cursor、
+   * Gemini CLI 等直接读它。在这里装的技能别的工具也能用，反过来也一样，不用各装一份。
+   * 早先是 `~/.aiclaw/skills`，启动时搬过来（见 migrateSkills）。
+   */
   get skillsDir(): string {
+    return join(homedir(), ".agents", "skills");
+  }
+
+  /** 旧的技能目录（3.6.5 及以前）。 */
+  get legacySkillsDir(): string {
     return join(this.homeDir, "skills");
+  }
+
+  /**
+   * 技能的开关状态。放在我们自己的目录里而不是 `~/.agents/skills` 下：那是好几个
+   * 工具共用的目录，AIClaw 里关掉一个技能不该往里面写东西。
+   */
+  get skillStatePath(): string {
+    return join(this.homeDir, "skills-disabled.json");
   }
 
   /** 长期记忆文件。 */
@@ -227,7 +247,7 @@ export class ConfigStore {
    */
   migrateHomeData(): void {
     const moves: [string, string][] = [
-      [join(this.dir, "skills"), this.skillsDir],
+      [join(this.dir, "skills"), this.legacySkillsDir],
       [join(this.dir, "memory.md"), this.memoryFile],
     ];
     for (const [from, to] of moves) {
@@ -238,6 +258,11 @@ export class ConfigStore {
         // 忽略：见上面的说明。
       }
     }
+  }
+
+  /** 把 `~/.aiclaw/skills` 里的技能搬进 `~/.agents/skills`，见 skill-migrate.ts。 */
+  migrateSkills(): { moved: string[]; disabled: string[] } {
+    return migrateSkillDir(this.legacySkillsDir, this.skillsDir, this.skillStatePath);
   }
 
   // ---------- 会话分组 ----------
@@ -326,7 +351,9 @@ export class ConfigStore {
     rmSync(join(this.homeDir, "secret.key"), { force: true });
     rmSync(this.groupsPath, { force: true });
     rmSync(this.mcpPath, { force: true });
-    rmSync(this.skillsDir, { recursive: true, force: true });
+    // ~/.agents/skills 是好几个工具共用的，清 AIClaw 的数据不碰它；只清我们自己的状态与旧目录。
+    rmSync(this.skillStatePath, { force: true });
+    rmSync(this.legacySkillsDir, { recursive: true, force: true });
     rmSync(this.memoryFile, { force: true });
     rmSync(join(this.dir, "agent-home"), { recursive: true, force: true });
   }

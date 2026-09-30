@@ -552,7 +552,7 @@ export const actions = {
   // ---------- 技能 ----------
 
   /**
-   * 重扫技能目录。顺带把当前会话重挂一遍：用户往 ~/.aiclaw/skills 丢了一个新技能
+   * 重扫技能目录。顺带把当前会话重挂一遍：用户往 ~/.agents/skills 丢了一个新技能
    * 之后点的就是这个刷新，只更新列表不重挂的话，列表里有、会话里没有。
    */
   async refreshSkills(): Promise<void> {

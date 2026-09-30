@@ -46,7 +46,7 @@ const (
 // Load 加载一批技能目录。
 //
 // **每一项都是一个技能自己的目录**（里面直接放 SKILL.md），不是装着若干技能的
-// 根目录。技能散在好几个地方——我们自己的 ~/.aiclaw/skills、Claude Code 的
+// 根目录。技能散在好几个地方——我们自己的 ~/.agents/skills、Claude Code 的
 // ~/.claude/skills、Codex 的 ~/.codex/skills、npx 装的 CLI 缓存、npm 全局包，
 // 而且各自的目录结构还不一样。那套发现逻辑只该有一份，且必须在宿主侧：
 // 界面要显示「这个技能从哪儿来」，还要记住用户关掉了哪些。

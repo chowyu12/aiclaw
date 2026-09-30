@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { ConfigStore } from "./config.js";
 import { dedupeByName, discoverSkills, type FoundSkill } from "./skill-roots.js";
 import { parseFrontmatter } from "./skill-frontmatter.js";
@@ -112,12 +112,11 @@ export class SkillManager {
         dir: found.dir,
         name,
         description: meta.description || "",
-        // 两套关闭方式，各管各的：自己目录里的用目录内的标记文件（删目录就
-        // 连状态一起删了），别处的记在我们自己的配置里——往 ~/.claude/skills
-        // 里写标记会把人家 Claude Code 里的技能也关掉。
-        enabled: found.writable
-          ? !existsSync(join(found.dir, DISABLED_MARKER))
-          : !off.has(found.dir),
+        // 开关一律记在我们自己的状态文件里（~/.aiclaw/skills-disabled.json），不往技能
+        // 目录里写标记：~/.agents/skills、~/.claude/skills 都是和别的工具共用的。
+        // 旧版在自己目录的技能里放过 .disabled 标记，搬家时已经并进状态文件；这里还认它，
+        // 是给搬不动、留在原处的那几个。
+        enabled: !off.has(found.dir) && !existsSync(join(found.dir, DISABLED_MARKER)),
         source: found.rootLabel,
         writable: found.writable,
       });
@@ -136,13 +135,7 @@ export class SkillManager {
     const skill = this.list().find((item) => item.id === id);
     if (!skill) return this.list();
 
-    if (skill.writable) {
-      const marker = join(this.resolve(skill.dirName), DISABLED_MARKER);
-      if (enabled) rmSync(marker, { force: true });
-      else writeFileSync(marker, "", "utf8");
-      return this.list();
-    }
-
+    if (enabled) rmSync(join(skill.dir, DISABLED_MARKER), { force: true });
     const off = this.disabledSet();
     if (enabled) off.delete(skill.dir);
     else off.add(skill.dir);
@@ -158,13 +151,15 @@ export class SkillManager {
       throw new Error(`「${skill.name}」来自${skill.source}（${skill.dir}），请到那边删除。`);
     }
     rmSync(this.resolve(skill.dirName), { recursive: true, force: true });
+    const off = this.disabledSet();
+    if (off.delete(skill.dir)) this.writeDisabled([...off]);
     return this.list();
   }
 
   // ---------- 外部技能的关闭状态 ----------
 
   private get disabledPath(): string {
-    return join(this.dir, ".disabled-external.json");
+    return this.store.skillStatePath;
   }
 
   private disabledSet(): Set<string> {
@@ -177,7 +172,7 @@ export class SkillManager {
   }
 
   private writeDisabled(list: string[]): void {
-    mkdirSync(this.dir, { recursive: true });
+    mkdirSync(dirname(this.disabledPath), { recursive: true });
     writeFileSync(this.disabledPath, `${JSON.stringify(list, null, 2)}\n`, "utf8");
   }
 

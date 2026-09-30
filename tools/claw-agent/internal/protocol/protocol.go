@@ -640,7 +640,7 @@ type SessionStartParams struct {
 	 * 不是「装着若干技能的根目录」。
 	 *
 	 * 为什么由宿主给出具体目录而不是给一个根：技能散在好几个地方——我们自己的
-	 * ~/.aiclaw/skills、Claude Code 的 ~/.claude/skills、Codex 的
+	 * ~/.agents/skills、Claude Code 的 ~/.claude/skills、Codex 的
 	 * ~/.codex/skills、npx 装的 CLI 缓存、npm 全局包，每种的目录结构还不一样
 	 * （带版本号的、带 @scope 的）。发现逻辑只该有一份，而它必须在宿主侧——
 	 * 界面要把「这个技能从哪儿来」显示出来，还要记住用户关掉了哪些。

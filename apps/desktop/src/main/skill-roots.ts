@@ -61,8 +61,11 @@ export function skillRoots(options: DiscoverOptions): SkillRoot[] {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
 
+  // 默认的自己目录就是 ~/.agents/skills（「通用」位置）；测试与旧配置里可能是别处。
+  const universal = join(home, ".agents", "skills");
+  const ownIsUniversal = ownDir === universal;
   const roots: SkillRoot[] = [
-    { path: ownDir, label: "AIClaw", writable: true, layout: "flat" },
+    { path: ownDir, label: ownIsUniversal ? "通用" : "AIClaw", writable: true, layout: "flat" },
   ];
 
   // 项目级排在用户级前面：放进仓库的技能是为这个项目量身写的，
@@ -76,11 +79,13 @@ export function skillRoots(options: DiscoverOptions): SkillRoot[] {
     });
   }
 
+  // `npx skills add ... -g` 装的「通用」位置：Codex、Cursor、Gemini CLI 等直接读这里，
+  // 只给 Claude Code 这类另软链一份。排在 Claude Code 前面，这样同一个技能显示的
+  // 来源是它真正所在的地方，而不是某一条软链。
+  if (!ownIsUniversal) {
+    roots.push({ path: universal, label: "通用", writable: false, layout: "flat" });
+  }
   roots.push(
-    // `npx skills add ... -g` 装的「通用」位置：Codex、Cursor、Gemini CLI 等直接读这里，
-    // 只给 Claude Code 这类另软链一份。排在 Claude Code 前面，这样同一个技能显示的
-    // 来源是它真正所在的地方，而不是某一条软链。
-    { path: join(home, ".agents", "skills"), label: "通用", writable: false, layout: "flat" },
     { path: join(home, ".claude", "skills"), label: "Claude Code", writable: false, layout: "flat" },
     { path: join(home, ".codex", "skills"), label: "Codex", writable: false, layout: "flat" },
   );

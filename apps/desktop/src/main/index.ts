@@ -494,6 +494,7 @@ if (!app.requestSingleInstanceLock()) {
     applyAppIcon();
     // 技能与记忆从 userData 搬到 ~/.aiclaw。只搬一次，目标已存在就跳过。
     store.migrateHomeData();
+    store.migrateSkills();
     registerIpc();
     createWindow();
     void sessions.syncBrowserBridge();

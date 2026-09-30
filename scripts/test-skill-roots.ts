@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,6 +10,7 @@ import {
   scanRoot,
   skillRoots,
 } from "../apps/desktop/src/main/skill-roots.ts";
+import { migrateSkillDir } from "../apps/desktop/src/main/skill-migrate.ts";
 
 /**
  * 技能发现。
@@ -148,4 +149,37 @@ test("npx skills add -g 装进 ~/.agents/skills 的技能认得出来，来源�
   const matches = found.filter((f) => f.dirName === "wecomcli-calendar");
   assert.equal(matches.length, 1, "软链与本体只算一个");
   assert.equal(matches[0]!.rootLabel, "通用");
+});
+
+test("默认技能目录是 ~/.agents/skills：它就是自己的目录，来源记作「通用」，不重复列一遍", () => {
+  const home = mkdtempSync(join(tmpdir(), "aiclaw-own-agents-"));
+  skill(join(home, ".agents", "skills", "wecomcli-todo"), "企业微信待办");
+  const roots = skillRoots({ ownDir: join(home, ".agents", "skills"), home, env: {} });
+  assert.equal(roots[0]!.label, "通用");
+  assert.equal(roots[0]!.writable, true);
+  assert.equal(roots.filter((r) => r.path === join(home, ".agents", "skills")).length, 1);
+  const found = discoverSkills({ ownDir: join(home, ".agents", "skills"), home, env: {} });
+  assert.deepEqual(found.map((f) => [f.dirName, f.rootLabel, f.writable]), [["wecomcli-todo", "通用", true]]);
+});
+
+test("旧目录 ~/.aiclaw/skills 的技能搬进 ~/.agents/skills，关着的记进状态文件，同名的不动", () => {
+  const home = mkdtempSync(join(tmpdir(), "aiclaw-migrate-"));
+  const from = join(home, ".aiclaw", "skills");
+  const to = join(home, ".agents", "skills");
+  const state = join(home, ".aiclaw", "skills-disabled.json");
+  skill(join(from, "daily-report"), "日报");
+  skill(join(from, "quiet"), "关着的");
+  writeFileSync(join(from, "quiet", ".disabled"), "");
+  skill(join(from, "clash"), "旧的那份");
+  skill(join(to, "clash"), "新的那份");
+  writeFileSync(join(from, ".disabled-external.json"), JSON.stringify(["/elsewhere/skill"]));
+
+  const result = migrateSkillDir(from, to, state);
+  assert.deepEqual(result.moved.sort(), ["daily-report", "quiet"]);
+  assert.ok(existsSync(join(to, "daily-report", "SKILL.md")) && !existsSync(join(from, "daily-report")));
+  assert.ok(!existsSync(join(to, "quiet", ".disabled")), "共用目录里不留我们的标记");
+  assert.ok(readFileSync(join(to, "clash", "SKILL.md"), "utf8").includes("新的那份"), "同名的不覆盖");
+  assert.ok(existsSync(join(from, "clash")), "没搬的留在原处");
+  assert.deepEqual(JSON.parse(readFileSync(state, "utf8")).sort(), ["/elsewhere/skill", join(to, "quiet")].sort());
+  assert.deepEqual(migrateSkillDir(from, to, state).moved, [], "再跑一遍什么都不动");
 });
