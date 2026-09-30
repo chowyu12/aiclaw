@@ -6,25 +6,26 @@
     <style>
       body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; font: 14px/1.6 -apple-system, "PingFang SC", sans-serif; color: #1f2a24; background: #f4f7f4; }
       .card { width: 420px; padding: 28px 30px; border: 1px solid #d6dfd9; border-radius: 14px; background: #fff; box-shadow: 0 8px 30px rgba(31, 42, 36, 0.08); }
-      h1 { margin: 0 0 6px; font-size: 18px; }
+      h1 { display: flex; align-items: center; gap: 8px; margin: 0 0 6px; font-size: 18px; }
+      h1 img { width: 28px; height: 28px; flex: 0 0 auto; }
       .lead { margin: 0 0 18px; color: #5b6660; font-size: 13px; }
-      .code { margin: 0 0 6px; font: 600 40px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 10px; text-align: center; color: #2f7d5b; }
+      .code { margin: 0 0 6px; font: 600 40px/1.2 ui-monospace, Menlo, monospace; letter-spacing: 10px; text-align: center; color: #10813f; }
       .code-hint { margin: 0 0 18px; color: #5b6660; font-size: 12.5px; text-align: center; }
       ul { margin: 0 0 20px; padding-left: 18px; color: #3d4842; font-size: 12.5px; }
       .actions { display: flex; gap: 10px; justify-content: flex-end; }
       button { padding: 7px 18px; border-radius: 8px; font-size: 13px; cursor: pointer; }
       .reject { border: 1px solid #cfd8d2; background: #fff; color: #3d4842; }
-      .allow { border: 1px solid #2f7d5b; background: #2f7d5b; color: #fff; }
+      .allow { border: 1px solid #10813f; background: #10813f; color: #fff; }
       button:disabled { opacity: 0.5; cursor: default; }
       .result { margin: 14px 0 0; font-size: 13px; text-align: center; }
-      .result.ok { color: #2f7d5b; }
+      .result.ok { color: #10813f; }
       .result.bad { color: #b3261e; }
       .warn { margin: 0 0 16px; padding: 8px 10px; border-radius: 8px; background: #fff6e6; color: #8a5a00; font-size: 12px; }
     </style>
   </head>
   <body>
     <div class="card">
-      <h1>本机的 AIClaw 请求连接这个浏览器</h1>
+      <h1><img src="icon48.png" alt="" />本机的 AIClaw 请求连接这个浏览器</h1>
       <p class="lead">核对下面的代码与 AIClaw「设置 → 配置 → 浏览器」里显示的一致，再点「允许」。</p>
       <p id="code" class="code">····</p>
       <p class="code-hint">两边的代码一样，才是你自己的 AIClaw</p>

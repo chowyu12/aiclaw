@@ -6,35 +6,41 @@
  *   - 文字分三级：ink 正文 / ink-2 次要 / muted 辅助。同一段里最多用两级，
  *     三级全上会糊成一锅灰。
  *   - 中性色统一往绿偏一点（与 accent 同向）。纯灰看起来像没调过。
+ *   - 绿色分两种：--brand 是标识上那个亮绿，只做装饰（状态点、标识投影、焦点环），
+ *     不承载文字；--accent 是它压暗之后的版本，按钮、链接、选中态用它，保证读得清。
  */
 :root {
-  --ground: #f4f7f4;
+  --ground: #f3f8f4;
   --surface: #ffffff;
-  --surface-2: #eef2ee;
-  --sidebar: #ecf0ec;
+  --surface-2: #edf5ef;
+  --sidebar: #eaf3ec;
 
-  --ink: #10161a;
-  --ink-2: #47535a;
-  --muted: #727f86;
+  --ink: #0f1712;
+  --ink-2: #45534b;
+  --muted: #6f7e75;
 
-  --rule: #e0e6e1;
-  --rule-strong: #cdd6cf;
+  --rule: #dce8df;
+  --rule-strong: #c8d8cc;
 
-  /* 白字压在 accent 上对比度 4.9:1，别再往亮了调。 */
-  --accent: #1b7f45;
-  --accent-hover: #166a39;
-  --accent-soft: #e3f3e8;
+  /* 标识上的亮绿（make-icon.cjs 渐变的中间色）。白字压在它上面只有 2.6:1，不放文字。 */
+  --brand: #1cb85c;
+  --brand-soft: #d9f6e3;
+
+  /* 白字压在 accent 上 5.0:1，accent 当文字放在页面底色上 4.6:1——别再往亮了调。 */
+  --accent: #10813f;
+  --accent-hover: #0c6d34;
+  --accent-soft: #e0f5e7;
   --on-accent: #ffffff;
 
-  --ok: #1b7f45;
-  --ok-soft: #e1f1e6;
+  --ok: #10813f;
+  --ok-soft: #def3e5;
   --warn: #8a6210;
   --warn-soft: #f5ebd6;
   --danger: #a83329;
   --danger-soft: #f7e5e2;
 
-  --hover: #e5ebe6;
-  --active: #d7e9dc;
+  --hover: #e2ede5;
+  --active: #d4efdc;
 
   /* 圆角只有这四档。混用会让界面看起来是拼出来的。 */
   --r-sm: 6px;
@@ -53,32 +59,36 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #0e1310;
-    --surface: #161d18;
-    --surface-2: #1d2620;
-    --sidebar: #111813;
+    --ground: #0d130f;
+    --surface: #151d18;
+    --surface-2: #1b2620;
+    --sidebar: #101813;
 
-    --ink: #e8edee;
-    --ink-2: #aab5ba;
-    --muted: #7f8c92;
+    --ink: #e7efe9;
+    --ink-2: #a9b8ae;
+    --muted: #7d8d83;
 
-    --rule: #26302a;
-    --rule-strong: #364038;
+    --rule: #24302a;
+    --rule-strong: #34423a;
 
-    --accent: #4fcd7f;
-    --accent-hover: #6ad893;
-    --accent-soft: #163524;
-    --on-accent: #06200f;
+    --brand: #2fcf6c;
+    --brand-soft: #123524;
 
-    --ok: #4fcd7f;
-    --ok-soft: #17332a;
+    /* 深色下 accent 直接用亮绿：它压在深底上 9:1，按钮上配深色字。 */
+    --accent: #3fd67a;
+    --accent-hover: #62e394;
+    --accent-soft: #12321f;
+    --on-accent: #04200e;
+
+    --ok: #3fd67a;
+    --ok-soft: #133524;
     --warn: #d9ac52;
     --warn-soft: #322813;
     --danger: #e98379;
     --danger-soft: #35201d;
 
-    --hover: #1f2923;
-    --active: #1a3425;
+    --hover: #1d2a22;
+    --active: #173a26;
 
     /* 深色下靠亮度分层，投影几乎看不见，所以压得更轻。 */
     --shadow-1: 0 1px 2px rgb(0 0 0 / 30%);
@@ -224,6 +234,14 @@ select {
   background-size: 5px 5px, 5px 5px;
   background-repeat: no-repeat;
   padding-right: 30px;
+}
+
+/* 勾选框、单选框、进度条跟主题色走：不设的话是系统的蓝色，和绿色的界面对不上。 */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"],
+progress {
+  accent-color: var(--accent);
 }
 
 :focus-visible {

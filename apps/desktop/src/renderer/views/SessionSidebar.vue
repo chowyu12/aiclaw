@@ -818,7 +818,7 @@ function when(iso: string): string {
   height: 7px;
   margin-right: 5px;
   border-radius: 50%;
-  background: var(--accent, #3b82f6);
+  background: var(--brand, var(--accent));
   vertical-align: 1px;
   animation: breathe 1.4s ease-in-out infinite;
 }
@@ -924,7 +924,7 @@ function when(iso: string): string {
 }
 
 .update.ready {
-  background: var(--accent, #3b82f6);
+  background: var(--brand, var(--accent));
   color: #fff;
 }
 

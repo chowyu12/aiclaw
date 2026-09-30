@@ -7,6 +7,6 @@
   "minimum_chrome_version": "116",
   "permissions": ["debugger", "tabs", "tabGroups", "storage", "alarms"],
   "background": { "service_worker": "background.js", "type": "module" },
-  "action": { "default_title": "AIClaw 浏览器助手", "default_popup": "popup.html" },
-  "icons": { "128": "icon128.png" }
+  "action": { "default_title": "AIClaw 浏览器助手", "default_popup": "popup.html", "default_icon": { "16": "icon16.png", "32": "icon32.png" } },
+  "icons": { "16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png" }
 }

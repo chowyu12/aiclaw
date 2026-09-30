@@ -970,7 +970,7 @@ button.small {
 }
 
 .dot.running {
-  background: var(--accent);
+  background: var(--brand);
 }
 
 .dot.failed,

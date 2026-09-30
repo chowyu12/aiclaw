@@ -5,21 +5,22 @@
     <title>AIClaw 浏览器助手</title>
     <style>
       body { width: 300px; margin: 0; padding: 14px 16px; font: 13px/1.5 -apple-system, "PingFang SC", sans-serif; color: #1f2a24; background: #f4f7f4; }
-      h1 { margin: 0 0 8px; font-size: 14px; }
+      h1 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 14px; }
+      h1 img { width: 20px; height: 20px; flex: 0 0 auto; }
       .status { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
       .dot { width: 8px; height: 8px; border-radius: 50%; background: #b35c00; }
-      .dot.ok { background: #2f7d5b; }
+      .dot.ok { background: #10813f; }
       .detail { margin: 0 0 12px; color: #5b6660; font-size: 12px; }
       label { display: block; margin-bottom: 4px; color: #5b6660; font-size: 12px; }
       input { box-sizing: border-box; width: 100%; padding: 6px 8px; border: 1px solid #cfd8d2; border-radius: 6px; font: 12px ui-monospace, Menlo, monospace; }
-      button { margin-top: 8px; padding: 5px 12px; border: none; border-radius: 6px; background: #2f7d5b; color: #fff; font-size: 12px; cursor: pointer; }
+      button { margin-top: 8px; padding: 5px 12px; border: none; border-radius: 6px; background: #10813f; color: #fff; font-size: 12px; cursor: pointer; }
       .buttons { display: flex; gap: 8px; }
-      button.ghost { background: #fff; color: #2f7d5b; border: 1px solid #2f7d5b; }
+      button.ghost { background: #fff; color: #10813f; border: 1px solid #10813f; }
       .hint { margin: 10px 0 0; color: #7a857f; font-size: 11px; }
     </style>
   </head>
   <body>
-    <h1>AIClaw 浏览器助手</h1>
+    <h1><img src="icon48.png" alt="" />AIClaw 浏览器助手</h1>
     <div class="status"><span id="dot" class="dot"></span><span id="status">…</span></div>
     <p id="detail" class="detail"></p>
     <label for="token">一般不用填：AIClaw 开启「我的浏览器」后会自动弹出配对页。实在连不上，再把 AIClaw「设置 → 配置 → 浏览器」里的配对码粘到这里</label>

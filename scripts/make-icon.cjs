@@ -34,33 +34,40 @@ const RADIUS = 185.4; // Apple 的圆角半径，约 0.225 × 边长
 const SHADOW_DY = 10;
 const SHADOW_BLUR = 22;
 
+// 爪印与配色量自设计稿 apps/desktop/assets/logo-source.png（按 32 格坐标）：三个趾垫是圆，
+// 掌垫是椭圆，左右对称。设计稿的边缘抠图不干净（外沿一圈绿色毛边、透明区有杂点），
+// 所以这里按量出来的尺寸重画成矢量，而不是直接缩放那张 PNG。
 const SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${SIZE} ${SIZE}" width="${SIZE}" height="${SIZE}">
   <defs>
-    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1b7f45"/><stop offset="100%" stop-color="#4fcd7f"/>
+    <!-- 上沿最亮、中间最深、下沿回亮，右侧整体亮一点：与设计稿同一个走向，去掉了噪点。 -->
+    <linearGradient id="g" x1="40%" y1="0%" x2="60%" y2="100%">
+      <stop offset="0%" stop-color="#6ae67d"/>
+      <stop offset="24%" stop-color="#46d06d"/>
+      <stop offset="50%" stop-color="#1cb85c"/>
+      <stop offset="76%" stop-color="#2cc868"/>
+      <stop offset="100%" stop-color="#3bdc7b"/>
     </linearGradient>
-    <linearGradient id="s" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.35"/>
-      <stop offset="55%" stop-color="#ffffff" stop-opacity="0"/>
-    </linearGradient>
+    <radialGradient id="lift" cx="85%" cy="8%" r="70%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
     <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="${SHADOW_DY}" stdDeviation="${SHADOW_BLUR}"
-                    flood-color="#0a2f18" flood-opacity="0.28"/>
+                    flood-color="#0b3d1f" flood-opacity="0.26"/>
     </filter>
   </defs>
 
   <g filter="url(#shadow)">
     <rect x="${INSET}" y="${INSET}" width="${BODY}" height="${BODY}" rx="${RADIUS}" fill="url(#g)"/>
   </g>
-  <rect x="${INSET}" y="${INSET}" width="${BODY}" height="${BODY}" rx="${RADIUS}" fill="url(#s)"/>
+  <rect x="${INSET}" y="${INSET}" width="${BODY}" height="${BODY}" rx="${RADIUS}" fill="url(#lift)"/>
 
   <!-- 爪印按 32 格坐标画的，整体缩放到圆角方块里。与 BrandLogo.vue 同一份形状。 -->
   <g transform="translate(${INSET} ${INSET}) scale(${BODY / 32})" fill="#ffffff">
-    <circle cx="9.6" cy="11.4" r="3.1"/>
-    <circle cx="16" cy="8.6" r="3.3"/>
-    <circle cx="22.4" cy="11.4" r="3.1"/>
-    <path d="M16 26.6 C 11.2 26.6 8.4 23.8 8.9 20.3 C 9.4 16.9 12.4 15.2 16 15.2
-             C 19.6 15.2 22.6 16.9 23.1 20.3 C 23.6 23.8 20.8 26.6 16 26.6 Z"/>
+    <circle cx="16" cy="9.03" r="3.35"/>
+    <circle cx="9.05" cy="12.12" r="3.22"/>
+    <circle cx="22.95" cy="12.12" r="3.22"/>
+    <ellipse cx="16" cy="20.91" rx="7.72" ry="6.04"/>
   </g>
 </svg>`;
 
@@ -100,9 +107,17 @@ app.whenReady().then(async () => {
   const ico = path.join(ASSETS, "icon.ico");
   fs.writeFileSync(ico, buildIco(png));
 
+  // 浏览器扩展的图标：扩展页、工具栏、配对页都用它。与应用图标同一张图缩的。
+  const extension = path.join(__dirname, "..", "apps", "browser-extension");
+  const extensionIcons = [16, 32, 48, 128].map((size) => {
+    const file = path.join(extension, `icon${size}.png`);
+    fs.writeFileSync(file, png(size));
+    return file;
+  });
+
   const { width, height } = image.getSize();
   console.log(`source ${width}x${height}`);
-  for (const file of [OUT, icns, ico]) {
+  for (const file of [OUT, icns, ico, ...extensionIcons]) {
     console.log(`wrote ${file} ${fs.statSync(file).size} bytes`);
   }
   app.exit(0);
