@@ -106,8 +106,11 @@ test("停用的不跑；重新启用从现在算，不补关着的那几天", as
   patch(saved.id, { anchorAt: at(2026, 9, 30, 8).toISOString() });
   await scheduler.tick(at(2026, 9, 30, 9));
   assert.deepEqual(runs, []);
+  // 跟「重新启用前的这一刻」比，不跟某个写死的日历时间比：CI 跑在 UTC，写死的本地
+  // 时间可能还在未来，断言就成了看当时几点。
+  const before = Date.now();
   scheduler.setEnabled(saved.id, true);
-  assert.ok(Date.parse(read()[0]!.anchorAt) > at(2026, 9, 30, 9).getTime());
+  assert.ok(Date.parse(read()[0]!.anchorAt) >= before, "锚点挪到了重新启用的那一刻");
 });
 
 test("模型经工具建、列、删", () => {
