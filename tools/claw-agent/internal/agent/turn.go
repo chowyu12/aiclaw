@@ -782,7 +782,8 @@ func summarizeCall(call llm.ToolCall) string {
 	switch call.Name {
 	case "run_command":
 		return firstLine(pick("command"), 120)
-	case "read_file", "write_file", "edit_file", "list_dir":
+	case "read_file", "write_file", "edit_file", "list_dir",
+		"read_office", "write_docx", "edit_docx", "write_xlsx", "write_pptx":
 		return pick("path")
 	case "search_files":
 		return pick("pattern")

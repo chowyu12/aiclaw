@@ -101,6 +101,14 @@ func readTool() Tool {
 			if info.IsDir() {
 				return "", fmt.Errorf("%s 是目录，不是文件；用 list_dir 看目录内容", args.Path)
 			}
+			// Office 文件是 zip 包，按文本读出来只是一串乱码，还白占上下文。
+			// 直接指到 read_office；老格式则直接说清读不了。
+			if kind, legacy := officeKind(path); kind != "" {
+				if legacy {
+					return "", legacyOfficeError(path)
+				}
+				return "", fmt.Errorf("%s 是 Office 文件（压缩包格式），read_file 读不出文字；请改用 read_office", args.Path)
+			}
 
 			content, err := os.ReadFile(path)
 			if err != nil {

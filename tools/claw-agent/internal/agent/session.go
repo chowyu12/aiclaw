@@ -567,6 +567,9 @@ func registerBuiltins(registry *tools.Registry, enabled []string) error {
 	if err := tools.RegisterExecTool(registry); err != nil {
 		return err
 	}
+	if err := tools.RegisterOfficeTools(registry); err != nil {
+		return err
+	}
 	if len(enabled) == 0 {
 		return nil
 	}
