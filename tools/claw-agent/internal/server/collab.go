@@ -216,6 +216,59 @@ func (h *collabHub) Interrupt(self *agent.Session, target string) (string, error
 	return previous, nil
 }
 
+// deleteSessionTree 删掉一个会话，连同它开出的子 agent（和孙子）。返回删掉的全部 id，
+// 子的在前。
+//
+// 父子关系以存档里的 parentId 为准，不只看内存里的协作树：内核重启过之后树没了，
+// 但「删了父会话留下一串孤儿子会话」同样不该发生。
+func (s *Server) deleteSessionTree(ctx context.Context, rootID string) ([]string, error) {
+	summaries, err := agent.List(ctx, s.db)
+	if err != nil {
+		return nil, err
+	}
+	children := map[string][]string{}
+	for _, summary := range summaries {
+		if summary.ParentID != "" {
+			children[summary.ParentID] = append(children[summary.ParentID], summary.ID)
+		}
+	}
+	var order []string
+	seen := map[string]bool{}
+	var walk func(id string)
+	walk = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		for _, child := range children[id] {
+			walk(child)
+		}
+		order = append(order, id)
+	}
+	walk(rootID)
+	for _, id := range order {
+		s.sessMu.Lock()
+		session := s.sessions[id]
+		delete(s.sessions, id)
+		s.sessMu.Unlock()
+		if session != nil {
+			session.Close()
+		}
+		s.collab.forget(id)
+		if err := agent.Delete(ctx, s.db, id); err != nil {
+			return order, err
+		}
+	}
+	return order, nil
+}
+
+// forget 把删掉的会话从协作树上摘下来：它的名字可以再用，list_agents 也不再列它。
+func (h *collabHub) forget(sessionID string) {
+	h.mu.Lock()
+	delete(h.nodes, sessionID)
+	h.mu.Unlock()
+}
+
 // InterruptTree 用户在界面上停下一个会话时，它开出去还在跑的子 agent 一并停下：
 // 用户点「停止」的意思是「别再干了」，不是「你停下，让你的手下接着花钱」。
 func (h *collabHub) InterruptTree(sessionID string) {

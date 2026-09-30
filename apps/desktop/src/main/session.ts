@@ -494,8 +494,9 @@ export class SessionManager extends EventEmitter {
     return this.requireClient().sessionSearch(keyword);
   }
 
-  async deleteSession(sessionId: string): Promise<void> {
-    await this.requireClient().sessionDelete(sessionId);
+  /** 删会话，连同它开出的子 agent。返回删掉的全部 id。 */
+  deleteSession(sessionId: string): Promise<string[]> {
+    return this.requireClient().sessionDelete(sessionId);
   }
 
   approve(request: PendingApproval, approved: boolean, scope?: "once" | "session"): void {

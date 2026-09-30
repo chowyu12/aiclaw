@@ -416,9 +416,11 @@ export class ClawAgentClient extends EventEmitter {
     return result.sessions ?? [];
   }
 
-  sessionDelete(sessionId: string): Promise<unknown> {
+  /** 删会话，连同它开出的子 agent。返回删掉的全部 id（子的在前）。 */
+  async sessionDelete(sessionId: string): Promise<string[]> {
     this.assertReady();
-    return this.transport.request("session/delete", { sessionId });
+    const result = await this.transport.request<{ deleted?: string[] }>("session/delete", { sessionId });
+    return result.deleted ?? [sessionId];
   }
 
   /** 取会话历史，还原成可直接渲染的时间线条目。 */

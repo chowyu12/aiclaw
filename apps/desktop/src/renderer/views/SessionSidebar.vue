@@ -189,7 +189,10 @@ async function removeGroup(groupId: string, name: string): Promise<void> {
 }
 
 async function removeSession(session: SessionSummaryView): Promise<void> {
-  if (!confirm(`删除会话「${session.title || "未命名"}」？对话记录会从本机移除，不可恢复。`)) {
+  // 子 agent 跟着父会话一起删：留下一串孤儿子会话，谁也说不清它们是干什么的。
+  const children = descendants(session.id).length;
+  const extra = children > 0 ? `连同它开出的 ${children} 个子 agent 一起，` : "";
+  if (!confirm(`删除会话「${session.title || "未命名"}」？${extra}对话记录会从本机移除，不可恢复。`)) {
     return;
   }
   await actions.deleteSession(session.id);

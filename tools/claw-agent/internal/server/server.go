@@ -284,17 +284,12 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 			s.writeError(f.ID, codeInvalidParams, "invalid params")
 			return
 		}
-		s.sessMu.Lock()
-		if session, ok := s.sessions[params.SessionID]; ok {
-			session.Close()
-			delete(s.sessions, params.SessionID)
-		}
-		s.sessMu.Unlock()
-		if err := agent.Delete(ctx, s.db, params.SessionID); err != nil {
+		deleted, err := s.deleteSessionTree(ctx, params.SessionID)
+		if err != nil {
 			s.writeError(f.ID, codeInternal, err.Error())
 			return
 		}
-		s.writeResult(f.ID, map[string]any{})
+		s.writeResult(f.ID, map[string]any{"deleted": deleted})
 	case protocol.MethodSessionConfigure:
 		var params protocol.SessionConfigureParams
 		if err := json.Unmarshal(f.Params, &params); err != nil {

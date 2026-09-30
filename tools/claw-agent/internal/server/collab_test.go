@@ -305,3 +305,56 @@ func findNode(hub *collabHub, path string) *collabNode {
 	}
 	return nil
 }
+
+// 删父会话，子 agent 和孙子一起删；删完名字能再用。父子关系按存档里的 parentId 找。
+func TestDeleteSessionTreeCascades(t *testing.T) {
+	model := &scriptedModel{
+		root:  func(int, wireRequest) string { return sseText("好") },
+		child: func(wireRequest) string { return sseText("好") },
+	}
+	server, root := collabServer(t, model)
+	hub := server.collab
+	ctx := context.Background()
+	if err := root.Save(ctx, server.db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hub.Spawn(ctx, root, agent.SpawnRequest{TaskName: "a", Message: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	child := server.session(findNode(hub, "/root/a").sessionID)
+	if _, err := hub.Spawn(ctx, child, agent.SpawnRequest{TaskName: "b", Message: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	grand := findNode(hub, "/root/a/b").sessionID
+	// 等两个子 agent 跑完，免得删到一半它们又存了一次档。
+	eventually(t, "子 agent 跑完", func() bool {
+		return !child.Busy() && server.session(grand) != nil && !server.session(grand).Busy()
+	})
+	if _, err := hub.Spawn(ctx, root, agent.SpawnRequest{TaskName: "keep", Message: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	keepID := findNode(hub, "/root/keep").sessionID
+	eventually(t, "keep 跑完", func() bool { return !server.session(keepID).Busy() })
+
+	deleted, err := server.deleteSessionTree(ctx, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 2 || deleted[0] != grand || deleted[1] != child.ID {
+		t.Errorf("应当先删孙子再删子：%v", deleted)
+	}
+	list, _ := agent.List(ctx, server.db)
+	ids := map[string]bool{}
+	for _, item := range list {
+		ids[item.ID] = true
+	}
+	if ids[child.ID] || ids[grand] || !ids[keepID] || !ids[root.ID] {
+		t.Errorf("只该删掉这一支：%v", ids)
+	}
+	if server.session(child.ID) != nil || findNode(hub, "/root/a") != nil {
+		t.Error("内存里的会话和协作树节点也要摘掉")
+	}
+	if _, err := hub.Spawn(ctx, root, agent.SpawnRequest{TaskName: "a", Message: "x"}); err != nil {
+		t.Errorf("删掉之后名字应当能再用：%v", err)
+	}
+}

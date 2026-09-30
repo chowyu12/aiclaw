@@ -438,10 +438,11 @@ export const actions = {
     }
   },
 
+  /** 删会话。内核会连同它开出的子 agent 一起删，回来的是删掉的全部 id。 */
   async deleteSession(sessionId: string): Promise<void> {
-    await window.aiclaw.session.remove(sessionId);
-    delete state.live[sessionId];
-    if (sessionId === state.sessionId) {
+    const removed = ((await window.aiclaw.session.remove(sessionId)) as string[] | undefined) ?? [sessionId];
+    for (const id of removed) delete state.live[id];
+    if (removed.includes(state.sessionId)) {
       state.sessionId = "";
       state.sessionInfo = null;
     }
