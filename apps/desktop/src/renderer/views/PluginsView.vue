@@ -35,6 +35,10 @@ const PERMISSION_LABELS: Record<string, string> = {
 const ACTING_TOOLS = [
   { name: "write_file", label: "写文件" },
   { name: "edit_file", label: "改文件" },
+  { name: "write_docx", label: "写 Word" },
+  { name: "edit_docx", label: "改 Word" },
+  { name: "write_xlsx", label: "写 Excel" },
+  { name: "write_pptx", label: "写 PPT" },
   { name: "run_command", label: "执行命令" },
 ];
 
