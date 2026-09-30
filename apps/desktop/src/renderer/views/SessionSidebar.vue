@@ -98,9 +98,18 @@ function isCollapsed(bucket: Bucket): boolean {
   return store.groups.collapsed?.[bucket.id] ?? bucket.id === CHANNELS;
 }
 
-/** 折叠时还要露出来的：当前正在看的那个会话（从用量页之类的地方打开时，它可能在折叠的分组里）。 */
+/**
+ * 折叠就是全收起来。早先折叠时还露出当前正在看的那个会话，而应用启动时恢复的
+ * 常常正是一个渠道会话——于是分组看上去怎么也折不起来。当前会话在折叠的分组里时，
+ * 改由分组标题高亮来提示。
+ */
 function visibleSessions(bucket: Bucket): SessionSummaryView[] {
-  return isCollapsed(bucket) ? bucket.sessions.filter((session) => session.id === store.sessionId) : bucket.sessions;
+  return isCollapsed(bucket) ? [] : bucket.sessions;
+}
+
+/** 当前正在看的会话在这个分组里。 */
+function holdsCurrent(bucket: Bucket): boolean {
+  return bucket.sessions.some((session) => session.id === store.sessionId);
 }
 
 /** 折叠着的分组里，上次看过之后有新消息的会话数。 */
@@ -297,7 +306,7 @@ function when(iso: string): string {
         :key="bucket.id"
         class="bucket"
       >
-        <header class="bucket-head" :class="{ collapsed: isCollapsed(bucket) }">
+        <header class="bucket-head" :class="{ collapsed: isCollapsed(bucket), current: isCollapsed(bucket) && holdsCurrent(bucket) }">
           <button
             class="fold"
             :title="isCollapsed(bucket) ? '展开' : '折叠'"
@@ -318,6 +327,7 @@ function when(iso: string): string {
           <template v-else>
             <span
               class="bucket-name"
+              :title="isCollapsed(bucket) && holdsCurrent(bucket) ? '正在看的会话在这个分组里' : undefined"
               @click="toggleBucket(bucket)"
               @dblclick="bucket.id !== UNGROUPED && bucket.id !== CHANNELS && startRename(bucket.id, bucket.name)"
             >
@@ -642,6 +652,13 @@ function when(iso: string): string {
 
 .bucket-name {
   cursor: pointer;
+}
+
+/* 折叠着、但正在看的会话在里面：标题高亮，点开就能找到它。 */
+.bucket-head.current {
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .unread {
