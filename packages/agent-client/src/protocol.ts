@@ -417,6 +417,8 @@ export interface SessionSummary {
   snippet?: string;
   /** 子 agent 的父会话 id；普通会话没有。 */
   parentId?: string;
+  /** 归档的时刻（ISO）；没归档的没有。 */
+  archivedAt?: string;
 }
 
 export interface InitializeResult {

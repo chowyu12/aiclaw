@@ -45,7 +45,7 @@ const EMPTY_TIMELINE: TimelineEntry[] = [];
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules",
+  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules" | "archived",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
@@ -69,6 +69,8 @@ const state = reactive({
     return this.live[this.sessionId]?.busy ?? false;
   },
   approvals: [] as ApprovalPayload[],
+  /** 归档了的会话（设置 → 已归档）。打开那一页时读。 */
+  archived: [] as SessionSummaryView[],
   /** 定时任务。主进程改了会推过来（建、改、删、跑完）。 */
   schedules: [] as ScheduledTaskView[],
   /** 模型提的、还没回答的问题（ask_user）。按会话显示在对话里。 */
@@ -435,6 +437,34 @@ export const actions = {
       state.error = describeError(error);
     } finally {
       if (state.sessionSearch.keyword === keyword) state.sessionSearch.loading = false;
+    }
+  },
+
+  /**
+   * 归档会话：从侧边栏收起来，设置 → 已归档里能恢复。内核连同它开出的子 agent 一起归档，
+   * 还在跑的会先停下。
+   */
+  async archiveSession(sessionId: string): Promise<void> {
+    const changed = ((await window.aiclaw.session.archive(sessionId, true)) as string[] | undefined) ?? [sessionId];
+    for (const id of changed) delete state.live[id];
+    if (changed.includes(state.sessionId)) {
+      state.sessionId = "";
+      state.sessionInfo = null;
+    }
+    await actions.refreshSessions();
+  },
+
+  /** 恢复归档的会话（连同子 agent），回到侧边栏原来的分组。 */
+  async restoreSession(sessionId: string): Promise<void> {
+    await window.aiclaw.session.archive(sessionId, false);
+    await Promise.all([actions.refreshSessions(), actions.loadArchived()]);
+  },
+
+  async loadArchived(): Promise<void> {
+    try {
+      state.archived = (await window.aiclaw.session.archived()) as SessionSummaryView[];
+    } catch {
+      state.archived = [];
     }
   },
 
@@ -1113,7 +1143,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules"): void {
+  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules" | "archived"): void {
     state.view = view;
   },
 

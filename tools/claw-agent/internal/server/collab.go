@@ -216,13 +216,12 @@ func (h *collabHub) Interrupt(self *agent.Session, target string) (string, error
 	return previous, nil
 }
 
-// deleteSessionTree 删掉一个会话，连同它开出的子 agent（和孙子）。返回删掉的全部 id，
-// 子的在前。
+// sessionTree 找出一个会话连同它开出的子 agent（和孙子），子的在前、自己在最后。
 //
 // 父子关系以存档里的 parentId 为准，不只看内存里的协作树：内核重启过之后树没了，
-// 但「删了父会话留下一串孤儿子会话」同样不该发生。
-func (s *Server) deleteSessionTree(ctx context.Context, rootID string) ([]string, error) {
-	summaries, err := agent.List(ctx, s.db)
+// 但「删了、归档了父会话，留下一串孤儿子会话」同样不该发生。归档了的也算在内。
+func (s *Server) sessionTree(ctx context.Context, rootID string) ([]string, error) {
+	summaries, err := agent.ListAll(ctx, s.db)
 	if err != nil {
 		return nil, err
 	}
@@ -246,20 +245,53 @@ func (s *Server) deleteSessionTree(ctx context.Context, rootID string) ([]string
 		order = append(order, id)
 	}
 	walk(rootID)
+	return order, nil
+}
+
+// unload 把会话从内存里摘掉：停下正在跑的轮次、关掉 MCP、从协作树上摘下节点。
+func (s *Server) unload(id string) {
+	s.sessMu.Lock()
+	session := s.sessions[id]
+	delete(s.sessions, id)
+	s.sessMu.Unlock()
+	if session != nil {
+		session.Close()
+	}
+	s.collab.forget(id)
+}
+
+// deleteSessionTree 删掉一个会话，连同它开出的子 agent。返回删掉的全部 id，子的在前。
+func (s *Server) deleteSessionTree(ctx context.Context, rootID string) ([]string, error) {
+	order, err := s.sessionTree(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range order {
-		s.sessMu.Lock()
-		session := s.sessions[id]
-		delete(s.sessions, id)
-		s.sessMu.Unlock()
-		if session != nil {
-			session.Close()
-		}
-		s.collab.forget(id)
+		s.unload(id)
 		if err := agent.Delete(ctx, s.db, id); err != nil {
 			return order, err
 		}
 	}
 	return order, nil
+}
+
+// archiveSessionTree 归档（或恢复）一个会话，连同它开出的子 agent。返回涉及的全部 id。
+//
+// 归档时把它们从内存里摘掉：还在跑的就停下——归档的意思是「这件事先放一边」，
+// 放一边的会话不该还在后台花钱。恢复只是改回标记，点开时照常重新挂载。
+func (s *Server) archiveSessionTree(ctx context.Context, rootID string, archived bool) ([]string, error) {
+	order, err := s.sessionTree(ctx, rootID)
+	if err != nil {
+		return nil, err
+	}
+	at := time.Time{}
+	if archived {
+		at = time.Now()
+		for _, id := range order {
+			s.unload(id)
+		}
+	}
+	return order, s.db.SetArchived(ctx, order, at)
 }
 
 // forget 把删掉的会话从协作树上摘下来：它的名字可以再用，list_agents 也不再列它。

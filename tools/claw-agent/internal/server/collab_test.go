@@ -358,3 +358,44 @@ func TestDeleteSessionTreeCascades(t *testing.T) {
 		t.Errorf("删掉之后名字应当能再用：%v", err)
 	}
 }
+
+// 归档父会话：子 agent 一起归档、从内存里摘掉；恢复时整支回来。
+func TestArchiveSessionTree(t *testing.T) {
+	model := &scriptedModel{
+		root:  func(int, wireRequest) string { return sseText("好") },
+		child: func(wireRequest) string { return sseText("好") },
+	}
+	server, root := collabServer(t, model)
+	hub := server.collab
+	ctx := context.Background()
+	if err := root.Save(ctx, server.db); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hub.Spawn(ctx, root, agent.SpawnRequest{TaskName: "a", Message: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	childID := findNode(hub, "/root/a").sessionID
+	eventually(t, "子 agent 跑完", func() bool { return !server.session(childID).Busy() })
+
+	changed, err := server.archiveSessionTree(ctx, root.ID, true)
+	if err != nil || len(changed) != 2 || changed[1] != root.ID {
+		t.Fatalf("应当归档父子两个，父的在最后：%v %v", changed, err)
+	}
+	if list, _ := agent.List(ctx, server.db); len(list) != 0 {
+		t.Errorf("列表里不该还有：%+v", list)
+	}
+	archived, _ := agent.ListArchived(ctx, server.db)
+	if len(archived) != 2 || archived[0].ArchivedAt == nil {
+		t.Errorf("归档列表不对：%+v", archived)
+	}
+	if server.session(root.ID) != nil || server.session(childID) != nil {
+		t.Error("归档的会话要从内存里摘掉")
+	}
+	if _, err := server.archiveSessionTree(ctx, root.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := agent.List(ctx, server.db)
+	if len(list) != 2 {
+		t.Errorf("恢复之后整支回来：%+v", list)
+	}
+}

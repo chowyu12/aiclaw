@@ -20,6 +20,7 @@ const NAV = [
   { id: "mcp", label: "MCP", note: "第三方 MCP server，stdio 或 HTTP" },
   { id: "skills", label: "技能", note: "本地 SKILL.md，也认 Claude Code / Codex 的" },
   { id: "schedules", label: "定时任务", note: "到点自动开一个会话去做：日报、提醒、巡检" },
+  { id: "archived", label: "已归档", note: "收起来的会话，可以恢复或彻底删除" },
   { id: "usage", label: "用量", note: "token、模型调用、工具与技能" },
 ] as const;
 
@@ -86,6 +87,36 @@ const present = computed(() => new Set(store.sessions.map((session) => session.i
 
 function isNestedChild(session: SessionSummaryView): boolean {
   return Boolean(session.parentId && present.value.has(session.parentId));
+}
+
+/**
+ * 子 agent 列表默认折叠：一次调研开出三四个很常见，默认展开会把会话列表撑得很长。
+ * 折叠状态与分组存在一起（session-groups.json 的 collapsed，键为 agents:<会话 id>）。
+ */
+function agentsKey(id: string): string {
+  return `agents:${id}`;
+}
+
+function agentsCollapsed(id: string): boolean {
+  return store.groups.collapsed?.[agentsKey(id)] ?? true;
+}
+
+function toggleAgents(id: string): void {
+  void actions.collapseGroup(agentsKey(id), !agentsCollapsed(id));
+}
+
+/** 折叠着的子 agent 里有没有在跑的、有没有正在看的：开关上亮点、高亮。 */
+function agentsBusy(id: string): boolean {
+  return descendants(id).some(({ session }) => store.live[session.id]?.busy || waiting(session.id));
+}
+
+function agentsHoldCurrent(id: string): boolean {
+  return descendants(id).some(({ session }) => session.id === store.sessionId);
+}
+
+async function archiveSession(session: SessionSummaryView): Promise<void> {
+  moving.value = "";
+  await actions.archiveSession(session.id);
 }
 
 /** 某个会话下面的子 agent，连同孙子一起按层展开。 */
@@ -402,6 +433,17 @@ function when(iso: string): string {
               <template v-if="session.turnCount"> · {{ session.turnCount }} 轮</template>
               <template v-if="session.model"> · {{ session.model }}</template>
             </div>
+            <!-- 开出过子 agent 的会话：一个折叠开关，默认收着。 -->
+            <button
+              v-if="descendants(session.id).length > 0"
+              class="agents-toggle"
+              :class="{ current: agentsCollapsed(session.id) && agentsHoldCurrent(session.id) }"
+              :aria-expanded="!agentsCollapsed(session.id)"
+              @click.stop="toggleAgents(session.id)"
+            >
+              {{ agentsCollapsed(session.id) ? "▸" : "▾" }} {{ descendants(session.id).length }} 个子 agent
+              <span v-if="agentsCollapsed(session.id) && agentsBusy(session.id)" class="running" title="有子 agent 正在执行"></span>
+            </button>
           </div>
           <div class="item-actions" @click.stop>
             <button
@@ -410,6 +452,11 @@ function when(iso: string): string {
               @click="moving = moving === session.id ? '' : session.id"
             >
               ⤴
+            </button>
+            <button class="icon tiny" title="归档（设置 → 已归档里能恢复）" aria-label="归档" @click="archiveSession(session)">
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                <path fill="currentColor" d="M2 2.5h12a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Zm0 5h12v5.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5Zm4 1.8v.9h4v-.9H6Z" />
+              </svg>
             </button>
             <button class="icon tiny" title="删除会话" @click="removeSession(session)">×</button>
           </div>
@@ -433,7 +480,7 @@ function when(iso: string): string {
         </div>
         <!-- 这个会话开出去的子 agent：缩进挂在下面，跑着的亮点。 -->
         <div
-          v-for="child in descendants(session.id)"
+          v-for="child in agentsCollapsed(session.id) ? [] : descendants(session.id)"
           :key="child.session.id"
           class="item child"
           :class="{ active: child.session.id === store.sessionId }"
@@ -449,6 +496,11 @@ function when(iso: string): string {
             </div>
           </div>
           <div class="item-actions" @click.stop>
+            <button class="icon tiny" title="归档" aria-label="归档" @click="archiveSession(child.session)">
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+                <path fill="currentColor" d="M2 2.5h12a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Zm0 5h12v5.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5Zm4 1.8v.9h4v-.9H6Z" />
+              </svg>
+            </button>
             <button class="icon tiny" title="删除会话" @click="removeSession(child.session)">×</button>
           </div>
         </div>
@@ -656,6 +708,30 @@ function when(iso: string): string {
 
 .item:hover {
   background: var(--hover);
+}
+
+/* 「▸ 2 个子 agent」开关：跟在会话的 meta 下面，小一号，不抢标题的注意力。 */
+.agents-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 3px;
+  padding: 1px 7px;
+  border: none;
+  border-radius: var(--r-full);
+  background: var(--surface-2, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.agents-toggle:hover {
+  color: var(--ink-2);
+}
+
+.agents-toggle.current {
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 /* 子 agent：一行、字小一号，缩进由模板按层级给。 */

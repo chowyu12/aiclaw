@@ -1260,11 +1260,23 @@ type Summary struct {
 	Snippet string `json:"snippet,omitempty"`
 	/** 子 agent 的父会话；普通会话为空。 */
 	ParentID string `json:"parentId,omitempty"`
+	/** 归档的时刻；没归档时不出现。 */
+	ArchivedAt *time.Time `json:"archivedAt,omitempty"`
 }
 
-// List 列出全部会话，按更新时间倒序。
+// List 列出没归档的会话，按更新时间倒序。
 func List(ctx context.Context, db *store.Store) ([]Summary, error) {
 	return summarize(db.List(ctx))
+}
+
+// ListArchived 列出归档了的会话，最近归档的在前。
+func ListArchived(ctx context.Context, db *store.Store) ([]Summary, error) {
+	return summarize(db.ListArchived(ctx))
+}
+
+// ListAll 列出全部会话，归档的也在内。
+func ListAll(ctx context.Context, db *store.Store) ([]Summary, error) {
+	return summarize(db.ListAll(ctx))
 }
 
 // Search 按关键词找会话：标题与正文都找，命中的那一段放在 Snippet 里。
@@ -1289,6 +1301,10 @@ func summarize(records []store.Summary, err error) ([]Summary, error) {
 			Snippet:   record.Snippet,
 			ParentID:  record.ParentID,
 		})
+		if !record.ArchivedAt.IsZero() {
+			archived := record.ArchivedAt
+			summaries[len(summaries)-1].ArchivedAt = &archived
+		}
 	}
 	return summaries, nil
 }

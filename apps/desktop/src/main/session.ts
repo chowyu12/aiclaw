@@ -494,6 +494,15 @@ export class SessionManager extends EventEmitter {
     return this.requireClient().sessionSearch(keyword);
   }
 
+  /** 归档（或恢复）会话，连同它开出的子 agent。返回涉及的全部 id。 */
+  archiveSession(sessionId: string, archived: boolean): Promise<string[]> {
+    return this.requireClient().sessionArchive(sessionId, archived);
+  }
+
+  listArchived(): Promise<SessionSummary[]> {
+    return this.requireClient().sessionArchived();
+  }
+
   /** 删会话，连同它开出的子 agent。返回删掉的全部 id。 */
   deleteSession(sessionId: string): Promise<string[]> {
     return this.requireClient().sessionDelete(sessionId);

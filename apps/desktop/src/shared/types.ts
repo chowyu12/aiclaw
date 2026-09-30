@@ -269,6 +269,8 @@ export interface SessionSummaryView {
   snippet?: string;
   /** 子 agent 的父会话 id；普通会话没有。侧边栏据此把它挂在父会话下面。 */
   parentId?: string;
+  /** 归档的时刻（ISO）；只有归档列表里的有。 */
+  archivedAt?: string;
 }
 
 /** 一个角色用哪个模型。providerId 为 0 表示没配。 */

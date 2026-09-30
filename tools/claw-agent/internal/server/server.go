@@ -290,6 +290,28 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 			return
 		}
 		s.writeResult(f.ID, map[string]any{"deleted": deleted})
+	case protocol.MethodSessionArchive:
+		var params protocol.SessionArchiveParams
+		if err := json.Unmarshal(f.Params, &params); err != nil || params.SessionID == "" {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		changed, err := s.archiveSessionTree(ctx, params.SessionID, params.Archived)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		s.writeResult(f.ID, map[string]any{"sessions": changed})
+	case protocol.MethodSessionArchived:
+		summaries, err := agent.ListArchived(ctx, s.db)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		if summaries == nil {
+			summaries = []agent.Summary{}
+		}
+		s.writeResult(f.ID, map[string]any{"sessions": summaries})
 	case protocol.MethodSessionConfigure:
 		var params protocol.SessionConfigureParams
 		if err := json.Unmarshal(f.Params, &params); err != nil {

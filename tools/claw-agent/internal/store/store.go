@@ -56,6 +56,8 @@ type Summary struct {
 	Snippet string
 	/** 子 agent 的父会话 id（存在 config 的 parentId 里）；普通会话为空。 */
 	ParentID string
+	/** 归档的时刻；没归档是零值。 */
+	ArchivedAt time.Time
 }
 
 type Store struct {
@@ -104,6 +106,10 @@ func Open(dataHome string) (*Store, error) {
 		return nil, fmt.Errorf("初始化会话库失败：%w", err)
 	}
 	if err := ensureUsageSchema(context.Background(), db); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := ensureArchiveColumn(context.Background(), db); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -174,12 +180,58 @@ FROM sessions WHERE id = ?`, id)
 	return session, nil
 }
 
-// List 按更新时间倒序列出全部会话，不带消息正文。
+// ensureArchiveColumn 给老库补上 archived_at 列（3.6.7 之前没有）。
+func ensureArchiveColumn(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, `PRAGMA table_info(sessions)`)
+	if err != nil {
+		return fmt.Errorf("读会话表结构失败：%w", err)
+	}
+	has := false
+	for rows.Next() {
+		var (
+			cid      int
+			name     string
+			kind     string
+			notNull  int
+			fallback sql.NullString
+			primary  int
+		)
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &fallback, &primary); err != nil {
+			rows.Close()
+			return fmt.Errorf("读会话表结构失败：%w", err)
+		}
+		has = has || name == "archived_at"
+	}
+	rows.Close()
+	if has {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return fmt.Errorf("给会话表加归档列失败：%w", err)
+	}
+	return nil
+}
+
+// List 按更新时间倒序列出没归档的会话，不带消息正文。
 func (s *Store) List(ctx context.Context) ([]Summary, error) {
+	return s.listWhere(ctx, `archived_at = 0`, `updated_at DESC`)
+}
+
+// ListArchived 列出归档了的会话，最近归档的在前。
+func (s *Store) ListArchived(ctx context.Context) ([]Summary, error) {
+	return s.listWhere(ctx, `archived_at > 0`, `archived_at DESC`)
+}
+
+// ListAll 列出全部会话，归档的也在内。删除、归档一整支时按它找子会话。
+func (s *Store) ListAll(ctx context.Context) ([]Summary, error) {
+	return s.listWhere(ctx, `1 = 1`, `updated_at DESC`)
+}
+
+func (s *Store) listWhere(ctx context.Context, where, order string) ([]Summary, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, title, created_at, updated_at, workdir, model, turn_count,
-  COALESCE(json_extract(config, '$.parentId'), '')
-FROM sessions ORDER BY updated_at DESC`)
+  COALESCE(json_extract(config, '$.parentId'), ''), archived_at
+FROM sessions WHERE `+where+` ORDER BY `+order)
 	if err != nil {
 		return nil, fmt.Errorf("列出会话失败：%w", err)
 	}
@@ -188,16 +240,33 @@ FROM sessions ORDER BY updated_at DESC`)
 	summaries := []Summary{}
 	for rows.Next() {
 		var summary Summary
-		var created, updated int64
+		var created, updated, archived int64
 		if err := rows.Scan(&summary.ID, &summary.Title, &created, &updated,
-			&summary.Workdir, &summary.Model, &summary.TurnCount, &summary.ParentID); err != nil {
+			&summary.Workdir, &summary.Model, &summary.TurnCount, &summary.ParentID, &archived); err != nil {
 			return nil, fmt.Errorf("列出会话失败：%w", err)
 		}
 		summary.CreatedAt = time.UnixMilli(created)
 		summary.UpdatedAt = time.UnixMilli(updated)
+		if archived > 0 {
+			summary.ArchivedAt = time.UnixMilli(archived)
+		}
 		summaries = append(summaries, summary)
 	}
 	return summaries, rows.Err()
+}
+
+// SetArchived 归档（at 非零）或恢复（at 为零）几个会话。
+func (s *Store) SetArchived(ctx context.Context, ids []string, at time.Time) error {
+	value := int64(0)
+	if !at.IsZero() {
+		value = at.UnixMilli()
+	}
+	for _, id := range ids {
+		if _, err := s.db.ExecContext(ctx, `UPDATE sessions SET archived_at = ? WHERE id = ?`, value, id); err != nil {
+			return fmt.Errorf("归档会话失败：%w", err)
+		}
+	}
+	return nil
 }
 
 /**
@@ -224,7 +293,7 @@ func (s *Store) Search(ctx context.Context, keyword string, limit int) ([]Summar
 SELECT id, title, created_at, updated_at, workdir, model, turn_count, messages,
   COALESCE(json_extract(config, '$.parentId'), '')
 FROM sessions
-WHERE title LIKE ? ESCAPE '\' OR messages LIKE ? ESCAPE '\'
+WHERE archived_at = 0 AND (title LIKE ? ESCAPE '\' OR messages LIKE ? ESCAPE '\')
 ORDER BY updated_at DESC LIMIT ?`, pattern, pattern, limit)
 	if err != nil {
 		return nil, fmt.Errorf("搜索会话失败：%w", err)

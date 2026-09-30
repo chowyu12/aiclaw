@@ -416,6 +416,20 @@ export class ClawAgentClient extends EventEmitter {
     return result.sessions ?? [];
   }
 
+  /** 归档（或恢复）会话，连同它开出的子 agent。返回涉及的全部 id。 */
+  async sessionArchive(sessionId: string, archived: boolean): Promise<string[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ sessions?: string[] }>("session/archive", { sessionId, archived });
+    return result.sessions ?? [sessionId];
+  }
+
+  /** 归档了的会话，最近归档的在前。 */
+  async sessionArchived(): Promise<SessionSummary[]> {
+    this.assertReady();
+    const result = await this.transport.request<{ sessions: SessionSummary[] }>("session/listArchived", {});
+    return result.sessions ?? [];
+  }
+
   /** 删会话，连同它开出的子 agent。返回删掉的全部 id（子的在前）。 */
   async sessionDelete(sessionId: string): Promise<string[]> {
     this.assertReady();

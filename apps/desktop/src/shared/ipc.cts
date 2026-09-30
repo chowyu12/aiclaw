@@ -25,6 +25,8 @@ export const IPC = {
   sessionSearch: "session:search",
   sessionWorkspace: "session:workspace",
   sessionDelete: "session:delete",
+  sessionArchive: "session:archive",
+  sessionArchived: "session:archived",
   sessionConfigure: "session:configure",
 
   providerList: "provider:list",

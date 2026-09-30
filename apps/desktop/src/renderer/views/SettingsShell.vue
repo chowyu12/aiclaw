@@ -8,6 +8,7 @@ import McpView from "./McpView.vue";
 import SkillsView from "./SkillsView.vue";
 import UsageView from "./UsageView.vue";
 import SchedulesView from "./SchedulesView.vue";
+import ArchivedView from "./ArchivedView.vue";
 
 /**
  * 设置几页的路由。
@@ -27,4 +28,5 @@ import SchedulesView from "./SchedulesView.vue";
   <SkillsView v-else-if="store.view === 'skills'" />
   <UsageView v-else-if="store.view === 'usage'" />
   <SchedulesView v-else-if="store.view === 'schedules'" />
+  <ArchivedView v-else-if="store.view === 'archived'" />
 </template>

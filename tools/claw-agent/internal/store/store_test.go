@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -278,5 +279,68 @@ func TestImportLegacyOnFreshInstall(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("没有旧文件时不该导入任何东西，实际 %d", count)
+	}
+}
+
+// 归档：列表与搜索里不出现，归档列表里按归档时间排；恢复之后回来。老库启动时补上这一列。
+func TestArchive(t *testing.T) {
+	dir := t.TempDir()
+	// 先造一个 3.6.6 的老库：没有 archived_at 列。
+	legacy, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := legacy.Exec(`CREATE TABLE sessions (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  workdir TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', turn_count INTEGER NOT NULL DEFAULT 0,
+  config TEXT NOT NULL DEFAULT '{}', messages TEXT NOT NULL DEFAULT '[]');
+INSERT INTO sessions (id, title, created_at, updated_at, messages) VALUES ('old', '老会话', 1, 1, '[{"Role":"user","Content":"找得到我"}]');`); err != nil {
+		t.Fatal(err)
+	}
+	legacy.Close()
+
+	db, err := Open(dir)
+	if err != nil {
+		t.Fatalf("老库升级失败：%v", err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now()
+	for _, id := range []string{"a", "b"} {
+		if err := db.Save(ctx, Session{ID: id, Title: "会话 " + id, CreatedAt: now, UpdatedAt: now,
+			Messages: json.RawMessage(`[{"Role":"user","Content":"找得到我"}]`)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.SetArchived(ctx, []string{"a", "old"}, now); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := db.List(ctx)
+	if len(list) != 1 || list[0].ID != "b" {
+		t.Errorf("列表里只该剩 b：%+v", list)
+	}
+	archived, _ := db.ListArchived(ctx)
+	if len(archived) != 2 || archived[0].ArchivedAt.IsZero() {
+		t.Errorf("归档列表应有两条且带归档时间：%+v", archived)
+	}
+	found, _ := db.Search(ctx, "找得到", 10)
+	if len(found) != 1 || found[0].ID != "b" {
+		t.Errorf("搜索不该搜出归档的：%+v", found)
+	}
+	// 归档后再保存（比如后台轮次收尾）不该把它变回没归档。
+	if err := db.Save(ctx, Session{ID: "a", Title: "改了标题", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if archived, _ := db.ListArchived(ctx); len(archived) != 2 {
+		t.Errorf("保存不该清掉归档：%+v", archived)
+	}
+	if err := db.SetArchived(ctx, []string{"a"}, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := db.List(ctx); len(list) != 2 {
+		t.Errorf("恢复之后应当回到列表：%+v", list)
+	}
+	if all, _ := db.ListAll(ctx); len(all) != 3 {
+		t.Errorf("ListAll 应当包括归档的：%+v", all)
 	}
 }

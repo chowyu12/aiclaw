@@ -239,9 +239,15 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionList, async () => {
     const list = await sessions.listSessions();
     // 顺手清掉指向已删会话的分组归属，别让分组里留下看不见的幽灵成员。
-    store.pruneGroupAssignments(list.map((session) => session.id));
+    // 归档的会话还在，只是不在列表里：它们的归属要留着，恢复时回到原来的分组。
+    const archived = await sessions.listArchived().catch(() => []);
+    store.pruneGroupAssignments([...list, ...archived].map((session) => session.id));
     return list;
   });
+  ipcMain.handle(IPC.sessionArchive, (_event, input: { sessionId: string; archived: boolean }) =>
+    sessions.archiveSession(String(input.sessionId), input.archived === true),
+  );
+  ipcMain.handle(IPC.sessionArchived, () => sessions.listArchived());
   ipcMain.handle(IPC.sessionSearch, (_event, keyword: string) => sessions.searchSessions(keyword));
   ipcMain.handle(
     IPC.sessionWorkspace,

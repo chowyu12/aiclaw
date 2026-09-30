@@ -14,12 +14,16 @@ import "encoding/json"
 // ---------- 宿主 → agent 的请求 ----------
 
 const (
-	MethodInitialize       = "initialize"
-	MethodSessionStart     = "session/start"
-	MethodSessionResume    = "session/resume"
-	MethodSessionList      = "session/list"
-	MethodSessionSearch    = "session/search"
-	MethodSessionDelete    = "session/delete"
+	MethodInitialize    = "initialize"
+	MethodSessionStart  = "session/start"
+	MethodSessionResume = "session/resume"
+	MethodSessionList   = "session/list"
+	MethodSessionSearch = "session/search"
+	MethodSessionDelete = "session/delete"
+	// MethodSessionArchive 归档 / 恢复一个会话（连同它开出的子 agent）。
+	MethodSessionArchive = "session/archive"
+	// MethodSessionArchived 列出归档了的会话。
+	MethodSessionArchived  = "session/listArchived"
 	MethodSessionConfigure = "session/configure"
 	MethodSessionHistory   = "session/history"
 	MethodTurnStart        = "turn/start"
@@ -792,6 +796,12 @@ type SessionRefresh struct {
 	ApprovalPolicy    ApprovalPolicy             `json:"approvalPolicy"`
 	Roles             RoleModels                 `json:"roles,omitzero"`
 	ModelSeesImages   bool                       `json:"modelSeesImages,omitempty"`
+}
+
+// SessionArchiveParams 归档（archived=true）或恢复一个会话。
+type SessionArchiveParams struct {
+	SessionID string `json:"sessionId"`
+	Archived  bool   `json:"archived"`
 }
 
 // SessionSearchParams 按关键词找会话。关键词为空时等于列全部。
