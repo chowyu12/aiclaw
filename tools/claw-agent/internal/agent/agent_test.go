@@ -125,6 +125,7 @@ type recordingEmitter struct {
 	// scope 让用例模拟「本次会话都允许」那一档。
 	scope         protocol.ApprovalScope
 	browser       []protocol.BrowserRequestParams
+	schedule      []protocol.ScheduleRequestParams
 	browserResult protocol.BrowserResult
 	browserOK     bool
 	// questions 是 ask_user 问过的；answer 是预置的回答（nil 表示不回答，报错）。
@@ -165,6 +166,17 @@ func (e *recordingEmitter) RequestComputer(
 		return protocol.ComputerResult{}, errors.New("测试没有预置屏幕操作结果")
 	}
 	return result, nil
+}
+
+// RequestSchedule 记下定时任务请求，回一句固定的话。
+func (e *recordingEmitter) RequestSchedule(
+	_ context.Context,
+	params protocol.ScheduleRequestParams,
+) (protocol.ScheduleResult, error) {
+	e.mu.Lock()
+	e.schedule = append(e.schedule, params)
+	e.mu.Unlock()
+	return protocol.ScheduleResult{Text: "已处理：" + params.Action}, nil
 }
 
 // RequestBrowser 记下浏览器请求，按预设返回。

@@ -50,6 +50,8 @@ type Emitter interface {
 	RequestBrowser(ctx context.Context, params protocol.BrowserRequestParams) (protocol.BrowserResult, error)
 	// RequestUserInput 请用户回答一个问题（ask_user），阻塞直到用户回答或跳过。
 	RequestUserInput(ctx context.Context, params protocol.UserInputRequestParams) (protocol.UserInputResponse, error)
+	// RequestSchedule 请宿主建、列、删定时任务。调度器在宿主。
+	RequestSchedule(ctx context.Context, params protocol.ScheduleRequestParams) (protocol.ScheduleResult, error)
 }
 
 // userInput 是一次用户输入：文字，可能还带着图片。
@@ -148,6 +150,7 @@ func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 		EnableComputerUse: config.EnableComputerUse,
 		EnableBrowser:     config.EnableBrowser,
 		EnableEmail:       config.EnableEmail,
+		EnableSchedule:    config.EnableSchedule,
 		DisableSandbox:    config.DisableSandbox,
 		CodeMode:          config.CodeMode,
 		ApprovalPolicy:    config.ApprovalPolicy,
@@ -218,6 +221,7 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	for _, option := range options {
 		option(session)
 	}
+	session.Title = strings.TrimSpace(config.Title)
 
 	mountStarted := time.Now()
 	session.mountAllMCP(ctx, config.MCPServers)
@@ -235,6 +239,9 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		return nil, err
 	}
 	if err := session.registerEmailTools(ctx); err != nil {
+		return nil, err
+	}
+	if err := session.registerScheduleTools(); err != nil {
 		return nil, err
 	}
 
@@ -1182,6 +1189,7 @@ func Load(
 		config.EnableComputerUse = refresh.EnableComputerUse
 		config.EnableBrowser = refresh.EnableBrowser
 		config.EnableEmail = refresh.EnableEmail
+		config.EnableSchedule = refresh.EnableSchedule
 		config.DisableSandbox = refresh.DisableSandbox
 		config.CodeMode = refresh.CodeMode
 		config.Roles = refresh.Roles

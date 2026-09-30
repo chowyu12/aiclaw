@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, shell, systemPreferences } from "electron";
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,8 @@ import type { PendingApproval, PendingUserInput } from "@aiclaw/agent-client";
 import { ConfigStore, type McpServer } from "./config.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
+import { Scheduler } from "./scheduler.js";
+import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
 import { Updater } from "./updater.js";
 import { DiagnosticsLog, buildReport } from "./diagnostics.js";
 import { LogFile } from "./logfile.js";
@@ -43,6 +45,38 @@ const store = new ConfigStore();
 const skills = new SkillManager(store);
 // SessionManager 要问技能：会话启动时把当前启用的技能目录下发给内核。
 const sessions = new SessionManager(store, skills);
+
+/** 定时任务开的会话归进侧边栏的这个内置分组。 */
+const SCHEDULED_GROUP = "__scheduled__";
+
+const scheduler = new Scheduler(store.dataDir, {
+  async runTask(task) {
+    const title = `⏰ ${task.name} · ${formatWhen(new Date())}`;
+    const text = `（这是定时任务「${task.name}」自动发起的，用户此刻可能不在电脑前。）\n\n${task.prompt}`;
+    const sessionId = await sessions.runBackgroundSession({ workspace: task.workspace, title, text });
+    const groups = store.readGroups();
+    store.writeGroups({ assignments: { ...groups.assignments, [sessionId]: SCHEDULED_GROUP } });
+    return sessionId;
+  },
+  notify(task, ok, detail) {
+    if (!Notification.isSupported()) return;
+    const notification = new Notification({
+      title: ok ? `定时任务「${task.name}」完成了` : `定时任务「${task.name}」没做完`,
+      body: ok ? "点这里查看结果" : detail.slice(0, 120) || "点这里查看",
+    });
+    notification.on("click", () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.show();
+        mainWindow.focus();
+      }
+      const target = scheduler.list().find((item) => item.id === task.id)?.lastSessionId;
+      if (target) push(IPC.onOpenSession, target);
+    });
+    notification.show();
+  },
+});
+scheduler.on("changed", (tasks) => push(IPC.onSchedules, tasks));
 const updater = new Updater();
 // 内核 stderr 与宿主自己的关键事件都进这里，攒一小段供「诊断」页复制。
 const diagnostics = new DiagnosticsLog();
@@ -273,6 +307,13 @@ function registerIpc(): void {
     }
     return status === "granted" ? "granted" : "denied";
   });
+  ipcMain.handle(IPC.scheduleList, () => scheduler.list());
+  ipcMain.handle(IPC.scheduleSave, (_event, input: ScheduledTaskInput) => scheduler.save(input));
+  ipcMain.handle(IPC.scheduleDelete, (_event, id: string) => scheduler.remove(String(id)));
+  ipcMain.handle(IPC.scheduleToggle, (_event, input: { id: string; enabled: boolean }) =>
+    scheduler.setEnabled(String(input.id), input.enabled === true),
+  );
+  ipcMain.handle(IPC.scheduleRunNow, (_event, id: string) => scheduler.runNow(String(id)));
   ipcMain.handle(IPC.voiceTranscribe, (_event, wav: Uint8Array) => sessions.transcribeVoice(new Uint8Array(wav)));
   ipcMain.handle(IPC.wechatLoginStart, () => sessions.wechatLoginStart());
   ipcMain.handle(IPC.wechatLoginPoll, (_event, input: { uuid: string; token: string; connectionId?: string }) =>
@@ -427,7 +468,20 @@ function registerIpc(): void {
   });
 }
 
+// 模型经 schedule_* 工具建、列、删定时任务。
+sessions.on("schedule", ({ request, respond, fail }) => {
+  try {
+    respond({ text: scheduler.handleModelRequest(request) });
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+  }
+});
+
 sessions.on("event", (method, params) => {
+  if (method === "turn/completed") {
+    const done = params as { sessionId?: string; error?: string } | undefined;
+    if (done?.sessionId) scheduler.onTurnCompleted(done.sessionId, done.error);
+  }
   // 一轮结束（完成、失败、中断）时，它还没回应的审批就作废了：内核那边已经
   // 不等了。不清的话渲染层重新加载后会把它们当成待办再弹一遍。
   if (method === "turn/completed") {
@@ -508,6 +562,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createWindow();
     void sessions.syncBrowserBridge();
+    scheduler.start();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
@@ -519,6 +574,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on("before-quit", () => {
     // 让 claw-agent 有机会落盘会话再退出。
+    scheduler.stop();
     void sessions.stop();
   });
 }

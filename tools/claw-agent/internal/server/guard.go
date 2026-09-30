@@ -51,4 +51,5 @@ func pinChannelPolicy(sessionID string, refresh *protocol.SessionRefresh) {
 	refresh.ApprovalPolicy = protocol.ApprovalNever
 	// 邮箱同理：对面是外部的人，不能让他借助手去翻、去发用户的信。
 	refresh.EnableEmail = false
+	refresh.EnableSchedule = false
 }

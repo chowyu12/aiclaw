@@ -7,6 +7,7 @@ import SearchEnginesView from "./SearchEnginesView.vue";
 import McpView from "./McpView.vue";
 import SkillsView from "./SkillsView.vue";
 import UsageView from "./UsageView.vue";
+import SchedulesView from "./SchedulesView.vue";
 
 /**
  * 设置几页的路由。
@@ -25,4 +26,5 @@ import UsageView from "./UsageView.vue";
   <McpView v-else-if="store.view === 'mcp'" />
   <SkillsView v-else-if="store.view === 'skills'" />
   <UsageView v-else-if="store.view === 'usage'" />
+  <SchedulesView v-else-if="store.view === 'schedules'" />
 </template>

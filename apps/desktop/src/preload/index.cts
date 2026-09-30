@@ -73,6 +73,13 @@ const api = {
     renameConnection: (uuid: string, name: string) => ipcRenderer.invoke(IPC.connectionRename, { uuid, name }),
     deleteConnection: (uuid: string) => ipcRenderer.invoke(IPC.connectionDelete, uuid),
   },
+  schedules: {
+    list: () => ipcRenderer.invoke(IPC.scheduleList),
+    save: (input: unknown) => ipcRenderer.invoke(IPC.scheduleSave, input),
+    remove: (id: string) => ipcRenderer.invoke(IPC.scheduleDelete, id),
+    toggle: (id: string, enabled: boolean) => ipcRenderer.invoke(IPC.scheduleToggle, { id, enabled }),
+    runNow: (id: string) => ipcRenderer.invoke(IPC.scheduleRunNow, id),
+  },
   voice: {
     /** 麦克风授权：granted / denied。macOS 第一次会弹系统授权框。 */
     permission: () => ipcRenderer.invoke(IPC.voicePermission),
@@ -176,6 +183,16 @@ const api = {
       const listener = (_event: unknown, payload: unknown) => handler(payload);
       ipcRenderer.on(IPC.onBrowserBridge, listener);
       return () => ipcRenderer.off(IPC.onBrowserBridge, listener);
+    },
+    schedules: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => handler(payload);
+      ipcRenderer.on(IPC.onSchedules, listener);
+      return () => ipcRenderer.off(IPC.onSchedules, listener);
+    },
+    openSession: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => handler(payload);
+      ipcRenderer.on(IPC.onOpenSession, listener);
+      return () => ipcRenderer.off(IPC.onOpenSession, listener);
     },
     runtimeStatus: (handler: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => handler(payload);

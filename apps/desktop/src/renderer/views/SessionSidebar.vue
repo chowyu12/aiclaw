@@ -19,6 +19,7 @@ const NAV = [
   { id: "plugins", label: "插件", note: "邮件、computer use、微信、企业微信，以及从目录装的" },
   { id: "mcp", label: "MCP", note: "第三方 MCP server，stdio 或 HTTP" },
   { id: "skills", label: "技能", note: "本地 SKILL.md，也认 Claude Code / Codex 的" },
+  { id: "schedules", label: "定时任务", note: "到点自动开一个会话去做：日报、提醒、巡检" },
   { id: "usage", label: "用量", note: "token、模型调用、工具与技能" },
 ] as const;
 
@@ -64,6 +65,14 @@ const UNGROUPED = "__ungrouped__";
  */
 const CHANNELS = "__channels__";
 
+/** 内置的「定时任务」分组：定时任务跑出来的会话由主进程归到这里（见 main/index.ts）。 */
+const SCHEDULED = "__scheduled__";
+
+/** 内置分组不能改名、不能删。 */
+function isBuiltin(id: string): boolean {
+  return id === UNGROUPED || id === CHANNELS || id === SCHEDULED;
+}
+
 function isChannelSession(session: SessionSummaryView): boolean {
   return session.id.startsWith("c_");
 }
@@ -85,9 +94,11 @@ const buckets = computed<Bucket[]>(() => {
   // 排哪儿都一样。
   const loose = byGroup.get(UNGROUPED) ?? [];
   const channels = byGroup.get(CHANNELS) ?? [];
-  if (loose.length > 0 || (result.length === 0 && channels.length === 0)) {
+  const scheduled = byGroup.get(SCHEDULED) ?? [];
+  if (loose.length > 0 || (result.length === 0 && channels.length === 0 && scheduled.length === 0)) {
     result.push({ id: UNGROUPED, name: "未分组", sessions: loose });
   }
+  if (scheduled.length > 0) result.push({ id: SCHEDULED, name: "定时任务", sessions: scheduled });
   // 渠道会话排最后：它们默认折叠，自己的会话在前面。
   if (channels.length > 0) result.push({ id: CHANNELS, name: "渠道会话", sessions: channels });
   return result;
@@ -316,7 +327,7 @@ function when(iso: string): string {
             {{ isCollapsed(bucket) ? "▸" : "▾" }}
           </button>
           <input
-            v-if="renaming === bucket.id && bucket.id !== UNGROUPED && bucket.id !== CHANNELS"
+            v-if="renaming === bucket.id && !isBuiltin(bucket.id)"
             v-model="renameDraft"
             class="rename"
             autofocus
@@ -329,7 +340,7 @@ function when(iso: string): string {
               class="bucket-name"
               :title="isCollapsed(bucket) && holdsCurrent(bucket) ? '正在看的会话在这个分组里' : undefined"
               @click="toggleBucket(bucket)"
-              @dblclick="bucket.id !== UNGROUPED && bucket.id !== CHANNELS && startRename(bucket.id, bucket.name)"
+              @dblclick="!isBuiltin(bucket.id) && startRename(bucket.id, bucket.name)"
             >
               {{ bucket.name }}
             </span>
@@ -340,7 +351,7 @@ function when(iso: string): string {
             </span>
             <span v-if="isCollapsed(bucket) && active(bucket)" class="running" title="有会话正在执行或在等你回答"></span>
             <button
-              v-if="bucket.id !== UNGROUPED && bucket.id !== CHANNELS"
+              v-if="!isBuiltin(bucket.id)"
               class="icon tiny"
               title="删除分组（会话会回到未分组）"
               @click="removeGroup(bucket.id, bucket.name)"

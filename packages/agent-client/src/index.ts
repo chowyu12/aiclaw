@@ -2,9 +2,12 @@ export { AgentTransport } from "./transport.js";
 export type { TransportOptions, RpcError, JsonValue } from "./transport.js";
 export { ClawAgentClient } from "./client.js";
 export { MODEL_ROLES } from "./protocol.js";
-export type { PendingApproval, PendingUserInput, ClientEvents } from "./client.js";
+export type { PendingApproval, PendingUserInput, PendingScheduleAction, ClientEvents } from "./client.js";
 export type {
   EmailTestResult,
+  ScheduleRequestParams,
+  ScheduleResult,
+  ScheduleTaskInput,
   AudioTranscribeParams,
   ChannelConnectionView,
   UsageSummary,

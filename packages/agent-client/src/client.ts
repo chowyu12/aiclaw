@@ -23,6 +23,8 @@ import type {
   ProviderView,
   SearchEngineCreateParams,
   EmailTestResult,
+  ScheduleRequestParams,
+  ScheduleResult,
   AudioTranscribeParams,
   SearchEngineTestResult,
   SearchEngineUpdateParams,
@@ -70,12 +72,20 @@ export interface PendingApproval extends ApprovalRequestParams {
   id: number | string;
 }
 
+/** 模型要建、列、删定时任务。宿主做完回 respond，做不了回 fail。 */
+export interface PendingScheduleAction {
+  request: ScheduleRequestParams;
+  respond: (result: ScheduleResult) => void;
+  fail: (message: string) => void;
+}
+
 export interface ClientEvents {
   notification: (notification: AgentNotification) => void;
   approval: (request: PendingApproval) => void;
   computer: (action: PendingComputerAction) => void;
   browser: (action: PendingBrowserAction) => void;
   userInput: (question: PendingUserInput) => void;
+  schedule: (action: PendingScheduleAction) => void;
   stderr: (chunk: string) => void;
   exit: (code: number | null) => void;
 }
@@ -121,6 +131,14 @@ export class ClawAgentClient extends EventEmitter {
           respond: (result: BrowserResult) => this.transport.respond(id, result),
           fail: (message: string) =>
             this.transport.respondError(id, { code: -32000, message }),
+        });
+        return;
+      }
+      if (method === "schedule/request") {
+        this.emit("schedule", {
+          request: params as ScheduleRequestParams,
+          respond: (result: ScheduleResult) => this.transport.respond(id, result),
+          fail: (message: string) => this.transport.respondError(id, { code: -32000, message }),
         });
         return;
       }

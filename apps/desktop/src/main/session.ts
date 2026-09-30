@@ -12,6 +12,7 @@ import {
   ClawAgentClient,
   type AgentNotification,
   type PendingUserInput,
+  type PendingScheduleAction,
   type ChannelConnectionView,
   type UsageSummary,
   type ApprovalPolicy,
@@ -121,6 +122,8 @@ export interface SessionManagerEvents {
   browserBridge: (view: BrowserBridgeView) => void;
   /** 模型向用户提了一个问题（ask_user），等回答。 */
   userInput: (question: PendingUserInput) => void;
+  /** 模型要建、列、删定时任务（schedule_* 工具）。 */
+  schedule: (action: PendingScheduleAction) => void;
 }
 
 export declare interface SessionManager {
@@ -204,6 +207,8 @@ export class SessionManager extends EventEmitter {
     client.on("notification", (n: AgentNotification) => this.emit("event", n.method, n.params));
     client.on("approval", (request) => this.emit("approval", request));
     client.on("userInput", (question) => this.emit("userInput", question));
+    // 模型要建、列、删定时任务：调度器在主进程，交给它。
+    client.on("schedule", (action) => this.emit("schedule", action));
     // 屏幕操作在宿主这边做：截屏要走应用自己的屏幕录制授权，输入要按平台
     // 合成事件，而且只有宿主知道「最前面的应用是不是我自己」。
     // 浏览器窗口是宿主的：加载、点、填、截图都在这边做，内核只发请求。
@@ -373,6 +378,23 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * 给定时任务开一个后台会话并发出第一条消息。
+   *
+   * 与 startSession 的区别：不动「当前会话」那几样状态（工作区、挂载结果）——用户
+   * 可能正在看着别的会话，定时任务在旁边跑，不该把他那边的技能发现和状态栏换掉。
+   */
+  async runBackgroundSession(input: { workspace: string; title: string; text: string }): Promise<string> {
+    await this.start();
+    const client = this.requireClient();
+    const params = await this.buildParams(this.store.readConfig(), input.workspace);
+    params.title = input.title;
+    if (params.workdir) mkdirSync(params.workdir, { recursive: true });
+    const result = await client.sessionStart(params);
+    await client.turnStart(result.sessionId, input.text);
+    return result.sessionId;
+  }
+
+  /**
    * 恢复一个会话，连同它的历史一起返回。
    *
    * 历史必须一起给：内核存的是给模型看的消息，宿主自己没留时间线，
@@ -511,6 +533,7 @@ export class SessionManager extends EventEmitter {
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
       enableEmail: contributions.email === true,
+      enableSchedule: true,
       enableBrowser: config.browser === true,
       roles: toRoles(config),
       modelSeesImages: await this.modelSeesImages(config),
@@ -606,6 +629,7 @@ export class SessionManager extends EventEmitter {
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
       enableEmail: contributions.email === true,
+      enableSchedule: true,
       enableBrowser: config.browser === true,
       disableSandbox: config.sandboxCommands === false,
       codeMode: config.codeMode === true,

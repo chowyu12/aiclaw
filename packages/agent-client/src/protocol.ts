@@ -94,6 +94,10 @@ export interface SessionStartParams {
   enableBrowser?: boolean;
   /** 挂上邮件工具（邮件插件启用时）。 */
   enableEmail?: boolean;
+  /** 挂上定时任务工具。只给用户自己的会话。 */
+  enableSchedule?: boolean;
+  /** 会话一开始的标题；空的话由第一条消息生成。 */
+  title?: string;
   /**
    * 技能目录列表。每一项是一个技能自己的目录（里面直接放 SKILL.md），
    * 不是装着若干技能的根目录——技能散在好几个地方且结构各异，
@@ -126,6 +130,7 @@ export interface SessionRefresh {
   enableBrowser?: boolean;
   /** 挂上邮件工具（邮件插件启用时）。 */
   enableEmail?: boolean;
+  enableSchedule?: boolean;
   disableSandbox: boolean;
   codeMode: boolean;
   approvalPolicy: ApprovalPolicy;
@@ -676,4 +681,27 @@ export interface EmailTestResult {
   imapPort?: number;
   smtpHost?: string;
   smtpPort?: number;
+}
+
+/** 模型对定时任务的一次操作（schedule/request）。调度器在宿主。 */
+export interface ScheduleRequestParams {
+  sessionId: string;
+  action: "list" | "create" | "delete";
+  id?: string;
+  task?: ScheduleTaskInput;
+}
+
+export interface ScheduleTaskInput {
+  name: string;
+  prompt: string;
+  kind: "daily" | "weekdays" | "weekly" | "interval" | "once";
+  time?: string;
+  days?: number[];
+  everyMinutes?: number;
+  at?: string;
+  workspace?: string;
+}
+
+export interface ScheduleResult {
+  text: string;
 }

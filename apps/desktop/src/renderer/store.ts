@@ -33,6 +33,7 @@ import type {
   SessionSummaryView,
   UpdateStatusView,
 } from "../shared/types";
+import type { ScheduledTaskInput, ScheduledTaskView } from "../shared/schedule";
 
 declare global {
   interface Window {
@@ -44,7 +45,7 @@ const EMPTY_TIMELINE: TimelineEntry[] = [];
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage",
+  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
@@ -68,6 +69,8 @@ const state = reactive({
     return this.live[this.sessionId]?.busy ?? false;
   },
   approvals: [] as ApprovalPayload[],
+  /** 定时任务。主进程改了会推过来（建、改、删、跑完）。 */
+  schedules: [] as ScheduledTaskView[],
   /** 模型提的、还没回答的问题（ask_user）。按会话显示在对话里。 */
   questions: [] as QuestionPayload[],
   config: null as AppConfigView | null,
@@ -218,6 +221,14 @@ export const actions = {
         }
       }
     });
+    window.aiclaw.on.schedules((payload) => {
+      state.schedules = payload as ScheduledTaskView[];
+    });
+    // 点了定时任务的系统通知：打开那次运行开的会话。
+    window.aiclaw.on.openSession((payload) => {
+      void actions.openSession(String(payload));
+    });
+    void actions.loadSchedules();
     window.aiclaw.on.approval((payload) => {
       const approval = payload as ApprovalPayload;
       if (!state.approvals.some((item) => item.id === approval.id)) state.approvals.push(approval);
@@ -715,6 +726,39 @@ export const actions = {
     }
   },
 
+  async loadSchedules(): Promise<void> {
+    try {
+      state.schedules = (await window.aiclaw.schedules.list()) as ScheduledTaskView[];
+    } catch {
+      // 读不到就是空列表；设置页会再读一次。
+    }
+  },
+
+  /** 新建或修改定时任务。出错抛给表单，写在保存按钮旁边。 */
+  async saveSchedule(input: ScheduledTaskInput): Promise<ScheduledTaskView> {
+    const saved = (await window.aiclaw.schedules.save(input)) as ScheduledTaskView;
+    await actions.loadSchedules();
+    return saved;
+  },
+
+  async deleteSchedule(id: string): Promise<void> {
+    await window.aiclaw.schedules.remove(id);
+    await actions.loadSchedules();
+  },
+
+  async toggleSchedule(id: string, enabled: boolean): Promise<void> {
+    await window.aiclaw.schedules.toggle(id, enabled);
+    await actions.loadSchedules();
+  },
+
+  /** 立刻跑一次，返回开出来的会话 id。 */
+  async runScheduleNow(id: string): Promise<string> {
+    const sessionId = (await window.aiclaw.schedules.runNow(id)) as string;
+    await actions.loadSchedules();
+    await actions.refreshSessions();
+    return sessionId;
+  },
+
   /** 邮件插件：用已存的配置试着登录收信、发信服务器。 */
   async testEmail(uuid: string): Promise<EmailTestView> {
     return (await window.aiclaw.plugins.testEmail(uuid)) as EmailTestView;
@@ -1068,7 +1112,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage"): void {
+  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules"): void {
     state.view = view;
   },
 

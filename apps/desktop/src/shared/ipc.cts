@@ -56,6 +56,11 @@ export const IPC = {
   connectionDelete: "connection:delete",
   emailTest: "plugin:emailTest",
   voicePermission: "voice:permission",
+  scheduleList: "schedule:list",
+  scheduleSave: "schedule:save",
+  scheduleDelete: "schedule:delete",
+  scheduleToggle: "schedule:toggle",
+  scheduleRunNow: "schedule:runNow",
   voiceTranscribe: "voice:transcribe",
   wechatLoginStart: "wechat:loginStart",
   wechatLoginPoll: "wechat:loginPoll",
@@ -111,5 +116,9 @@ export const IPC = {
   onRuntimeStatus: "push:runtimeStatus",
   onBrowserBridge: "push:browserBridge",
   onQuestion: "push:question",
+  /** 定时任务列表变了（建、改、删、跑完）。 */
+  onSchedules: "push:schedules",
+  /** 要渲染层打开某个会话（点了定时任务的系统通知）。 */
+  onOpenSession: "push:openSession",
   onUpdateProgress: "push:updateProgress",
 } as const;

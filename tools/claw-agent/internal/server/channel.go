@@ -244,6 +244,12 @@ func (e *channelEmitter) RequestUserInput(context.Context, protocol.UserInputReq
 	return protocol.UserInputResponse{}, errors.New("这个会话里没有人能点选项卡片；把问题直接写在回复里问对方")
 }
 
+// RequestSchedule 同理：外部的人不该能在用户的电脑上排定时任务。通道会话本来就不挂
+// 这组工具，这里再挡一次。
+func (e *channelEmitter) RequestSchedule(context.Context, protocol.ScheduleRequestParams) (protocol.ScheduleResult, error) {
+	return protocol.ScheduleResult{}, errors.New("通道会话不能管理定时任务")
+}
+
 // RequestBrowser 同理：浏览器窗口在桌面上，外部用户不该驾驭它。
 func (e *channelEmitter) RequestBrowser(context.Context, protocol.BrowserRequestParams) (protocol.BrowserResult, error) {
 	return protocol.BrowserResult{}, errors.New("通道会话不能操作浏览器")

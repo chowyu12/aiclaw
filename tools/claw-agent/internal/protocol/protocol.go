@@ -87,7 +87,41 @@ const (
 	// RequestUserInput 请用户回答模型提的一个问题（ask_user 工具）。宿主在对话里
 	// 显示一张带选项的卡片，用户选了、写了或跳过之后回应。
 	RequestUserInput = "userInput/request"
+	// RequestSchedule 请宿主管理定时任务（建、列、删）。调度在宿主：到点时由宿主用
+	// 当前的应用配置开一个新会话发出任务，内核只翻译工具调用。
+	RequestSchedule = "schedule/request"
 )
+
+// ScheduleRequestParams 是模型对定时任务的一次操作。
+type ScheduleRequestParams struct {
+	SessionID string `json:"sessionId"`
+	/** list / create / delete */
+	Action string `json:"action"`
+	/** delete 时给。 */
+	ID   string             `json:"id,omitempty"`
+	Task *ScheduleTaskInput `json:"task,omitempty"`
+}
+
+// ScheduleTaskInput 是新建的定时任务。时间规则与宿主 shared/schedule.ts 一致。
+type ScheduleTaskInput struct {
+	Name   string `json:"name"`
+	Prompt string `json:"prompt"`
+	/** daily / weekdays / weekly / interval / once */
+	Kind string `json:"kind"`
+	/** HH:MM */
+	Time string `json:"time,omitempty"`
+	/** 0 = 周日 … 6 = 周六 */
+	Days         []int  `json:"days,omitempty"`
+	EveryMinutes int    `json:"everyMinutes,omitempty"`
+	At           string `json:"at,omitempty"`
+	/** 任务跑在哪个工作区；空表示不设。 */
+	Workspace string `json:"workspace,omitempty"`
+}
+
+// ScheduleResult 是宿主的回应：写好给模型看的一段话。
+type ScheduleResult struct {
+	Text string `json:"text"`
+}
 
 // UserInputOption 是问题的一个选项。
 type UserInputOption struct {
@@ -700,6 +734,10 @@ type SessionStartParams struct {
 	 * 没配邮箱时把它当成关，所以模型看不到一组永远报「没配置」的工具。
 	 */
 	EnableEmail bool `json:"enableEmail,omitempty"`
+	/** 是否挂上定时任务工具（建、列、删）。只给用户自己的会话。 */
+	EnableSchedule bool `json:"enableSchedule,omitempty"`
+	/** 会话一开始的标题。空的话由第一条消息生成；定时任务用它写上任务名。 */
+	Title string `json:"title,omitempty"`
 	/**
 	 * 对话之外的角色模型（看图、听写、朗读、画图）。见 roles.go。
 	 * 没配的角色对应的工具不注册——模型看不到一个用不了的工具。
@@ -745,6 +783,7 @@ type SessionRefresh struct {
 	EnableComputerUse bool                       `json:"enableComputerUse"`
 	EnableBrowser     bool                       `json:"enableBrowser,omitempty"`
 	EnableEmail       bool                       `json:"enableEmail,omitempty"`
+	EnableSchedule    bool                       `json:"enableSchedule,omitempty"`
 	DisableSandbox    bool                       `json:"disableSandbox"`
 	CodeMode          bool                       `json:"codeMode"`
 	ApprovalPolicy    ApprovalPolicy             `json:"approvalPolicy"`

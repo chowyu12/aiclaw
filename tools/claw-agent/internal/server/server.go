@@ -1075,6 +1075,24 @@ func (e *emitter) RequestUserInput(
 	return response, nil
 }
 
+// RequestSchedule 请宿主管理定时任务。都是改配置文件，几秒内就该回来。
+func (e *emitter) RequestSchedule(
+	ctx context.Context,
+	params protocol.ScheduleRequestParams,
+) (protocol.ScheduleResult, error) {
+	actionCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	raw, err := e.server.requestHost(actionCtx, protocol.RequestSchedule, params)
+	if err != nil {
+		return protocol.ScheduleResult{}, err
+	}
+	var result protocol.ScheduleResult
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return protocol.ScheduleResult{}, fmt.Errorf("定时任务回应格式不对：%w", err)
+	}
+	return result, nil
+}
+
 // describeDials 把各个 server 的耗时排成一行。
 //
 // 并发挂载之后总耗时等于最慢的那一个，只报「4 个」说不出是谁——实测出现过一次
