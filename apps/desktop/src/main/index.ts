@@ -263,6 +263,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.channelBindings, () => sessions.channelBindings());
   ipcMain.handle(IPC.channelAuthorize, (_event, params) => sessions.authorizeChannel(params));
   ipcMain.handle(IPC.channelRevoke, (_event, key) => sessions.revokeChannel(key));
+  ipcMain.handle(IPC.emailTest, (_event, uuid: string) => sessions.emailTest(uuid));
   ipcMain.handle(IPC.wechatLoginStart, () => sessions.wechatLoginStart());
   ipcMain.handle(IPC.wechatLoginPoll, (_event, input: { uuid: string; token: string; connectionId?: string }) =>
     sessions.wechatLoginPoll(input.uuid, input.token, input.connectionId ?? ""),

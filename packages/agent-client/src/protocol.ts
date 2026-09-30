@@ -92,6 +92,8 @@ export interface SessionStartParams {
   enableComputerUse?: boolean;
   /** 浏览器工具：宿主开一个独立窗口，模型按元素编号操作。默认关。 */
   enableBrowser?: boolean;
+  /** 挂上邮件工具（邮件插件启用时）。 */
+  enableEmail?: boolean;
   /**
    * 技能目录列表。每一项是一个技能自己的目录（里面直接放 SKILL.md），
    * 不是装着若干技能的根目录——技能散在好几个地方且结构各异，
@@ -122,6 +124,8 @@ export interface SessionRefresh {
   enableComputerUse: boolean;
   /** 浏览器工具：宿主开一个独立窗口，模型按元素编号操作。默认关。 */
   enableBrowser?: boolean;
+  /** 挂上邮件工具（邮件插件启用时）。 */
+  enableEmail?: boolean;
   disableSandbox: boolean;
   codeMode: boolean;
   approvalPolicy: ApprovalPolicy;
@@ -297,6 +301,8 @@ export interface PluginContributions {
   mcpServers: Record<string, MCPServerConfig>;
   skills: PluginSkill[];
   computerUse: boolean;
+  /** 启用了邮件插件。 */
+  email?: boolean;
 }
 
 export interface PluginSkill {
@@ -652,4 +658,14 @@ export interface UsageSummary {
   sessions: { sessionId: string; title: string; total: number; calls: number }[];
   /** 有记录以来最早的一条（毫秒）。0 表示还没有任何记录。 */
   firstAt: number;
+}
+
+/** 「测试邮箱」的结果。连得上时带回实际用的服务器。 */
+export interface EmailTestResult {
+  ok: boolean;
+  error?: string;
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
 }

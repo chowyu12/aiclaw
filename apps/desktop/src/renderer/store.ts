@@ -17,6 +17,7 @@ import type {
   QuestionPayload,
   ChannelBindingView,
   ChannelStatusView,
+  EmailTestView,
   McpProbeView,
   McpServerView,
   PluginConfigFieldView,
@@ -697,6 +698,26 @@ export const actions = {
     await actions.loadPluginConfig(uuid, connectionId);
     await actions.loadPlugins();
     await actions.refreshChannels();
+  },
+
+  /**
+   * 邮件插件：把表单里改过的几项写进配置。出错直接抛给调用方——表单要把原因摆在
+   * 按钮旁边，而不是顶上的错误条。
+   */
+  async saveEmailConfig(uuid: string, changes: Record<string, string>): Promise<void> {
+    try {
+      for (const [key, value] of Object.entries(changes)) {
+        await window.aiclaw.plugins.setConfig({ uuid, key, value, connectionId: "" });
+      }
+    } finally {
+      await actions.loadPluginConfig(uuid);
+      await actions.loadPlugins();
+    }
+  },
+
+  /** 邮件插件：用已存的配置试着登录收信、发信服务器。 */
+  async testEmail(uuid: string): Promise<EmailTestView> {
+    return (await window.aiclaw.plugins.testEmail(uuid)) as EmailTestView;
   },
 
   /** 给渠道插件加一个连接（一个企微机器人、一个微信号）。返回新连接的 id。 */

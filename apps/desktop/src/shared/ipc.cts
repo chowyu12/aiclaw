@@ -54,6 +54,7 @@ export const IPC = {
   connectionCreate: "connection:create",
   connectionRename: "connection:rename",
   connectionDelete: "connection:delete",
+  emailTest: "plugin:emailTest",
   wechatLoginStart: "wechat:loginStart",
   wechatLoginPoll: "wechat:loginPoll",
 

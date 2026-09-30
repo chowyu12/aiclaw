@@ -135,6 +135,8 @@ type Session struct {
 	// 当前配置，与这份一比就知道要不要重挂——不比的话，已经在内核内存里的
 	// 会话会一直用着挂载那一刻的配置。
 	applied protocol.SessionRefresh
+	// mailbox 取邮箱账号，给邮件工具用。nil 表示不挂邮件工具。
+	mailbox Mailbox
 }
 
 // refreshOf 取出配置里「跟着宿主配置走」的那几项。
@@ -145,6 +147,7 @@ func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 		MemoryFile:        config.MemoryFile,
 		EnableComputerUse: config.EnableComputerUse,
 		EnableBrowser:     config.EnableBrowser,
+		EnableEmail:       config.EnableEmail,
 		DisableSandbox:    config.DisableSandbox,
 		CodeMode:          config.CodeMode,
 		ApprovalPolicy:    config.ApprovalPolicy,
@@ -169,7 +172,7 @@ func StaticKey(key string) KeyResolver {
 //
 // MCP server 挂载失败不让整个会话起不来——那个 server 的工具缺席，
 // 其余照常，失败原因放进 mcpStatus 让宿主展示。
-func New(ctx context.Context, id string, config protocol.SessionStartParams, keyFor KeyResolver) (*Session, error) {
+func New(ctx context.Context, id string, config protocol.SessionStartParams, keyFor KeyResolver, options ...Option) (*Session, error) {
 	// 工作区可以没有：那时相对路径按主目录解析，写之前一律问一句。
 	// 早先这里是「没配工作目录就起不来」，而用户刚打开应用还没想好在哪儿干活，
 	// 却被一个配置项挡在门外。
@@ -212,6 +215,9 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		mcpMounted: map[string]int{},
 		shells:     tools.NewShellPool(),
 	}
+	for _, option := range options {
+		option(session)
+	}
 
 	mountStarted := time.Now()
 	session.mountAllMCP(ctx, config.MCPServers)
@@ -226,6 +232,9 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	}
 	// 浏览器工具同样收进 exec：翻十页搜索结果写成一段循环，比十次来回省得多。
 	if err := session.registerBrowserTools(); err != nil {
+		return nil, err
+	}
+	if err := session.registerEmailTools(ctx); err != nil {
 		return nil, err
 	}
 
@@ -1150,6 +1159,7 @@ func Load(
 	id string,
 	keyFor KeyResolver,
 	refresh *protocol.SessionRefresh,
+	options ...Option,
 ) (*Session, error) {
 	record, err := db.Load(ctx, id)
 	if err != nil {
@@ -1171,6 +1181,7 @@ func Load(
 		config.MemoryFile = refresh.MemoryFile
 		config.EnableComputerUse = refresh.EnableComputerUse
 		config.EnableBrowser = refresh.EnableBrowser
+		config.EnableEmail = refresh.EnableEmail
 		config.DisableSandbox = refresh.DisableSandbox
 		config.CodeMode = refresh.CodeMode
 		config.Roles = refresh.Roles
@@ -1186,7 +1197,7 @@ func Load(
 		}
 	}
 
-	session, err := New(ctx, record.ID, config, keyFor)
+	session, err := New(ctx, record.ID, config, keyFor, options...)
 	if err != nil {
 		return nil, err
 	}

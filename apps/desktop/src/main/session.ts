@@ -31,6 +31,7 @@ import {
   type ProviderView,
   type RoleModels,
   type SearchEngineCreateParams,
+  type EmailTestResult,
   type SearchEngineTestResult,
   type SearchEngineUpdateParams,
   type SearchEngineView,
@@ -504,6 +505,7 @@ export class SessionManager extends EventEmitter {
       skillDirs: this.skills.enabledDirs(),
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
+      enableEmail: contributions.email === true,
       enableBrowser: config.browser === true,
       roles: toRoles(config),
       modelSeesImages: await this.modelSeesImages(config),
@@ -598,6 +600,7 @@ export class SessionManager extends EventEmitter {
       skillDirs: this.skills.enabledDirs(),
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
+      enableEmail: contributions.email === true,
       enableBrowser: config.browser === true,
       disableSandbox: config.sandboxCommands === false,
       codeMode: config.codeMode === true,
@@ -727,6 +730,10 @@ export class SessionManager extends EventEmitter {
 
   async revokeChannel(key: ChannelBindingKey): Promise<void> {
     await this.requireClient().channelRevoke(key);
+  }
+
+  emailTest(uuid: string): Promise<EmailTestResult> {
+    return this.requireClient().emailTest(uuid);
   }
 
   wechatLoginStart(): Promise<WeChatLoginStartResult> {

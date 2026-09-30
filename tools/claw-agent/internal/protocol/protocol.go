@@ -55,6 +55,7 @@ const (
 	MethodSearchUpdate     = "search/update"
 	MethodSearchDelete     = "search/delete"
 	MethodSearchTest       = "search/test"
+	MethodEmailTest        = "plugin/emailTest"
 	MethodShutdown         = "shutdown"
 )
 
@@ -461,6 +462,18 @@ type PluginContributions struct {
 	Skills     []PluginSkill              `json:"skills"`
 	/** 有启用中的插件贡献了 computer use。 */
 	ComputerUse bool `json:"computerUse"`
+	/** 启用了邮件插件（且填好了邮箱）。 */
+	Email bool `json:"email,omitempty"`
+}
+
+// EmailTestResult 是「测试邮箱」的结果：连得上时带回实际用的服务器，界面上好让用户看见。
+type EmailTestResult struct {
+	OK       bool   `json:"ok"`
+	Error    string `json:"error,omitempty"`
+	IMAPHost string `json:"imapHost,omitempty"`
+	IMAPPort int    `json:"imapPort,omitempty"`
+	SMTPHost string `json:"smtpHost,omitempty"`
+	SMTPPort int    `json:"smtpPort,omitempty"`
 }
 
 // PluginSkill 是插件带来的一个技能目录（里面直接放 SKILL.md）。
@@ -668,6 +681,11 @@ type SessionStartParams struct {
 	 */
 	EnableBrowser bool `json:"enableBrowser,omitempty"`
 	/**
+	 * 是否挂上邮件工具（列信、读信、发信、回信）。宿主按设置传（默认开）；内核在
+	 * 没配邮箱时把它当成关，所以模型看不到一组永远报「没配置」的工具。
+	 */
+	EnableEmail bool `json:"enableEmail,omitempty"`
+	/**
 	 * 对话之外的角色模型（看图、听写、朗读、画图）。见 roles.go。
 	 * 没配的角色对应的工具不注册——模型看不到一个用不了的工具。
 	 */
@@ -711,6 +729,7 @@ type SessionRefresh struct {
 	MemoryFile        string                     `json:"memoryFile"`
 	EnableComputerUse bool                       `json:"enableComputerUse"`
 	EnableBrowser     bool                       `json:"enableBrowser,omitempty"`
+	EnableEmail       bool                       `json:"enableEmail,omitempty"`
 	DisableSandbox    bool                       `json:"disableSandbox"`
 	CodeMode          bool                       `json:"codeMode"`
 	ApprovalPolicy    ApprovalPolicy             `json:"approvalPolicy"`

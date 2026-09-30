@@ -425,6 +425,9 @@ func (s *Service) Contributions(ctx context.Context) (protocol.PluginContributio
 			if strings.TrimSpace(tool.Provider) == computerUseProvider {
 				result.ComputerUse = true
 			}
+			if strings.TrimSpace(tool.Provider) == emailProvider {
+				result.Email = true
+			}
 		}
 	}
 	skillItems, err := s.db.ListSkills(ctx)

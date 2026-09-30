@@ -22,6 +22,7 @@ import type {
   ProviderUpdateParams,
   ProviderView,
   SearchEngineCreateParams,
+  EmailTestResult,
   SearchEngineTestResult,
   SearchEngineUpdateParams,
   SearchEngineView,
@@ -350,6 +351,12 @@ export class ClawAgentClient extends EventEmitter {
   channelMedia(roles: RoleModels): Promise<unknown> {
     this.assertReady();
     return this.transport.request("channel/media", { roles });
+  }
+
+  /** 用邮件插件已存的配置试着登录收信、发信服务器。 */
+  emailTest(uuid: string): Promise<EmailTestResult> {
+    this.assertReady();
+    return this.transport.request<EmailTestResult>("plugin/emailTest", { uuid });
   }
 
   wechatLoginStart(): Promise<WeChatLoginStartResult> {

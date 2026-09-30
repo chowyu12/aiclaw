@@ -4,12 +4,12 @@ import { actions, modelChoices, pluginConfigKey, store } from "../store";
 import { describeError } from "../errors";
 
 /**
- * 插件页：随应用分发的三个（computer use、微信、企业微信）加用户从目录装的。
+ * 插件页：随应用分发的几个（computer use、邮件、微信、企业微信）加用户从目录装的。
  *
  * 一张卡片一个插件，收起时只看名字、来源、贡献了什么、开没开；点开是
  * 权限清单、配置项、以及通道插件特有的两块——连接状态与「谁在找它」（外部
- * 会话的授权）。**启用即授权**：启用那一步把声明的权限一次交出去，所以
- * 缺必填配置时内核会拒绝启用，原因摆到错误条上。
+ * 会话的授权）。**启用即授权**：启用那一步把声明的权限一次交出去。缺必填配置时
+ * 点「启用」不直接去撞内核的拒绝，而是展开卡片、把要填的摆出来，填好了再启用。
  *
  * 秘密只进不出：Key 类配置项存完只回「已配置」。微信不用手填——扫码登录后
  * 凭据由内核直接写进配置。
@@ -55,7 +55,111 @@ const renaming = reactive<Record<string, string>>({});
 const editing = reactive<Record<string, boolean>>({});
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
-onMounted(() => void actions.loadPlugins());
+// ---------- 邮件插件 ----------
+//
+// 邮箱的配置项有八个，大半不用填（服务器按邮箱域名自动识别），按原始键名一行行摆
+// 出来太吓人：这里给它一张专门的表单，地址与授权码在前，其余收进「高级」。
+
+const EMAIL_FIELDS: { key: string; label: string; placeholder: string; advanced?: boolean }[] = [
+  { key: "address", label: "邮箱地址", placeholder: "name@qq.com" },
+  { key: "password", label: "授权码", placeholder: "不是登录密码" },
+  { key: "name", label: "发件人名字", placeholder: "留空只显示地址" },
+  { key: "username", label: "登录名", placeholder: "留空用邮箱地址", advanced: true },
+  { key: "imap_host", label: "收信服务器（IMAP）", placeholder: "留空自动识别", advanced: true },
+  { key: "imap_port", label: "收信端口", placeholder: "993", advanced: true },
+  { key: "smtp_host", label: "发信服务器（SMTP）", placeholder: "留空自动识别", advanced: true },
+  { key: "smtp_port", label: "发信端口", placeholder: "465（587 走 STARTTLS）", advanced: true },
+];
+/** 邮件表单的草稿：打开卡片时从已存的配置填进来，秘密项除外。 */
+const emailDrafts = reactive<Record<string, string>>({});
+const emailResult = ref<{ ok: boolean; text: string } | null>(null);
+const emailBusy = ref(false);
+
+function isEmail(plugin: PluginRow): boolean {
+  return plugin.pluginId === "aiclaw.email";
+}
+
+function isComputerUse(plugin: PluginRow): boolean {
+  return plugin.pluginId === "aiclaw.computer-use";
+}
+
+async function openEmailForm(plugin: PluginRow): Promise<void> {
+  await actions.loadPluginConfig(plugin.uuid);
+  for (const field of configOf(plugin)) emailDrafts[field.key] = field.secret ? "" : field.value ?? "";
+  emailResult.value = null;
+}
+
+function emailField(plugin: PluginRow, key: string) {
+  return configOf(plugin).find((field) => field.key === key);
+}
+
+/** 保存改过的几项、测一次连接；测通了且插件还没开就顺手启用。 */
+async function saveEmail(plugin: PluginRow): Promise<void> {
+  const changes: Record<string, string> = {};
+  for (const { key } of EMAIL_FIELDS) {
+    const field = emailField(plugin, key);
+    const draft = (emailDrafts[key] ?? "").trim();
+    if (field?.secret) {
+      if (draft) changes[key] = draft;
+    } else if (draft !== (field?.value ?? "")) {
+      changes[key] = draft;
+    }
+  }
+  const hasAddress = (changes.address ?? emailField(plugin, "address")?.value ?? "") !== "";
+  const hasPassword = Boolean(changes.password) || Boolean(emailField(plugin, "password")?.isSet);
+  if (!hasAddress || !hasPassword) {
+    emailResult.value = { ok: false, text: "邮箱地址和授权码都要填" };
+    return;
+  }
+  emailBusy.value = true;
+  emailResult.value = { ok: true, text: "正在连接邮箱…" };
+  try {
+    await actions.saveEmailConfig(plugin.uuid, changes);
+    emailDrafts.password = "";
+    const result = await actions.testEmail(plugin.uuid);
+    if (!result.ok) {
+      emailResult.value = { ok: false, text: result.error || "连不上" };
+      return;
+    }
+    const servers = `收信 ${result.imapHost}:${result.imapPort} · 发信 ${result.smtpHost}:${result.smtpPort}`;
+    let text = `已连上（${servers}）`;
+    if (!plugin.enabled) {
+      await actions.togglePlugin(plugin.uuid, true);
+      text = `已连上并启用（${servers}）。助手现在就能收发邮件了。`;
+    }
+    // 重新从库里填一遍草稿：自动识别出来的服务器不回填，留空就是「自动」。
+    await openEmailForm(store.plugins.find((item) => item.uuid === plugin.uuid) ?? plugin);
+    emailResult.value = { ok: true, text };
+  } catch (error) {
+    emailResult.value = { ok: false, text: describeError(error) };
+  } finally {
+    emailBusy.value = false;
+  }
+}
+
+/**
+ * 点「启用」。还缺必填配置的插件先展开卡片让用户填（邮件插件填完点「测试并启用」），
+ * 不去撞内核的拒绝——那样只得到顶上一条错误。
+ */
+function onToggle(plugin: PluginRow, event: Event): void {
+  const input = event.target as HTMLInputElement;
+  if (input.checked && !isChannel(plugin) && plugin.missingConfig.length > 0) {
+    input.checked = false;
+    if (expanded.value !== plugin.uuid) toggleExpand(plugin);
+    needsSetup.value = plugin.uuid;
+    return;
+  }
+  void actions.togglePlugin(plugin.uuid, input.checked);
+}
+/** 点了启用、但还得先填配置的那个插件：卡片里给一句提示。 */
+const needsSetup = ref("");
+
+onMounted(async () => {
+  await actions.loadPlugins();
+  // 邮件插件收起时那一行显示邮箱地址，要先把它的配置读进来。
+  const email = store.plugins.find((plugin) => isEmail(plugin));
+  if (email) void actions.loadPluginConfig(email.uuid);
+});
 onUnmounted(() => clearTimeout(pollTimer));
 
 const choices = computed(() => modelChoices(store.providers));
@@ -113,6 +217,10 @@ function summary(plugin: PluginRow): string {
     const running = channelsOf(plugin).filter((c) => c.state === "running").length;
     return plugin.enabled ? `${total} 个连接 · ${running} 个已连接` : `${total} 个连接`;
   }
+  if (isEmail(plugin)) {
+    if (plugin.missingConfig.length > 0) return "还没填邮箱";
+    return emailField(plugin, "address")?.value || "已配置邮箱";
+  }
   if (plugin.missingConfig.length > 0) return `缺 ${plugin.missingConfig.join("、")}`;
   const parts: string[] = [];
   if (plugin.tools > 0) parts.push("宿主能力");
@@ -147,6 +255,8 @@ function toggleExpand(plugin: PluginRow): void {
   if (isChannel(plugin)) {
     void actions.refreshChannels();
     for (const connection of plugin.connections) void actions.loadPluginConfig(plugin.uuid, connection.uuid);
+  } else if (isEmail(plugin)) {
+    void openEmailForm(plugin);
   } else if (!store.pluginConfigs[plugin.uuid]) {
     void actions.loadPluginConfig(plugin.uuid);
   }
@@ -342,7 +452,7 @@ async function pollWeChat(): Promise<void> {
             <input
               type="checkbox"
               :checked="plugin.enabled"
-              @change="actions.togglePlugin(plugin.uuid, ($event.target as HTMLInputElement).checked)"
+              @change="onToggle(plugin, $event)"
             />
             启用
           </label>
@@ -362,7 +472,7 @@ async function pollWeChat(): Promise<void> {
                 {{ labelOf(permission) }}<code>{{ permission }}</code>
               </li>
             </ul>
-            <p v-if="plugin.tools > 0" class="note warn">
+            <p v-if="isComputerUse(plugin)" class="note warn">
               启用后模型能<strong>看见并操作整个屏幕</strong>，不只是工作目录——包括别的应用、
               系统设置、以及本应用自己的窗口。除截屏外每个动作都会请你确认；最前面的应用是
               AIClaw 自己时直接拒绝。macOS 还要在「隐私与安全性」里给屏幕录制与辅助功能授权，
@@ -370,9 +480,53 @@ async function pollWeChat(): Promise<void> {
             </p>
           </div>
 
+          <!-- 邮件：一张专门的表单，填完「测试并启用」。 -->
+          <div v-if="isEmail(plugin)" class="block">
+            <div class="block-head"><span class="block-title">邮箱</span></div>
+            <p v-if="needsSetup === plugin.uuid && !plugin.enabled" class="note">先填好邮箱地址和授权码，点「测试并启用」。</p>
+            <div class="email-form">
+              <label v-for="field in EMAIL_FIELDS.filter((item) => !item.advanced)" :key="field.key">
+                <span>
+                  {{ field.label }}
+                  <em v-if="field.key === 'password' && emailField(plugin, 'password')?.isSet" class="set">已配置</em>
+                </span>
+                <input
+                  v-model="emailDrafts[field.key]"
+                  :type="field.key === 'password' ? 'password' : 'text'"
+                  :placeholder="field.key === 'password' && emailField(plugin, 'password')?.isSet ? '留空表示不修改' : field.placeholder"
+                  :autocomplete="field.key === 'password' ? 'new-password' : 'off'"
+                  @keydown.enter="saveEmail(plugin)"
+                />
+              </label>
+              <p class="hint">
+                QQ、163、126 邮箱：在网页版「设置」里开启 IMAP/SMTP 服务，按提示生成授权码填在这里。
+                Gmail、iCloud、Outlook：生成「应用专用密码」。授权码只保存在本机，加密存放。
+              </p>
+              <details class="advanced">
+                <summary>高级：服务器与端口（一般不用填）</summary>
+                <label v-for="field in EMAIL_FIELDS.filter((item) => item.advanced)" :key="field.key">
+                  <span>{{ field.label }}</span>
+                  <input v-model="emailDrafts[field.key]" type="text" :placeholder="field.placeholder" autocomplete="off" />
+                </label>
+              </details>
+              <div class="row">
+                <button class="primary small" :disabled="emailBusy" @click="saveEmail(plugin)">
+                  {{ emailBusy ? "正在连接…" : plugin.enabled ? "保存并测试" : "测试并启用" }}
+                </button>
+                <span v-if="emailResult" class="result" :class="{ bad: !emailResult.ok }">{{ emailResult.text }}</span>
+              </div>
+            </div>
+            <p class="hint">
+              助手能列信、读信（读过的标成已读）、把附件存进工作区、发新信、回信。
+              <strong>每次发信、回信都会先请你确认</strong>收件人与内容；信里的内容一律当作外部资料，不当指令。
+              只在你自己的对话里可用，微信、企业微信那边来的会话碰不到你的邮箱。
+            </p>
+          </div>
+
           <!-- 配置项：秘密只进不出。渠道插件的配置在各自的连接里。 -->
-          <div v-if="!isChannel(plugin) && configOf(plugin).length > 0" class="block">
+          <div v-if="!isChannel(plugin) && !isEmail(plugin) && configOf(plugin).length > 0" class="block">
             <div class="block-head"><span class="block-title">配置</span></div>
+            <p v-if="needsSetup === plugin.uuid && !plugin.enabled" class="note">先填好标着「必填」的几项，再启用。</p>
             <div v-for="field in configOf(plugin)" :key="field.key" class="field">
               <label>
                 <span>
@@ -948,5 +1102,75 @@ button.small {
   color: var(--muted);
   font-size: 11.5px;
   line-height: 1.6;
+}
+/* 邮件表单 */
+.email-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 460px;
+}
+
+.email-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+}
+
+.email-form label > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.email-form em.set {
+  padding: 1px 7px;
+  border-radius: var(--r-full);
+  font-size: 10.5px;
+  font-style: normal;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.email-form .advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.email-form .advanced summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.email-form .advanced[open] summary {
+  margin-bottom: 8px;
+}
+
+.email-form .advanced label + label {
+  margin-top: 10px;
+}
+
+.email-form .row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.email-form .result {
+  font-size: 12px;
+  color: var(--accent);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.email-form .result.bad {
+  color: var(--danger);
 }
 </style>

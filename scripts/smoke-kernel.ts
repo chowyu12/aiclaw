@@ -45,7 +45,7 @@ async function main(): Promise<number> {
     const ids = plugins.map((p) => p.pluginId).sort();
     record(
       "内置插件同步进库且默认停用",
-      ids.join(",") === "aiclaw.computer-use,aiclaw.wechat,aiclaw.wecom" && plugins.every((p) => !p.enabled),
+      ids.join(",") === "aiclaw.computer-use,aiclaw.email,aiclaw.wechat,aiclaw.wecom" && plugins.every((p) => !p.enabled),
       ids.join(", "),
     );
     record("插件文件落在 <root>/plugins", existsSync(join(root, "plugins", "wechat", "plugin.json")));
@@ -108,6 +108,40 @@ async function main(): Promise<number> {
     await client.pluginToggle(cu.uuid, true);
     const after = await client.pluginContributions();
     record("启用 computer-use 插件即打开 computer use", !before.computerUse && after.computerUse);
+
+    // 邮件插件：没填邮箱不能启用；填了之后「测试」给出按域名识别的服务器，启用后贡献里 email 为真。
+    const email = plugins.find((p) => p.pluginId === "aiclaw.email")!;
+    let emailRefused = "";
+    try {
+      await client.pluginToggle(email.uuid, true);
+    } catch (error) {
+      emailRefused = String(error);
+    }
+    record("没填邮箱的邮件插件拒绝启用", emailRefused.includes("address") || emailRefused.includes("password"), emailRefused.slice(0, 80));
+    await client.pluginSetConfig(email.uuid, "address", "smoke@qq.com");
+    await client.pluginSetConfig(email.uuid, "password", "not-a-real-code");
+    // 端口指到本机一个没人听的口，测试必然失败——要验的是它失败得快、说得清。
+    await client.pluginSetConfig(email.uuid, "imap_host", "127.0.0.1");
+    await client.pluginSetConfig(email.uuid, "imap_port", "1");
+    const tested = await client.emailTest(email.uuid);
+    record(
+      "测试邮箱：连不上时说清楚，发信服务器按域名识别",
+      !tested.ok && (tested.error ?? "").includes("收信服务器") && tested.smtpHost === "smtp.qq.com" && tested.smtpPort === 465,
+      `${tested.error?.slice(0, 50)} · ${tested.smtpHost}:${tested.smtpPort}`,
+    );
+    await client.pluginToggle(email.uuid, true);
+    const withEmail = await client.pluginContributions();
+    record("启用邮件插件后贡献里有邮件", withEmail.email === true && after.email !== true);
+    const mailSession = await client.sessionStart({
+      model: { providerId: provider.id, baseUrl: "", model: "m1" },
+      approvalPolicy: "never",
+      enableEmail: true,
+    });
+    record(
+      "邮件插件开着的会话挂上邮件工具",
+      ["email_list", "email_read", "email_attachment", "email_send", "email_reply"].every((name) => mailSession.tools.includes(name)),
+      mailSession.tools.filter((name) => name.startsWith("email_")).join(", "),
+    );
 
     // 会话按 providerId 选模型服务；端点打不通，但错误应在开会话之后（挂载阶段不打模型）。
     const session = await client.sessionStart({

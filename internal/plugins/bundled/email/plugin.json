@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "id": "aiclaw.email",
+  "name": "邮件",
+  "version": "0.1.0",
+  "description": "让助手用你的邮箱收发邮件：列信、读信、存附件、发新信、回复。看信不问你；每次发信、回信都会先把收件人和内容摆出来请你确认。",
+  "author": "aiclaw",
+  "permissions": ["network.access", "secrets.read", "filesystem.read", "filesystem.write"],
+  "config": {
+    "address": { "type": "string", "required": true, "description": "邮箱地址" },
+    "password": { "type": "string", "required": true, "secret": true, "description": "授权码 / 应用密码（多数邮箱不能用登录密码），仅保存在本机数据库" },
+    "name": { "type": "string", "description": "发件人名字，留空只显示地址" },
+    "username": { "type": "string", "description": "登录名，留空用邮箱地址" },
+    "imap_host": { "type": "string", "description": "收信（IMAP）服务器，留空按邮箱自动识别" },
+    "imap_port": { "type": "string", "description": "收信端口，留空为 993" },
+    "smtp_host": { "type": "string", "description": "发信（SMTP）服务器，留空按邮箱自动识别" },
+    "smtp_port": { "type": "string", "description": "发信端口，留空为 465" }
+  },
+  "contributes": {
+    "tools": [
+      {
+        "provider": "builtin:email",
+        "names": ["email_list", "email_read", "email_attachment", "email_send", "email_reply"]
+      }
+    ]
+  }
+}

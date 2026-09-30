@@ -242,7 +242,7 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		protocol.MethodPluginContrib, protocol.MethodChannelStatus, protocol.MethodChannelBindings,
 		protocol.MethodChannelAuthorize, protocol.MethodChannelRevoke,
 		protocol.MethodConnectionCreate, protocol.MethodConnectionRename, protocol.MethodConnectionDelete,
-		protocol.MethodWeChatLoginStart, protocol.MethodWeChatLoginPoll:
+		protocol.MethodWeChatLoginStart, protocol.MethodWeChatLoginPoll, protocol.MethodEmailTest:
 		s.handlePlugin(ctx, f)
 	case protocol.MethodSearchList, protocol.MethodSearchCreate, protocol.MethodSearchUpdate,
 		protocol.MethodSearchDelete, protocol.MethodSearchTest:
@@ -348,6 +348,16 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 	}
 }
 
+// sessionOptions 是用户会话（不含通道会话）建起来时要接上的东西。
+//
+// 邮箱只接给用户自己的会话：通道会话的另一头是外部的人，不该能让助手去翻用户的信箱。
+func (s *Server) sessionOptions(id string) []agent.Option {
+	if s.plugins == nil || strings.HasPrefix(id, channelSessionPrefix) {
+		return nil
+	}
+	return []agent.Option{agent.WithMailbox(s.plugins.EmailAccount)}
+}
+
 func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 	var params protocol.SessionStartParams
 	if err := json.Unmarshal(f.Params, &params); err != nil {
@@ -356,7 +366,7 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 	}
 	id := fmt.Sprintf("s_%d", time.Now().UnixNano())
 	started := time.Now()
-	session, err := agent.New(ctx, id, params, s.keyFor)
+	session, err := agent.New(ctx, id, params, s.keyFor, s.sessionOptions(id)...)
 	if err != nil {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
@@ -413,7 +423,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		s.dropSession(params.SessionID)
 	}
 	loadStarted := time.Now()
-	session, err := agent.Load(ctx, s.db, params.SessionID, s.keyFor, params.Refresh)
+	session, err := agent.Load(ctx, s.db, params.SessionID, s.keyFor, params.Refresh, s.sessionOptions(params.SessionID)...)
 	if err != nil {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
@@ -765,6 +775,13 @@ func (s *Server) handlePlugin(ctx context.Context, f frame) {
 			return
 		}
 		s.writeResult(f.ID, result)
+	case protocol.MethodEmailTest:
+		var params protocol.PluginUUIDParams
+		if err := json.Unmarshal(f.Params, &params); err != nil || params.UUID == "" {
+			s.writeError(f.ID, codeInvalidParams, "invalid params")
+			return
+		}
+		s.writeResult(f.ID, s.plugins.TestEmail(ctx, params.UUID))
 	case protocol.MethodWeChatLoginPoll:
 		var params protocol.WeChatLoginPollParams
 		if err := json.Unmarshal(f.Params, &params); err != nil {

@@ -8,7 +8,7 @@ import (
 	"io/fs"
 )
 
-//go:embed computer-use wecom wechat
+//go:embed computer-use email wecom wechat
 var bundles embed.FS
 
 // FS returns the bundled plugin tree.

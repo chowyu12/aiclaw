@@ -179,6 +179,17 @@ export interface PluginContributionsView {
   mcpServers: Record<string, { command?: string; url?: string }>;
   skills: { dir: string; pluginName: string; pluginUuid: string }[];
   computerUse: boolean;
+  email?: boolean;
+}
+
+/** 「测试邮箱」的结果。 */
+export interface EmailTestView {
+  ok: boolean;
+  error?: string;
+  imapHost?: string;
+  imapPort?: number;
+  smtpHost?: string;
+  smtpPort?: number;
 }
 
 /** 试连一个 MCP server 的结果。连不上不算错误，原因在 error 里。 */

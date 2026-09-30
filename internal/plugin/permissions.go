@@ -28,6 +28,10 @@ type Provider struct {
 // providers is the registry of declared bundled providers.
 var providers = map[string]Provider{
 	"builtin:computer_use": {Requires: []string{skills.PermissionComputerControl, skills.PermissionFilesystemWrite}},
+	"builtin:email": {Requires: []string{
+		skills.PermissionNetworkAccess, skills.PermissionSecretsRead,
+		skills.PermissionFilesystemRead, skills.PermissionFilesystemWrite,
+	}},
 	"builtin:wechat": {Requires: []string{
 		skills.PermissionNetworkAccess, skills.PermissionChannelReceive,
 		skills.PermissionChannelSend, skills.PermissionSecretsRead,

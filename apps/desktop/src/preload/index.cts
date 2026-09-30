@@ -60,6 +60,8 @@ const api = {
     config: (uuid: string, connectionId = "") => ipcRenderer.invoke(IPC.pluginConfig, { uuid, connectionId }),
     setConfig: (input: unknown) => ipcRenderer.invoke(IPC.pluginSetConfig, input),
     contributions: () => ipcRenderer.invoke(IPC.pluginContributions),
+    /** 邮件插件：用已存的配置试着登录收信、发信服务器。 */
+    testEmail: (uuid: string) => ipcRenderer.invoke(IPC.emailTest, uuid),
   },
   channels: {
     status: () => ipcRenderer.invoke(IPC.channelStatus),
