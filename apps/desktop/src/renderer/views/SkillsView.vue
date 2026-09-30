@@ -23,7 +23,7 @@ interface SkillGroup {
 }
 
 /** 组的顺序，与主进程 skill-roots.ts 里的优先级一致。插件来源不止一个，按前缀归到同一位。 */
-const ORDER = ["AIClaw", "插件", "项目", "Claude Code", "Codex", "npm 全局"];
+const ORDER = ["AIClaw", "插件", "项目", "通用", "Claude Code", "Codex", "npm 全局"];
 
 function rank(source: string): number {
   const index = ORDER.findIndex((label) => source === label || source.startsWith(`${label} `));
@@ -103,12 +103,13 @@ async function remove(id: string, name: string): Promise<void> {
           判断用得上时才把正文取出来——所以 description 要写清楚<strong>什么时候</strong>用。
         </p>
         <p class="sub">
-          这里会一并列出 Claude Code（<code>~/.claude/skills</code>）、Codex
+          这里会一并列出通用目录（<code>~/.agents/skills</code>，<code>npx skills add -g</code> 装在这里）、
+          Claude Code（<code>~/.claude/skills</code>）、Codex
           （<code>~/.codex/skills</code>）、当前工作目录的 <code>.claude/skills</code>、
           npm 全局包里的技能，以及启用中的插件带来的——它们是同一种格式，
           没必要在这里再装一遍。别处的技能可以关掉但删不了，去它自己的位置删
           （插件带的随插件停用一起消失）。同名时按这个顺序取第一个：
-          AIClaw &gt; 插件 &gt; 项目 &gt; Claude Code &gt; Codex &gt; npm。
+          AIClaw &gt; 插件 &gt; 项目 &gt; 通用 &gt; Claude Code &gt; Codex &gt; npm。
         </p>
       </header>
 

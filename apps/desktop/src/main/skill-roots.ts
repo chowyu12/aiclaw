@@ -77,6 +77,10 @@ export function skillRoots(options: DiscoverOptions): SkillRoot[] {
   }
 
   roots.push(
+    // `npx skills add ... -g` 装的「通用」位置：Codex、Cursor、Gemini CLI 等直接读这里，
+    // 只给 Claude Code 这类另软链一份。排在 Claude Code 前面，这样同一个技能显示的
+    // 来源是它真正所在的地方，而不是某一条软链。
+    { path: join(home, ".agents", "skills"), label: "通用", writable: false, layout: "flat" },
     { path: join(home, ".claude", "skills"), label: "Claude Code", writable: false, layout: "flat" },
     { path: join(home, ".codex", "skills"), label: "Codex", writable: false, layout: "flat" },
   );

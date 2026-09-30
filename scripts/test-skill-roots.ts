@@ -137,3 +137,15 @@ test("同名技能只留优先级最高的那个", () => {
     ["gitlab@Claude Code", "代码评审@Claude Code"],
   );
 });
+
+test("npx skills add -g 装进 ~/.agents/skills 的技能认得出来，来源记作「通用」", () => {
+  // 真机布局：技能本体在 ~/.agents/skills，~/.claude/skills 下是相对软链指过去。
+  const home = mkdtempSync(join(tmpdir(), "aiclaw-agents-"));
+  skill(join(home, ".agents", "skills", "wecomcli-calendar"), "企业微信日程");
+  mkdirSync(join(home, ".claude", "skills"), { recursive: true });
+  symlinkSync("../../.agents/skills/wecomcli-calendar", join(home, ".claude", "skills", "wecomcli-calendar"));
+  const found = discoverSkills({ ownDir: join(home, ".aiclaw", "skills"), home, env: {} });
+  const matches = found.filter((f) => f.dirName === "wecomcli-calendar");
+  assert.equal(matches.length, 1, "软链与本体只算一个");
+  assert.equal(matches[0]!.rootLabel, "通用");
+});

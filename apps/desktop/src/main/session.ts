@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { clipboard, shell } from "electron";
+import { toolPath } from "./shell-path.js";
 import {
   ClawAgentClient,
   type AgentNotification,
@@ -185,15 +186,19 @@ export class SessionManager extends EventEmitter {
   }
 
   private starting: Promise<void> | null = null;
+  /** 给内核的 PATH，第一次启动时从登录 shell 读一次。见 shell-path.ts。 */
+  private path: string | undefined;
 
   private async launch(): Promise<void> {
     this.emit("status", "starting");
 
     // 模型 Key 不经这里：内核按会话的 providerId 到 --app-db 那个库里查。
+    // PATH 换成终端里那样的：模型跑的命令、技能调的 CLI、stdio 的 MCP server 都从内核继承它。
+    this.path ??= await toolPath(homedir());
     const client = new ClawAgentClient({
       command: this.agentBin,
       args: ["serve", `--data-home=${this.store.agentHome}`, `--app-db=${this.store.appDbPath}`],
-      env: { ...process.env },
+      env: { ...process.env, PATH: this.path },
     });
 
     client.on("notification", (n: AgentNotification) => this.emit("event", n.method, n.params));

@@ -144,7 +144,18 @@ func cacheDirs(home string) []string {
 		filepath.Join(home, ".gradle", "caches"),
 		filepath.Join(home, ".m2", "repository"),
 	)
+	// 技能调用的 CLI 自己的状态目录：写不进去的话它连缓存都刷不了，授权也存不下。
+	// 只列具体的几个，不放开整个 ~/.config——那下面还有 gh、gcloud 这些别人的凭据。
+	for _, relative := range cliStateDirs {
+		dirs = append(dirs, filepath.Join(home, relative))
+	}
 	return dirs
+}
+
+// cliStateDirs 是常用技能背后那几个 CLI 的配置与缓存目录（相对主目录）。
+var cliStateDirs = []string{
+	// 企业微信 wecom-cli（npx skills add WeComTeam/wecom-cli 装的那组技能）
+	filepath.Join(".config", "wecom"),
 }
 
 /*

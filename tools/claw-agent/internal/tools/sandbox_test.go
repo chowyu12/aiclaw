@@ -199,6 +199,8 @@ func TestSandboxLetsToolchainCachesThrough(t *testing.T) {
 		filepath.Join("go", "pkg", "mod"),
 		filepath.Join("Library", "Caches", "go-build"),
 		".cache",
+		// wecom-cli 的缓存与授权：技能一跑就要刷它的 catalog。
+		filepath.Join(".config", "wecom", "cache"),
 	} {
 		dir := filepath.Join(env.Home, relative)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -212,6 +214,20 @@ func TestSandboxLetsToolchainCachesThrough(t *testing.T) {
 		if _, err := os.Stat(target); err != nil {
 			t.Errorf("%s 没写成：%v", relative, err)
 		}
+	}
+}
+
+func TestSandboxKeepsOtherConfigReadOnly(t *testing.T) {
+	// 放开的是 ~/.config/wecom 这一个，不是整个 ~/.config：gh、gcloud 的凭据也在那下面。
+	env, registry, _ := sandboxEnv(t)
+	dir := filepath.Join(env.Home, ".config", "gh")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "probe.txt")
+	_, _ = call(t, registry, "run_command", `{"command":"echo x > `+target+`"}`, env)
+	if _, err := os.Stat(target); err == nil {
+		t.Fatal("~/.config 下别的目录不该可写")
 	}
 }
 
