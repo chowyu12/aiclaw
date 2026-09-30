@@ -77,10 +77,30 @@ function isChannelSession(session: SessionSummaryView): boolean {
   return session.id.startsWith("c_");
 }
 
+/**
+ * 子 agent（spawn_agent 开出来的会话）挂在父会话下面，不单独占一行：一次调研开出
+ * 三四个子 agent 很常见，平铺的话侧边栏一下子就被它们挤满了。父会话不在列表里
+ * （删了、或者搜索没搜到它）时，子会话照常平铺，免得找不到。
+ */
+const present = computed(() => new Set(store.sessions.map((session) => session.id)));
+
+function isNestedChild(session: SessionSummaryView): boolean {
+  return Boolean(session.parentId && present.value.has(session.parentId));
+}
+
+/** 某个会话下面的子 agent，连同孙子一起按层展开。 */
+function descendants(id: string, depth = 1): { session: SessionSummaryView; depth: number }[] {
+  const children = store.sessions
+    .filter((session) => session.parentId === id)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  return children.flatMap((child) => [{ session: child, depth }, ...descendants(child.id, depth + 1)]);
+}
+
 const buckets = computed<Bucket[]>(() => {
   const assignments = store.groups.assignments;
   const byGroup = new Map<string, SessionSummaryView[]>();
   for (const session of store.sessions) {
+    if (isNestedChild(session)) continue;
     const groupId = assignments[session.id] ?? (isChannelSession(session) ? CHANNELS : UNGROUPED);
     const list = byGroup.get(groupId);
     if (list) list.push(session);
@@ -361,9 +381,8 @@ function when(iso: string): string {
           </template>
         </header>
 
+        <template v-for="session in visibleSessions(bucket)" :key="session.id">
         <div
-          v-for="session in visibleSessions(bucket)"
-          :key="session.id"
           class="item"
           :class="{ active: session.id === store.sessionId }"
           @click="actions.openSession(session.id)"
@@ -409,6 +428,28 @@ function when(iso: string): string {
             </p>
           </div>
         </div>
+        <!-- 这个会话开出去的子 agent：缩进挂在下面，跑着的亮点。 -->
+        <div
+          v-for="child in descendants(session.id)"
+          :key="child.session.id"
+          class="item child"
+          :class="{ active: child.session.id === store.sessionId }"
+          :style="{ paddingLeft: `${10 + child.depth * 14}px` }"
+          :title="child.session.title"
+          @click="actions.openSession(child.session.id)"
+        >
+          <div class="item-main">
+            <div class="title">
+              <span v-if="waiting(child.session.id)" class="asking" title="模型在等你回答一个问题">待回答</span>
+              <span v-else-if="store.live[child.session.id]?.busy" class="running" title="正在执行"></span>
+              {{ child.session.title || "子 agent" }}
+            </div>
+          </div>
+          <div class="item-actions" @click.stop>
+            <button class="icon tiny" title="删除会话" @click="removeSession(child.session)">×</button>
+          </div>
+        </div>
+        </template>
       </section>
     </div>
 
@@ -612,6 +653,17 @@ function when(iso: string): string {
 
 .item:hover {
   background: var(--hover);
+}
+
+/* 子 agent：一行、字小一号，缩进由模板按层级给。 */
+.item.child {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.item.child .title {
+  color: var(--ink-2);
+  font-size: 12px;
 }
 
 .item.active {

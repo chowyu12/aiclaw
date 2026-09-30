@@ -54,6 +54,8 @@ type Summary struct {
 	TurnCount int
 	/** 搜索时命中的那一小段正文。只有 Search 会填。 */
 	Snippet string
+	/** 子 agent 的父会话 id（存在 config 的 parentId 里）；普通会话为空。 */
+	ParentID string
 }
 
 type Store struct {
@@ -175,7 +177,8 @@ FROM sessions WHERE id = ?`, id)
 // List 按更新时间倒序列出全部会话，不带消息正文。
 func (s *Store) List(ctx context.Context) ([]Summary, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, title, created_at, updated_at, workdir, model, turn_count
+SELECT id, title, created_at, updated_at, workdir, model, turn_count,
+  COALESCE(json_extract(config, '$.parentId'), '')
 FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("列出会话失败：%w", err)
@@ -187,7 +190,7 @@ FROM sessions ORDER BY updated_at DESC`)
 		var summary Summary
 		var created, updated int64
 		if err := rows.Scan(&summary.ID, &summary.Title, &created, &updated,
-			&summary.Workdir, &summary.Model, &summary.TurnCount); err != nil {
+			&summary.Workdir, &summary.Model, &summary.TurnCount, &summary.ParentID); err != nil {
 			return nil, fmt.Errorf("列出会话失败：%w", err)
 		}
 		summary.CreatedAt = time.UnixMilli(created)
@@ -218,7 +221,8 @@ func (s *Store) Search(ctx context.Context, keyword string, limit int) ([]Summar
 	}
 	pattern := "%" + escapeLike(keyword) + "%"
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, title, created_at, updated_at, workdir, model, turn_count, messages
+SELECT id, title, created_at, updated_at, workdir, model, turn_count, messages,
+  COALESCE(json_extract(config, '$.parentId'), '')
 FROM sessions
 WHERE title LIKE ? ESCAPE '\' OR messages LIKE ? ESCAPE '\'
 ORDER BY updated_at DESC LIMIT ?`, pattern, pattern, limit)
@@ -233,7 +237,7 @@ ORDER BY updated_at DESC LIMIT ?`, pattern, pattern, limit)
 		var created, updated int64
 		var messages string
 		if err := rows.Scan(&summary.ID, &summary.Title, &created, &updated,
-			&summary.Workdir, &summary.Model, &summary.TurnCount, &messages); err != nil {
+			&summary.Workdir, &summary.Model, &summary.TurnCount, &messages, &summary.ParentID); err != nil {
 			return nil, fmt.Errorf("搜索会话失败：%w", err)
 		}
 		summary.CreatedAt = time.UnixMilli(created)

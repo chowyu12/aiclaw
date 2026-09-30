@@ -738,6 +738,9 @@ type SessionStartParams struct {
 	EnableSchedule bool `json:"enableSchedule,omitempty"`
 	/** 会话一开始的标题。空的话由第一条消息生成；定时任务用它写上任务名。 */
 	Title string `json:"title,omitempty"`
+	/** 子 agent：父会话的 id 与自己在协作树上的路径（/root/research）。普通会话为空。 */
+	ParentID  string `json:"parentId,omitempty"`
+	AgentPath string `json:"agentPath,omitempty"`
 	/**
 	 * 对话之外的角色模型（看图、听写、朗读、画图）。见 roles.go。
 	 * 没配的角色对应的工具不注册——模型看不到一个用不了的工具。

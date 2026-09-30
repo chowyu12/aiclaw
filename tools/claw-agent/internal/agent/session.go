@@ -58,6 +58,11 @@ type Emitter interface {
 type userInput struct {
 	text   string
 	images [][]byte
+	// mail 表示这是别的 agent 投来的消息（见 collab.go），不是用户说的话：进历史时
+	// 不显示成用户气泡，时间线上只留 notice 那一行提示。
+	mail     bool
+	mailFrom string
+	notice   string
 }
 
 // Session 是一个会话：一份配置 + 一段对话历史 + 一套已挂载的工具。
@@ -94,6 +99,10 @@ type Session struct {
 	// input_queue 同款处理。拒绝的话用户得先等完一轮才能纠正方向，而他想
 	// 纠正往往正是因为看见这一轮跑偏了。
 	pending []userInput
+	// pendingSignal 在 pending 进了东西时响一下，叫醒 wait_agent。容量 1，满了就不再塞。
+	pendingSignal chan struct{}
+	// collab 是多 agent 协作的控制面（见 collab.go）。nil 表示不挂协作工具。
+	collab Collaboration
 	// backoff 给出第 n 次重试前的等待时长；测试把它换成零等待。
 	backoff func(attempt int) time.Duration
 	// lastInputTokens 是最近一次采样上游报的输入 token 数，压缩阈值据此判断。
@@ -217,6 +226,8 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		mcpStatus:  map[string]string{},
 		mcpMounted: map[string]int{},
 		shells:     tools.NewShellPool(),
+		// 容量 1：只是「有新东西了」的信号，攒多少条都只需要叫醒一次。
+		pendingSignal: make(chan struct{}, 1),
 	}
 	for _, option := range options {
 		option(session)
@@ -268,6 +279,10 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	}
 	// 向用户提问同样留在 exec 外面：在脚本里停下来等人没有意义。
 	if err := session.registerAskTool(); err != nil {
+		return nil, err
+	}
+	// 协作工具同样不进 exec（Codex 也这样）：在脚本里开 agent、等 agent 没有意义。
+	if err := session.registerCollabTools(); err != nil {
 		return nil, err
 	}
 
@@ -1243,6 +1258,8 @@ type Summary struct {
 	Model     string    `json:"model"`
 	/** 搜索命中的那一小段正文。只有 Search 会填。 */
 	Snippet string `json:"snippet,omitempty"`
+	/** 子 agent 的父会话；普通会话为空。 */
+	ParentID string `json:"parentId,omitempty"`
 }
 
 // List 列出全部会话，按更新时间倒序。
@@ -1270,6 +1287,7 @@ func summarize(records []store.Summary, err error) ([]Summary, error) {
 			TurnCount: record.TurnCount,
 			Model:     record.Model,
 			Snippet:   record.Snippet,
+			ParentID:  record.ParentID,
 		})
 	}
 	return summaries, nil

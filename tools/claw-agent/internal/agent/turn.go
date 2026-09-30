@@ -38,10 +38,17 @@ func (s *Session) RunTurn(
 ) {
 	ctx, cancel := context.WithCancel(parent)
 	s.mu.Lock()
+	if s.cancelTurn != nil && text == "" && len(images) == 0 && len(audioPaths) == 0 {
+		// 由邮箱开的一轮撞上了正在跑的一轮：邮件已经在队列里，那一轮会收到，不用排空消息。
+		s.mu.Unlock()
+		cancel()
+		return
+	}
 	if s.cancelTurn != nil {
 		// 上一轮还在跑：把输入排进队列而不是拒绝。见 pending 字段的说明。
 		s.pending = append(s.pending, userInput{text: text, images: images})
 		s.mu.Unlock()
+		s.signalPending()
 		cancel()
 		return
 	}
@@ -69,7 +76,11 @@ func (s *Session) RunTurn(
 	// 上一轮被中断时排着队的输入还在 pending 里：先放它们，再放这一条——历史里的
 	// 先后要和用户发送的先后一致（早先它们会被插到这一条后面）。
 	s.drainPending(ctx, turnID, emitter)
-	s.acceptUserInput(ctx, turnID, text, transcript, images, emitter)
+	// 没有新输入的一轮：由邮箱里的消息开起来的（子 agent 完成、followup_task），
+	// 排着的那几条上面已经插进去了，不再补一条空的用户消息。
+	if text != "" || transcript != "" || len(images) > 0 {
+		s.acceptUserInput(ctx, turnID, text, transcript, images, emitter)
+	}
 
 	usage, err := s.loop(ctx, turnID, emitter)
 
@@ -139,6 +150,7 @@ func (s *Session) Enqueue(text string, images [][]byte) (string, bool) {
 		return "", false
 	}
 	s.pending = append(s.pending, userInput{text: text, images: images})
+	defer s.signalPending()
 	return s.currentTurn, true
 }
 
@@ -188,6 +200,10 @@ func (s *Session) drainPending(ctx context.Context, turnID string, emitter Emitt
 	s.pending = nil
 	s.mu.Unlock()
 	for _, input := range queued {
+		if input.mail {
+			s.acceptAgentMail(turnID, input, emitter)
+			continue
+		}
 		s.acceptUserInput(ctx, turnID, input.text, "", input.images, emitter)
 	}
 }
@@ -789,6 +805,16 @@ func summarizeCall(call llm.ToolCall) string {
 		return pick("pattern")
 	case "ask_user":
 		return "提问：" + firstLine(pick("question"), 100)
+	case "spawn_agent":
+		return "开子 agent " + pick("task_name") + "：" + firstLine(pick("message"), 80)
+	case "send_message", "followup_task":
+		return "→ " + pick("target") + "：" + firstLine(pick("message"), 80)
+	case "wait_agent":
+		return "等子 agent 的结果"
+	case "list_agents":
+		return "看看子 agent 们在干什么"
+	case "interrupt_agent":
+		return "打断 " + pick("target")
 	case "exec":
 		// 代码模式下参数是整段脚本。压成一行的话，步骤标题会变成一坨
 		// 带着 \n 的代码；只取第一行有内容的，完整脚本在展开的详情里。

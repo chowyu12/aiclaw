@@ -66,6 +66,8 @@ type Server struct {
 	providers *providers.Store
 	plugins   *pluginhost.Service
 	search    *searchengines.Store
+	// collab 是子 agent 的协作树（见 collab.go）。
+	collab *collabHub
 
 	// channelRoles 是宿主推来的角色配置，通道会话每轮开始前按它刷新（见 channel.go）。
 	channelMu    sync.Mutex
@@ -104,6 +106,7 @@ func New(options Options, out io.Writer) (*Server, error) {
 		shutdown:        make(chan struct{}),
 		db:              db,
 	}
+	server.collab = newCollabHub(server)
 	if options.AppDB != "" {
 		server.appDB, err = appdb.Open(options.AppDB)
 		if err != nil {
@@ -151,6 +154,7 @@ type rpcError struct {
 
 // Serve 读 stdin 直到 EOF 或收到 shutdown。
 func (s *Server) Serve(ctx context.Context, in io.Reader) error {
+	s.collab.setContext(ctx)
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
@@ -343,6 +347,7 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		if session := s.session(params.SessionID); session != nil {
 			session.Interrupt()
 		}
+		s.collab.InterruptTree(params.SessionID)
 		s.writeResult(f.ID, map[string]any{})
 	case protocol.MethodShutdown:
 		s.writeResult(f.ID, map[string]any{})
@@ -403,10 +408,15 @@ func (s *Server) handleAudioTranscribe(ctx context.Context, f frame) {
 //
 // 邮箱只接给用户自己的会话：通道会话的另一头是外部的人，不该能让助手去翻用户的信箱。
 func (s *Server) sessionOptions(id string) []agent.Option {
-	if s.plugins == nil || strings.HasPrefix(id, channelSessionPrefix) {
+	if strings.HasPrefix(id, channelSessionPrefix) {
 		return nil
 	}
-	return []agent.Option{agent.WithMailbox(s.plugins.EmailAccount)}
+	// 子 agent 同理只给用户自己的会话：外部的人不该能借助手在用户电脑上开一群 agent。
+	options := []agent.Option{agent.WithCollaboration(s.collab)}
+	if s.plugins != nil {
+		options = append(options, agent.WithMailbox(s.plugins.EmailAccount))
+	}
+	return options
 }
 
 func (s *Server) handleSessionStart(ctx context.Context, f frame) {

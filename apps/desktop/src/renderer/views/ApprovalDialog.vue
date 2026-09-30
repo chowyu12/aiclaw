@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import type { ApprovalPayload } from "../../shared/types";
+import { store } from "../store";
 
-defineProps<{ request: ApprovalPayload }>();
+const props = defineProps<{ request: ApprovalPayload }>();
 const emit = defineEmits<{ respond: [approved: boolean, scope?: "once" | "session"] }>();
 
 const denyButton = ref<HTMLButtonElement | null>(null);
+
+/**
+ * 不是你正在看的会话发来的审批，写上是哪个：子 agent、定时任务都在后台跑，
+ * 不说的话用户不知道这条命令是谁要跑的、为什么要跑。
+ */
+const source = computed(() => {
+  if (!props.request.sessionId || props.request.sessionId === store.sessionId) return "";
+  const session = store.sessions.find((item) => item.id === props.request.sessionId);
+  return session?.title || "另一个会话";
+});
 
 // 默认焦点在「拒绝」。没有沙箱之后审批是最后一道闸，回车不该等于同意。
 onMounted(() => denyButton.value?.focus());
@@ -37,6 +48,7 @@ const KIND_WARNING: Record<ApprovalPayload["kind"], string> = {
         <span class="badge">{{ KIND_LABEL[request.kind] }}</span>
         <h2>{{ request.title }}</h2>
       </div>
+      <p v-if="source" class="source">来自「{{ source }}」</p>
 
       <p v-if="request.reason" class="reason">{{ request.reason }}</p>
 
@@ -206,5 +218,11 @@ dd {
 
 .allow:hover {
   color: var(--ink);
+}
+
+.source {
+  margin: -4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 </style>

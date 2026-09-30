@@ -415,6 +415,8 @@ export interface SessionSummary {
   model: string;
   /** 搜索命中的那一小段正文。只有 sessionSearch 会给。 */
   snippet?: string;
+  /** 子 agent 的父会话 id；普通会话没有。 */
+  parentId?: string;
 }
 
 export interface InitializeResult {

@@ -322,6 +322,62 @@ async function main(): Promise<number> {
     } finally {
       fake.close();
     }
+
+    // 子 agent：根会话 spawn_agent → 子会话在后台跑完 → 最终回答投回根会话的邮箱 → 根会话汇总。
+    // 同一个假模型服务按请求里有没有「你是子 agent」分辨是谁在问。
+    const sse = (payload: unknown) => `data: ${JSON.stringify(payload)}\n\ndata: [DONE]\n\n`;
+    const toolCall = (id: string, name: string, args: unknown) =>
+      sse({ choices: [{ delta: { tool_calls: [{ index: 0, id, type: "function", function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: "tool_calls" }] });
+    const say = (text: string) => sse({ choices: [{ delta: { content: text } }] });
+    const collab = createServer((request, response) => {
+      let body = "";
+      request.on("data", (chunk) => (body += chunk));
+      request.on("end", () => {
+        const messages = (JSON.parse(body) as { messages: { role: string; content?: unknown }[] }).messages;
+        const all = messages.map((message) => (typeof message.content === "string" ? message.content : "")).join("\n");
+        response.writeHead(200, { "Content-Type": "text/event-stream" });
+        if (all.includes("你是子 agent")) return void response.end(say("北京今天晴，25 度"));
+        const tools = messages.filter((message) => message.role === "tool").length;
+        if (tools === 0) return void response.end(toolCall("c1", "spawn_agent", { task_name: "weather", message: "查北京天气", fork_turns: "none" }));
+        if (tools === 1) return void response.end(toolCall("c2", "wait_agent", { timeout_ms: 60000 }));
+        const got = /最终回答：\n([^\n]+)/.exec(all)?.[1] ?? "没收到";
+        response.end(say(`汇总：${got}`));
+      });
+    });
+    await new Promise<void>((done) => collab.listen(0, "127.0.0.1", () => done()));
+    try {
+      const collabProvider = await client.providerCreate({
+        name: "协作", type: "openai-compatible", baseUrl: `http://127.0.0.1:${(collab.address() as { port: number }).port}/v1`, apiKey: "sk-c", models: ["fake"],
+      });
+      const rootSession = await client.sessionStart({ model: { providerId: collabProvider.id, baseUrl: "", model: "fake" }, approvalPolicy: "on-write" });
+      record(
+        "子 agent：用户会话挂上协作工具",
+        ["spawn_agent", "send_message", "followup_task", "wait_agent", "list_agents", "interrupt_agent"].every((name) => rootSession.tools.includes(name)),
+      );
+      let summary = "";
+      let childStarted = "";
+      const done = new Promise<void>((resolve) => {
+        client.on("notification", (note) => {
+          const params = note.params as { sessionId?: string; item?: { kind?: string; text?: string } };
+          if (note.method === "turn/started" && params.sessionId && params.sessionId !== rootSession.sessionId) childStarted = params.sessionId;
+          if (params.sessionId !== rootSession.sessionId) return;
+          if (note.method === "item/completed" && params.item?.kind === "agentMessage") summary = params.item.text ?? "";
+          if (note.method === "turn/completed") resolve();
+        });
+      });
+      await client.turnStart(rootSession.sessionId, "北京天气怎么样");
+      await Promise.race([done, new Promise((_, fail) => setTimeout(() => fail(new Error("协作这一轮 20 秒没跑完")), 20_000))]);
+      record("子 agent：结果回到根会话", summary === "汇总：北京今天晴，25 度", summary);
+      const listedSessions = await client.sessionList();
+      const child = listedSessions.find((item) => item.id === childStarted);
+      record(
+        "子 agent：子会话有自己的事件流，列表里记着父会话",
+        Boolean(child) && child!.parentId === rootSession.sessionId && child!.title === "↳ weather",
+        child ? `${child.title} ← ${child.parentId}` : "没找到子会话",
+      );
+    } finally {
+      collab.close();
+    }
   } catch (error) {
     record("unexpected", false, String(error));
   } finally {

@@ -71,6 +71,10 @@ type usageWriter struct {
 	queue chan UsageEvent
 	done  chan struct{}
 	once  sync.Once
+	// mu 护着 closed：退出时还有轮次在收尾（后台的子 agent、定时任务），它们记的
+	// 用量不能往已经关掉的队列里塞——那是 panic，不是丢一条记录。
+	mu     sync.RWMutex
+	closed bool
 }
 
 const usageQueueSize = 4096
@@ -87,6 +91,11 @@ func (s *Store) RecordUsage(event UsageEvent) {
 	}
 	if event.At.IsZero() {
 		event.At = time.Now()
+	}
+	s.usage.mu.RLock()
+	defer s.usage.mu.RUnlock()
+	if s.usage.closed {
+		return
 	}
 	select {
 	case s.usage.queue <- event:
@@ -129,7 +138,12 @@ func (s *Store) flushUsage() {
 	if s.usage == nil {
 		return
 	}
-	s.usage.once.Do(func() { close(s.usage.queue) })
+	s.usage.once.Do(func() {
+		s.usage.mu.Lock()
+		s.usage.closed = true
+		close(s.usage.queue)
+		s.usage.mu.Unlock()
+	})
 	<-s.usage.done
 }
 
