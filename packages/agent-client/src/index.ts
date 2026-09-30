@@ -5,6 +5,7 @@ export { MODEL_ROLES } from "./protocol.js";
 export type { PendingApproval, PendingUserInput, ClientEvents } from "./client.js";
 export type {
   EmailTestResult,
+  AudioTranscribeParams,
   ChannelConnectionView,
   UsageSummary,
   UsageTotals,

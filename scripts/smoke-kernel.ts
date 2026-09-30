@@ -173,6 +173,43 @@ async function main(): Promise<number> {
 
     record("通道与授权列表可读", (await client.channelStatus()).length === 0 && (await client.channelBindings()).length === 0);
 
+    // 语音输入：没配听写角色时说清楚去哪儿配；配了的话，录音经内核送到听写接口，文字原样回来。
+    let noRole = "";
+    try {
+      await client.audioTranscribe({ audio: "UklGRg==", name: "voice.wav", role: { providerId: 0, model: "" } });
+    } catch (error) {
+      noRole = String(error);
+    }
+    record("语音输入：没配听写模型时说清楚", noRole.includes("听写"), noRole.slice(0, 60));
+    let heard = { contentType: "", bytes: 0, model: "" };
+    const asr = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        const body = Buffer.concat(chunks).toString("latin1");
+        heard = {
+          contentType: String(request.headers["content-type"] ?? ""),
+          bytes: body.includes("RIFF") ? body.length : 0,
+          model: /name="model"\r\n\r\n([^\r]+)/.exec(body)?.[1] ?? "",
+        };
+        response.writeHead(200, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ text: " 明天上午十点开会 " }));
+      });
+    });
+    await new Promise<void>((done) => asr.listen(0, "127.0.0.1", done));
+    const asrPort = (asr.address() as { port: number }).port;
+    const asrProvider = await client.providerCreate({
+      name: "听写", type: "openai-compatible", baseUrl: `http://127.0.0.1:${asrPort}/v1`, apiKey: "sk-asr", models: ["whisper-1"],
+    });
+    const wav = Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(40), Buffer.alloc(3200)]).toString("base64");
+    const spoken = await client.audioTranscribe({ audio: wav, name: "voice.wav", role: { providerId: asrProvider.id, model: "whisper-1" } });
+    asr.close();
+    record(
+      "语音输入：录音送到听写接口，文字回到宿主",
+      spoken === "明天上午十点开会" && heard.contentType.startsWith("multipart/form-data") && heard.bytes > 0 && heard.model === "whisper-1",
+      `${spoken} · ${heard.model}`,
+    );
+
     // 多模态：没配角色时那几个工具根本不该出现——给模型一个用不了的工具，
     // 它会调、会失败、会重试，而失败原因它无从修复。
     const bare = await client.sessionStart({

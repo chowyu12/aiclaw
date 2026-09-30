@@ -7,6 +7,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/appdb"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/mcpclient"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/pluginhost"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
@@ -234,6 +236,8 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		s.handleSessionResume(ctx, f)
 	case protocol.MethodMCPProbe:
 		s.handleMCPProbe(ctx, f)
+	case protocol.MethodAudioTranscribe:
+		s.handleAudioTranscribe(ctx, f)
 	case protocol.MethodProviderList, protocol.MethodProviderCreate, protocol.MethodProviderUpdate,
 		protocol.MethodProviderDelete, protocol.MethodProviderModels, protocol.MethodProviderAutoMark:
 		s.handleProvider(ctx, f)
@@ -346,6 +350,50 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		}
 		s.writeError(f.ID, codeMethodNotFound, fmt.Sprintf("method %q not supported", f.Method))
 	}
+}
+
+// handleAudioTranscribe 处理语音输入：一段录音 → 听写角色 → 文字。
+//
+// 放在请求循环之外的 goroutine 里：一段一分钟的录音听写要好几秒，不能让它把
+// 同一条管道上的其他请求（会话事件、审批回应）堵住。
+func (s *Server) handleAudioTranscribe(ctx context.Context, f frame) {
+	var params protocol.AudioTranscribeParams
+	if err := json.Unmarshal(f.Params, &params); err != nil {
+		s.writeError(f.ID, codeInvalidParams, "invalid params")
+		return
+	}
+	if !params.Role.Configured() {
+		s.writeError(f.ID, codeInvalidParams, "还没有配听写模型：到「配置 → 多模态」里选一个听写模型")
+		return
+	}
+	audio, err := base64.StdEncoding.DecodeString(params.Audio)
+	if err != nil || len(audio) == 0 {
+		s.writeError(f.ID, codeInvalidParams, "音频数据不对")
+		return
+	}
+	go func() {
+		config := protocol.ModelConfig{ProviderID: params.Role.ProviderID, Model: params.Role.Model}
+		apiKey, err := s.keyFor(&config)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		client, err := llm.New(config.BaseURL, apiKey, 0)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		name := strings.TrimSpace(params.Name)
+		if name == "" {
+			name = "voice.wav"
+		}
+		text, err := client.Transcribe(ctx, params.Role.Model, name, audio)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, "听写失败："+err.Error())
+			return
+		}
+		s.writeResult(f.ID, protocol.AudioTranscribeResult{Text: strings.TrimSpace(text)})
+	}()
 }
 
 // sessionOptions 是用户会话（不含通道会话）建起来时要接上的东西。

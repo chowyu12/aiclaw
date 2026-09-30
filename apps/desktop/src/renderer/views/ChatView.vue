@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
 import {
@@ -16,6 +16,7 @@ import {
 import { groupTurns, stepsElapsed, type Turn } from "../turns";
 import { renderMarkdown } from "../markdown";
 import { answerText, answerTime, formatMessageTime, fullMessageTime } from "../message-meta";
+import { formatDuration as formatVoiceTime, MAX_SECONDS, VoiceRecorder } from "../voice";
 import StepsBlock from "./StepsBlock.vue";
 import QuestionCard from "./QuestionCard.vue";
 
@@ -46,6 +47,130 @@ watch(
   },
   () => void scrollToEnd(),
 );
+
+// ---------- 语音输入 ----------
+//
+// 点话筒开始录，再点一下停下、转成文字放进输入框（不直接发：听写会听错）。
+// Esc 或点 × 丢掉这段。听写走「配置 → 多模态」里的听写模型。
+
+const input = ref<HTMLTextAreaElement | null>(null);
+const voiceState = ref<"idle" | "recording" | "transcribing">("idle");
+const voiceError = ref("");
+const voiceElapsed = ref(0);
+const voiceLevel = ref(0);
+let recorder: VoiceRecorder | null = null;
+let voiceTimer: ReturnType<typeof setInterval> | undefined;
+
+const sttReady = computed(() => Boolean(store.config?.roles?.stt?.providerId && store.config?.roles?.stt?.model));
+
+const voiceTitle = computed(() => {
+  if (voiceState.value === "recording") return "再点一下结束录音，转成文字";
+  if (voiceState.value === "transcribing") return "正在听写…";
+  return sttReady.value ? "语音输入：点一下开始说话" : "语音输入：先在「配置 → 多模态」里给「听写」选一个模型";
+});
+
+async function toggleVoice(): Promise<void> {
+  voiceError.value = "";
+  if (voiceState.value === "recording") return finishVoice();
+  if (voiceState.value !== "idle") return;
+  if (!sttReady.value) {
+    voiceError.value = "还没有配听写模型：到「配置 → 多模态」里给「听写」选一个模型。";
+    return;
+  }
+  const permission = (await window.aiclaw.voice.permission()) as string;
+  if (permission !== "granted") {
+    voiceError.value = "没有麦克风权限：到「系统设置 → 隐私与安全性 → 麦克风」里打开 AIClaw，然后重新打开应用。";
+    return;
+  }
+  recorder = new VoiceRecorder();
+  try {
+    await recorder.start();
+  } catch (error) {
+    recorder = null;
+    voiceError.value = `打不开麦克风：${describeError(error)}`;
+    return;
+  }
+  voiceState.value = "recording";
+  voiceElapsed.value = 0;
+  voiceTimer = setInterval(() => {
+    if (!recorder) return;
+    voiceElapsed.value = recorder.elapsed();
+    voiceLevel.value = recorder.level();
+    if (voiceElapsed.value >= MAX_SECONDS) void finishVoice();
+  }, 100);
+}
+
+async function finishVoice(): Promise<void> {
+  clearInterval(voiceTimer);
+  const current = recorder;
+  recorder = null;
+  voiceLevel.value = 0;
+  if (!current) {
+    voiceState.value = "idle";
+    return;
+  }
+  voiceState.value = "transcribing";
+  try {
+    const recorded = await current.stop();
+    if (!recorded) {
+      voiceError.value = "没有听到声音。检查一下麦克风，靠近一点再说一次。";
+      return;
+    }
+    const text = ((await window.aiclaw.voice.transcribe(recorded.wav)) as string).trim();
+    if (!text) {
+      voiceError.value = "没听出内容，再说一次试试。";
+      return;
+    }
+    insertAtCursor(text);
+  } catch (error) {
+    voiceError.value = describeError(error);
+  } finally {
+    voiceState.value = "idle";
+  }
+}
+
+function cancelVoice(): void {
+  clearInterval(voiceTimer);
+  recorder?.cancel();
+  recorder = null;
+  voiceLevel.value = 0;
+  voiceState.value = "idle";
+}
+
+// 录音时 Esc 丢掉这段，焦点在不在输入框里都算。
+function onVoiceKey(event: KeyboardEvent): void {
+  if (event.key === "Escape" && voiceState.value === "recording") {
+    event.preventDefault();
+    cancelVoice();
+  }
+}
+watch(voiceState, (state) => {
+  if (state === "recording") window.addEventListener("keydown", onVoiceKey);
+  else window.removeEventListener("keydown", onVoiceKey);
+});
+// 切走（换会话、去设置页）时别让麦克风一直开着。
+onUnmounted(() => {
+  window.removeEventListener("keydown", onVoiceKey);
+  cancelVoice();
+});
+
+/** 把听写出来的字插到光标处；输入框里原来的字不动。 */
+function insertAtCursor(text: string): void {
+  const element = input.value;
+  const value = draft.value;
+  const start = element?.selectionStart ?? value.length;
+  const end = element?.selectionEnd ?? value.length;
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const glue = before && !/\s$/.test(before) && /^[A-Za-z0-9]/.test(text) ? " " : "";
+  draft.value = before + glue + text + after;
+  void nextTick(() => {
+    if (!element) return;
+    const caret = before.length + glue.length + text.length;
+    element.focus();
+    element.setSelectionRange(caret, caret);
+  });
+}
 
 // ---------- 附件 ----------
 //
@@ -498,8 +623,13 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
               </div>
             </div>
             <p v-if="attachError" class="attach-error">{{ attachError }}</p>
+            <p v-if="voiceError" class="attach-error">
+              {{ voiceError }}
+              <button v-if="!sttReady" class="link" @click="actions.setView('settings')">去配置</button>
+            </p>
 
             <textarea
+              ref="input"
               v-model="draft"
               rows="2"
               @paste="onPaste"
@@ -645,6 +775,28 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                   </div>
                 </div>
 
+                <!-- 语音输入：录音时显示时长与音量，旁边的 × 丢掉这段。 -->
+                <span v-if="voiceState === 'recording'" class="voice-live">
+                  <span class="voice-dot" :style="{ transform: `scale(${1 + voiceLevel * 0.9})` }"></span>
+                  {{ formatVoiceTime(voiceElapsed) }}
+                  <button class="voice-cancel" title="丢掉这段（Esc）" @click="cancelVoice()">×</button>
+                </span>
+                <button
+                  class="mic"
+                  :class="{ recording: voiceState === 'recording', busy: voiceState === 'transcribing', off: !sttReady }"
+                  :disabled="voiceState === 'transcribing'"
+                  :title="voiceTitle"
+                  :aria-label="voiceTitle"
+                  @click="toggleVoice()"
+                >
+                  <svg v-if="voiceState !== 'transcribing'" viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                    <path
+                      fill="currentColor"
+                      d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2Z"
+                    />
+                  </svg>
+                  <span v-else class="voice-spin" aria-hidden="true"></span>
+                </button>
                 <button v-if="store.busy" class="stop" title="停止" @click="actions.interrupt()">
                   ■
                 </button>
@@ -1294,6 +1446,90 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
 
 .send:hover:not(:disabled) {
   background: var(--accent-hover);
+}
+
+.mic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--rule);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.mic:hover:not(:disabled) {
+  background: var(--surface-2, var(--accent-soft));
+  color: var(--ink);
+}
+
+.mic.off {
+  color: var(--muted);
+}
+
+.mic.recording {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.mic.busy {
+  cursor: progress;
+}
+
+.voice-spin {
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--rule);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: voice-spin 0.8s linear infinite;
+}
+
+@keyframes voice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.voice-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--danger);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.voice-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  transition: transform 0.1s linear;
+}
+
+.voice-cancel {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.attach-error .link {
+  margin-left: 6px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: inherit;
+  cursor: pointer;
+  text-decoration: underline;
 }
 
 .send:disabled {

@@ -56,6 +56,7 @@ const (
 	MethodSearchDelete     = "search/delete"
 	MethodSearchTest       = "search/test"
 	MethodEmailTest        = "plugin/emailTest"
+	MethodAudioTranscribe  = "audio/transcribe"
 	MethodShutdown         = "shutdown"
 )
 
@@ -464,6 +465,20 @@ type PluginContributions struct {
 	ComputerUse bool `json:"computerUse"`
 	/** 启用了邮件插件（且填好了邮箱）。 */
 	Email bool `json:"email,omitempty"`
+}
+
+// AudioTranscribeParams 是语音输入：宿主录好的一段音频，用听写角色转成文字。
+// 与会话无关——转出来的字先回到输入框，用户看过、改过才发出去。
+type AudioTranscribeParams struct {
+	/** 音频内容，base64。 */
+	Audio string `json:"audio"`
+	/** 文件名，只用来带出格式（扩展名）。 */
+	Name string    `json:"name"`
+	Role RoleModel `json:"role"`
+}
+
+type AudioTranscribeResult struct {
+	Text string `json:"text"`
 }
 
 // EmailTestResult 是「测试邮箱」的结果：连得上时带回实际用的服务器，界面上好让用户看见。

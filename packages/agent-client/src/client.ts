@@ -23,6 +23,7 @@ import type {
   ProviderView,
   SearchEngineCreateParams,
   EmailTestResult,
+  AudioTranscribeParams,
   SearchEngineTestResult,
   SearchEngineUpdateParams,
   SearchEngineView,
@@ -351,6 +352,13 @@ export class ClawAgentClient extends EventEmitter {
   channelMedia(roles: RoleModels): Promise<unknown> {
     this.assertReady();
     return this.transport.request("channel/media", { roles });
+  }
+
+  /** 语音输入：录音（base64）→ 听写角色 → 文字。 */
+  async audioTranscribe(params: AudioTranscribeParams): Promise<string> {
+    this.assertReady();
+    const result = await this.transport.request<{ text: string }>("audio/transcribe", params);
+    return result.text ?? "";
   }
 
   /** 用邮件插件已存的配置试着登录收信、发信服务器。 */

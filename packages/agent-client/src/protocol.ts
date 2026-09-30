@@ -660,6 +660,14 @@ export interface UsageSummary {
   firstAt: number;
 }
 
+/** 语音输入：一段录音用听写角色转成文字。与会话无关。 */
+export interface AudioTranscribeParams {
+  /** base64 */
+  audio: string;
+  name: string;
+  role: RoleModel;
+}
+
 /** 「测试邮箱」的结果。连得上时带回实际用的服务器。 */
 export interface EmailTestResult {
   ok: boolean;

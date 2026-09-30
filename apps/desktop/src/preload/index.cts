@@ -73,6 +73,12 @@ const api = {
     renameConnection: (uuid: string, name: string) => ipcRenderer.invoke(IPC.connectionRename, { uuid, name }),
     deleteConnection: (uuid: string) => ipcRenderer.invoke(IPC.connectionDelete, uuid),
   },
+  voice: {
+    /** 麦克风授权：granted / denied。macOS 第一次会弹系统授权框。 */
+    permission: () => ipcRenderer.invoke(IPC.voicePermission),
+    /** 录好的 WAV 交给听写模型，返回文字。 */
+    transcribe: (wav: Uint8Array) => ipcRenderer.invoke(IPC.voiceTranscribe, wav),
+  },
   wechat: {
     loginStart: () => ipcRenderer.invoke(IPC.wechatLoginStart),
     loginPoll: (input: unknown) => ipcRenderer.invoke(IPC.wechatLoginPoll, input),

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell, systemPreferences } from "electron";
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -264,6 +264,16 @@ function registerIpc(): void {
   ipcMain.handle(IPC.channelAuthorize, (_event, params) => sessions.authorizeChannel(params));
   ipcMain.handle(IPC.channelRevoke, (_event, key) => sessions.revokeChannel(key));
   ipcMain.handle(IPC.emailTest, (_event, uuid: string) => sessions.emailTest(uuid));
+  // 麦克风授权：macOS 要应用自己去问一次，系统才会弹框；拒绝过的只能去系统设置里开。
+  ipcMain.handle(IPC.voicePermission, async () => {
+    if (process.platform !== "darwin") return "granted";
+    const status = systemPreferences.getMediaAccessStatus("microphone");
+    if (status === "not-determined") {
+      return (await systemPreferences.askForMediaAccess("microphone")) ? "granted" : "denied";
+    }
+    return status === "granted" ? "granted" : "denied";
+  });
+  ipcMain.handle(IPC.voiceTranscribe, (_event, wav: Uint8Array) => sessions.transcribeVoice(new Uint8Array(wav)));
   ipcMain.handle(IPC.wechatLoginStart, () => sessions.wechatLoginStart());
   ipcMain.handle(IPC.wechatLoginPoll, (_event, input: { uuid: string; token: string; connectionId?: string }) =>
     sessions.wechatLoginPoll(input.uuid, input.token, input.connectionId ?? ""),

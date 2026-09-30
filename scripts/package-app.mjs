@@ -232,6 +232,8 @@ async function main() {
     // `xattr -dr com.apple.quarantine /Applications/AIClaw.app`。
     // 以后有 macOS runner 了，在这里加 osxSign / osxNotarize。
     darwinDarkModeSupport: true,
+    // 语音输入要用麦克风：Info.plist 里没有这条说明，macOS 直接拒绝访问、连授权框都不弹。
+    extendInfo: platform === "darwin" ? { NSMicrophoneUsageDescription: "语音输入：把你说的话转成文字填进输入框。" } : undefined,
     // win32metadata 同理：给了它 packager 就会去调 rcedit。
   });
 

@@ -32,6 +32,7 @@ const REQUIRED = [
   "plugins",
   "channels",
   "wechat",
+  "voice",
   "mcp",
   "skills",
   "approval",

@@ -737,6 +737,20 @@ export class SessionManager extends EventEmitter {
     await this.requireClient().channelRevoke(key);
   }
 
+  /**
+   * 语音输入：把渲染层录好的 WAV 交给「配置 → 多模态」里的听写模型。
+   * 没配听写模型时说清楚去哪儿配，而不是让按钮点了没反应。
+   */
+  async transcribeVoice(wav: Uint8Array): Promise<string> {
+    const role = toRoles(this.store.readConfig()).stt;
+    if (!role) throw new Error("还没有配听写模型：到「配置 → 多模态」里给「听写」选一个模型（比如 qwen3-asr-flash、whisper-1）");
+    return this.requireClient().audioTranscribe({
+      audio: Buffer.from(wav).toString("base64"),
+      name: "voice.wav",
+      role,
+    });
+  }
+
   emailTest(uuid: string): Promise<EmailTestResult> {
     return this.requireClient().emailTest(uuid);
   }
