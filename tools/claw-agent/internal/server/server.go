@@ -199,7 +199,10 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		s.writeResult(f.ID, protocol.InitializeResult{
 			Version:  s.options.Version,
 			DataHome: s.options.DataHome,
-			Tools:    []string{"read_file", "write_file", "edit_file", "list_dir", "search_files", "run_command"},
+			Tools: []string{
+				"read_file", "write_file", "edit_file", "list_dir", "search_files", "run_command",
+				"read_office", "write_docx", "edit_docx", "write_xlsx", "write_pptx",
+			},
 		})
 	case protocol.MethodUsageSummary:
 		var params protocol.UsageSummaryParams
