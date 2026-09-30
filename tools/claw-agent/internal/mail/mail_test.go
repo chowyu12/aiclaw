@@ -355,10 +355,10 @@ Content-Type: text/html; charset=utf-8
 
 	wrong := account
 	wrong.Password = "nope"
-	if err := Test(ctx, wrong); err == nil || !strings.Contains(err.Error(), "拒绝登录") {
+	if _, err := Test(ctx, wrong); err == nil || !strings.Contains(err.Error(), "拒绝登录") {
 		t.Fatalf("密码错时应当说拒绝登录：%v", err)
 	}
-	if err := Test(ctx, account); err != nil {
+	if _, err := Test(ctx, account); err != nil {
 		t.Fatalf("测试连接应当通过：%v", err)
 	}
 }

@@ -46,26 +46,20 @@ func (c *conn) close() {
 }
 
 // connect 连上并登录。ctx 取消时连接被强制关掉，正在等的命令随之返回错误。
-func connect(ctx context.Context, account Account) (*conn, error) {
-	options := &imapclient.Options{
-		// 国内邮件的标题常是 GBK / GB2312 编码，默认的解码器只认 UTF-8 与 Latin-1。
-		WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader},
-		Dialer:      &net.Dialer{Timeout: dialTimeout},
-	}
-	address := net.JoinHostPort(account.IMAPHost, strconv.Itoa(account.IMAPPort))
-	var (
-		client *imapclient.Client
-		err    error
-	)
-	switch {
-	case insecureForTest:
-		client, err = imapclient.DialInsecure(address, options)
-	case account.IMAPPort == 993:
-		client, err = imapclient.DialTLS(address, options)
-	default:
-		client, err = imapclient.DialStartTLS(address, options)
+//
+// 证书上的名字与服务器对不上（企业邮箱用自己域名的 CNAME 指到服务商）时，按证书
+// 上的名字重连一次，并把 account.IMAPHost 改成它——调用方拿得到实际连上的是哪台。
+func connect(ctx context.Context, account *Account) (*conn, error) {
+	client, err := dialIMAP(account.IMAPHost, account.IMAPPort)
+	if err != nil {
+		if fixed := certHost(err, account.IMAPHost); fixed != "" && fixed != account.IMAPHost {
+			if retried, retryErr := dialIMAP(fixed, account.IMAPPort); retryErr == nil {
+				account.IMAPHost, client, err = fixed, retried, nil
+			}
+		}
 	}
 	if err != nil {
+		address := net.JoinHostPort(account.IMAPHost, strconv.Itoa(account.IMAPPort))
 		return nil, fmt.Errorf("连不上收信服务器 %s：%w", address, err)
 	}
 	c := &conn{client: client, stop: make(chan struct{})}
@@ -85,6 +79,23 @@ func connect(ctx context.Context, account Account) (*conn, error) {
 		_, _ = client.ID(&imap.IDData{Name: "AIClaw", Version: "1.0", Vendor: "AIClaw"}).Wait()
 	}
 	return c, nil
+}
+
+func dialIMAP(host string, port int) (*imapclient.Client, error) {
+	options := &imapclient.Options{
+		// 国内邮件的标题常是 GBK / GB2312 编码，默认的解码器只认 UTF-8 与 Latin-1。
+		WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader},
+		Dialer:      &net.Dialer{Timeout: dialTimeout},
+	}
+	address := net.JoinHostPort(host, strconv.Itoa(port))
+	switch {
+	case insecureForTest:
+		return imapclient.DialInsecure(address, options)
+	case port == 993:
+		return imapclient.DialTLS(address, options)
+	default:
+		return imapclient.DialStartTLS(address, options)
+	}
 }
 
 // selectFolder 选中信箱。找不到时把有哪些信箱一并说出来，模型好换个名字再试。
@@ -149,7 +160,7 @@ func hasAttr(attrs []imap.MailboxAttr, want imap.MailboxAttr) bool {
 
 // Folders 列出能打开的信箱。
 func Folders(ctx context.Context, account Account) ([]string, error) {
-	c, err := connect(ctx, account)
+	c, err := connect(ctx, &account)
 	if err != nil {
 		return nil, err
 	}
@@ -157,18 +168,19 @@ func Folders(ctx context.Context, account Account) ([]string, error) {
 	return c.folders()
 }
 
-// Test 试着登录收信与发信两台服务器，给配置页的「测试」用。
-func Test(ctx context.Context, account Account) error {
-	c, err := connect(ctx, account)
+// Test 试着登录收信与发信两台服务器，给配置页的「测试」用。返回实际连上的服务器
+// （证书对不上时会换成证书上的名字）。
+func Test(ctx context.Context, account Account) (Account, error) {
+	c, err := connect(ctx, &account)
 	if err != nil {
-		return err
+		return account, err
 	}
 	err = c.selectFolder("INBOX", true)
 	c.close()
 	if err != nil {
-		return err
+		return account, err
 	}
-	return testSMTP(ctx, account)
+	return account, testSMTP(ctx, &account)
 }
 
 // ListQuery 是列信的条件。
@@ -202,7 +214,7 @@ func List(ctx context.Context, account Account, query ListQuery) (items []Summar
 	if query.Limit <= 0 || query.Limit > 50 {
 		query.Limit = 20
 	}
-	c, err := connect(ctx, account)
+	c, err := connect(ctx, &account)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -334,7 +346,7 @@ type Message struct {
 // Read 读一封信：信封、正文（优先纯文本，只有 HTML 时转成文字）、附件清单。
 // markSeen 为 true 时读完标成已读，和在邮件客户端里点开一样。
 func Read(ctx context.Context, account Account, folder string, uid uint32, markSeen bool) (*Message, error) {
-	c, err := connect(ctx, account)
+	c, err := connect(ctx, &account)
 	if err != nil {
 		return nil, err
 	}
@@ -462,7 +474,7 @@ func (c *conn) section(uid imap.UID, path []int, whole bool, limit uint32) ([]by
 
 // FetchAttachment 下载一封信里的第 index 个附件（从 1 数，与 Read 给的编号一致）。
 func FetchAttachment(ctx context.Context, account Account, folder string, uid uint32, index int) (Attachment, []byte, error) {
-	c, err := connect(ctx, account)
+	c, err := connect(ctx, &account)
 	if err != nil {
 		return Attachment{}, nil, err
 	}

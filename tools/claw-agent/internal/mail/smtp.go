@@ -215,7 +215,23 @@ func compose(account Account, to, cc []*gomail.Address, outgoing Outgoing) ([]by
 }
 
 // smtpClient 连上发信服务器并登录。465 是一上来就 TLS，其余端口走 STARTTLS。
-func smtpClient(ctx context.Context, account Account) (*smtp.Client, func(), error) {
+// 证书上的名字对不上时按证书上的名字重连一次，并把 account.SMTPHost 改成它。
+func smtpClient(ctx context.Context, account *Account) (*smtp.Client, func(), error) {
+	client, cleanup, err := smtpClientAt(ctx, *account, account.SMTPHost)
+	if err == nil {
+		return client, cleanup, nil
+	}
+	if fixed := certHost(err, account.SMTPHost); fixed != "" && fixed != account.SMTPHost {
+		if client, cleanup, retryErr := smtpClientAt(ctx, *account, fixed); retryErr == nil {
+			account.SMTPHost = fixed
+			return client, cleanup, nil
+		}
+	}
+	return nil, nil, err
+}
+
+func smtpClientAt(ctx context.Context, account Account, host string) (*smtp.Client, func(), error) {
+	account.SMTPHost = host
 	address := net.JoinHostPort(account.SMTPHost, strconv.Itoa(account.SMTPPort))
 	dialer := &net.Dialer{Timeout: dialTimeout}
 	var (
@@ -276,7 +292,7 @@ func loginAuth(account Account) smtp.Auth {
 	return smtp.PlainAuth("", account.Username, account.Password, account.SMTPHost)
 }
 
-func testSMTP(ctx context.Context, account Account) error {
+func testSMTP(ctx context.Context, account *Account) error {
 	client, cleanup, err := smtpClient(ctx, account)
 	if err != nil {
 		return err
@@ -286,7 +302,7 @@ func testSMTP(ctx context.Context, account Account) error {
 }
 
 func deliver(ctx context.Context, account Account, recipients []string, message []byte) error {
-	client, cleanup, err := smtpClient(ctx, account)
+	client, cleanup, err := smtpClient(ctx, &account)
 	if err != nil {
 		return err
 	}
@@ -315,7 +331,7 @@ func deliver(ctx context.Context, account Account, recipients []string, message 
 
 // saveSent 把发出去的信补存进「已发送」，标成已读。
 func saveSent(ctx context.Context, account Account, message []byte) (string, error) {
-	c, err := connect(ctx, account)
+	c, err := connect(ctx, &account)
 	if err != nil {
 		return "", err
 	}

@@ -68,7 +68,8 @@ func (s *Service) emailAccountOf(ctx context.Context, item model.Plugin) (mail.A
 	if strings.TrimSpace(account.Address) == "" {
 		return account, errors.New("还没填邮箱地址")
 	}
-	return account.Normalize()
+	// 自己域名的企业邮箱：没填服务器时按 DNS 找出托管在哪家（见 mail.Discover）。
+	return mail.Discover(ctx, account).Normalize()
 }
 
 // TestEmail 用插件里已经存下的配置试着登录收信、发信两台服务器。启用前也能测。
@@ -84,15 +85,15 @@ func (s *Service) TestEmail(ctx context.Context, uuid string) protocol.EmailTest
 	if err != nil {
 		return protocol.EmailTestResult{Error: err.Error()}
 	}
-	result := protocol.EmailTestResult{
-		IMAPHost: account.IMAPHost, IMAPPort: account.IMAPPort,
-		SMTPHost: account.SMTPHost, SMTPPort: account.SMTPPort,
-	}
 	if account.Password == "" {
-		result.Error = "还没填授权码"
-		return result
+		return protocol.EmailTestResult{Error: "还没填授权码"}
 	}
-	if err := mail.Test(ctx, account); err != nil {
+	used, err := mail.Test(ctx, account)
+	result := protocol.EmailTestResult{
+		IMAPHost: used.IMAPHost, IMAPPort: used.IMAPPort,
+		SMTPHost: used.SMTPHost, SMTPPort: used.SMTPPort,
+	}
+	if err != nil {
 		result.Error = err.Error()
 		return result
 	}

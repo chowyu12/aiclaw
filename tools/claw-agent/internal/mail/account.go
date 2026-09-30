@@ -1,7 +1,7 @@
 // Package mail 是邮件工具的收发两端：IMAP 读信箱、SMTP 发信。
 //
-// 账号只有一个（配置页「邮件」里填的那个），存在应用库里，密码与其它凭据一样
-// 加密落库。这个包本身不碰库：调用方把解出来的 Account 交进来，每次调用现连现断——
+// 账号是「邮件」插件的配置（插件页里填的那个），密码与其它插件秘密一样加密落库。
+// 这个包本身不碰库：调用方把解出来的 Account 交进来，每次调用现连现断——
 // 模型读一封信隔几十秒才会再读下一封，长连接要处理掉线重连，换来的只是省一次握手。
 //
 // 国内邮箱（QQ、163、126）要在网页版设置里打开 IMAP/SMTP 并生成「授权码」，
@@ -36,8 +36,8 @@ type preset struct {
 	smtpPort int
 }
 
-// presets 按邮箱域名给出服务器。没列到的域名按 imap.<域名> / smtp.<域名> 猜，
-// 猜错了用户在「高级」里改。
+// presets 按邮箱域名给出服务器。没列到的域名（公司自己的域名）先经 Discover 查
+// DNS，查不出来才按 imap.<域名> / smtp.<域名> 猜，猜错了用户在「高级」里改。
 var presets = map[string]preset{
 	"qq.com":         {"imap.qq.com", 993, "smtp.qq.com", 465},
 	"foxmail.com":    {"imap.qq.com", 993, "smtp.qq.com", 465},
@@ -132,6 +132,15 @@ func (a Account) savesSentItself() bool {
 
 // hint 在登录失败时补一句最常见的原因。
 func (a Account) hint() string {
+	host := strings.ToLower(a.IMAPHost + " " + a.SMTPHost)
+	switch {
+	case strings.Contains(host, "qiye.163.com"):
+		return "网易企业邮箱：在网页版「设置 → 客户端设置」里开启 IMAP/SMTP；开了安全登录的话要生成「客户端专用密码」填在这里"
+	case strings.Contains(host, "exmail.qq.com"):
+		return "腾讯企业邮箱：在网页版「设置 → 客户端设置」里开启 IMAP/SMTP；开了安全登录的话要生成「客户端专用密码」填在这里"
+	case strings.Contains(host, "qiye.aliyun.com"):
+		return "阿里企业邮箱：确认管理员开放了 IMAP/SMTP；开了二次验证的话要用「三方客户端安全密码」"
+	}
 	switch Domain(a.Address) {
 	case "qq.com", "foxmail.com", "vip.qq.com":
 		return "QQ 邮箱要在网页版「设置 → 账号」里开启 IMAP/SMTP 服务，密码处填生成的授权码"

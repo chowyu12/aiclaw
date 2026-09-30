@@ -500,7 +500,8 @@ async function pollWeChat(): Promise<void> {
               </label>
               <p class="hint">
                 QQ、163、126 邮箱：在网页版「设置」里开启 IMAP/SMTP 服务，按提示生成授权码填在这里。
-                Gmail、iCloud、Outlook：生成「应用专用密码」。授权码只保存在本机，加密存放。
+                Gmail、iCloud、Outlook：生成「应用专用密码」。公司邮箱（网易、腾讯、阿里企业邮等）
+                会按域名自动找到服务器，开了安全登录的填「客户端专用密码」。授权码只保存在本机，加密存放。
               </p>
               <details class="advanced">
                 <summary>高级：服务器与端口（一般不用填）</summary>
