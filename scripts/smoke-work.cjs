@@ -10,16 +10,17 @@ const checks=[];
 function check(name,ok){checks.push({name,ok});console.log(`${ok?'ok':'FAIL'} ${name}`);}
 app.whenReady().then(async()=>{
  const config={providerId:1,model:'test',reasoningEffort:'medium',contextWindow:0,workdir:'/tmp/smoke',profile:'on-write',language:'zh-CN'};
- let goal=null,forked=false;const sends=[],forks=[],recoveries=[];
+ let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',renameFails=false;const renameCalls=[];
  let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[];
  let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
  const changes=[{id:'c',path:'/tmp/smoke/example.txt',before:'old\nkeep\n',after:'new\nkeep\n',state:'applied',conflict:false,turnId:'t1',createdAt:1},{id:'conflict',path:'/tmp/smoke/other.txt',before:'x',after:'y',state:'applied',conflict:true,turnId:'t2',createdAt:2}];
- const list=()=>[{id:'s',title:'Workflow test',model:'test',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),turnCount:1,workdir:'/tmp/smoke'},...(forked?[{id:'fork',title:'Workflow test (fork)',model:'test',turnCount:1,workdir:'/tmp/smoke'}]:[])];
+ const list=()=>[{id:'s',title:sessionTitle,model:'test',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),turnCount:1,workdir:'/tmp/smoke'},...(forked?[{id:'fork',title:'Workflow test (fork)',model:'test',turnCount:1,workdir:'/tmp/smoke'}]:[])];
  const handle=(key,fn)=>ipcMain.handle(IPC[key],fn);
  handle('configRead',()=>config);handle('configWrite',(_e,p)=>Object.assign(config,p));handle('runtimeStart',()=>undefined);
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>[{id:'on-write',label:'默认'}]);
  handle('groupRead',()=>({groups:[],assignments:{}}));handle('mcpRead',()=>mcpServers);handle('skillList',()=>[]);
  handle('providerList',()=>[{id:1,name:'fixture',type:'openai-compatible',enabled:true,apiKeySet:true,models:['test']}]);
+ handle('sessionRename',(_e,input)=>{renameCalls.push(input);if(renameFails)throw Error('rename failure');sessionTitle=input.title;return {sessionId:input.sessionId,title:sessionTitle};});
  handle('sessionList',list);handle('sessionArchived',()=>[]);
  handle('approvalPending',()=>[]);handle('questionPending',()=>[]);handle('scheduleList',()=>tasks);
  handle('browserBridgeStatus',()=>({listening:false,port:17891,browser:'',browsers:[]}));
@@ -52,6 +53,19 @@ app.whenReady().then(async()=>{
  await click('处理这条输入');await wait("!document.querySelector('.work-panel').textContent.includes('queued input')");
  await click('已检查，移除恢复提示');await wait("!document.querySelector('.work-panel').textContent.includes('uncertain input')");
  check('recovery actions use request identities',recoveries.length===2&&recoveries[0].action==='resume'&&recoveries[1].action==='dismiss');
+
+ const openRename=async()=>{await js("document.querySelector('.sidebar button[aria-label=\"重命名会话\"]').click()");await wait("!!document.querySelector('.session-rename input')");};
+ const nameDraft=async text=>{await js(`(()=>{const input=document.querySelector('.session-rename input');input.value=${JSON.stringify(text)};input.dispatchEvent(new Event('input',{bubbles:true}));})()`);};
+ await openRename();await nameDraft('   ');
+ check('blank chat names cannot be submitted',await js("document.querySelector('.session-rename button[type=submit]').disabled"));
+ await nameDraft('  新会话名称 🐾  ');await js("document.querySelector('.session-rename').requestSubmit()");
+ check('rename crosses preload and updates sidebar',await wait("!document.querySelector('.session-rename') && document.querySelector('.sidebar').textContent.includes('新会话名称 🐾')")&&renameCalls[0]?.sessionId==='s'&&renameCalls[0]?.title==='新会话名称 🐾');
+ await openRename();await nameDraft('discard this');await js("document.querySelector('.session-rename input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+ check('Escape cancels without changing the chat name',await wait("!document.querySelector('.session-rename')")&&renameCalls.length===1&&sessionTitle==='新会话名称 🐾');
+ await openRename();await nameDraft('Retry name');renameFails=true;await js("document.querySelector('.session-rename').requestSubmit()");
+ check('rename failure preserves editable draft',await wait("document.querySelector('.session-rename [role=alert]')?.textContent.includes('rename failure')")&&await js("document.querySelector('.session-rename input').value==='Retry name'"));
+ renameFails=false;await js("document.querySelector('.session-rename').requestSubmit()");await wait("!document.querySelector('.session-rename')");
+ check('rename retry succeeds and survives sidebar reload',sessionTitle==='Retry name'&&renameCalls.length===3);
  await click('设置目标');await wait("!!document.querySelector('.goal-form')");
  await js("(()=>{const fields=document.querySelectorAll('.goal-form textarea');['Ship work','Tests pass','Implement\\nVerify'].forEach((v,i)=>{fields[i].value=v;fields[i].dispatchEvent(new Event('input',{bubbles:true}));});})()");
  await click('创建并开始');await wait("document.querySelector('.work-panel').textContent.includes('Ship work') && !document.querySelector('.goal-form')");

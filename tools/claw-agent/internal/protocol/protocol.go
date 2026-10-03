@@ -19,6 +19,7 @@ const (
 	MethodSessionResume = "session/resume"
 	MethodSessionList   = "session/list"
 	MethodSessionSearch = "session/search"
+	MethodSessionRename = "session/rename"
 	MethodSessionDelete = "session/delete"
 	// MethodSessionArchive 归档 / 恢复一个会话（连同它开出的子 agent）。
 	MethodSessionArchive = "session/archive"
@@ -1111,4 +1112,10 @@ type RawMessage = json.RawMessage
 // ConfigLocaleParams 是 config/locale 的参数。
 type ConfigLocaleParams struct {
 	Locale string `json:"locale"`
+}
+
+// SessionRenameParams changes only the displayed conversation name.
+type SessionRenameParams struct {
+	SessionID string `json:"sessionId"`
+	Title     string `json:"title"`
 }

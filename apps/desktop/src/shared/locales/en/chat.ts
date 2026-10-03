@@ -1,5 +1,8 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "重命名会话": "Rename chat",
+  "会话名称": "Chat name",
+  "保存中…": "Saving…",
  "供应商未报告部分 Token 用量，累计值不完整。": "The provider omitted some token usage; the total is incomplete.",
   "设置目标": "Set goal",
   "分叉会话": "Fork chat",

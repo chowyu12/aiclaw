@@ -412,6 +412,11 @@ export class ClawAgentClient extends EventEmitter {
     });
   }
 
+  sessionRename(sessionId: string, title: string): Promise<{ sessionId: string; title: string }> {
+    this.assertReady();
+    return this.transport.request("session/rename", { sessionId, title });
+  }
+
   async sessionList(): Promise<SessionSummary[]> {
     this.assertReady();
     const result = await this.transport.request<{ sessions: SessionSummary[] }>("session/list", {});

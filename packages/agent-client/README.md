@@ -31,3 +31,5 @@ attachments and references. Confirmed input is not restored as an unsent draft.
 `sessionRecover(id, requestId, "resume" | "dismiss")` 只允许恢复尚未消费的输入，执行结果
 不确定的输入只能检查后移除提示。`changesList` / `changesUndo` 查看、撤销内置文本文件
 工具的改动，检测到外部修改时拒绝覆盖。详见 [工作流设计](../../docs/design/workflows.md)。
+
+`sessionRename(id, title)` changes the durable display name without changing history, model, workspace or archive state. Returns `{ sessionId, title }` with whitespace trimmed.

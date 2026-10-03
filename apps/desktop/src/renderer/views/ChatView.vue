@@ -683,7 +683,13 @@ const forking = ref(false);
                   <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
                 </svg>
               </button>
-              <button :disabled="store.busy || forking || turn.user.pending" @click="forkAt(turn.user.id)">{{ t("从这里分叉") }}</button>
+              <button class="meta-fork" :disabled="store.busy || forking || turn.user.pending" @click="forkAt(turn.user.id)">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M4 11V5m0 4h3a5 5 0 0 0 5-5" />
+                  <circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="13" r="1.5" /><circle cx="12" cy="2.5" r="1.5" />
+                </svg>
+                <span>{{ t("从这里分叉") }}</span>
+              </button>
               <time v-if="turn.user.at" :title="fullMessageTime(turn.user.at)">
                 {{ formatMessageTime(turn.user.at) }}
               </time>
@@ -723,7 +729,13 @@ const forking = ref(false);
                   <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
                 </svg>
               </button>
-              <button :disabled="store.busy || forking" @click="forkAt(turn.messages[turn.messages.length - 1]!.id)">{{ t("从这里分叉") }}</button>
+              <button class="meta-fork" :disabled="store.busy || forking" @click="forkAt(turn.messages[turn.messages.length - 1]!.id)">
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="M4 11V5m0 4h3a5 5 0 0 0 5-5" />
+                  <circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="13" r="1.5" /><circle cx="12" cy="2.5" r="1.5" />
+                </svg>
+                <span>{{ t("从这里分叉") }}</span>
+              </button>
               <time v-if="answerTime(turn.messages)" :title="fullMessageTime(answerTime(turn.messages))">
                 {{ formatMessageTime(answerTime(turn.messages)) }}
               </time>
@@ -1133,7 +1145,8 @@ const forking = ref(false);
   color: var(--ink);
 }
 
-.meta-copy svg {
+.meta-copy svg,
+.meta-fork svg {
   width: 14px;
   height: 14px;
   fill: none;
@@ -1141,6 +1154,48 @@ const forking = ref(false);
   stroke-width: 1.4;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+
+.meta-fork {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 0.12s, background-color 0.12s;
+}
+
+.meta-fork svg {
+  flex-shrink: 0;
+}
+
+.meta-fork:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.meta-fork:active:not(:disabled) {
+  background: var(--active);
+}
+
+.meta-fork:focus-visible,
+.meta-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.meta-fork:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .caret {

@@ -57,13 +57,14 @@ type Options struct {
 }
 
 type Server struct {
-	oauth        *mcpclient.OAuthManager
-	submissionMu sync.Mutex
-	options      Options
-	out          io.Writer
-	writeMu      sync.Mutex
-	sessions     map[string]*agent.Session
-	sessMu       sync.Mutex
+	oauth          *mcpclient.OAuthManager
+	submissionMu   sync.Mutex
+	sessionTitleMu sync.Mutex
+	options        Options
+	out            io.Writer
+	writeMu        sync.Mutex
+	sessions       map[string]*agent.Session
+	sessMu         sync.Mutex
 	// db 是会话库。整个进程共用一个连接池。
 	db *store.Store
 	// appDB 是应用库；Options.AppDB 为空时下面三个都是 nil。
@@ -300,6 +301,8 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 			summaries = []agent.Summary{}
 		}
 		s.writeResult(f.ID, map[string]any{"sessions": summaries})
+	case protocol.MethodSessionRename:
+		s.handleSessionRename(ctx, f)
 	case protocol.MethodSessionDelete:
 		var params protocol.SessionIDParams
 		if err := json.Unmarshal(f.Params, &params); err != nil {
@@ -495,6 +498,8 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 }
 
 func (s *Server) handleSessionResume(ctx context.Context, f frame) {
+	s.sessionTitleMu.Lock()
+	defer s.sessionTitleMu.Unlock()
 	var params protocol.SessionResumeParams
 	if err := json.Unmarshal(f.Params, &params); err != nil {
 		s.writeError(f.ID, codeInvalidParams, "invalid params")

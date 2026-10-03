@@ -31,6 +31,7 @@ export const IPC = {
   sessionList: "session:list",
   sessionSearch: "session:search",
   sessionWorkspace: "session:workspace",
+  sessionRename: "session:rename",
   sessionDelete: "session:delete",
   sessionArchive: "session:archive",
   sessionArchived: "session:archived",

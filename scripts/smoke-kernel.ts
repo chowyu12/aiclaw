@@ -388,11 +388,12 @@ async function main(): Promise<number> {
       if (req.url === "/.well-known/oauth-protected-resource/mcp") return res.end(JSON.stringify({resource: `${oauthBase}/mcp`, authorization_servers: [oauthBase]}));
       if (req.url === "/.well-known/oauth-authorization-server") return res.end(JSON.stringify({issuer: oauthBase, authorization_endpoint: `${oauthBase}/authorize`, token_endpoint: `${oauthBase}/token`, registration_endpoint: `${oauthBase}/register`, code_challenge_methods_supported: ["S256"]}));
       if (req.url === "/register") return res.end(JSON.stringify({client_id: "smoke-client"}));
+      // Shorter than the 30-second refresh buffer, but not near immediate expiry.
       if (req.url === "/token") {
         let body = ""; for await (const chunk of req) body += chunk;
         const refreshed = new URLSearchParams(body).get("grant_type") === "refresh_token";
         if (refreshed) refreshes++;
-        return res.end(JSON.stringify({access_token: refreshed ? "fresh-token" : "initial-token", refresh_token: "refresh-secret", token_type: "Bearer", expires_in: refreshed ? 3600 : 1}));
+        return res.end(JSON.stringify({access_token: refreshed ? "fresh-token" : "initial-token", refresh_token: "refresh-secret", token_type: "Bearer", expires_in: refreshed ? 3600 : 20}));
       }
       if (req.method === "GET") { res.statusCode = 401; res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${oauthBase}/.well-known/oauth-protected-resource/mcp"`); return res.end(); }
       if (req.headers.authorization !== "Bearer fresh-token") { res.statusCode = 401; return res.end(); }

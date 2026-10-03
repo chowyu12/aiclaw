@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import SessionRename from "./SessionRename.vue";
 import { actions, store } from "../store";
 import { describeError } from "../errors";
 import { t } from "../i18n";
@@ -16,6 +17,7 @@ import { formatWhen } from "../../shared/schedule";
 type Row = (typeof store.archived)[number];
 
 const keyword = ref("");
+const renamingSession = ref("");
 const busy = reactive<Record<string, string>>({});
 
 onMounted(() => void actions.loadArchived());
@@ -98,7 +100,9 @@ function archivedText(session: Row): string {
           </div>
           <p v-if="busy[session.id]" class="hint">{{ busy[session.id] }}</p>
         </div>
+        <SessionRename v-if="renamingSession === session.id" :session-id="session.id" :title="session.title || ''" @close="renamingSession = ''" />
         <div class="actions">
+          <button class="ghost small" :disabled="!!renamingSession" @click="renamingSession = session.id">{{ t("重命名会话") }}</button>
           <button class="ghost small" @click="restore(session)">{{ t("恢复") }}</button>
           <button class="ghost small danger" @click="remove(session)">{{ t("删除") }}</button>
         </div>
@@ -148,6 +152,7 @@ h2 {
 }
 
 .row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;

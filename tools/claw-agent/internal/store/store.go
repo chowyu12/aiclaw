@@ -114,6 +114,10 @@ func Open(dataHome string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := ensureManualTitleColumn(context.Background(), db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	store := &Store{db: db}
 	store.startUsageWriter()
 	return store, nil
@@ -137,7 +141,7 @@ func (s *Store) Save(ctx context.Context, session Session) error {
 INSERT INTO sessions (id, title, created_at, updated_at, workdir, model, turn_count, config, messages)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
-  title = excluded.title,
+  title = CASE WHEN sessions.manual_title <> '' THEN sessions.manual_title ELSE excluded.title END,
   updated_at = excluded.updated_at,
   workdir = excluded.workdir,
   model = excluded.model,

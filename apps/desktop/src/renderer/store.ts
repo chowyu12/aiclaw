@@ -450,6 +450,16 @@ export const actions = {
    * 归档会话：从侧边栏收起来，设置 → 已归档里能恢复。内核连同它开出的子 agent 一起归档，
    * 还在跑的会先停下。
    */
+  async renameSession(sessionId: string, title: string): Promise<void> {
+    const result = await window.aiclaw.session.rename(sessionId, title);
+    for (const list of [state.sessions, state.archived, state.sessionSearch.results]) {
+      const session = list.find(item => item.id === sessionId);
+      if (session) session.title = result.title;
+    }
+    await actions.refreshSessions();
+    if (state.sessionSearch.keyword.trim()) await actions.searchSessions(state.sessionSearch.keyword);
+  },
+
   async archiveSession(sessionId: string): Promise<void> {
     const changed = ((await window.aiclaw.session.archive(sessionId, true)) as string[] | undefined) ?? [sessionId];
     for (const id of changed) delete state.live[id];

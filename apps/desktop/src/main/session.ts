@@ -543,6 +543,10 @@ export class SessionManager extends EventEmitter {
   }
 
   /** 归档（或恢复）会话，连同它开出的子 agent。返回涉及的全部 id。 */
+  renameSession(sessionId: string, title: string): Promise<{ sessionId: string; title: string }> {
+    return this.requireClient().sessionRename(sessionId, title);
+  }
+
   archiveSession(sessionId: string, archived: boolean): Promise<string[]> {
     return this.requireClient().sessionArchive(sessionId, archived);
   }

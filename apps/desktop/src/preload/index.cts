@@ -35,6 +35,7 @@ const api = {
     list: () => ipcRenderer.invoke(IPC.sessionList),
     search: (keyword: string) => ipcRenderer.invoke(IPC.sessionSearch, keyword),
     setWorkspace: (input: unknown) => ipcRenderer.invoke(IPC.sessionWorkspace, input),
+    rename: (sessionId: string, title: string) => ipcRenderer.invoke(IPC.sessionRename, { sessionId, title }),
     remove: (sessionId: string) => ipcRenderer.invoke(IPC.sessionDelete, sessionId),
     /** 归档（archived=false 为恢复），连同它开出的子 agent。 */
     archive: (sessionId: string, archived: boolean) => ipcRenderer.invoke(IPC.sessionArchive, { sessionId, archived }),

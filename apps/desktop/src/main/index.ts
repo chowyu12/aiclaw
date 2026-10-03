@@ -265,6 +265,9 @@ function registerIpc(): void {
     store.pruneGroupAssignments([...list, ...archived].map((session) => session.id));
     return list;
   });
+  ipcMain.handle(IPC.sessionRename, (_event, input: { sessionId: string; title: string }) =>
+    sessions.renameSession(input.sessionId, input.title),
+  );
   ipcMain.handle(IPC.sessionArchive, (_event, input: { sessionId: string; archived: boolean }) =>
     sessions.archiveSession(String(input.sessionId), input.archived === true),
   );

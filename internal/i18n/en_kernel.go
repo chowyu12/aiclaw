@@ -8,6 +8,9 @@ package i18n
 // 中文照旧是全角冒号，英文是 ": "。
 func init() {
 	register(map[string]string{
+		"会话名称不能为空":                       "Chat name cannot be empty",
+		"会话名称最多 200 个字符":                 "Chat name must be at most 200 characters",
+		"会话名称不能包含换行或控制字符":                "Chat name cannot contain line breaks or control characters",
 		"只能查看或恢复普通文件":                    "only regular files can be reviewed or restored",
 		"可记录的文本写入不能超过 4 MiB":             "reviewable text writes are limited to 4 MiB",
 		"原文件过大，无法保存快照":                   "existing file is too large to snapshot",

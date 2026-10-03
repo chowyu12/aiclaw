@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { actions, store } from "../store";
 import { locale, t } from "../i18n";
 import BrandLogo from "./BrandLogo.vue";
+import SessionRename from "./SessionRename.vue";
 import type { SessionSummaryView } from "../../shared/types";
 
 /**
@@ -45,6 +46,11 @@ watch(keyword, (value) => {
 });
 const searching = computed(() => keyword.value.trim().length > 0);
 
+const renamingSession = ref("");
+watch(() => [store.view, keyword.value], () => { renamingSession.value = ""; });
+watch(() => store.sessions.map(session => session.id), ids => {
+  if (renamingSession.value && !ids.includes(renamingSession.value)) renamingSession.value = "";
+});
 const renaming = ref("");
 const renameDraft = ref("");
 /** 展开哪个会话的「移动到」菜单。空串表示都收着。 */
@@ -361,6 +367,12 @@ function when(iso: string): string {
             <template v-if="session.turnCount"> · {{ session.turnCount === 1 ? t("1 轮") : t("{n} 轮", { n: session.turnCount }) }}</template>
           </div>
         </div>
+        <div class="item-actions" @click.stop>
+            <button class="icon tiny" :title="t(`重命名会话`)" :aria-label="t(`重命名会话`)" :disabled="!!renamingSession" @click="renamingSession = session.id">
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 2 4 4-7.5 7.5-4.5.5.5-4.5Z M8.5 3.5l4 4" /></svg>
+            </button>
+        </div>
+        <SessionRename v-if="renamingSession === session.id" :session-id="session.id" :title="session.title || ''" @close="renamingSession = ''" />
       </div>
     </div>
 
@@ -454,6 +466,9 @@ function when(iso: string): string {
             </button>
           </div>
           <div class="item-actions" @click.stop>
+            <button class="icon tiny" :title="t(`重命名会话`)" :aria-label="t(`重命名会话`)" :disabled="!!renamingSession" @click="renamingSession = session.id">
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 2 4 4-7.5 7.5-4.5.5.5-4.5Z M8.5 3.5l4 4" /></svg>
+            </button>
             <button
               class="icon tiny"
               :title="t(`移动到分组`)"
@@ -468,6 +483,8 @@ function when(iso: string): string {
             </button>
             <button class="icon tiny" :title="t(`删除会话`)" @click="removeSession(session)">×</button>
           </div>
+
+          <SessionRename v-if="renamingSession === session.id" :session-id="session.id" :title="session.title || ''" @close="renamingSession = ''" />
 
           <div v-if="moving === session.id" class="move" @click.stop>
             <button
@@ -504,6 +521,9 @@ function when(iso: string): string {
             </div>
           </div>
           <div class="item-actions" @click.stop>
+            <button class="icon tiny" :title="t(`重命名会话`)" :aria-label="t(`重命名会话`)" :disabled="!!renamingSession" @click="renamingSession = child.session.id">
+              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 2 4 4-7.5 7.5-4.5.5.5-4.5Z M8.5 3.5l4 4" /></svg>
+            </button>
             <button class="icon tiny" :title="t(`归档`)" :aria-label="t(`归档`)" @click="archiveSession(child.session)">
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                 <path fill="currentColor" d="M2 2.5h12a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Zm0 5h12v5.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5Zm4 1.8v.9h4v-.9H6Z" />
@@ -511,6 +531,7 @@ function when(iso: string): string {
             </button>
             <button class="icon tiny" :title="t(`删除会话`)" @click="removeSession(child.session)">×</button>
           </div>
+          <SessionRename v-if="renamingSession === child.session.id" :session-id="child.session.id" :title="child.session.title || ''" @close="renamingSession = ''" />
         </div>
         </template>
       </section>
@@ -853,6 +874,7 @@ function when(iso: string): string {
   }
 }
 
+.item:focus-within .item-actions,
 .item:hover .item-actions,
 .item.active .item-actions {
   opacity: 1;
