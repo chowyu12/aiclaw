@@ -1,0 +1,104 @@
+/** Exercises the real Vue/preload workflow without touching user data or paid models. */
+const {app,BrowserWindow,ipcMain}=require('electron');
+const {join}=require('node:path');
+const {writeFileSync}=require('node:fs');
+const desktop=join(__dirname,'../apps/desktop');
+const {IPC}=require(join(desktop,'dist/shared/ipc.cjs'));
+app.setPath('userData',join(app.getPath('temp'),'aiclaw-work-smoke'));
+let win;
+const checks=[];
+function check(name,ok){checks.push({name,ok});console.log(`${ok?'ok':'FAIL'} ${name}`);}
+app.whenReady().then(async()=>{
+ const config={providerId:1,model:'test',reasoningEffort:'medium',contextWindow:0,workdir:'/tmp/smoke',profile:'on-write',language:'zh-CN'};
+ let goal=null,forked=false;const sends=[],forks=[],recoveries=[];
+ let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[];
+ let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
+ const changes=[{id:'c',path:'/tmp/smoke/example.txt',before:'old\nkeep\n',after:'new\nkeep\n',state:'applied',conflict:false,turnId:'t1',createdAt:1},{id:'conflict',path:'/tmp/smoke/other.txt',before:'x',after:'y',state:'applied',conflict:true,turnId:'t2',createdAt:2}];
+ const list=()=>[{id:'s',title:'Workflow test',model:'test',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),turnCount:1,workdir:'/tmp/smoke'},...(forked?[{id:'fork',title:'Workflow test (fork)',model:'test',turnCount:1,workdir:'/tmp/smoke'}]:[])];
+ const handle=(key,fn)=>ipcMain.handle(IPC[key],fn);
+ handle('configRead',()=>config);handle('configWrite',(_e,p)=>Object.assign(config,p));handle('runtimeStart',()=>undefined);
+ handle('appVersion',()=> 'work-smoke');handle('profileList',()=>[{id:'on-write',label:'默认'}]);
+ handle('groupRead',()=>({groups:[],assignments:{}}));handle('mcpRead',()=>mcpServers);handle('skillList',()=>[]);
+ handle('providerList',()=>[{id:1,name:'fixture',type:'openai-compatible',enabled:true,apiKeySet:true,models:['test']}]);
+ handle('sessionList',list);handle('sessionArchived',()=>[]);
+ handle('approvalPending',()=>[]);handle('questionPending',()=>[]);handle('scheduleList',()=>tasks);
+ handle('browserBridgeStatus',()=>({listening:false,port:17891,browser:'',browsers:[]}));
+ handle('mcpWrite',(_e,input)=>{mcpServers=input;return input;});handle('mcpProbe',()=>({ok:true,tools:[]}));
+ handle('mcpOAuthStatus',()=>({state:authState}));handle('mcpOAuthLogin',(_e,input)=>{authCalls.push(input);authState='authorizing';return {state:authState};});handle('mcpOAuthLogout',()=>{authState='needs_login';return {disconnected:true};});
+ handle('sessionConfigure',()=>({tools:[],mcpStatus:{}}));
+ handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
+ handle('sessionResume',(_e,id)=>({sessionId:id,workspace:'/tmp/smoke',tools:[],mcpStatus:{},model:'test',providerId:1,history:[{id:'u1',kind:'userMessage',text:'original prompt'},{id:'a1',kind:'agentMessage',text:'original answer'}]}));
+ handle('sessionWork',(_e,id)=>({goal:id==='s'?goal:null,pending:id==='s'?pending:[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
+ handle('changesList',(_e,id)=>id==='s'?changes:[]);
+ handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
+ handle('goalUpdate',(_e,id,update)=>{Object.assign(goal,update);return goal;});
+ handle('sessionSend',(_e,input)=>{sends.push(input);setTimeout(()=>{win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:input.sessionId,turnId:'t'}});setTimeout(()=>win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:input.sessionId,turnId:'t'}}),30);},0);return {turnId:'t'};});
+ handle('sessionRecover',(_e,id,requestId,action)=>{recoveries.push({requestId,action});pending=pending.filter(p=>p.requestId!==requestId);return {};});
+ handle('sessionFork',(_e,id,itemId)=>{forked=true;forks.push({id,itemId});return {sessionId:'fork'};});
+ handle('changesUndo',(_e,id,changeId)=>{const change=changes.find(c=>c.id===changeId);if(change.conflict)throw Error('conflict');change.state='undone';return {};});
+ win=new BrowserWindow({show:false,width:1200,height:900,webPreferences:{preload:join(desktop,'dist/preload/index.cjs'),contextIsolation:true,nodeIntegration:false,sandbox:true}});
+ const js=code=>win.webContents.executeJavaScript(code);
+ const wait=async code=>{for(let i=0;i<60;i++){if(await js(code))return true;await new Promise(r=>setTimeout(r,50));}return false;};
+ const click=async text=>{
+  const find=`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)})`;
+  if(!(await wait(`(()=>{const b=${find};return !!b&&!b.disabled&&b.getClientRects().length>0})()`)))throw Error('button unavailable: '+text);
+  await js(`(${find}).click()`);
+ };
+
+ try {
+ await win.loadFile(join(desktop,'dist/renderer/index.html'));
+ check('work panel rendered',await wait("!!document.querySelector('.work-panel') && [...document.querySelectorAll('.work-panel article')].some(a=>a.textContent.includes('uncertain input'))"));
+ check('uncertain input has no replay action',await js("[...document.querySelectorAll('.work-panel article')].find(a=>a.textContent.includes('uncertain input')).querySelectorAll('button').length===1"));
+ await click('处理这条输入');await wait("!document.querySelector('.work-panel').textContent.includes('queued input')");
+ await click('已检查，移除恢复提示');await wait("!document.querySelector('.work-panel').textContent.includes('uncertain input')");
+ check('recovery actions use request identities',recoveries.length===2&&recoveries[0].action==='resume'&&recoveries[1].action==='dismiss');
+ await click('设置目标');await wait("!!document.querySelector('.goal-form')");
+ await js("(()=>{const fields=document.querySelectorAll('.goal-form textarea');['Ship work','Tests pass','Implement\\nVerify'].forEach((v,i)=>{fields[i].value=v;fields[i].dispatchEvent(new Event('input',{bubbles:true}));});})()");
+ await click('创建并开始');await wait("document.querySelector('.work-panel').textContent.includes('Ship work') && !document.querySelector('.goal-form')");
+ check('goal creation passes criteria and plan through preload',goal?.acceptance==='Tests pass'&&goal.steps.length===2&&sends.length===1);
+ await click('暂停目标');await wait("document.querySelector('.work-panel').textContent.includes('已暂停')");
+ check('goal pause rendered',goal.status==='paused');
+ await click('继续目标');await wait("document.querySelector('.work-panel').textContent.includes('进行中')");
+ check('goal resumes and dispatches continuation',goal.status==='active'&&sends.length===2);
+ await click('暂停目标');await wait("document.querySelector('.work-panel').textContent.includes('已暂停')");
+ await js("[...document.querySelectorAll('.work-panel summary')].find(s=>s.textContent.includes('调整预算')).click()");
+ await new Promise(r=>setTimeout(r,60));
+ await js("(()=>{const inputs=document.querySelectorAll('.work-panel input[type=number]');[200,2].forEach((v,i)=>{inputs[i].value=String(v);inputs[i].dispatchEvent(new Event('input',{bubbles:true}));});})()");
+ await click('保存预算');await wait("document.querySelector('.work-panel').textContent.includes('200')");
+ check('budget edit crosses the IPC bridge',goal.tokenBudget===200&&goal.timeBudgetMs===120000);
+ for(let index=0;index<2;index++){
+  await js(`(()=>{const input=document.querySelectorAll('.work-panel select')[${index}];input.value='completed';input.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  await wait("![...document.querySelectorAll('.work-panel button')].find(b=>b.textContent.trim()==='保存预算').disabled");
+ }
+ await js("(()=>{const input=document.querySelector('.work-panel textarea');input.value='Tests verified';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+ await click('标记完成');await wait("!document.querySelector('.work-panel textarea')");
+ check('completion records evidence and finished steps',goal.status==='complete'&&goal.evidence==='Tests verified'&&goal.steps.every(s=>s.status==='completed'));
+ goal={...goal,tokensUsed:123};win.webContents.send(IPC.onAgentEvent,{method:'session/workUpdated',params:{sessionId:'s',goal}});
+ check('goal updates stream independently of tool display mode',await wait("document.querySelector('.work-panel').textContent.includes('123')"));
+
+ await js("[...document.querySelectorAll('.work-panel summary')].find(s=>s.textContent.includes('文件改动')).click()");
+ await click('/tmp/smoke/example.txt');check('file diff renders additions and deletions',await wait("document.querySelector('.diff .add')?.offsetHeight>0 && document.querySelector('.diff .remove')?.offsetHeight>0"));
+ check('conflicting edit offers no undo',await js("[...document.querySelectorAll('.work-panel article')].find(a=>a.textContent.includes('other.txt')).querySelectorAll('button').length===1"));
+ writeFileSync('/tmp/aiclaw-work-panel.png',(await win.webContents.capturePage()).toPNG());
+ await click('撤销此改动');await wait("document.querySelector('.work-panel').textContent.includes('已撤销')");check('undo uses selected change',changes[0].state==='undone');
+ await click('从这里分叉');await wait("document.querySelector('.work-panel').textContent.includes('查看来源会话')");
+ check('fork uses chosen message and opens provenance',forks.length===1&&forks[0].itemId==='u1'&&await js("document.querySelector('.work-panel').textContent.includes('查看来源会话')"));
+
+ await click('⚙');
+ const nav = async title => { const selector=`[...document.querySelectorAll('.sidebar .item')].find(item=>item.querySelector('.title')?.textContent.trim()===${JSON.stringify(title)})`;await wait(`!!(${selector})`);await js(`(${selector}).click()`); };
+ await nav('MCP');await wait("!!document.querySelector('.card .disclose')");await js("document.querySelector('.card .disclose').click()");
+ check('OAuth settings render status and credentials form',await wait("document.querySelector('.oauth')?.textContent.includes('需要登录')"));
+ await js("(()=>{const input=document.querySelector('.oauth input[type=password]');input.value='client-secret';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
+ await click('登录');await wait("document.querySelector('.oauth').textContent.includes('等待浏览器授权')");
+ check('OAuth login crosses preload without saving secret in config',authCalls[0]?.clientSecret==='client-secret'&&!JSON.stringify(mcpServers).includes('client-secret'));
+ authState='connected';check('OAuth callback status becomes visible',await wait("document.querySelector('.oauth').textContent.includes('已登录')"));
+ await click('退出登录');check('OAuth logout updates status',await wait("document.querySelector('.oauth').textContent.includes('需要登录')"));
+ await nav('定时任务');await click('+ 新建定时任务');await wait("!!document.querySelector('.editor')");
+ await js("(()=>{const root=document.querySelector('.editor');const field=label=>[...root.querySelectorAll('label')].find(l=>l.querySelector('span')?.textContent.trim()===label);const set=(label,value)=>{const input=field(label).querySelector('input,textarea,select');input.value=value;input.dispatchEvent(new Event(input.tagName==='SELECT'?'change':'input',{bubbles:true}));};set('名称','Follow up');set('要做什么','Check progress');set('停止条件（可选）','All checks pass');})()");
+ await click('建好');await wait("!document.querySelector('.editor')");
+ check('follow-up form sends chat, notification and stop condition',scheduleInputs[0]?.mode==='followup'&&scheduleInputs[0]?.sessionId==='fork'&&scheduleInputs[0]?.notificationPolicy==='changes'&&scheduleInputs[0]?.stopWhen==='All checks pass');
+ await nav('MCP');await nav('定时任务');check('last follow-up result renders after reload',await wait("document.querySelector('.page').textContent.includes('waiting for checks')"));
+ }catch(e){check(String(e.stack||e),false);}
+ console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
+ app.exit(checks.every(c=>c.ok)?0:1);
+});

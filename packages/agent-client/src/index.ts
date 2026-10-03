@@ -58,3 +58,7 @@ export type {
   WeChatLoginPollResult,
   WeChatLoginStartResult,
 } from "./protocol.js";
+
+export type { Goal, GoalInput, GoalUpdate, PlanStep, SessionWork, PendingSubmission, FileChange } from "./protocol.js";
+
+export type { MCPOAuthInput, MCPOAuthStatus } from "./protocol.js";

@@ -26,7 +26,7 @@
 | `list_agents` | `path_prefix?` | `{"agents":[{"agent_name","agent_status"}]}` |
 | `interrupt_agent` | `target` | `{"previous_status"}` |
 
-状态值：`running` / `completed` / `errored` / `interrupted` / `idle`。
+状态值：`preparing`（环境准备中）/ `running` / `completed` / `errored` / `interrupted` / `idle`。
 
 ## 语义
 
@@ -48,7 +48,11 @@
 
 - **模型与推理强度跟父会话走**，不开放 `model` / `reasoning_effort` 覆盖：AIClaw 的模型绑在模型服务上，按名字换模型说不清换到哪个服务。
 - **没有 `agent_type`（角色）**。
-- **上限**：最多嵌套 2 层；一棵树上同时在跑的子 agent 最多 6 个（`server/collab.go` 的常量）。
+- **上限**：最多嵌套 2 层；一棵树上正在准备或运行的子 agent 合计最多 6 个（`server/collab.go` 的常量）。
+- **环境准备**（2026-10-03 跟进 Codex 0.160）：挂载工具前先原子保留名字与名额，
+  `list_agents` 显示 `preparing`；准备失败或被取消时释放名额。中断父会话会取消
+  仍在准备的后代。MCP 挂载结果通过 `spawn_agent` 的 `mcp_status` 返回，并附在
+  子任务输入中；可选 MCP 失败仍按原规则降级，配置或建会话失败直接返回错误。
 - **树只活在内存里**：内核重启后，子会话还在、能打开能继续聊，但不再属于哪棵树。
 - **只给用户自己的会话**：通道会话（微信、企业微信）不挂这组工具。
 - **停止会连坐**：用户在界面上停下一个会话时，它开出去还在跑的子 agent 一并停下。

@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { AgentTransport, type TransportOptions } from "./transport.js";
 import type {
+  Goal, GoalInput, GoalUpdate, SessionWork, FileChange,
   AgentNotification,
   RoleModels,
   ApprovalRequestParams,
@@ -195,6 +196,10 @@ export class ClawAgentClient extends EventEmitter {
   }
 
   /** 试连一个 MCP server 并列出它的工具。与会话无关，配置页用。 */
+  mcpOAuthLogin(input: import("./protocol.js").MCPOAuthInput) { return this.transport.request<import("./protocol.js").MCPOAuthStatus>("mcp/oauth/login", input); }
+  mcpOAuthStatus(url: string) { return this.transport.request<import("./protocol.js").MCPOAuthStatus>("mcp/oauth/status", {url}); }
+  mcpOAuthLogout(url: string) { return this.transport.request<{disconnected: boolean}>("mcp/oauth/logout", {url}); }
+
   mcpProbe(server: MCPServerConfig): Promise<MCPProbeResult> {
     this.assertReady();
     return this.transport.request<MCPProbeResult>("mcp/probe", { server });
@@ -445,6 +450,14 @@ export class ClawAgentClient extends EventEmitter {
   }
 
   /** 取会话历史，还原成可直接渲染的时间线条目。 */
+  sessionWork(sessionId: string): Promise<SessionWork> { return this.transport.request("session/work", { sessionId }); }
+  goalSet(sessionId: string, goal: GoalInput): Promise<Goal> { return this.transport.request("goal/set", { sessionId, goal }); }
+  goalUpdate(sessionId: string, update: GoalUpdate): Promise<Goal> { return this.transport.request("goal/update", { sessionId, update }); }
+  sessionFork(sessionId: string, itemId?: string, model?: ModelConfig): Promise<{sessionId: string}> { return this.transport.request("session/fork", { sessionId, itemId, model }); }
+  sessionRecover(sessionId: string, requestId: string, action: "resume" | "dismiss"): Promise<unknown> { return this.transport.request("session/recover", { sessionId, requestId, action }); }
+  changesList(sessionId: string): Promise<FileChange[]> { return this.transport.request("changes/list", { sessionId }); }
+  changesUndo(sessionId: string, changeId: string): Promise<unknown> { return this.transport.request("changes/undo", { sessionId, changeId }); }
+
   async sessionHistory(sessionId: string): Promise<Item[]> {
     const result = await this.transport.request<SessionHistoryResult>("session/history", {
       sessionId,
@@ -478,10 +491,12 @@ export class ClawAgentClient extends EventEmitter {
     images?: string[],
     audioPaths?: string[],
     references?: ThreadRef[],
+    requestId?: string,
+    idleOnly?: boolean,
   ): Promise<TurnStartResult> {
     this.assertReady();
     return this.transport.request<{ turnId: string }>("turn/start", {
-      sessionId, text, images, audioPaths, references,
+      sessionId, text, images, audioPaths, references, requestId, idleOnly,
     });
   }
 

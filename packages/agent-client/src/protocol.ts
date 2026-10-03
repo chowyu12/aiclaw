@@ -33,6 +33,7 @@ export interface ModelConfig {
  * 当子进程拉起来走 stdio（本地）。
  */
 export interface MCPServerConfig {
+ oauth?: boolean;
   /** stdio：可执行文件与参数。 */
   command?: string;
   args?: string[];
@@ -543,6 +544,7 @@ export interface ThreadRef {
 }
 
 export interface Item {
+  requestId?: string;
   id: string;
   kind: ItemKind;
   text?: string;
@@ -623,6 +625,7 @@ export interface ApprovalRequestParams {
 
 /** 服务端通知的判别联合，宿主按 method 分发。 */
 export type AgentNotification =
+ | { method: "session/workUpdated"; params: {sessionId: string; goal: Goal} }
   | { method: "turn/started"; params: TurnNotification }
   | { method: "turn/completed"; params: TurnNotification }
   | { method: "item/started"; params: ItemNotification }
@@ -700,6 +703,10 @@ export interface EmailTestResult {
 
 /** 模型对定时任务的一次操作（schedule/request）。调度器在宿主。 */
 export interface ScheduleRequestParams {
+ runId?: string;
+ result?: string;
+ resultKey?: string;
+ complete?: boolean;
   sessionId: string;
   action: "list" | "create" | "delete";
   id?: string;
@@ -707,6 +714,9 @@ export interface ScheduleRequestParams {
 }
 
 export interface ScheduleTaskInput {
+ mode?: "cron" | "followup";
+ notificationPolicy?: "changes" | "all";
+ stopWhen?: string;
   name: string;
   prompt: string;
   kind: "daily" | "weekdays" | "weekly" | "interval" | "once";
@@ -720,3 +730,21 @@ export interface ScheduleTaskInput {
 export interface ScheduleResult {
   text: string;
 }
+
+export interface PlanStep { text: string; status: "pending" | "in_progress" | "completed" }
+export interface Goal {
+  objective: string; acceptance: string; status: "active" | "paused" | "blocked" | "complete" | "budget_exhausted";
+  steps: PlanStep[]; evidence: string; tokenBudget: number; timeBudgetMs: number;
+  usageIncomplete?: boolean; tokensUsed: number; elapsedMs: number; revision: number;
+}
+export interface GoalInput { objective: string; acceptance: string; steps: PlanStep[]; tokenBudget?: number; timeBudgetMs?: number }
+export interface GoalUpdate { status?: Goal["status"]; steps?: PlanStep[]; evidence?: string; tokenBudget?: number; timeBudgetMs?: number }
+export interface PendingSubmission {
+  requestId: string; turnId: string; state: "queued" | "uncertain"; createdAt: number;
+  payload: { text: string; images?: string[]; audioPaths?: string[] };
+}
+export interface SessionWork { goal: Goal | null; pending: PendingSubmission[]; forkSourceId: string; forkItemId: string }
+export interface FileChange { id: string; path: string; turnId: string; before: string; after: string; existed: boolean; state: "pending" | "applied" | "undoing" | "undone"; createdAt: number; conflict: boolean }
+
+export interface MCPOAuthInput { url: string; clientId?: string; clientSecret?: string; scope?: string; redirectPort?: number }
+export interface MCPOAuthStatus { state: "connected" | "expired" | "needs_login" | "authorizing"; expiresAt?: number; error?: string; authorizationUrl?: string }

@@ -47,7 +47,7 @@ function parseEntry(entry: string): { name: string; context: number } {
 
 /** 能用的模型服务：启用了、配了 Key、清单里至少有一个模型。 */
 export function usable(provider: ProviderLike): boolean {
-  return provider.enabled && provider.apiKeySet && provider.models.length > 0;
+  return provider.enabled && provider.apiKeySet && provider.models.some((entry) => parseEntry(entry).name !== "");
 }
 
 /** 把全部能用的模型服务铺成一张可选清单，给对话页顶部与配置页的选择器用。 */
@@ -59,6 +59,7 @@ export function modelChoices(providers: readonly ProviderLike[]): ModelChoice[] 
       // 清单项可能带能力与窗口标记（`名字#vision@131072`）。发给服务的是名字
       // 那一段——把整条送过去，上游只会回一句「没有这个模型」。
       const { name, context } = parseEntry(entry);
+      if (!name || choices.some((choice) => choice.providerId === provider.id && choice.model === name)) continue;
       choices.push({ providerId: provider.id, providerName: provider.name, model: name, context });
     }
   }
@@ -79,4 +80,13 @@ export function filterChoices(choices: ModelChoice[], keyword: string): ModelCho
       choice.model.toLowerCase().includes(needle) ||
       choice.providerName.toLowerCase().includes(needle),
   );
+}
+
+/** Resolve defaults exclusively against the configured catalogs, including marked names. */
+export function defaultModelChoice(
+  providers: readonly ProviderLike[], providerId?: number, model?: string,
+): ModelChoice | undefined {
+  const choices = modelChoices(providers);
+  const name = parseEntry(model ?? "").name;
+  return choices.find((choice) => choice.providerId === providerId && choice.model === name) ?? choices[0];
 }

@@ -1,7 +1,8 @@
 {
   "name": "@aiclaw/desktop",
-  "version": "3.6.8",
+  "version": "3.7.0",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "main": "dist/main/index.js",
   "scripts": {

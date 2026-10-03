@@ -11,6 +11,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,8 +57,10 @@ type Emitter interface {
 
 // userInput 是一次用户输入：文字，可能还带着图片。
 type userInput struct {
-	text   string
-	images [][]byte
+	requestID  string
+	text       string
+	images     [][]byte
+	audioPaths []string
 	// mail 表示这是别的 agent 投来的消息（见 collab.go），不是用户说的话：进历史时
 	// 不显示成用户气泡，时间线上只留 notice 那一行提示。
 	mail     bool
@@ -69,6 +72,21 @@ type userInput struct {
 
 // Session 是一个会话：一份配置 + 一段对话历史 + 一套已挂载的工具。
 type Session struct {
+	mcpAuth             func(context.Context, string) (string, error)
+	db                  *store.Store
+	persistMu           sync.Mutex
+	saveMu              sync.Mutex
+	deleted             bool
+	persistedMessages   map[string]bool
+	persistenceErr      error
+	goalMu              sync.Mutex
+	goalTick            time.Time
+	goalCancel          context.CancelFunc
+	goalStop            func()
+	goalTimer           *time.Timer
+	goalTimerGeneration uint64
+	goalCharging        bool
+
 	ID        string
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -86,10 +104,14 @@ type Session struct {
 	// folded 是代码模式下收进 exec 的工具名，给宿主展示用。
 	folded []string
 
+	runMu     sync.Mutex
+	finishing bool
 	mu        sync.Mutex
 	turnCount int
 	// cancelTurn 是当前轮次的取消函数；没有进行中的轮次时为 nil。
 	cancelTurn context.CancelFunc
+	// Only model sampling/retry waits are preempted by user input; running tools finish normally.
+	cancelSample context.CancelFunc
 	// currentTurn 是进行中那一轮的 id，用于把排队的输入归到它名下。
 	currentTurn string
 	// emitter 是当轮的事件出口。computer use 的工具要靠它回调宿主，
@@ -247,6 +269,9 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	// 放在后面它就成了一个游离在 exec 外面的顶层工具，而模型在代码模式下
 	// 顺手写 tools.generate_image(...)，得到的是「没有这个工具」——实际踩过：
 	// 它随即去翻应用库找 Key 自己 curl。批量转写一堆录音也正需要在脚本里调。
+	if err := session.registerGoalTools(); err != nil {
+		return nil, err
+	}
 	if err := session.registerMediaTools(); err != nil {
 		return nil, err
 	}
@@ -652,7 +677,7 @@ func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.M
 		go func(index int, name string) {
 			defer wg.Done()
 			started := time.Now()
-			client, key, err := mcpShared.acquire(ctx, name, servers[name])
+			client, key, err := mcpShared.acquire(ctx, name, servers[name], s.mcpAuth)
 			results[index] = dialed{client: client, key: key, err: err, took: time.Since(started)}
 		}(index, name)
 	}
@@ -993,6 +1018,25 @@ func (s *Session) SetUsageSink(sink func(store.UsageEvent)) {
 }
 
 func (s *Session) recordUsage(event store.UsageEvent) {
+	if event.Kind == store.UsageModel {
+		if event.Total == 0 && event.Input == 0 && event.Output == 0 {
+			s.unknownGoalUsage()
+		}
+		if err := s.accountGoal(int64(max(event.Total, event.Input+event.Output))); err != nil {
+			if !errors.Is(err, errGoalBudget) {
+				s.mu.Lock()
+				s.persistenceErr = err
+				s.mu.Unlock()
+			}
+			s.goalMu.Lock()
+			cancel := s.goalCancel
+			s.goalMu.Unlock()
+			if cancel != nil {
+				cancel()
+			}
+		}
+	}
+
 	s.mu.Lock()
 	sink := s.usage
 	s.mu.Unlock()
@@ -1172,6 +1216,11 @@ type persisted struct {
 // 存的是给模型看的原始消息，不是给人看的条目——恢复会话需要的是前者，
 // 后者由 History() 从前者还原。
 func (s *Session) Save(ctx context.Context, db *store.Store) error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	if s.deleted {
+		return store.ErrNotFound
+	}
 	s.mu.Lock()
 	snapshot := persisted{
 		ID:        s.ID,
@@ -1179,7 +1228,7 @@ func (s *Session) Save(ctx context.Context, db *store.Store) error {
 		CreatedAt: s.CreatedAt,
 		UpdatedAt: s.UpdatedAt,
 		Config:    s.config,
-		Messages:  s.messages,
+		Messages:  append([]llm.Message(nil), s.messages...),
 		TurnCount: s.turnCount,
 	}
 	s.mu.Unlock()

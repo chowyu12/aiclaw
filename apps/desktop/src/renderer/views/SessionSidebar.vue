@@ -22,7 +22,7 @@ const NAV = computed(
       { id: "plugins", label: t("插件"), note: t("邮件、computer use、微信、企业微信，以及从目录装的") },
       { id: "mcp", label: "MCP", note: t("第三方 MCP server，stdio 或 HTTP") },
       { id: "skills", label: t("技能"), note: t("本地 SKILL.md，也认 Claude Code / Codex 的") },
-      { id: "schedules", label: t("定时任务"), note: t("到点自动开一个会话去做：日报、提醒、巡检") },
+      { id: "schedules", label: t("定时任务"), note: t("定时执行或在原会话持续跟进") },
       { id: "archived", label: t("已归档"), note: t("收起来的会话，可以恢复或彻底删除") },
       { id: "usage", label: t("用量"), note: t("token、模型调用、工具与技能") },
     ] as const,

@@ -176,7 +176,7 @@ func writeTool() Tool {
 			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				return "", fmt.Errorf("%s: %w", i18n.D("创建父目录失败"), err)
 			}
-			if err := os.WriteFile(path, []byte(args.Content), 0o644); err != nil {
+			if err := env.writeFile(ctx, path, []byte(args.Content), nil); err != nil {
 				return "", fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 			}
 			return i18n.D("已写入 {path}（{bytes} 字节）", "path", args.Path, "bytes", len(args.Content)), nil
@@ -230,7 +230,7 @@ func editTool() Tool {
 				return "", err
 			}
 			updated := strings.Replace(text, args.OldText, args.NewText, 1)
-			if err := os.WriteFile(path, []byte(updated), 0o644); err != nil {
+			if err := env.writeFile(ctx, path, []byte(updated), content); err != nil {
 				return "", fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 			}
 			return i18n.D("已修改 {path}", "path", args.Path), nil
@@ -397,4 +397,11 @@ func isBinary(content []byte) bool {
 		}
 	}
 	return false
+}
+
+func (e *Env) writeFile(ctx context.Context, path string, data, expected []byte) error {
+	if e.WriteFile != nil {
+		return e.WriteFile(ctx, path, data, expected)
+	}
+	return os.WriteFile(path, data, 0o644)
 }

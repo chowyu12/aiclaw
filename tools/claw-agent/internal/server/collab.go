@@ -32,12 +32,14 @@ const (
 )
 
 type collabNode struct {
-	sessionID string
-	path      string
-	parentID  string
-	rootID    string
-	depth     int
-	status    string
+	sessionID     string
+	path          string
+	parentID      string
+	rootID        string
+	depth         int
+	status        string
+	prepareCtx    context.Context
+	cancelPrepare context.CancelFunc
 }
 
 type collabHub struct {
@@ -112,24 +114,44 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 			h.mu.Unlock()
 			return agent.SpawnResult{}, i18n.E("已经有叫 {path} 的 agent 了：换个 task_name，或者用 followup_task 给它派新活", "path", path)
 		}
-		if node.depth > 0 && node.status == agent.AgentRunning {
+		if node.depth > 0 && (node.status == agent.AgentRunning || node.status == agent.AgentPreparing) {
 			live++
 		}
 	}
-	h.mu.Unlock()
 	if live >= maxLiveAgents {
+		h.mu.Unlock()
 		return agent.SpawnResult{}, i18n.E("同时在跑的子 agent 已经有 {count} 个了，先等一些做完（wait_agent）", "count", live)
 	}
+
+	// Reserve the name and capacity before any blocking environment preparation.
+	id := fmt.Sprintf("s_%d", time.Now().UnixNano())
+	prepareCtx, cancelPrepare := context.WithCancel(h.ctx)
+	node := &collabNode{
+		sessionID: id, path: path, parentID: parent.ID, rootID: parentNode.rootID,
+		depth: parentNode.depth + 1, status: agent.AgentPreparing, prepareCtx: prepareCtx, cancelPrepare: cancelPrepare,
+	}
+	h.nodes[id] = node
+	h.mu.Unlock()
+	prepared := false
+	defer func() {
+		if !prepared {
+			cancelPrepare()
+			h.forget(id)
+		}
+	}()
 
 	config := parent.Config()
 	config.Title = "↳ " + request.TaskName
 	config.ParentID = parent.ID
 	config.AgentPath = path
-	id := fmt.Sprintf("s_%d", time.Now().UnixNano())
 	// 建会话用服务的 ctx：MCP 连接要活得比这次工具调用长。
-	child, err := agent.New(h.context(), id, config, h.server.keyFor, h.server.sessionOptions(id)...)
+	child, err := agent.New(prepareCtx, id, config, h.server.keyFor, h.server.sessionOptions(id)...)
 	if err != nil {
 		return agent.SpawnResult{}, i18n.E("开子 agent 失败：{error}", "error", err)
+	}
+	if err := prepareCtx.Err(); err != nil {
+		child.Close()
+		return agent.SpawnResult{}, err
 	}
 	child.ForkFrom(parent, request.ForkTurns)
 	h.server.guard(child)
@@ -137,23 +159,22 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 	h.server.sessions[id] = child
 	h.server.sessMu.Unlock()
 
-	node := &collabNode{
-		sessionID: id, path: path, parentID: parent.ID, rootID: parentNode.rootID,
-		depth: parentNode.depth + 1, status: agent.AgentRunning,
-	}
-	h.mu.Lock()
-	h.nodes[id] = node
-	h.mu.Unlock()
 	// 开出来就存一次档：会话列表是从库里读的，不存的话它跑完之前侧边栏里看不到，
 	// 用户没法点进去看它在干什么——跑得久的时候看上去就像没动静。
-	if err := child.Save(h.context(), h.server.db); err != nil {
-		h.server.options.Logf("保存子会话失败：%v", err)
+	if err := child.Save(prepareCtx, h.server.db); err != nil {
+		h.server.dropSession(id)
+		return agent.SpawnResult{}, err
 	}
+	prepared = true
 
 	task := fmt.Sprintf("(This task was assigned to you by %s. You are a sub-agent; your canonical name is %s. When you finish, your final answer is delivered to it automatically; "+
 		"to report progress or ask questions along the way, use send_message to %s.)\n\n%s", parentNode.path, path, parentNode.path, request.Message)
+	if mounts := child.MCPStatus(); len(mounts) > 0 {
+		encoded, _ := json.Marshal(mounts)
+		task += "\n\nEnvironment preparation results (some tools may be unavailable):\n" + string(encoded)
+	}
 	go h.runTurn(child, node, task)
-	return agent.SpawnResult{TaskName: path, Nickname: request.TaskName}, nil
+	return agent.SpawnResult{TaskName: path, Nickname: request.TaskName, MCPStatus: child.MCPStatus()}, nil
 }
 
 func (h *collabHub) Send(_ context.Context, from *agent.Session, target, message string, trigger bool) error {
@@ -210,6 +231,11 @@ func (h *collabHub) Interrupt(self *agent.Session, target string) (string, error
 		return "", err
 	}
 	previous := h.statusOf(node)
+	h.mu.Lock()
+	if node.status == agent.AgentPreparing && node.cancelPrepare != nil {
+		node.cancelPrepare()
+	}
+	h.mu.Unlock()
 	if session := h.server.session(node.sessionID); session != nil {
 		session.Interrupt()
 	}
@@ -267,6 +293,9 @@ func (s *Server) deleteSessionTree(ctx context.Context, rootID string) ([]string
 		return nil, err
 	}
 	for _, id := range order {
+		if session := s.session(id); session != nil {
+			session.MarkDeleted()
+		}
 		s.unload(id)
 		if err := agent.Delete(ctx, s.db, id); err != nil {
 			return order, err
@@ -297,6 +326,9 @@ func (s *Server) archiveSessionTree(ctx context.Context, rootID string, archived
 // forget 把删掉的会话从协作树上摘下来：它的名字可以再用，list_agents 也不再列它。
 func (h *collabHub) forget(sessionID string) {
 	h.mu.Lock()
+	if node := h.nodes[sessionID]; node != nil && node.cancelPrepare != nil {
+		node.cancelPrepare()
+	}
 	delete(h.nodes, sessionID)
 	h.mu.Unlock()
 }
@@ -310,6 +342,9 @@ func (h *collabHub) InterruptTree(sessionID string) {
 	collect = func(parent string) {
 		for _, node := range h.nodes {
 			if node.parentID == parent {
+				if node.status == agent.AgentPreparing && node.cancelPrepare != nil {
+					node.cancelPrepare()
+				}
 				targets = append(targets, node.sessionID)
 				collect(node.sessionID)
 			}
@@ -330,9 +365,6 @@ func (h *collabHub) statusOf(node *collabNode) string {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if node.status == agent.AgentRunning {
-		return agent.AgentIdle
-	}
 	return node.status
 }
 
@@ -345,14 +377,18 @@ func (h *collabHub) setStatus(node *collabNode, status string) {
 // runTurn 在后台替一个 agent 跑一轮；text 为空表示由邮箱里的消息开起来。
 // 这一轮结束后，它是子 agent 的话就把结果投进父 agent 的邮箱。
 func (h *collabHub) runTurn(session *agent.Session, node *collabNode, text string) {
-	if text == "" && session.Busy() {
-		// 已经在跑：邮箱里的东西会在它下一次采样前送到，不用另开一轮。
+	ctx := h.context()
+	h.mu.Lock()
+	if node.status == agent.AgentPreparing && node.prepareCtx != nil {
+		ctx = node.prepareCtx
+	}
+	h.mu.Unlock()
+	turnID := fmt.Sprintf("t_%d", time.Now().UnixNano())
+	watcher := &turnWatcher{emitter: emitter{server: h.server}, sessionID: session.ID, onStart: func() { h.setStatus(node, agent.AgentRunning) }}
+	session.RunTurn(ctx, turnID, text, nil, nil, watcher)
+	if !watcher.started {
 		return
 	}
-	ctx := h.context()
-	turnID := fmt.Sprintf("t_%d", time.Now().UnixNano())
-	watcher := &turnWatcher{emitter: emitter{server: h.server}, sessionID: session.ID}
-	session.RunTurn(ctx, turnID, text, nil, nil, watcher)
 	if err := session.Save(ctx, h.server.db); err != nil {
 		h.server.options.Logf("保存会话失败：%v", err)
 	}
@@ -407,9 +443,17 @@ type turnWatcher struct {
 	emitter
 	sessionID string
 	err       string
+	started   bool
+	onStart   func()
 }
 
 func (w *turnWatcher) Notify(method string, params any) {
+	if method == protocol.NotifyTurnStarted {
+		w.started = true
+		if w.onStart != nil {
+			w.onStart()
+		}
+	}
 	if method == protocol.NotifyTurnCompleted {
 		if completed, ok := params.(protocol.TurnNotification); ok && completed.SessionID == w.sessionID {
 			w.err = completed.Error

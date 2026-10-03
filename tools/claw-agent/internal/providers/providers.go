@@ -183,7 +183,13 @@ func (s *Store) FetchModels(ctx context.Context, id int64) ([]string, error) {
 		return nil, fmt.Errorf("%s%w", i18n.D("连接模型服务失败："), err)
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
+	if readErr != nil {
+		return nil, readErr
+	}
+	if len(body) > 4<<20 {
+		return nil, i18n.E("模型列表超过 4 MiB，无法读取")
+	}
 	if resp.StatusCode != http.StatusOK {
 		// 把上游的话带出来：401/403 最常见，都是 Key 的问题，直接说比让人猜强。
 		return nil, i18n.E("模型服务返回 {status}：{message}", "status", resp.StatusCode, "message", upstreamMessage(body))
@@ -196,10 +202,16 @@ func (s *Store) FetchModels(ctx context.Context, id int64) ([]string, error) {
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		return nil, fmt.Errorf("%s%w", i18n.D("模型列表不是预期的格式："), err)
 	}
+	if parsed.Data == nil {
+		return nil, i18n.E("模型列表不是预期的格式：缺少 data 数组")
+	}
 	names := make([]string, 0, len(parsed.Data))
+	seen := map[string]bool{}
 	for _, entry := range parsed.Data {
-		if entry.ID != "" {
-			names = append(names, entry.ID)
+		name := strings.TrimSpace(entry.ID)
+		if name != "" && !seen[name] {
+			names = append(names, name)
+			seen[name] = true
 		}
 	}
 	sort.Strings(names)

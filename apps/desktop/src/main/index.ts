@@ -52,21 +52,26 @@ const SCHEDULED_GROUP = "__scheduled__";
 
 const scheduler = new Scheduler(store.dataDir, {
   async runTask(task) {
-    const title = `⏰ ${task.name} · ${formatWhen(new Date())}`;
-    // 这段是发给模型的，固定英文，不随界面语言变（与内核的系统提示同一口径）。
-    const text =
-      `(This chat was started automatically by the scheduled task "${task.name}"; ` +
-      `the user may not be at the computer right now.)\n\n${task.prompt}`;
-    const sessionId = await sessions.runBackgroundSession({ workspace: task.workspace, title, text });
-    const groups = store.readGroups();
-    store.writeGroups({ assignments: { ...groups.assignments, [sessionId]: SCHEDULED_GROUP } });
-    return sessionId;
+    const text = `(Scheduled check "${task.name}"; task ID ${task.id}; run ID ${task.lastRunId}. The user may be away.)
+
+${task.prompt}` +
+      (task.mode === "followup" ? `
+
+Previous result: ${JSON.stringify(task.lastResult ?? null)}
+Stop condition: ${JSON.stringify(task.stopWhen || "none; keep monitoring")}
+After checking, call schedule_report with id=${JSON.stringify(task.id)}, run_id=${JSON.stringify(task.lastRunId)}, a concise result and stable result_key reflecting observed state. Do not include the current timestamp in result_key. Set complete only after verifying the stop condition. Stay quiet if nothing changed.` : "");
+    const receipt = await sessions.runScheduledTask(task, text, id => scheduler.bindRunSession(task.id, task.lastRunId!, id));
+    if (task.mode !== "followup") {
+      const groups = store.readGroups();
+      store.writeGroups({assignments: {...groups.assignments, [receipt.sessionId]: SCHEDULED_GROUP}});
+    }
+    return receipt;
   },
   notify(task, ok, detail) {
     if (!Notification.isSupported()) return;
     const notification = new Notification({
       title: ok ? tr("定时任务「{name}」完成了", { name: task.name }) : tr("定时任务「{name}」没做完", { name: task.name }),
-      body: ok ? tr("点这里查看结果") : detail.slice(0, 120) || tr("点这里查看"),
+      body: detail.slice(0, 120) || tr("点这里查看结果"),
     });
     notification.on("click", () => {
       if (mainWindow) {
@@ -242,6 +247,13 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionStart, (_event, input?: { workspace?: string }) =>
     sessions.startSession(input?.workspace),
   );
+  ipcMain.handle(IPC.sessionWork, (_event, id: string) => sessions.sessionWork(id));
+  ipcMain.handle(IPC.goalSet, (_event, id: string, goal) => sessions.goalSet(id, goal));
+  ipcMain.handle(IPC.goalUpdate, (_event, id: string, update) => sessions.goalUpdate(id, update));
+  ipcMain.handle(IPC.sessionFork, (_event, id: string, itemId?: string) => sessions.forkSession(id, itemId));
+  ipcMain.handle(IPC.sessionRecover, (_event, id: string, requestId: string, action: "resume" | "dismiss") => sessions.recoverSession(id, requestId, action));
+  ipcMain.handle(IPC.changesList, (_event, id: string) => sessions.changesList(id));
+  ipcMain.handle(IPC.changesUndo, (_event, id: string, changeId: string) => sessions.changesUndo(id, changeId));
   ipcMain.handle(IPC.sessionResume, (_event, sessionId: string) => sessions.resumeSession(sessionId));
   ipcMain.handle(IPC.sessionSend, (_event, input) => sessions.sendTurn(input));
   ipcMain.handle(IPC.sessionInterrupt, (_event, sessionId: string) => sessions.interrupt(sessionId));
@@ -337,6 +349,13 @@ function registerIpc(): void {
 
   ipcMain.handle(IPC.mcpRead, () => store.readMcpServers());
   ipcMain.handle(IPC.mcpWrite, (_event, servers: McpServer[]) => store.writeMcpServers(servers));
+  ipcMain.handle(IPC.mcpOAuthLogin, async (_event, input: import("@aiclaw/agent-client").MCPOAuthInput) => {
+    const result = await sessions.mcpOAuthLogin(input);
+    if (result.authorizationUrl) await shell.openExternal(result.authorizationUrl);
+    return { ...result, authorizationUrl: undefined };
+  });
+  ipcMain.handle(IPC.mcpOAuthStatus, (_event, url: string) => sessions.mcpOAuthStatus(url));
+  ipcMain.handle(IPC.mcpOAuthLogout, (_event, url: string) => sessions.mcpOAuthLogout(url));
   ipcMain.handle(IPC.mcpProbe, (_event, server: McpServer) => sessions.probeMcp(server));
 
   // 对话里点一个文件名就打开它。路径来自模型输出，所以校验全在主进程做：
@@ -494,8 +513,8 @@ sessions.on("schedule", ({ request, respond, fail }) => {
 
 sessions.on("event", (method, params) => {
   if (method === "turn/completed") {
-    const done = params as { sessionId?: string; error?: string } | undefined;
-    if (done?.sessionId) scheduler.onTurnCompleted(done.sessionId, done.error);
+    const done = params as { sessionId?: string; turnId?: string; error?: string } | undefined;
+    if (done?.sessionId) scheduler.onTurnCompleted(done.sessionId, done.error, done.turnId);
   }
   // 一轮结束（完成、失败、中断）时，它还没回应的审批就作废了：内核那边已经
   // 不等了。不清的话渲染层重新加载后会把它们当成待办再弹一遍。

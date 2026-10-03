@@ -1,6 +1,6 @@
 import { reactive, readonly } from "vue";
 import { describeError } from "./errors";
-import { modelChoices, usable, type ModelChoice } from "./model-choices";
+import { defaultModelChoice, modelChoices, usable, type ModelChoice } from "./model-choices";
 import {
   applyAgentEvent,
   ensureLive,
@@ -1039,11 +1039,11 @@ export const actions = {
    */
   async ensureDefaultModel(): Promise<boolean> {
     if (state.providers.length === 0) await actions.loadProviders();
-    const current = state.providers.find((item) => item.id === state.config?.providerId);
-    if (current && usable(current) && state.config?.model) return true;
-    const first = state.providers.find(usable);
-    if (!first) return false;
-    await actions.saveConfig({ providerId: first.id, model: first.models[0] ?? "" });
+    const choice = defaultModelChoice(state.providers, state.config?.providerId, state.config?.model);
+    if (!choice) return false;
+    if (state.config?.providerId !== choice.providerId || state.config?.model !== choice.model || state.config?.contextWindow !== choice.context) {
+      await actions.saveConfig({ providerId: choice.providerId, model: choice.model, contextWindow: choice.context });
+    }
     return true;
   },
 
@@ -1091,8 +1091,8 @@ export const actions = {
     images: string[] = [],
     audio: { name: string; data: string }[] = [],
     references: { id: string; title: string }[] = [],
-  ): Promise<void> {
-    if (!text.trim() && images.length === 0 && audio.length === 0) return;
+  ): Promise<boolean> {
+    if (!text.trim() && images.length === 0 && audio.length === 0) return false;
     // 没有会话就先开一个。删掉当前会话之后运行时仍然是 ready，输入框还能打字，
     // 早先这里直接 return——发出去石沉大海，用户看不出发生了什么。
     if (!state.sessionId) {
@@ -1100,15 +1100,18 @@ export const actions = {
         await actions.newSession();
       } catch (error) {
         state.error = t("新建会话失败：{error}", { error: describeError(error) });
-        return;
+        return false;
       }
     }
     // 记住发出去的是哪个会话：下面有几次 await，期间用户可能已经切走了。
     const sessionId = state.sessionId;
     const record = ensureLive(state.live, sessionId);
+    const optimisticId = `user-${crypto.randomUUID()}`;
+    const wasBusy = record.busy;
     record.timeline.push({
       kind: "user",
-      id: `user-${Date.now()}`,
+      id: optimisticId,
+      requestId: optimisticId,
       text,
       images: images.map((data) => `data:image/jpeg;base64,${data}`),
       // 内核随后会为这条输入发来 userMessage 事件；标记之后由它认领，
@@ -1124,10 +1127,17 @@ export const actions = {
       for (const item of audio) {
         audioPaths.push((await window.aiclaw.audio.stage(plain(item))) as string);
       }
-      await window.aiclaw.session.send({ sessionId, text, images, audioPaths, references: plain(references) });
+      await window.aiclaw.session.send({ sessionId, requestId: optimisticId, text, images, audioPaths, references: plain(references) });
+      return true;
     } catch (error) {
-      record.busy = false;
+      // A userMessage event can confirm delivery before the RPC response is lost.
+      const index = record.timeline.findIndex((entry) => entry.id === optimisticId && entry.kind === "user" && entry.pending);
+      if (index < 0) return true;
+      record.timeline.splice(index, 1);
+      // Do not resurrect a preceding turn that completed while this send failed.
+      if (!wasBusy) record.busy = false;
       state.error = describeError(error);
+      return false;
     }
   },
 

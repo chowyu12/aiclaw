@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -139,6 +140,10 @@ func collabServer(t *testing.T, model *scriptedModel) (*Server, *agent.Session) 
 		ApprovalPolicy: protocol.ApprovalBypass,
 	}, server.keyFor, server.sessionOptions(id)...)
 	if err != nil {
+		t.Fatal(err)
+	}
+	server.guard(root)
+	if err := root.Checkpoint(); err != nil {
 		t.Fatal(err)
 	}
 	server.sessions[id] = root
@@ -441,5 +446,78 @@ func TestReadThreadAcrossSessions(t *testing.T) {
 	}
 	if second.LastAnswer() != "读到了" {
 		t.Errorf("回答不对：%q", second.LastAnswer())
+	}
+}
+
+// Preparation reserves the name and capacity before blocking on MCP initialization.
+func TestSpawnPreparationReservationAndCancellation(t *testing.T) {
+	model := &scriptedModel{root: func(int, wireRequest) string { return sseText("root") }, child: func(wireRequest) string { return sseText("child") }}
+	server, original := collabServer(t, model)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(entered) })
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer upstream.Close()
+	defer close(release)
+	config := original.Config()
+	config.MCPServers = map[string]protocol.MCPServerConfig{}
+	parent, err := agent.New(context.Background(), original.ID, config, server.keyFor, server.sessionOptions(original.ID)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original.Close()
+	server.sessions[parent.ID] = parent
+	// The parent already finished preparation. Its children inherit this newly
+	// configured server and block in their own agent.New.
+	config.MCPServers["slow"] = protocol.MCPServerConfig{URL: upstream.URL}
+	results := make(chan error, maxLiveAgents)
+	for i := 0; i < maxLiveAgents; i++ {
+		go func(i int) {
+			_, err := server.collab.Spawn(context.Background(), parent, agent.SpawnRequest{TaskName: fmt.Sprintf("slow%d", i), Message: "work"})
+			results <- err
+		}(i)
+	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("MCP did not start")
+	}
+	eventually(t, "all preparation reservations", func() bool {
+		infos, _ := server.collab.List(parent, "")
+		count := 0
+		for _, info := range infos {
+			if info.AgentStatus == agent.AgentPreparing {
+				count++
+			}
+		}
+		return count == maxLiveAgents
+	})
+	if _, err := server.collab.Spawn(context.Background(), parent, agent.SpawnRequest{TaskName: "slow0"}); err == nil {
+		t.Fatal("duplicate preparation accepted")
+	}
+	if _, err := server.collab.Spawn(context.Background(), parent, agent.SpawnRequest{TaskName: "overflow"}); err == nil {
+		t.Fatal("preparing agents did not count toward limit")
+	}
+	server.collab.InterruptTree(parent.ID)
+	for i := 0; i < maxLiveAgents; i++ {
+		select {
+		case err := <-results:
+			if err == nil {
+				t.Fatal("cancelled preparation succeeded")
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("preparation did not cancel")
+		}
+	}
+	infos, _ := server.collab.List(parent, "")
+	if len(infos) != 1 {
+		t.Fatalf("failed reservations leaked: %v", infos)
 	}
 }

@@ -28,7 +28,7 @@ import (
 // 给模型看的消息，没有这些数字。所以历史步骤不带时间——**宁可不显示，也不要
 // 编一个**，界面上那几个数字是用来判断「慢在等模型还是慢在跑工具」的。
 func (s *Session) History() []protocol.Item {
-	messages := s.snapshotMessages()
+	messages := s.historyMessages()
 	modelName := s.config.Model.Model
 
 	// 先把工具结果按 call id 建索引，下面按 assistant 里的顺序取用。
@@ -65,8 +65,9 @@ func (s *Session) History() []protocol.Item {
 			}
 			seq, round = 0, 0
 			items = append(items, protocol.Item{
-				ID:         historyID("user", index),
+				ID:         messageID(message, "user", index),
 				Kind:       protocol.ItemUserMessage,
+				RequestID:  message.RequestID,
 				Text:       text,
 				Images:     images,
 				At:         message.At,
@@ -88,7 +89,7 @@ func (s *Session) History() []protocol.Item {
 			})
 			if strings.TrimSpace(message.Content) != "" {
 				items = append(items, protocol.Item{
-					ID:   historyID("msg", index),
+					ID:   messageID(message, "msg", index),
 					Kind: protocol.ItemAgentMessage,
 					Text: message.Content,
 					At:   message.At,
@@ -163,4 +164,11 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(digits[pos:])
+}
+
+func messageID(m llm.Message, prefix string, index int) string {
+	if m.ID != "" {
+		return m.ID
+	}
+	return historyID(prefix, index)
 }

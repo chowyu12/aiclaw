@@ -17,6 +17,13 @@ export const IPC = {
   runtimeStop: "runtime:stop",
   runtimeStatus: "runtime:status",
 
+  sessionWork: "session:work",
+  goalSet: "goal:set",
+  goalUpdate: "goal:update",
+  sessionFork: "session:fork",
+  sessionRecover: "session:recover",
+  changesList: "changes:list",
+  changesUndo: "changes:undo",
   sessionStart: "session:start",
   sessionResume: "session:resume",
   sessionSend: "session:send",
@@ -81,6 +88,9 @@ export const IPC = {
   updateInstall: "update:install",
   updatePrepare: "update:prepare",
 
+  mcpOAuthLogin: "mcp:oauthLogin",
+  mcpOAuthStatus: "mcp:oauthStatus",
+  mcpOAuthLogout: "mcp:oauthLogout",
   mcpRead: "mcp:read",
   mcpWrite: "mcp:write",
   mcpProbe: "mcp:probe",

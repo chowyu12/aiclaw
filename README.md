@@ -7,7 +7,19 @@ over JSON-RPC on stdio. Model providers, plugins, search engines and chats all s
 machine, and the app runs no HTTP server. The interface is available in English and
 Simplified Chinese. Switch it at the top of the **Settings** page; new installs start in English.
 
+## License
+
+AIClaw uses the [AIClaw Personal and Commercial License](LICENSE).
+Personal, non-commercial use is free. Company or other organizational use
+(including internal use and evaluation), work for an employer or paying client,
+and other commercial use require a separate paid commercial license.
+For licensing, [contact the maintainer](https://github.com/chowyu12/aiclaw/issues).
+Model and external service fees are separate. This is source-available software
+under a custom license with use restrictions.
+
 ## What it does
+
+- **Persistent work.** Goals, plans and budgets; recovery after restarts; forks at a selected message; text-file diffs and conflict-protected undo for built-in file tools. See [workflow details](docs/design/workflows.md).
 
 - **Chat and act.** The model reads and writes files, runs commands and calls MCP tools on your
   machine.

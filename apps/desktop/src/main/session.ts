@@ -398,6 +398,28 @@ export class SessionManager extends EventEmitter {
    * 与 startSession 的区别：不动「当前会话」那几样状态（工作区、挂载结果）——用户
    * 可能正在看着别的会话，定时任务在旁边跑，不该把他那边的技能发现和状态栏换掉。
    */
+  async runScheduledTask(task: import("../shared/schedule.js").ScheduledTask, text: string, bind: (id: string) => void): Promise<{sessionId: string; turnId: string}> {
+    await this.start();
+    const client = this.requireClient();
+    let sessionId: string;
+    if (task.mode === "followup") {
+      if (!task.sessionId) throw new Error(tr("请选择跟进的会话"));
+      const summaries = await client.sessionList();
+      const source = summaries.find(item => item.id === task.sessionId && !item.parentId && !item.archivedAt);
+      if (!source) throw new Error(tr("原会话不存在或已归档"));
+      await client.sessionResume(task.sessionId, await this.buildRefresh());
+      sessionId = task.sessionId;
+    } else {
+      const params = await this.buildParams(this.store.readConfig(), task.workspace);
+      params.title = `⏰ ${task.name}`;
+      if (params.workdir) mkdirSync(params.workdir, {recursive: true});
+      sessionId = (await client.sessionStart(params)).sessionId;
+    }
+    bind(sessionId);
+    const receipt = await client.turnStart(sessionId, text, undefined, undefined, undefined, task.lastRunId, task.mode === "followup");
+    return {sessionId, turnId: receipt.turnId};
+  }
+
   async runBackgroundSession(input: { workspace: string; title: string; text: string }): Promise<string> {
     await this.start();
     const client = this.requireClient();
@@ -415,6 +437,14 @@ export class SessionManager extends EventEmitter {
    * 历史必须一起给：内核存的是给模型看的消息，宿主自己没留时间线，
    * 不还原的话点开旧会话是一片空白，看起来像记录丢了。
    */
+  sessionWork(id: string) { return this.requireClient().sessionWork(id); }
+  goalSet(id: string, goal: import("@aiclaw/agent-client").GoalInput) { return this.requireClient().goalSet(id, goal); }
+  goalUpdate(id: string, update: import("@aiclaw/agent-client").GoalUpdate) { return this.requireClient().goalUpdate(id, update); }
+  forkSession(id: string, itemId?: string) { return this.requireClient().sessionFork(id, itemId); }
+  recoverSession(id: string, requestId: string, action: "resume" | "dismiss") { return this.requireClient().sessionRecover(id, requestId, action); }
+  changesList(id: string) { return this.requireClient().changesList(id); }
+  changesUndo(id: string, changeId: string) { return this.requireClient().changesUndo(id, changeId); }
+
   async resumeSession(sessionId: string): Promise<SessionInfo> {
     const client = this.requireClient();
     const result = await client.sessionResume(sessionId, await this.buildRefresh());
@@ -460,6 +490,7 @@ export class SessionManager extends EventEmitter {
   }
 
   async sendTurn(input: {
+    requestId?: string;
     sessionId: string;
     text: string;
     images?: string[];
@@ -468,7 +499,7 @@ export class SessionManager extends EventEmitter {
     references?: { id: string; title: string }[];
   }): Promise<string> {
     const result = await this.requireClient().turnStart(
-      input.sessionId, input.text, input.images, input.audioPaths, input.references,
+      input.sessionId, input.text, input.images, input.audioPaths, input.references, input.requestId,
     );
     return result.turnId;
   }
@@ -635,7 +666,7 @@ export class SessionManager extends EventEmitter {
       //（声明了 readOnlyHint 的工具由内核自己放过）。
       mcpServers[server.label || server.id] =
         server.transport === "http"
-          ? { url: server.url, headers: server.headers }
+          ? { url: server.url, headers: server.headers, oauth: server.oauth }
           : { command: server.command, args: server.args, env: server.env };
     }
     return mcpServers;
@@ -818,12 +849,16 @@ export class SessionManager extends EventEmitter {
     return this.requireClient().wechatLoginPoll(uuid, token, connectionId);
   }
 
+  async mcpOAuthLogin(input: import("@aiclaw/agent-client").MCPOAuthInput) { await this.start(); return this.requireClient().mcpOAuthLogin(input); }
+  async mcpOAuthStatus(url: string) { return this.requireClient().mcpOAuthStatus(url); }
+  async mcpOAuthLogout(url: string) { await this.start(); return this.requireClient().mcpOAuthLogout(url); }
+
   /** 试连一个 MCP server 并列出它的工具。配置页用，与会话无关。 */
   async probeMcp(server: McpServer): Promise<MCPProbeResult> {
     const client = this.requireClient();
     return client.mcpProbe(
       server.transport === "http"
-        ? { url: server.url, headers: server.headers }
+        ? { url: server.url, headers: server.headers, oauth: server.oauth }
         : { command: server.command, args: server.args, env: server.env },
     );
   }

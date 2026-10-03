@@ -1,0 +1,69 @@
+AIClaw Personal and Commercial License, Version 1.0
+
+Copyright (c) 2026 AIClaw contributors. All rights reserved except as
+expressly granted below.
+
+1. Scope
+This license applies to AIClaw source code, binaries and accompanying project
+materials distributed with this license (the "Software"), to the extent the
+copyright holders have the right to license them. Separately licensed third-party
+components remain subject to their own licenses. This license does not replace
+those licenses or restrict rights they grant.
+
+2. Free personal use
+An individual may use, copy, study and modify the Software, free of charge,
+solely for that individual's personal, non-commercial purposes, such as private
+learning, experimentation and hobby projects. This permission does not cover
+work performed for an employer, organization or paying client, even if performed
+on a personal device, outside working hours or through a personal account.
+
+3. Paid commercial authorization
+Any use by or on behalf of a company or other organization, including internal
+use, evaluation, employee or contractor use, and any commercial use by an
+individual, requires a separate paid commercial license obtained in writing
+before that use begins. Commercial use includes paid client work, business
+operations, resale, embedding the Software in a commercial product, and offering
+the Software's functionality as a hosted or managed service. No organization-size,
+revenue or trial exemption is granted by this license. Fees, scope, term, support
+and any exceptions must be agreed in the separate commercial license; no price
+or commercial authorization is implied by downloading or paying a donation.
+
+To request commercial authorization, contact the project maintainer through:
+https://github.com/chowyu12/aiclaw/issues
+Do not include confidential business information in a public issue.
+
+4. Sharing and modifications
+Individuals exercising the permission in section 2 may share original or modified
+copies without charge under this same license. All copies must include this
+license and existing copyright and third-party notices. Modified copies must
+clearly identify their changes and must not imply endorsement by the project.
+Recipients receive only the permissions granted by this license; distributing a
+copy does not authorize organizational or commercial use. Public viewing and
+repository forking allowed by the hosting platform's terms are not restricted.
+No trademark rights or right to relicense the Software are granted.
+
+5. Outputs and external services
+This license does not claim ownership of users' data or generated outputs, and
+does not automatically apply to outputs merely because the Software produced
+them. Copies of Software code included in an output remain subject to this
+license. Model providers and other external services have their own terms and
+charges; free personal use does not include their fees.
+
+6. Termination and prior versions
+Permissions under this license terminate automatically upon a breach. On
+termination, cease use and distribution and delete copies except those required
+by law to be retained. Rights under a separate commercial agreement are governed
+by that agreement. This license applies only to versions distributed with it;
+it does not revoke rights granted for earlier versions under other licenses.
+
+7. Disclaimer
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE SOFTWARE IS PROVIDED "AS IS",
+WITHOUT WARRANTIES OF ANY KIND, INCLUDING MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NON-INFRINGEMENT. THE COPYRIGHT HOLDERS SHALL NOT BE
+LIABLE FOR CLAIMS, DAMAGES OR OTHER LIABILITY ARISING FROM THE SOFTWARE OR ITS
+USE. MANDATORY RIGHTS UNDER APPLICABLE LAW ARE NOT EXCLUDED. A SEPARATE WRITTEN
+COMMERCIAL AGREEMENT MAY PROVIDE DIFFERENT WARRANTIES OR LIABILITY TERMS.
+
+This is a source-available license with use restrictions, not an OSI-approved
+open-source license. The English text in this file controls if a translation
+differs.

@@ -32,6 +32,10 @@ type Mailbox func(ctx context.Context) (mail.Account, error)
 // Option 是建会话时的可选项。
 type Option func(*Session)
 
+func WithMCPAuth(auth func(context.Context, string) (string, error)) Option {
+	return func(s *Session) { s.mcpAuth = auth }
+}
+
 // WithMailbox 接上邮箱。没接的话即使配置里开着邮件也不挂工具（测试、通道会话）。
 func WithMailbox(mailbox Mailbox) Option {
 	return func(s *Session) { s.mailbox = mailbox }

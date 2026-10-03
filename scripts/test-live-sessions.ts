@@ -153,3 +153,18 @@ test("消息带上时间：实时来的用内核的，认领回显时也换成�
   applyAgentEvent(live, event("item/completed", "S", { item: { id: "k", kind: "userMessage", text: "问", at: 510 } }), "S");
   assert.equal(record.timeline[0]!.kind === "user" && record.timeline[0]!.at, 510);
 });
+
+test("请求身份认领相同文字的消息；重复通知不消费第二条回显", () => {
+  const live = fresh();
+  const record = ensureLive(live, "A");
+  record.timeline.push(
+    { kind: "user", id: "local1", requestId: "r1", text: "", images: ["image1"], pending: true },
+    { kind: "user", id: "local2", requestId: "r2", text: "", images: ["image2"], pending: true },
+  );
+  const confirmed = event("item/completed", "A", { item: { id: "server1", requestId: "r1", kind: "userMessage", text: "" } });
+  applyAgentEvent(live, confirmed, "A");
+  applyAgentEvent(live, confirmed, "A");
+  assert.equal(record.timeline.length, 2);
+  assert.equal(record.timeline[0]!.id, "server1");
+  assert.equal(record.timeline[1]!.id, "local2");
+});

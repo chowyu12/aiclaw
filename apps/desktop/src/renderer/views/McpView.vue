@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { onMounted, onUnmounted, reactive, ref } from "vue";
 import { actions, store } from "../store";
 import { describeError } from "../errors";
 import type { McpProbeView, McpServerView } from "../../shared/types";
@@ -17,6 +17,42 @@ import { t } from "../i18n";
 type ServerRow = (typeof store.mcpServers)[number];
 
 const saving = ref(false);
+const auth = reactive<Record<string, {state: string; error?: string; expiresAt?: number}>>({});
+const secrets = reactive<Record<string, string>>({});
+const authBusy = reactive<Record<string, boolean>>({});
+let poll: ReturnType<typeof setInterval> | undefined;
+async function authStatus(id: string): Promise<void> {
+ const server = actions.getMcpServers().find(item => item.id === id);
+ if (!server?.oauth || !server.url) return;
+ try {
+  const previous = auth[id]?.state;
+  auth[id] = await window.aiclaw.mcp.status(server.url);
+  if (previous === "authorizing" && auth[id]?.state === "connected") { await actions.remountCurrentSession(); await probe(id); }
+ } catch(error) { auth[id] = {state: "needs_login", error: describeError(error)}; }
+}
+async function login(id: string): Promise<void> {
+ const server = actions.getMcpServers().find(item => item.id === id);
+ if (!server?.url) return;
+ authBusy[id] = true;
+ try {
+  auth[id] = await window.aiclaw.mcp.login({url: server.url, clientId: server.oauthClientId, clientSecret: secrets[id], scope: server.oauthScope, redirectPort: server.oauthRedirectPort});
+  secrets[id] = "";
+ } catch(error) { auth[id] = {state: "needs_login", error: describeError(error)}; }
+ finally { authBusy[id] = false; }
+}
+async function logout(id: string): Promise<void> {
+ const server = actions.getMcpServers().find(item => item.id === id);
+ if (!server?.url) return;
+ authBusy[id] = true;
+ try { await window.aiclaw.mcp.logout(server.url); await authStatus(id); await actions.remountCurrentSession(); delete probes[id]; }
+ catch(error) { auth[id] = {state: "needs_login", error: describeError(error)}; }
+ finally { authBusy[id] = false; }
+}
+onMounted(() => { poll = setInterval(() => { if (expanded.value && !authBusy[expanded.value]) void authStatus(expanded.value); }, 1500); });
+onUnmounted(() => clearInterval(poll));
+function authLabel(state: string): string {
+ return state === "connected" ? t("已登录") : state === "authorizing" ? t("等待浏览器授权") : state === "expired" ? t("已过期，将自动刷新") : t("需要登录");
+}
 /** 展开的 server id。一次只展开一个：这一页上同时比较两份表单没有意义。 */
 const expanded = ref("");
 /** 试连结果，按 server id 存。改了地址/命令之后作废。 */
@@ -50,7 +86,7 @@ async function patch(id: string, change: Partial<McpServerView>): Promise<void> 
   const servers = actions.getMcpServers().map((s) => (s.id === id ? { ...s, ...change } : s));
   await commit(servers);
   // 连接参数变了，上次试连的结果就不作数了。只改名字或开关不用清。
-  if ("url" in change || "headers" in change || "command" in change || "args" in change || "env" in change) {
+  if ("oauth" in change || "url" in change || "headers" in change || "command" in change || "args" in change || "env" in change) {
     delete probes[id];
   }
 }
@@ -63,7 +99,7 @@ async function remove(id: string, label: string): Promise<void> {
 
 function toggleExpand(id: string): void {
   expanded.value = expanded.value === id ? "" : id;
-  if (expanded.value && !probes[id]) void probe(id);
+  if (expanded.value) { void authStatus(id); if (!probes[id]) void probe(id); }
 }
 
 /**
@@ -266,6 +302,21 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
                 "
               />
             </label>
+            <label class="toggle">
+              <input type="checkbox" :checked="server.oauth" @change="patch(server.id, {oauth: ($event.target as HTMLInputElement).checked})" />
+              {{ t("OAuth 浏览器登录") }}
+            </label>
+            <div v-if="server.oauth" class="oauth">
+              <p class="hint">{{ authLabel(auth[server.id]?.state ?? "needs_login") }}</p>
+              <label><span>{{ t("Client ID（可选）") }}</span><input :value="server.oauthClientId" @change="patch(server.id, {oauthClientId: ($event.target as HTMLInputElement).value})" /></label>
+              <label><span>{{ t("Client Secret（可选）") }}</span><input v-model="secrets[server.id]" type="password" autocomplete="off" /></label>
+              <label><span>{{ t("Scope（可选）") }}</span><input :value="server.oauthScope" @change="patch(server.id, {oauthScope: ($event.target as HTMLInputElement).value})" /></label>
+              <label><span>{{ t("回调端口（0 表示自动）") }}</span><input type="number" min="0" max="65535" :value="server.oauthRedirectPort ?? 0" @change="patch(server.id, {oauthRedirectPort: Number(($event.target as HTMLInputElement).value)})" /></label>
+              <p class="hint">{{ t("支持自动注册的服务无需填写 Client ID。预注册客户端的回调地址为 http://127.0.0.1:端口/oauth/callback。") }}</p>
+              <button class="ghost small" :disabled="authBusy[server.id] || auth[server.id]?.state === 'authorizing'" @click="login(server.id)">{{ t("登录") }}</button>
+              <button class="ghost small" :disabled="authBusy[server.id]" @click="logout(server.id)">{{ t("退出登录") }}</button>
+              <p v-if="auth[server.id]?.error" class="note warn">{{ auth[server.id]?.error }}</p>
+            </div>
             <p class="hint">
               {{ t("走 MCP 的 Streamable HTTP 传输（2025-03-26）。只支持 SSE 的旧版传输不支持。") }}
             </p>
@@ -279,6 +330,7 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
 </template>
 
 <style scoped>
+.oauth { display: flex; flex-direction: column; gap: 10px; }
 .page {
   height: 100%;
   overflow-y: auto;

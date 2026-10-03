@@ -51,6 +51,10 @@ interface Draft {
   unit: "minutes" | "hours";
   at: string;
   workspace: string;
+  mode: "cron" | "followup";
+  sessionId: string;
+  notificationPolicy: "changes" | "all";
+  stopWhen: string;
 }
 
 const editing = ref<Draft | null>(null);
@@ -58,7 +62,7 @@ const formError = ref("");
 const saving = ref(false);
 const busy = reactive<Record<string, string>>({});
 
-onMounted(() => void actions.loadSchedules());
+onMounted(() => { void actions.loadSchedules(); void actions.refreshSessions(); });
 
 const tasks = computed(() => store.schedules);
 
@@ -75,6 +79,10 @@ function blank(): Draft {
     unit: "hours",
     at: localInput(inAnHour),
     workspace: "",
+    mode: store.sessionId ? "followup" : "cron",
+    sessionId: store.sessionId,
+    notificationPolicy: "changes",
+    stopWhen: "",
   };
 }
 
@@ -91,6 +99,10 @@ function edit(task: TaskRow): void {
     unit: minutes % 60 === 0 ? "hours" : "minutes",
     at: task.rule.at ? localInput(new Date(task.rule.at)) : localInput(new Date(Date.now() + 3_600_000)),
     workspace: task.workspace,
+    mode: task.mode ?? "cron",
+    sessionId: task.sessionId ?? "",
+    notificationPolicy: task.notificationPolicy ?? "all",
+    stopWhen: task.stopWhen ?? "",
   };
   formError.value = "";
 }
@@ -146,6 +158,7 @@ async function save(): Promise<void> {
       prompt: draft.prompt,
       rule: ruleOf(draft),
       workspace: draft.workspace,
+      mode: draft.mode, sessionId: draft.sessionId, notificationPolicy: draft.notificationPolicy, stopWhen: draft.stopWhen,
     });
     editing.value = null;
   } catch (error) {
@@ -172,6 +185,7 @@ async function runNow(task: TaskRow): Promise<void> {
 }
 
 function nextText(task: TaskRow): string {
+  if (task.stoppedReason) return t("已满足停止条件");
   if (!task.enabled) return task.rule.kind === "once" && task.lastRunAt ? t("已跑过") : t("已暂停");
   return task.nextRunAt ? t("下次 {when}", { when: formatWhen(new Date(task.nextRunAt)) }) : t("没有下一次了");
 }
@@ -200,8 +214,8 @@ function lastText(task: TaskRow): string {
       <header>
         <h2>{{ t("定时任务") }}</h2>
         <p class="sub">
-          {{ t("到点时 AIClaw 自动开一个新会话，把「要做什么」当作你的一条消息发出去——模型、MCP、技能都按那时的设置。") }}
-          {{ t("跑出来的会话归在侧边栏的「定时任务」分组里，跑完会发一条系统通知。") }}
+          {{ t("可在原会话持续跟进，也可每次开启新会话。跟进会保留检查结果，默认仅在结果变化、失败或完成时通知。") }}
+          {{ t("跟进结果留在原会话，满足停止条件后自动停用；新建会话的任务归入「定时任务」分组。") }}
         </p>
       </header>
 
@@ -216,6 +230,10 @@ function lastText(task: TaskRow): string {
 
       <!-- 新建 / 修改 -->
       <article v-if="editing" class="card editor">
+        <label><span>{{ t("执行方式") }}</span><select v-model="editing.mode"><option value="followup">{{ t("在原会话跟进") }}</option><option value="cron">{{ t("每次新建会话") }}</option></select></label>
+        <label v-if="editing.mode === 'followup'"><span>{{ t("跟进会话") }}</span><select v-model="editing.sessionId"><option value="">{{ t("请选择跟进的会话") }}</option><option v-for="session in store.sessions.filter(item => !item.parentId)" :key="session.id" :value="session.id">{{ session.title || session.id }}</option></select></label>
+        <label v-if="editing.mode === 'followup'"><span>{{ t("通知方式") }}</span><select v-model="editing.notificationPolicy"><option value="changes">{{ t("仅变化、失败或完成时通知") }}</option><option value="all">{{ t("每次执行后通知") }}</option></select></label>
+        <label v-if="editing.mode === 'followup'"><span>{{ t("停止条件（可选）") }}</span><input v-model="editing.stopWhen" :placeholder="t('例如：检查通过后停止')" /></label>
         <label>
           <span>{{ t("名称") }}</span>
           <input v-model="editing.name" :placeholder="t(`比如：每日邮件汇总`)" />
@@ -265,7 +283,7 @@ function lastText(task: TaskRow): string {
             {{ item.label }}
           </button>
         </div>
-        <label>
+        <label v-if="editing.mode !== 'followup'">
           <span>{{ t("工作区") }}</span>
           <div class="inline">
             <input v-model="editing.workspace" :placeholder="t(`不设：相对路径按主目录解析，写文件前会问你`)" />
@@ -299,7 +317,10 @@ function lastText(task: TaskRow): string {
           </label>
           <button class="icon" :title="t(`删除`)" @click="remove(task)">×</button>
         </div>
+        <p class="hint">{{ task.mode === "followup" ? t("在原会话跟进") : t("每次新建会话") }} · {{ task.notificationPolicy === "changes" ? t("仅变化、失败或完成时通知") : t("每次执行后通知") }}</p>
         <p class="prompt">{{ task.prompt }}</p>
+        <p v-if="task.lastResult" class="prompt">{{ t("上次检查结果：") }}{{ task.lastResult }}</p>
+        <p v-if="task.stopWhen" class="hint">{{ t("停止条件：") }}{{ task.stopWhen }}</p>
         <p class="hint" :class="{ bad: task.lastStatus === 'failed' }">
           {{ t("上次：{text}", { text: lastText(task) }) }}
           <button v-if="task.lastSessionId" class="link" @click="actions.openSession(task.lastSessionId)">{{ t("打开会话") }}</button>

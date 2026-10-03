@@ -31,9 +31,14 @@ func appDBGuards(path string) []string {
 // 接在别处总会漏掉一种。
 func (s *Server) guard(session *agent.Session) {
 	session.Guard(appDBGuards(s.options.AppDB)...)
+	if s.oauth != nil {
+		session.Guard(s.oauth.CredentialPath(), s.oauth.KeyPath())
+	}
 	session.Guard(s.options.ProtectedPaths...)
 	if s.db != nil {
 		session.SetUsageSink(s.db.RecordUsage)
+		session.SetPersistence(s.db)
+		session.SetGoalStop(func() { s.collab.InterruptTree(session.ID) })
 	}
 }
 

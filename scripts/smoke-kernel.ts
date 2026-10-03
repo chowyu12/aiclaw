@@ -8,7 +8,7 @@
  * 用法：
  *   npm run build && npm run smoke
  */
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -379,6 +379,50 @@ async function main(): Promise<number> {
     } finally {
       collab.close();
     }
+
+    // Real client/kernel OAuth RPC and MCP mounting, using only a loopback fixture.
+    let oauthBase = "";
+    let refreshes = 0;
+    const oauth = createServer(async (req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      if (req.url === "/.well-known/oauth-protected-resource/mcp") return res.end(JSON.stringify({resource: `${oauthBase}/mcp`, authorization_servers: [oauthBase]}));
+      if (req.url === "/.well-known/oauth-authorization-server") return res.end(JSON.stringify({issuer: oauthBase, authorization_endpoint: `${oauthBase}/authorize`, token_endpoint: `${oauthBase}/token`, registration_endpoint: `${oauthBase}/register`, code_challenge_methods_supported: ["S256"]}));
+      if (req.url === "/register") return res.end(JSON.stringify({client_id: "smoke-client"}));
+      if (req.url === "/token") {
+        let body = ""; for await (const chunk of req) body += chunk;
+        const refreshed = new URLSearchParams(body).get("grant_type") === "refresh_token";
+        if (refreshed) refreshes++;
+        return res.end(JSON.stringify({access_token: refreshed ? "fresh-token" : "initial-token", refresh_token: "refresh-secret", token_type: "Bearer", expires_in: refreshed ? 3600 : 1}));
+      }
+      if (req.method === "GET") { res.statusCode = 401; res.setHeader("WWW-Authenticate", `Bearer resource_metadata="${oauthBase}/.well-known/oauth-protected-resource/mcp"`); return res.end(); }
+      if (req.headers.authorization !== "Bearer fresh-token") { res.statusCode = 401; return res.end(); }
+      let body = ""; for await (const chunk of req) body += chunk;
+      const rpc = JSON.parse(body);
+      if (!rpc.id) { res.statusCode = 202; return res.end(); }
+      const result = rpc.method === "tools/list" ? {tools: [{name: "whoami", inputSchema: {type: "object"}, annotations: {readOnlyHint: true}}]} : {};
+      res.end(JSON.stringify({jsonrpc: "2.0", id: rpc.id, result}));
+    });
+    await new Promise<void>(resolve => oauth.listen(0, "127.0.0.1", resolve));
+    oauthBase = `http://127.0.0.1:${(oauth.address() as {port: number}).port}`;
+    try {
+      const resource = `${oauthBase}/mcp`;
+      const login = await client.mcpOAuthLogin({url: resource});
+      record("OAuth login RPC returns a browser authorization URL", login.state === "authorizing" && !!login.authorizationUrl);
+      const authorization = new URL(login.authorizationUrl!);
+      const callback = new URL(authorization.searchParams.get("redirect_uri")!);
+      callback.searchParams.set("state", authorization.searchParams.get("state")!);
+      callback.searchParams.set("code", "smoke-code");
+      const authorized = await fetch(callback);
+      await authorized.text();
+      record("OAuth callback completes through the kernel", authorized.ok && (await client.mcpOAuthStatus(resource)).state === "connected");
+      const probe = await client.mcpProbe({url: resource, oauth: true});
+      const mounted = await client.sessionStart({model: {providerId: provider.id, baseUrl: "", model: "m1"}, mcpServers: {remote: {url: resource, oauth: true}}});
+      record("OAuth refresh authenticates probes and pooled session mounts", probe.ok && mounted.tools.some(name => name.includes("whoami")) && refreshes === 1);
+      const credentials = readFileSync(join(root, "mcp-oauth.enc"), "utf8");
+      record("OAuth credentials stay encrypted outside session configuration", credentials.startsWith("enc:v1:") && !credentials.includes("refresh-secret"));
+      await client.mcpOAuthLogout(resource);
+      record("OAuth logout disables future requests on the kernel", (await client.mcpOAuthStatus(resource)).state === "needs_login" && !(await client.mcpProbe({url: resource, oauth: true})).ok);
+    } finally { oauth.close(); }
   } catch (error) {
     record("unexpected", false, String(error));
   } finally {

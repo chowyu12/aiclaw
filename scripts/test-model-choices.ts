@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { filterChoices, modelChoices, usable } from "../apps/desktop/src/renderer/model-choices.ts";
+import { defaultModelChoice, filterChoices, modelChoices, usable } from "../apps/desktop/src/renderer/model-choices.ts";
 
 /**
  * 模型清单的筛选。
@@ -52,4 +52,19 @@ test("空关键词与纯空格返回全部，不是返回空", () => {
 
 test("搜不到就是空，不做模糊兜底——给出一个不匹配的结果比空列表更让人困惑", () => {
   assert.equal(filterChoices(modelChoices(providers), "zzz").length, 0);
+});
+
+test("自定义目录为空或只有无效标记时不补内置模型", () => {
+  const p = { ...providers[0]!, models: [" ", "#vision@100"] };
+  assert.equal(usable(p), false);
+  assert.deepEqual(modelChoices([p]), []);
+});
+
+test("已删除的默认模型不能继续使用，带标记的模型只发送模型名", () => {
+  const p = [{ ...providers[0]!, models: ["custom#vision@8192"] }];
+  assert.deepEqual(defaultModelChoice(p, 1, "removed"), {
+    providerId: 1, providerName: "百炼", model: "custom", context: 8192,
+  });
+  assert.equal(defaultModelChoice(p, 1, "custom#vision@8192")?.model, "custom");
+  assert.equal(defaultModelChoice([], 1, "removed"), undefined);
 });

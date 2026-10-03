@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { tr } from "../shared/i18n.js";
@@ -30,7 +30,7 @@ import {
 
 export interface SchedulerHost {
   /** 开一个后台会话并发出第一条消息，返回会话 id。不切换用户正在看的会话。 */
-  runTask(task: ScheduledTask): Promise<string>;
+  runTask(task: ScheduledTask): Promise<string | { sessionId: string; turnId: string }>;
   /** 任务跑完（或失败）时通知用户。 */
   notify(task: ScheduledTask, ok: boolean, detail: string): void;
 }
@@ -40,6 +40,9 @@ const TICK_MS = 30_000;
 export class Scheduler extends EventEmitter {
   private timer: ReturnType<typeof setInterval> | undefined;
   private running = new Set<string>();
+  private reports = new Map<string, {result: string; resultKey: string; complete: boolean}>();
+  private earlyCompletions = new Map<string, {sessionId: string; error?: string}>();
+  private startup: ReturnType<typeof setTimeout> | undefined;
 
   private readonly dir: string;
   private readonly host: SchedulerHost;
@@ -48,6 +51,15 @@ export class Scheduler extends EventEmitter {
     super();
     this.dir = dir;
     this.host = host;
+    const tasks = this.read();
+    let recovered = false;
+    for (const task of tasks) if (task.lastStatus === "running") {
+      task.enabled = false;
+      task.lastStatus = "failed";
+      task.lastError = tr("上次执行结果不确定，请检查原会话后再启用");
+      recovered = true;
+    }
+    if (recovered) this.write(tasks);
   }
 
   private get path(): string {
@@ -65,7 +77,8 @@ export class Scheduler extends EventEmitter {
   }
 
   private write(tasks: ScheduledTask[]): void {
-    writeFileSync(this.path, `${JSON.stringify(tasks, null, 2)}\n`, "utf8");
+    writeFileSync(this.path + ".tmp", `${JSON.stringify(tasks, null, 2)}\n`, "utf8");
+    renameSync(this.path + ".tmp", this.path);
     this.emit("changed", this.list());
   }
 
@@ -97,6 +110,13 @@ export class Scheduler extends EventEmitter {
     const now = new Date().toISOString();
     const tasks = this.read();
     let task = input.id ? tasks.find((item) => item.id === input.id) : undefined;
+    const mode = input.mode ?? task?.mode ?? "cron";
+    if (mode !== "cron" && mode !== "followup") throw new Error(tr("不认识的任务方式"));
+    const sessionId = (input.sessionId ?? task?.sessionId ?? "").trim();
+    if (mode === "followup" && !sessionId) throw new Error(tr("请选择跟进的会话"));
+    if (task && this.running.has(task.id)) throw new Error(tr("任务执行中，请结束后再修改"));
+    const notificationPolicy = mode === "followup" ? input.notificationPolicy ?? task?.notificationPolicy ?? "changes" : "all";
+    if (notificationPolicy !== "changes" && notificationPolicy !== "all") throw new Error(tr("通知方式无效"));
     if (task) {
       const ruleChanged = JSON.stringify(task.rule) !== JSON.stringify(rule);
       task.name = name;
@@ -118,6 +138,11 @@ export class Scheduler extends EventEmitter {
       };
       tasks.push(task);
     }
+    if (task.mode !== mode || task.sessionId !== (mode === "followup" ? sessionId : undefined)) { task.lastResult = undefined; task.lastResultKey = undefined; }
+    task.mode = mode;
+    task.sessionId = mode === "followup" ? sessionId : undefined;
+    task.notificationPolicy = notificationPolicy;
+    task.stopWhen = (input.stopWhen ?? task.stopWhen ?? "").trim();
     this.write(tasks);
     return toView(task);
   }
@@ -135,6 +160,7 @@ export class Scheduler extends EventEmitter {
     this.update(id, (task) => {
       if (enabled && !task.enabled) task.anchorAt = new Date().toISOString();
       task.enabled = enabled;
+      if (enabled) task.stoppedReason = undefined;
     });
   }
 
@@ -148,11 +174,12 @@ export class Scheduler extends EventEmitter {
   start(): void {
     if (this.timer) return;
     // 开机后稍等一会儿再查：内核刚起来，马上开会话容易撞上「运行时还没就绪」。
-    setTimeout(() => void this.tick(), 8_000);
+    this.startup = setTimeout(() => void this.tick(), 8_000);
     this.timer = setInterval(() => void this.tick(), TICK_MS);
   }
 
   stop(): void {
+    clearTimeout(this.startup);
     clearInterval(this.timer);
     this.timer = undefined;
   }
@@ -174,21 +201,37 @@ export class Scheduler extends EventEmitter {
   }
 
   private async fire(task: ScheduledTask, scheduled: boolean): Promise<string> {
+    if (this.running.has(task.id)) throw new Error(tr("任务已经在执行"));
+    if (task.mode === "followup" && this.read().some(item => item.id !== task.id && item.lastStatus === "running" && item.lastSessionId === task.sessionId)) throw new Error(tr("原会话已有跟进任务在执行"));
     this.running.add(task.id);
+    task.lastRunId = `run_${randomBytes(12).toString("hex")}`;
     const startedAt = new Date().toISOString();
+    this.update(task.id, item => {
+      item.lastStatus = "running"; item.lastRunId = task.lastRunId; item.lastTurnId = undefined;
+      item.lastSessionId = task.mode === "followup" ? task.sessionId : undefined;
+      item.lastError = undefined; item.lastRunAt = startedAt;
+    });
     try {
-      const sessionId = await this.host.runTask(task);
+      const receipt = await this.host.runTask(task);
+      const sessionId = typeof receipt === "string" ? receipt : receipt.sessionId;
+      const turnId = typeof receipt === "string" ? undefined : receipt.turnId;
       this.update(task.id, (item) => {
         item.lastRunAt = startedAt;
         item.lastStatus = "running";
         item.lastError = undefined;
         item.lastSessionId = sessionId;
+        item.lastTurnId = turnId;
         if (scheduled) {
           item.anchorAt = startedAt;
           // 一次性的跑过就关掉，留在列表里让用户看得到结果。
           if (item.rule.kind === "once") item.enabled = false;
         }
       });
+      if (turnId) {
+        const completed = this.earlyCompletions.get(turnId);
+        this.earlyCompletions.delete(turnId);
+        if (completed) this.onTurnCompleted(sessionId, completed.error, turnId);
+      }
       return sessionId;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -196,33 +239,61 @@ export class Scheduler extends EventEmitter {
         item.lastRunAt = startedAt;
         item.lastStatus = "failed";
         item.lastError = message;
+        if (item.mode === "followup") item.enabled = false;
         if (scheduled) item.anchorAt = startedAt;
       });
       this.host.notify(task, false, message);
       this.running.delete(task.id);
+      this.reports.delete(task.id);
       throw error;
     }
   }
 
   /** 会话的一轮结束了：是某个任务开的那个，就记下结果并通知。 */
-  onTurnCompleted(sessionId: string, error: string | undefined): void {
-    const task = this.read().find((item) => item.lastSessionId === sessionId && item.lastStatus === "running");
+  bindRunSession(id: string, runId: string, sessionId: string): void {
+    this.update(id, task => { if (task.lastRunId === runId && task.lastStatus === "running") task.lastSessionId = sessionId; });
+  }
+
+  onTurnCompleted(sessionId: string, error: string | undefined, turnId?: string): void {
+    const task = this.read().find(item => item.lastSessionId === sessionId && item.lastStatus === "running" && (!item.lastTurnId || item.lastTurnId === turnId));
     if (!task) return;
+    if (turnId && !task.lastTurnId) { this.earlyCompletions.set(turnId, {sessionId, error}); return; }
     this.running.delete(task.id);
-    this.update(task.id, (item) => {
-      item.lastStatus = error ? "failed" : "ok";
-      item.lastError = error || undefined;
+    const report = this.reports.get(task.id);
+    this.reports.delete(task.id);
+    const failed = error || (task.mode === "followup" && !report ? tr("跟进没有返回检查结果，请检查会话") : undefined);
+    const changed = !!report && report.resultKey !== task.lastResultKey;
+    const complete = !failed && !!report?.complete && !!task.stopWhen;
+    this.update(task.id, item => {
+      item.lastStatus = failed ? "failed" : "ok";
+      item.lastError = failed;
+      if (failed && item.mode === "followup") item.enabled = false;
+      if (report && !failed) { item.lastResult = report.result; item.lastResultKey = report.resultKey; }
+      if (complete) { item.enabled = false; item.stoppedReason = task.stopWhen; }
     });
-    this.host.notify(task, !error, error ?? "");
+    if (failed || complete || task.notificationPolicy !== "changes" || changed) this.host.notify(task, !failed, failed ?? report?.result ?? "");
   }
 
   /** 模型经 schedule_* 工具发来的请求。回一段给模型看的话；它也显示在界面的步骤详情里，跟界面语言走。 */
   handleModelRequest(request: {
     action: string;
+    sessionId?: string;
     id?: string;
-    task?: { name: string; prompt: string; kind: string; time?: string; days?: number[]; everyMinutes?: number; at?: string; workspace?: string };
+    runId?: string;
+    result?: string;
+    resultKey?: string;
+    complete?: boolean;
+    task?: { name: string; prompt: string; kind: string; time?: string; days?: number[]; everyMinutes?: number; at?: string; workspace?: string; mode?: "cron" | "followup"; notificationPolicy?: "changes" | "all"; stopWhen?: string };
   }): string {
     switch (request.action) {
+      case "report": {
+        const task = this.read().find(item => item.id === request.id);
+        if (!task || !this.running.has(task.id) || task.lastRunId !== request.runId || task.lastSessionId !== request.sessionId) throw new Error(tr("检查结果不属于当前执行"));
+        const result = (request.result ?? "").trim(), resultKey = (request.resultKey ?? "").trim();
+        if (!result || !resultKey || result.length > 16000 || resultKey.length > 4000) throw new Error(tr("检查结果与比较标识不能为空或过长"));
+        this.reports.set(task.id, {result, resultKey, complete: request.complete === true});
+        return tr("已记录本次检查结果");
+      }
       case "list": {
         const tasks = this.list();
         if (tasks.length === 0) return tr("还没有定时任务。");
@@ -250,7 +321,7 @@ export class Scheduler extends EventEmitter {
           everyMinutes: input.everyMinutes,
           at: input.at,
         };
-        const saved = this.save({ name: input.name, prompt: input.prompt, rule, workspace: input.workspace ?? "" });
+        const saved = this.save({ name: input.name, prompt: input.prompt, rule, workspace: input.workspace ?? "", mode: input.mode ?? (request.sessionId ? "followup" : "cron"), sessionId: request.sessionId, notificationPolicy: input.notificationPolicy, stopWhen: input.stopWhen });
         const next = saved.nextRunAt ? when(saved.nextRunAt) : tr("（没有下一次）");
         return tr(
           "已建好定时任务「{name}」（编号 {id}）：{rule}，下次 {next}。到点时 AIClaw 要开着才会跑；用户可以在「设置 → 定时任务」里查看、暂停或修改。",

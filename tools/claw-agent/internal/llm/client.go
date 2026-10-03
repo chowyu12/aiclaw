@@ -43,6 +43,8 @@ type ToolCall struct {
 // ToolCallID 只在 RoleTool 上有值：Chat Completions 要求工具结果消息
 // 通过它关联回是哪一次调用，缺了上游会报 400。
 type Message struct {
+	ID         string `json:",omitempty"`
+	RequestID  string `json:",omitempty"`
 	Role       Role
 	Content    string
 	ToolCalls  []ToolCall
@@ -107,6 +109,7 @@ type Usage struct {
 
 // Response 是一轮模型调用的结果。
 type Response struct {
+	LocalItemID  string
 	Content      string
 	ToolCalls    []ToolCall
 	FinishReason string

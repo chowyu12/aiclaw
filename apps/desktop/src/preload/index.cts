@@ -21,6 +21,13 @@ const api = {
     status: () => ipcRenderer.invoke(IPC.runtimeStatus),
   },
   session: {
+    work: (id: string) => ipcRenderer.invoke(IPC.sessionWork, id),
+    setGoal: (id: string, goal: unknown) => ipcRenderer.invoke(IPC.goalSet, id, goal),
+    updateGoal: (id: string, update: unknown) => ipcRenderer.invoke(IPC.goalUpdate, id, update),
+    fork: (id: string, itemId?: string) => ipcRenderer.invoke(IPC.sessionFork, id, itemId),
+    recover: (id: string, requestId: string, action: "resume" | "dismiss") => ipcRenderer.invoke(IPC.sessionRecover, id, requestId, action),
+    changes: (id: string) => ipcRenderer.invoke(IPC.changesList, id),
+    undo: (id: string, changeId: string) => ipcRenderer.invoke(IPC.changesUndo, id, changeId),
     start: (input?: unknown) => ipcRenderer.invoke(IPC.sessionStart, input),
     resume: (sessionId: string) => ipcRenderer.invoke(IPC.sessionResume, sessionId),
     send: (input: unknown) => ipcRenderer.invoke(IPC.sessionSend, input),
@@ -94,6 +101,9 @@ const api = {
     loginPoll: (input: unknown) => ipcRenderer.invoke(IPC.wechatLoginPoll, input),
   },
   mcp: {
+ login: (input: unknown) => ipcRenderer.invoke(IPC.mcpOAuthLogin, input),
+ status: (url: string) => ipcRenderer.invoke(IPC.mcpOAuthStatus, url),
+ logout: (url: string) => ipcRenderer.invoke(IPC.mcpOAuthLogout, url),
     read: () => ipcRenderer.invoke(IPC.mcpRead),
     write: (servers: unknown) => ipcRenderer.invoke(IPC.mcpWrite, servers),
     probe: (server: unknown) => ipcRenderer.invoke(IPC.mcpProbe, server),

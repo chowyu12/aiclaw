@@ -141,3 +141,88 @@ test("改了时间规则就从现在重新算；只改名字不动排期", () =>
   scheduler.save({ id: saved.id, name: "b", prompt: "x", rule: { kind: "daily", time: "10:00" } });
   assert.notEqual(read()[0]!.anchorAt, old);
 });
+
+test("follow-up keeps its chat, compares stable results and stops on verified completion", async () => {
+ const dir = mkdtempSync(join(tmpdir(), "aiclaw-followup-"));
+ const notes: string[] = [];
+ const runs: ScheduledTask[] = [];
+ let sequence = 0;
+ const scheduler = new Scheduler(dir, {
+  async runTask(task) { runs.push(task); return {sessionId: task.sessionId!, turnId: `turn_${++sequence}`}; },
+  notify(_task, _ok, detail) { notes.push(detail); },
+ });
+ const task = scheduler.save({name: "watch", prompt: "check", rule: {kind: "interval", everyMinutes: 5}, mode: "followup", sessionId: "original", stopWhen: "all checks pass"});
+ const report = (result: string, resultKey: string, complete = false) => {
+  const run = runs.at(-1)!;
+  scheduler.handleModelRequest({action: "report", id: task.id, sessionId: "original", runId: run.lastRunId, result, resultKey, complete});
+  scheduler.onTurnCompleted("original", undefined, `turn_${sequence}`);
+ };
+ assert.equal(await scheduler.runNow(task.id), "original");
+ report("still running", "running");
+ assert.deepEqual(notes, ["still running"]);
+ const restarted = new Scheduler(dir, {async runTask() { throw new Error("unused"); }, notify() {}});
+ assert.equal(restarted.list()[0]!.lastResult, "still running");
+ await scheduler.runNow(task.id); report("running, checked again", "running");
+ assert.equal(notes.length, 1, "wording changes must stay quiet");
+ await scheduler.runNow(task.id); report("checks passed", "passed", true);
+ assert.deepEqual(notes, ["still running", "checks passed"]);
+ const finished = scheduler.list()[0]!;
+ assert.equal(finished.enabled, false);
+ assert.equal(finished.stoppedReason, "all checks pass");
+ assert.equal(finished.lastResult, "checks passed");
+ assert.equal(new Set(runs.map(run => run.lastRunId)).size, 3, "each check needs a fresh identity");
+});
+
+test("follow-up rejects foreign/stale reports and duplicate dispatch, then pauses missing results", async () => {
+ const dir = mkdtempSync(join(tmpdir(), "aiclaw-followup-"));
+ let run: ScheduledTask | undefined;
+ const notes: boolean[] = [];
+ const scheduler = new Scheduler(dir, {
+  async runTask(task) { run = task; return {sessionId: "original", turnId: "turn"}; },
+  notify(_task, ok) { notes.push(ok); },
+ });
+ const task = scheduler.save({name: "watch", prompt: "check", rule: {kind: "interval", everyMinutes: 5}, mode: "followup", sessionId: "original"});
+ await scheduler.runNow(task.id);
+ await assert.rejects(scheduler.runNow(task.id), /已经在执行/);
+ assert.throws(() => scheduler.handleModelRequest({action: "report", id: task.id, sessionId: "other", runId: run!.lastRunId, result: "bad", resultKey: "bad"}), /不属于/);
+ assert.throws(() => scheduler.handleModelRequest({action: "report", id: task.id, sessionId: "original", runId: "old run", result: "bad", resultKey: "bad"}), /不属于/);
+ scheduler.onTurnCompleted("original", undefined, "unrelated-user-turn");
+ assert.equal(scheduler.list()[0]!.lastStatus, "running");
+ scheduler.onTurnCompleted("original", undefined, "turn");
+ assert.equal(scheduler.list()[0]!.lastStatus, "failed");
+ assert.equal(scheduler.list()[0]!.enabled, false);
+ assert.deepEqual(notes, [false]);
+ assert.throws(() => scheduler.handleModelRequest({action: "report", id: task.id, sessionId: "original", runId: run!.lastRunId, result: "late", resultKey: "late"}), /不属于/);
+});
+
+test("restart pauses an uncertain execution rather than replaying it", async () => {
+ const {scheduler, read} = fixture();
+ const task = scheduler.save({name: "watch", prompt: "check", rule: {kind: "interval", everyMinutes: 5}, mode: "followup", sessionId: "original"});
+ await scheduler.runNow(task.id);
+ // Derive the persisted directory through a separate fixture for a real reopen.
+ const dir = mkdtempSync(join(tmpdir(), "aiclaw-followup-restart-"));
+ writeFileSync(join(dir, "schedules.json"), JSON.stringify(read()));
+ let runs = 0;
+ const reopened = new Scheduler(dir, {async runTask() { runs++; return "original"; }, notify() {}});
+ assert.equal(reopened.list()[0]!.enabled, false);
+ assert.equal(reopened.list()[0]!.lastStatus, "failed");
+ await reopened.tick(new Date(Date.now() + 10 * 60_000));
+ assert.equal(runs, 0);
+});
+
+test("completion arriving before the start receipt is reconciled to the right run", async () => {
+ const dir = mkdtempSync(join(tmpdir(), "aiclaw-followup-early-"));
+ const notes: string[] = [];
+ const scheduler = new Scheduler(dir, {
+  async runTask(task) {
+   scheduler.bindRunSession(task.id, task.lastRunId!, "original");
+   scheduler.handleModelRequest({action: "report", id: task.id, sessionId: "original", runId: task.lastRunId, result: "ready", resultKey: "ready"});
+   scheduler.onTurnCompleted("original", undefined, "early");
+   return {sessionId: "original", turnId: "early"};
+  }, notify(_task, _ok, result) { notes.push(result); },
+ });
+ const task = scheduler.save({name: "watch", prompt: "check", rule: {kind: "interval", everyMinutes: 5}, mode: "followup", sessionId: "original"});
+ await scheduler.runNow(task.id);
+ assert.equal(scheduler.list()[0]!.lastStatus, "ok");
+ assert.deepEqual(notes, ["ready"]);
+});

@@ -100,6 +100,10 @@ const (
 
 // ScheduleRequestParams 是模型对定时任务的一次操作。
 type ScheduleRequestParams struct {
+	RunID     string `json:"runId,omitempty"`
+	Result    string `json:"result,omitempty"`
+	ResultKey string `json:"resultKey,omitempty"`
+	Complete  bool   `json:"complete,omitempty"`
 	SessionID string `json:"sessionId"`
 	/** list / create / delete */
 	Action string `json:"action"`
@@ -110,8 +114,11 @@ type ScheduleRequestParams struct {
 
 // ScheduleTaskInput 是新建的定时任务。时间规则与宿主 shared/schedule.ts 一致。
 type ScheduleTaskInput struct {
-	Name   string `json:"name"`
-	Prompt string `json:"prompt"`
+	Mode               string `json:"mode,omitempty"`
+	NotificationPolicy string `json:"notificationPolicy,omitempty"`
+	StopWhen           string `json:"stopWhen,omitempty"`
+	Name               string `json:"name"`
+	Prompt             string `json:"prompt"`
 	/** daily / weekdays / weekly / interval / once */
 	Kind string `json:"kind"`
 	/** HH:MM */
@@ -622,6 +629,7 @@ type WeChatLoginPollResult struct {
 // 两种传输二选一：填了 URL 走 Streamable HTTP（远程），否则把 Command
 // 当子进程拉起来走 stdio（本地）。
 type MCPServerConfig struct {
+	OAuth bool `json:"oauth,omitempty"`
 	/** stdio：可执行文件与参数。 */
 	Command string   `json:"command,omitempty"`
 	Args    []string `json:"args,omitempty"`
@@ -668,7 +676,9 @@ const (
 )
 
 type SessionStartParams struct {
-	Model ModelConfig `json:"model"`
+	ForkSourceID string      `json:"forkSourceId,omitempty"`
+	ForkItemID   string      `json:"forkItemId,omitempty"`
+	Model        ModelConfig `json:"model"`
 	/**
 	 * 会话工作区：相对路径的基准，也是「写这里不用问」的范围。
 	 *
@@ -864,6 +874,8 @@ type SessionStartResult struct {
 }
 
 type TurnStartParams struct {
+	IdleOnly  bool   `json:"idleOnly,omitempty"`
+	RequestID string `json:"requestId,omitempty"`
 	SessionID string `json:"sessionId"`
 	Text      string `json:"text"`
 	/**
@@ -944,8 +956,9 @@ const (
 )
 
 type Item struct {
-	ID   string   `json:"id"`
-	Kind ItemKind `json:"kind"`
+	RequestID string   `json:"requestId,omitempty"`
+	ID        string   `json:"id"`
+	Kind      ItemKind `json:"kind"`
 	/** 用户消息与助手消息的时间（Unix 毫秒）。界面在消息下面显示；0 表示不知道（旧存档）。 */
 	At int64 `json:"at,omitempty"`
 	/** 文本类条目的正文。 */

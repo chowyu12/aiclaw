@@ -60,8 +60,9 @@ type SpawnRequest struct {
 
 // SpawnResult 是 spawn_agent 的返回。与 Codex 一致：task_name 是规范名（完整路径）。
 type SpawnResult struct {
-	TaskName string `json:"task_name"`
-	Nickname string `json:"nickname,omitempty"`
+	TaskName  string            `json:"task_name"`
+	Nickname  string            `json:"nickname,omitempty"`
+	MCPStatus map[string]string `json:"mcp_status,omitempty"`
 }
 
 // AgentInfo 是 list_agents 的一行。
@@ -72,6 +73,7 @@ type AgentInfo struct {
 
 // Agent 的状态。与 Codex 的 AgentStatus 对应（小写蛇形）。
 const (
+	AgentPreparing   = "preparing"
 	AgentRunning     = "running"
 	AgentCompleted   = "completed"
 	AgentErrored     = "errored"
@@ -315,7 +317,7 @@ func jsonText(value any) string {
 func (s *Session) DeliverAgentMail(from, text, notice string) bool {
 	s.mu.Lock()
 	s.pending = append(s.pending, userInput{text: text, mail: true, mailFrom: from, notice: notice})
-	running := s.cancelTurn != nil
+	running := s.cancelTurn != nil && !s.finishing
 	s.mu.Unlock()
 	s.signalPending()
 	return running

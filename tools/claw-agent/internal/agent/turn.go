@@ -25,6 +25,13 @@ import (
 // 在盯着一个没动静的界面了，不如早点把失败说出来。
 const maxModelRetries = 4
 
+type inputRequestKey struct{}
+
+// RunRequest associates the user event with a stable client submission identity.
+func (s *Session) RunRequest(ctx context.Context, turnID string, input protocol.TurnStartParams, emitter Emitter) {
+	s.RunTurn(context.WithValue(ctx, inputRequestKey{}, input.RequestID), turnID, input.Text, input.Images, input.AudioPaths, emitter, input.References...)
+}
+
 // RunTurn 跑一轮：接收用户输入，循环调模型与工具直到模型给出最终回答。
 //
 // 事件顺序固定为：turn/started → 若干 item/* → turn/completed。
@@ -38,23 +45,20 @@ func (s *Session) RunTurn(
 	emitter Emitter,
 	refs ...protocol.ThreadRef,
 ) {
+	s.runMu.Lock()
+	defer s.runMu.Unlock()
+	requestID, _ := parent.Value(inputRequestKey{}).(string)
 	ctx, cancel := context.WithCancel(parent)
 	s.mu.Lock()
-	if s.cancelTurn != nil && text == "" && len(images) == 0 && len(audioPaths) == 0 {
-		// 由邮箱开的一轮撞上了正在跑的一轮：邮件已经在队列里，那一轮会收到，不用排空消息。
+	// Another queued wakeup may already have consumed the mailbox while this
+	// goroutine waited for the preceding turn to finish.
+	if text == "" && len(images) == 0 && len(audioPaths) == 0 && len(s.pending) == 0 {
 		s.mu.Unlock()
-		cancel()
-		return
-	}
-	if s.cancelTurn != nil {
-		// 上一轮还在跑：把输入排进队列而不是拒绝。见 pending 字段的说明。
-		s.pending = append(s.pending, userInput{text: text, images: images, refs: refs})
-		s.mu.Unlock()
-		s.signalPending()
 		cancel()
 		return
 	}
 	s.cancelTurn = cancel
+	s.finishing = false
 	s.currentTurn = turnID
 	s.emitter = emitter
 	s.turnCount++
@@ -70,6 +74,25 @@ func (s *Session) RunTurn(
 		s.mu.Unlock()
 	}()
 
+	if err := s.Checkpoint(); err != nil {
+		emitter.Notify(protocol.NotifyTurnCompleted, protocol.TurnNotification{SessionID: s.ID, TurnID: turnID, Error: err.Error()})
+		return
+	}
+	if s.db != nil && requestID != "" {
+		if err := s.db.SetSubmission(context.Background(), s.ID, requestID, turnID, "running"); err != nil {
+			emitter.Notify(protocol.NotifyTurnCompleted, protocol.TurnNotification{SessionID: s.ID, TurnID: turnID, Error: err.Error()})
+			return
+		}
+	}
+	execution := store.Execution{TurnID: turnID, State: "running", StartedAt: time.Now().UnixMilli()}
+	if s.db != nil {
+		if err := s.db.PutState(context.Background(), s.ID, "execution", execution); err != nil {
+			emitter.Notify(protocol.NotifyTurnCompleted, protocol.TurnNotification{SessionID: s.ID, TurnID: turnID, Error: err.Error()})
+			return
+		}
+	}
+	s.startGoalClock(cancel)
+	defer s.stopGoalClock()
 	emitter.Notify(protocol.NotifyTurnStarted, protocol.TurnNotification{SessionID: s.ID, TurnID: turnID})
 
 	// 音频先转成文字：模型读不了音频，而用户发过来就是希望它「听」到。
@@ -80,19 +103,51 @@ func (s *Session) RunTurn(
 	s.drainPending(ctx, turnID, emitter)
 	// 没有新输入的一轮：由邮箱里的消息开起来的（子 agent 完成、followup_task），
 	// 排着的那几条上面已经插进去了，不再补一条空的用户消息。
-	if text != "" || transcript != "" || len(images) > 0 {
-		s.acceptUserInput(ctx, turnID, text, transcript, images, emitter, refs)
+	if text != "" || transcript != "" || len(images) > 0 || len(audioPaths) > 0 {
+		s.acceptUserInput(ctx, turnID, text, transcript, images, emitter, refs, requestID)
 	}
 
+	s.addGoalContext()
 	usage, err := s.loop(ctx, turnID, emitter)
+	if goalErr := s.accountGoal(0); err == nil {
+		err = goalErr
+	}
+	s.mu.Lock()
+	s.finishing = true
+	s.mu.Unlock()
 
+	if err != nil {
+		if g, _ := s.Goal(); g != nil && g.Status == "active" {
+			reason := err.Error()
+			_, _ = s.UpdateGoal(GoalUpdate{Status: "paused", Evidence: &reason}, true)
+		}
+	}
 	completed := protocol.TurnNotification{SessionID: s.ID, TurnID: turnID, Usage: &usage}
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			s.recordInterruption()
 			completed.Error = i18n.D("已中断")
+			if g, _ := s.Goal(); g != nil && g.Status == "budget_exhausted" {
+				completed.Error = errGoalBudget.Error()
+			}
 		} else {
+			s.recordStopped(recoveryMarker)
 			completed.Error = err.Error()
+		}
+	}
+	if saveErr := s.Checkpoint(); saveErr != nil {
+		completed.Error = saveErr.Error()
+	} else if s.db != nil {
+		state := "completed"
+		if completed.Error != "" {
+			state = "uncertain"
+		}
+		execution.State = state
+		if e := s.db.PutState(context.Background(), s.ID, "execution", execution); e != nil {
+			completed.Error = e.Error()
+		}
+		if saveErr = s.db.FinishSubmissions(context.Background(), s.ID, turnID, state); saveErr != nil {
+			completed.Error = saveErr.Error()
 		}
 	}
 	emitter.Notify(protocol.NotifyTurnCompleted, completed)
@@ -107,14 +162,23 @@ func (s *Session) RunTurn(
 // text 是用户原话，transcript 是附带音频的转写（没有就是空串）。两者分开传：
 // 界面上显示原话，进模型历史的是原话加转写与转述；存档里两份都留（Message.Shown），
 // 切回会话时还原的才是用户发的那一版。
-func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript string, images [][]byte, emitter Emitter, refs []protocol.ThreadRef) {
+func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript string, images [][]byte, emitter Emitter, refs []protocol.ThreadRef, requestID string) {
+	if s.db != nil && requestID != "" {
+		if err := s.db.SetSubmission(context.Background(), s.ID, requestID, turnID, "running"); err != nil {
+			s.mu.Lock()
+			s.persistenceErr = err
+			s.mu.Unlock()
+			return
+		}
+	}
+	userID := newID("user")
 	images = limitImages(images)
 	refs = s.cleanReferences(refs)
 	// 用户消息本身也是一个条目，让宿主的时间线和模型看到的历史一致。
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{
 		SessionID: s.ID, TurnID: turnID,
 		Item: protocol.Item{
-			ID: newID("user"), Kind: protocol.ItemUserMessage, Text: text, Images: images,
+			ID: userID, RequestID: requestID, Kind: protocol.ItemUserMessage, Text: text, Images: images,
 			At: time.Now().UnixMilli(), References: refs,
 		},
 	})
@@ -126,7 +190,7 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 		// 正文的 user 消息，常常当成「继续」接着做上一件事（见 interruptMarker）。
 		content = fmt.Sprintf("(The user sent %d image(s) with no text.)", len(images))
 	}
-	message := llm.Message{Role: llm.RoleUser, Content: content, Images: images}
+	message := llm.Message{ID: userID, RequestID: requestID, Role: llm.RoleUser, Content: content, Images: images}
 	if len(images) > 0 && !s.config.ModelSeesImages {
 		if described := s.describeImages(ctx, images); described != "" {
 			message.Content += described
@@ -137,26 +201,61 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 		message.Shown = &llm.Shown{Text: text, Images: images, References: toLLMRefs(refs)}
 	}
 	s.appendMessage(message)
+	s.mu.Lock()
 	if s.Title == "" {
 		s.Title = firstLine(text, 40)
 	}
+	s.mu.Unlock()
 }
 
 // Enqueue 在有轮次进行中时把输入排队，返回 true 与那一轮的 id。
 //
-// 排队的输入不带音频：它们在下一次打模型之前被插进历史，而转写要打一次网络，
-// 卡在那里会让正在跑的这一轮停住。宿主在有音频时不走排队（见 handleTurnStart）。
+// 带音频的调用方用 EnqueueInput；转写在下一次采样前完成。
 //
 // 没有进行中的轮次时返回 false，调用方按常规起新一轮。
 func (s *Session) Enqueue(text string, images [][]byte, refs ...protocol.ThreadRef) (string, bool) {
+	return s.EnqueueInput(text, images, nil, refs...)
+}
+
+// EnqueueInput retains attachments while steering a running turn.
+func (s *Session) EnqueueInput(text string, images [][]byte, audioPaths []string, refs ...protocol.ThreadRef) (string, bool) {
+	return s.EnqueueRequest(protocol.TurnStartParams{Text: text, Images: images, AudioPaths: audioPaths, References: refs})
+}
+
+func (s *Session) EnqueueRequest(input protocol.TurnStartParams) (string, bool) {
+	turn, queued, _ := s.EnqueueDurable(input, nil)
+	return turn, queued
+}
+
+// EnqueueDurable records the receipt before the running turn can consume the input.
+func (s *Session) EnqueueDurable(input protocol.TurnStartParams, before func(string) error) (string, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cancelTurn == nil {
-		return "", false
+	if s.cancelTurn == nil || s.finishing {
+		return "", false, nil
 	}
-	s.pending = append(s.pending, userInput{text: text, images: images, refs: refs})
+	if before != nil {
+		if err := before(s.currentTurn); err != nil {
+			return "", false, err
+		}
+	}
+	s.pending = append(s.pending, userInput{text: input.Text, images: input.Images, audioPaths: input.AudioPaths, refs: input.References, requestID: input.RequestID})
+	if s.cancelSample != nil {
+		s.cancelSample()
+	}
 	defer s.signalPending()
-	return s.currentTurn, true
+	return s.currentTurn, true, nil
+}
+func (s *Session) RemovePending(requestID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.pending[:0]
+	for _, p := range s.pending {
+		if p.requestID != requestID {
+			out = append(out, p)
+		}
+	}
+	s.pending = out
 }
 
 // limitImages 兜住图片的张数与大小。
@@ -209,7 +308,8 @@ func (s *Session) drainPending(ctx context.Context, turnID string, emitter Emitt
 			s.acceptAgentMail(turnID, input, emitter)
 			continue
 		}
-		s.acceptUserInput(ctx, turnID, input.text, "", input.images, emitter, input.refs)
+		transcript := s.transcribeAttached(ctx, input.audioPaths)
+		s.acceptUserInput(ctx, turnID, input.text, transcript, input.images, emitter, input.refs, input.requestID)
 	}
 }
 
@@ -231,7 +331,26 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		TurnID:         turnID,
 	}
 
-	for iteration := 0; iteration < maxIterations; iteration++ {
+	if s.db != nil {
+		env.WriteFile = func(ctx context.Context, path string, data, expected []byte) error {
+			return s.db.WriteTracked(ctx, s.ID, turnID, path, data, expected)
+		}
+	}
+	var lastGoalRevision int64
+	stalls := 0
+	limit := maxIterations
+	for iteration := 0; iteration < limit; iteration++ {
+		if iteration == limit-1 {
+			if g, _ := s.Goal(); g != nil && g.Status == "active" {
+				limit += maxIterations
+			}
+		}
+		if err := s.Checkpoint(); err != nil {
+			return total, err
+		}
+		if err := s.accountGoal(0); err != nil {
+			return total, err
+		}
 		if ctx.Err() != nil {
 			return total, ctx.Err()
 		}
@@ -248,18 +367,47 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			}
 		}
 
-		response, err := s.sample(ctx, turnID, emitter, &total, steps, iteration+1)
+		// Register cancellation under the same lock as enqueueing so input arriving
+		// between draining the queue and starting the HTTP request cannot be missed.
+		sampleCtx, cancelSample := context.WithCancel(ctx)
+		s.mu.Lock()
+		s.cancelSample = cancelSample
+		if len(s.pending) > 0 {
+			cancelSample()
+		}
+		s.mu.Unlock()
+		response, err := s.sample(sampleCtx, turnID, emitter, &total, steps, iteration+1)
+		s.mu.Lock()
+		s.cancelSample = nil
+		steered := sampleCtx.Err() != nil && ctx.Err() == nil
+		s.mu.Unlock()
+		cancelSample()
+		if steered {
+			if strings.TrimSpace(response.Content) != "" {
+				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content})
+			}
+			continue
+		}
 		if err != nil {
 			// 最后一次采样断在半截（用户中断、重试用尽）：已经给用户看过的那段正文
 			// 记进历史——模型下一轮知道自己说到哪了，切回会话也还在。工具调用不记：
 			// 断在半截的调用没有结果，记了下一次请求就是 400。与 Codex 0.156 同一个修复。
 			if partial := strings.TrimSpace(response.Content); partial != "" {
-				s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: response.Content})
+				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content})
 			}
 			return total, err
 		}
 
+		// A completed response can race with new input. Do not dispatch its stale
+		// tool calls; no tool-call message has entered history yet.
+		if s.hasPending() && ctx.Err() == nil {
+			if strings.TrimSpace(response.Content) != "" {
+				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content})
+			}
+			continue
+		}
 		s.appendMessage(llm.Message{
+			ID:        response.LocalItemID,
 			Role:      llm.RoleAssistant,
 			Content:   response.Content,
 			ToolCalls: response.ToolCalls,
@@ -276,12 +424,50 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		if len(response.ToolCalls) == 0 {
 			// 没有工具调用就是这一轮说完了——除非用户在期间又发了话，
 			// 那就接着跑，别让他等下一次回车。
-			if s.hasPending() {
+			s.mu.Lock()
+			pending := len(s.pending) > 0
+
+			s.mu.Unlock()
+			if pending {
+				continue
+			}
+			g, goalErr := s.Goal()
+			if goalErr != nil {
+				return total, goalErr
+			}
+			if g != nil && g.Status == "active" {
+				if g.Revision == lastGoalRevision {
+					stalls++
+				} else {
+					stalls = 0
+				}
+				lastGoalRevision = g.Revision
+				if stalls >= 2 {
+					reason := "No plan progress after repeated continuations; user review required."
+					_, err := s.UpdateGoal(GoalUpdate{Status: "blocked", Evidence: &reason}, false)
+					return total, err
+				}
+				s.mu.Lock()
+				s.finishing = false
+				s.mu.Unlock()
+				s.addGoalContext()
+				continue
+			}
+			s.mu.Lock()
+			pending = len(s.pending) > 0
+			if !pending {
+				s.finishing = true
+			}
+			s.mu.Unlock()
+			if pending {
 				continue
 			}
 			return total, nil
 		}
 
+		if err := s.Checkpoint(); err != nil {
+			return total, err
+		}
 		toolCtx := ctx
 		if cut {
 			toolCtx = context.WithValue(ctx, truncatedCallKey{}, response.ToolCalls[len(response.ToolCalls)-1].ID)
@@ -305,6 +491,10 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		if ctx.Err() != nil {
 			return total, ctx.Err()
 		}
+	}
+	if g, _ := s.Goal(); g != nil && g.Status == "active" {
+		reason := "Turn iteration limit reached; review and resume to continue."
+		_, _ = s.UpdateGoal(GoalUpdate{Status: "paused", Evidence: &reason}, true)
 	}
 	return total, i18n.E("单轮内工具调用超过 {n} 次，已停止；请把任务拆小", "n", maxIterations)
 }
@@ -340,6 +530,7 @@ func (s *Session) sample(
 		total.InputTokens += response.Usage.InputTokens
 		total.OutputTokens += response.Usage.OutputTokens
 		total.TotalTokens += response.Usage.TotalTokens
+
 		if err == nil {
 			s.mu.Lock()
 			s.lastInputTokens = response.Usage.InputTokens
@@ -537,6 +728,7 @@ func (s *Session) callModel(
 	if thinkStart != 0 && thinking == 0 {
 		thinking = time.Since(llmStart) - thinkStart
 	}
+	response.LocalItemID = itemID
 	usage := response.Usage
 	s.recordUsage(store.UsageEvent{
 		Kind: store.UsageModel, Model: s.config.Model.Model,
@@ -670,7 +862,9 @@ func (s *Session) executeOne(
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
 
 	// 截断只作用于进历史的副本：界面上留的是工具实际返回的内容。
-	return llm.Message{Role: llm.RoleTool, ToolCallID: call.ID, Content: truncateForHistory(output)}
+	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: truncateForHistory(output), At: time.Now().UnixMilli()}
+	s.journalMessage(result)
+	return result
 }
 
 // truncatedCallKey 标记「这一批里哪条调用的参数被长度上限截断了」。
@@ -715,7 +909,10 @@ func (s *Session) runTool(ctx context.Context, call llm.ToolCall, env *tools.Env
 //  1. 给没有结果的 tool_call 补上结果。Chat Completions 要求一一对应，
 //     少一条下一轮开口就是 400，会话直接废掉；
 //  2. 写一句中断说明，否则模型下一轮会把那些半截结果当成正常完成的操作。
-func (s *Session) recordInterruption() {
+const recoveryMarker = "The previous execution stopped unexpectedly. Some operations may already have completed even when their results were not recorded. Inspect current state before repeating any side effect; ask the user when the outcome cannot be established."
+
+func (s *Session) recordInterruption() { s.recordStopped(interruptMarker) }
+func (s *Session) recordStopped(marker string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -738,13 +935,13 @@ func (s *Session) recordInterruption() {
 			missing = append(missing, llm.Message{
 				Role:       llm.RoleTool,
 				ToolCallID: call.ID,
-				Content:    toolErrorResult(i18n.D("用户中断，这次调用未完成。")),
+				Content:    toolErrorResult(i18n.D("执行结果未记录，操作可能已经完成；请先检查状态，不要直接重试。")),
 			})
 		}
 	}
 	s.messages = append(s.messages, missing...)
 	s.messages = append(s.messages, llm.Message{
-		Role: llm.RoleUser, Content: interruptMarker, Shown: &llm.Shown{Hidden: true},
+		Role: llm.RoleUser, Content: marker, Shown: &llm.Shown{Hidden: true},
 	})
 }
 
@@ -770,12 +967,17 @@ func (s *Session) llmTools() []llm.Tool {
 func (s *Session) appendMessage(message llm.Message) {
 	// 在这一处统一打时间，而不是在各个调用点：进历史的路径有七八条（提问、
 	// 回答、工具结果、截屏回灌、压缩摘要），漏一处就有一类消息没有时间。
+	if message.ID == "" {
+		message.ID = newID("message")
+	}
 	if message.At == 0 {
 		message.At = time.Now().UnixMilli()
 	}
 	s.mu.Lock()
 	s.messages = append(s.messages, message)
+	s.UpdatedAt = time.Now()
 	s.mu.Unlock()
+	s.journalMessage(message)
 }
 
 func (s *Session) snapshotMessages() []llm.Message {

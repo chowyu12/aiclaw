@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -82,6 +83,7 @@ func (p *mcpPool) acquire(
 	ctx context.Context,
 	name string,
 	config protocol.MCPServerConfig,
+	auth ...func(context.Context, string) (string, error),
 ) (*mcpclient.Client, string, error) {
 	key := fingerprint(name, config)
 
@@ -93,7 +95,12 @@ func (p *mcpPool) acquire(
 			// 换来的是那个会话的工具突然失效。
 			entry.refs++
 			p.mu.Unlock()
-			<-entry.ready
+			select {
+			case <-entry.ready:
+			case <-ctx.Done():
+				p.release(key)
+				return nil, "", ctx.Err()
+			}
 			if entry.err != nil {
 				p.release(key)
 				return nil, "", entry.err
@@ -109,12 +116,22 @@ func (p *mcpPool) acquire(
 	p.entries[key] = entry
 	p.mu.Unlock()
 
+	var token func(context.Context) (string, error)
+	if config.OAuth {
+		token = func(ctx context.Context) (string, error) {
+			if len(auth) == 0 || auth[0] == nil {
+				return "", fmt.Errorf("MCP OAuth login unavailable")
+			}
+			return auth[0](ctx, config.URL)
+		}
+	}
 	client, err := mcpclient.Start(ctx, mcpclient.Config{
-		Command: config.Command,
-		Args:    config.Args,
-		Env:     config.Env,
-		URL:     config.URL,
-		Headers: config.Headers,
+		AccessToken: token,
+		Command:     config.Command,
+		Args:        config.Args,
+		Env:         config.Env,
+		URL:         config.URL,
+		Headers:     config.Headers,
 	})
 	entry.client, entry.err = client, err
 	close(entry.ready)

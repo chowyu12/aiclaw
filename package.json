@@ -1,8 +1,9 @@
 {
   "name": "aiclaw",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
-  "version": "3.6.8",
+  "version": "3.7.0",
   "description": "AIClaw：本地 Agent 桌面客户端（Electron 宿主 + Go 内核 claw-agent）",
   "repository": {
     "type": "git",
@@ -26,8 +27,8 @@
     "test:go": "go test ./tools/claw-agent/... ./internal/...",
     "smoke": "node --experimental-strip-types scripts/smoke-kernel.ts",
     "scenarios": "node --experimental-strip-types scripts/scenarios.ts",
-    "smoke:desktop": "electron scripts/smoke-desktop.cjs",
-    "test:renderer": "node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-renderer.ts scripts/test-model-choices.ts scripts/test-model-roles.ts scripts/test-unzip.ts scripts/test-store-ipc.ts scripts/test-computer.ts scripts/test-config.ts scripts/test-turns.ts scripts/test-message-meta.ts scripts/test-live-sessions.ts scripts/test-browser-snapshot.ts scripts/test-browser-bridge.ts scripts/test-browser-cdp.ts scripts/test-usage-format.ts scripts/test-skill-roots.ts scripts/test-shell-path.ts scripts/test-voice.ts scripts/test-schedule.ts scripts/test-scheduler.ts scripts/test-mentions.ts scripts/test-i18n.ts scripts/test-skill-frontmatter.ts scripts/test-version.ts scripts/test-diagnostics.ts scripts/test-open-file.ts scripts/test-logfile.ts"
+    "smoke:desktop": "electron scripts/smoke-desktop.cjs && electron scripts/smoke-work.cjs",
+    "test:renderer": "node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-renderer.ts scripts/test-model-choices.ts scripts/test-model-roles.ts scripts/test-unzip.ts scripts/test-store-ipc.ts scripts/test-computer.ts scripts/test-config.ts scripts/test-turns.ts scripts/test-message-meta.ts scripts/test-live-sessions.ts scripts/test-browser-snapshot.ts scripts/test-browser-bridge.ts scripts/test-browser-cdp.ts scripts/test-usage-format.ts scripts/test-skill-roots.ts scripts/test-shell-path.ts scripts/test-voice.ts scripts/test-schedule.ts scripts/test-scheduler.ts scripts/test-mentions.ts scripts/test-i18n.ts scripts/test-skill-frontmatter.ts scripts/test-version.ts scripts/test-diagnostics.ts scripts/test-open-file.ts scripts/test-logfile.ts scripts/test-transport.ts scripts/test-file-diff.ts"
   },
   "devDependencies": {
     "@electron/packager": "^20.3.0",

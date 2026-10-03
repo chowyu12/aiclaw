@@ -280,3 +280,30 @@ func TestSlowServerIsNamed(t *testing.T) {
 		t.Errorf("应按耗时倒序：%+v", dials)
 	}
 }
+
+// Cancelling one child must stop its wait without cancelling the shared dial.
+func TestPendingPoolBorrowerCanCancelIndependently(t *testing.T) {
+	pool := newMCPPool()
+	config := protocol.MCPServerConfig{URL: "https://example.invalid/mcp"}
+	key := fingerprint("slow", config)
+	entry := &pooledEntry{refs: 1, startedAt: pool.now(), ready: make(chan struct{})}
+	pool.entries[key] = entry
+	defer close(entry.ready)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	result := make(chan error, 1)
+	go func() { _, _, err := pool.acquire(ctx, "slow", config); result <- err }()
+	select {
+	case err := <-result:
+		if err != context.Canceled {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled child remained blocked on shared preparation")
+	}
+	pool.mu.Lock()
+	defer pool.mu.Unlock()
+	if entry.refs != 1 || pool.entries[key] != entry {
+		t.Fatal("cancelling a borrower changed the original preparation")
+	}
+}

@@ -61,6 +61,7 @@ export declare interface AgentTransport {
 export class AgentTransport extends EventEmitter {
   private child: ChildProcessWithoutNullStreams | null = null;
   private stdoutBuffer = "";
+  private stopping = false;
   private nextId = 1;
   private readonly options: TransportOptions;
   private readonly pending = new Map<
@@ -74,11 +75,11 @@ export class AgentTransport extends EventEmitter {
   }
 
   get running(): boolean {
-    return this.child !== null && this.child.exitCode === null;
+    return this.child !== null && this.child.exitCode === null && this.child.signalCode === null && !this.child.stdin.destroyed;
   }
 
   start(): void {
-    if (this.child) {
+    if (this.child || this.stopping) {
       throw new Error("transport already started");
     }
     const child = spawn(this.options.command, this.options.args ?? ["serve"], {
@@ -87,27 +88,49 @@ export class AgentTransport extends EventEmitter {
       cwd: this.options.cwd,
     });
     this.child = child;
+    this.stdoutBuffer = "";
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => this.consume(chunk));
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => this.emit("stderr", chunk));
-    child.on("exit", (code, signal) => {
-      this.failAllPending(new Error(`claw-agent exited (code=${code} signal=${signal})`));
+    let ended = false;
+    const finish = (error: Error, code: number | null, signal: NodeJS.Signals | null) => {
+      if (ended) return;
+      ended = true;
+      if (this.child === child) this.child = null;
+      this.failAllPending(error);
       this.emit("exit", code, signal);
+    };
+    // close follows stdout draining, so confirmations preceding exit are delivered first.
+    child.on("close", (code, signal) =>
+      finish(new Error(`claw-agent exited (code=${code} signal=${signal}); submission may have been accepted`), code, signal),
+    );
+    child.on("error", (error) => finish(error, null, null));
+    // EPIPE is emitted on stdin, not necessarily on the ChildProcess.
+    child.stdin.on("error", (error) => {
+      if (this.child === child) this.failAllPending(error);
     });
-    child.on("error", (error) => this.failAllPending(error));
   }
 
   request<T = unknown>(method: string, params?: unknown): Promise<T> {
-    if (!this.child) {
+    if (!this.running) {
       return Promise.reject(new Error("transport not started"));
     }
     const id = this.nextId++;
     const promise = new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
     });
-    this.write({ jsonrpc: "2.0", id, method, params: params ?? {} });
+    try {
+      this.write({ jsonrpc: "2.0", id, method, params: params ?? {} }, (error) => {
+        if (!error) return;
+        this.pending.get(id)?.reject(error);
+        this.pending.delete(id);
+      });
+    } catch (error) {
+      this.pending.get(id)?.reject(error instanceof Error ? error : new Error(String(error)));
+      this.pending.delete(id);
+    }
     return promise;
   }
 
@@ -127,13 +150,14 @@ export class AgentTransport extends EventEmitter {
   async stop(): Promise<void> {
     const child = this.child;
     if (!child) return;
-    this.child = null;
+    this.stopping = true;
     // 先发 shutdown 让它落盘会话，再关管道；不退再 SIGTERM，最后 SIGKILL。
     try {
       this.write({ jsonrpc: "2.0", id: this.nextId++, method: "shutdown", params: {} });
     } catch {
       // 管道可能已经断了，忽略。
     }
+    this.child = null;
     child.stdin.end();
     await new Promise<void>((resolve) => {
       const hardKill = setTimeout(() => {
@@ -141,19 +165,20 @@ export class AgentTransport extends EventEmitter {
         resolve();
       }, 5000);
       const softKill = setTimeout(() => child.kill("SIGTERM"), 1500);
-      child.once("exit", () => {
+      child.once("close", () => {
         clearTimeout(softKill);
         clearTimeout(hardKill);
         resolve();
       });
     });
+    this.stopping = false;
   }
 
-  private write(frame: Record<string, unknown>): void {
+  private write(frame: Record<string, unknown>, callback?: (error?: Error | null) => void): void {
     if (!this.child) {
       throw new Error("transport not started");
     }
-    this.child.stdin.write(`${JSON.stringify(frame)}\n`);
+    this.child.stdin.write(`${JSON.stringify(frame)}\n`, callback);
   }
 
   private consume(chunk: string): void {

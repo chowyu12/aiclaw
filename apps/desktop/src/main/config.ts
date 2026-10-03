@@ -85,6 +85,10 @@ export interface AppConfig {
 
 /** 用户自己配的 MCP server。 */
 export interface McpServer {
+ oauth?: boolean;
+ oauthClientId?: string;
+ oauthScope?: string;
+ oauthRedirectPort?: number;
   id: string;
   /** 界面上显示的名字，也用作工具名前缀。 */
   label: string;
@@ -351,6 +355,7 @@ export class ConfigStore {
     rmSync(this.appDbPath, { force: true });
     // 库里的凭据是用 secret.key 加密的；库没了它也没用，留着只是多一处要解释的东西。
     rmSync(join(this.homeDir, "secret.key"), { force: true });
+    rmSync(join(this.homeDir, "mcp-oauth.enc"), { force: true });
     rmSync(this.groupsPath, { force: true });
     rmSync(this.mcpPath, { force: true });
     // ~/.agents/skills 是好几个工具共用的，清 AIClaw 的数据不碰它；只清我们自己的状态与旧目录。

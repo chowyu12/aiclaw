@@ -54,6 +54,7 @@ func (t ToolDef) ReadOnly() bool {
 }
 
 type Config struct {
+	AccessToken func(context.Context) (string, error)
 	// Transport 为空时按有没有 URL 推断：有 URL 走 HTTP，否则 stdio。
 	Transport TransportKind
 

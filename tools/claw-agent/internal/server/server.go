@@ -7,6 +7,8 @@ package server
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -55,11 +57,13 @@ type Options struct {
 }
 
 type Server struct {
-	options  Options
-	out      io.Writer
-	writeMu  sync.Mutex
-	sessions map[string]*agent.Session
-	sessMu   sync.Mutex
+	oauth        *mcpclient.OAuthManager
+	submissionMu sync.Mutex
+	options      Options
+	out          io.Writer
+	writeMu      sync.Mutex
+	sessions     map[string]*agent.Session
+	sessMu       sync.Mutex
 	// db 是会话库。整个进程共用一个连接池。
 	db *store.Store
 	// appDB 是应用库；Options.AppDB 为空时下面三个都是 nil。
@@ -94,6 +98,10 @@ func New(options Options, out io.Writer) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := db.RecoverSubmissions(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if imported, err := store.ImportLegacy(context.Background(), db, options.DataHome); err != nil {
 		options.Logf("导入旧会话失败：%v", err)
 	} else if imported > 0 {
@@ -106,6 +114,15 @@ func New(options Options, out io.Writer) (*Server, error) {
 		outboundPending: map[int64]chan json.RawMessage{},
 		shutdown:        make(chan struct{}),
 		db:              db,
+	}
+	oauthDir := options.DataHome
+	if options.AppDB != "" {
+		oauthDir = filepath.Dir(options.AppDB)
+	}
+	server.oauth, err = mcpclient.NewOAuthManager(oauthDir)
+	if err != nil {
+		db.Close()
+		return nil, err
 	}
 	server.collab = newCollabHub(server)
 	if options.AppDB != "" {
@@ -200,6 +217,8 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 
 func (s *Server) dispatch(ctx context.Context, f frame) {
 	switch f.Method {
+	case "session/work", "session/fork", "session/recover", "goal/set", "goal/update", "changes/list", "changes/undo":
+		s.handleWork(ctx, f)
 	case protocol.MethodInitialize:
 		s.writeResult(f.ID, protocol.InitializeResult{
 			Version:  s.options.Version,
@@ -242,6 +261,8 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		s.handleSessionStart(ctx, f)
 	case protocol.MethodSessionResume:
 		s.handleSessionResume(ctx, f)
+	case "mcp/oauth/login", "mcp/oauth/status", "mcp/oauth/logout":
+		s.handleOAuth(ctx, f)
 	case protocol.MethodMCPProbe:
 		s.handleMCPProbe(ctx, f)
 	case protocol.MethodAudioTranscribe:
@@ -430,7 +451,7 @@ func (s *Server) sessionOptions(id string) []agent.Option {
 		return nil
 	}
 	// 子 agent 同理只给用户自己的会话：外部的人不该能借助手在用户电脑上开一群 agent。
-	options := []agent.Option{agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s})}
+	options := []agent.Option{agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s}), agent.WithMCPAuth(s.oauth.AccessToken)}
 	if s.plugins != nil {
 		options = append(options, agent.WithMailbox(s.plugins.EmailAccount))
 	}
@@ -511,6 +532,14 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		params.SessionID, session.MountMS(), describeDials(session.MCPDials()),
 		time.Since(loadStarted).Milliseconds()-session.MountMS(), time.Since(loadStarted).Milliseconds())
 	s.guard(session)
+	if err = session.RecoverInterrupted(); err == nil {
+		err = session.Checkpoint()
+	}
+	if err != nil {
+		session.Close()
+		s.writeError(f.ID, codeInternal, err.Error())
+		return
+	}
 	s.sessMu.Lock()
 	s.sessions[session.ID] = session
 	s.sessMu.Unlock()
@@ -533,23 +562,64 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInvalidParams, i18n.D("会话不存在或尚未恢复：{id}", "id", params.SessionID))
 		return
 	}
-	// 有轮次在跑就把输入排进去，不另起一轮：宿主拿到的是那一轮的 id，
-	// 也不会再收到一次 turn/started。见 Session.pending 的说明。
-	if running, queued := session.Enqueue(params.Text, params.Images, params.References...); queued {
-		s.writeResult(f.ID, protocol.TurnStartResult{TurnID: running, Queued: true})
+	s.submissionMu.Lock()
+	defer s.submissionMu.Unlock()
+	if params.RequestID == "" {
+		params.RequestID = fmt.Sprintf("request_%d", time.Now().UnixNano())
+	}
+	encoded, _ := json.Marshal(params)
+	fingerprint := fmt.Sprintf("%x", sha256.Sum256(encoded))
+	prior, err := s.db.Submission(ctx, params.SessionID, params.RequestID)
+	if err == nil {
+		if prior.Fingerprint != fingerprint {
+			s.writeError(f.ID, codeInvalidParams, "requestId already used for different input")
+		} else {
+			s.writeResult(f.ID, protocol.TurnStartResult{TurnID: prior.TurnID})
+		}
 		return
 	}
-
-	turnID := fmt.Sprintf("t_%d", time.Now().UnixNano())
-	// 先回应，再异步跑：宿主拿到 turnId 之后靠通知跟进度。
-	s.writeResult(f.ID, protocol.TurnStartResult{TurnID: turnID})
-
-	go func() {
-		session.RunTurn(ctx, turnID, params.Text, params.Images, params.AudioPaths, &emitter{server: s}, params.References...)
-		if err := session.Save(ctx, s.db); err != nil {
-			s.options.Logf("保存会话失败：%v", err)
+	if !errors.Is(err, sql.ErrNoRows) {
+		s.writeError(f.ID, codeInternal, err.Error())
+		return
+	}
+	if params.IdleOnly {
+		running, e := s.db.HasRunningSubmission(ctx, params.SessionID)
+		pending, pe := s.db.PendingSubmissions(ctx, params.SessionID)
+		goal, ge := session.Goal()
+		var execution store.Execution
+		_ = s.db.State(ctx, params.SessionID, "execution", &execution)
+		if e != nil || pe != nil || ge != nil || running || session.Busy() || len(pending) > 0 || execution.State == "uncertain" || (goal != nil && goal.Status != "complete") {
+			s.writeError(f.ID, codeInvalidParams, "Follow-up requires an idle session with no unfinished goal or recovery notice")
+			return
 		}
-	}()
+	}
+	if err = session.Checkpoint(); err != nil {
+		s.writeError(f.ID, codeInternal, err.Error())
+		return
+	}
+	result := protocol.TurnStartResult{TurnID: fmt.Sprintf("t_%d", time.Now().UnixNano())}
+	if err = s.db.AcceptSubmission(ctx, params.SessionID, store.Submission{RequestID: params.RequestID, TurnID: result.TurnID, Payload: encoded, Fingerprint: fingerprint}); err != nil {
+		s.writeError(f.ID, codeInternal, err.Error())
+		return
+	}
+	if running, queued, enqueueErr := session.EnqueueDurable(params, func(turn string) error { return s.db.RelinkSubmission(ctx, params.SessionID, params.RequestID, turn) }); enqueueErr != nil {
+		s.writeError(f.ID, codeInternal, enqueueErr.Error())
+		return
+	} else if queued {
+		result.TurnID = running
+		result.Queued = true
+	}
+	if !result.Queued {
+		if err = s.db.SetSubmission(ctx, params.SessionID, params.RequestID, result.TurnID, "running"); err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+	}
+	s.writeResult(f.ID, result)
+	if !result.Queued {
+		go session.RunRequest(ctx, result.TurnID, params, &emitter{server: s})
+	}
+
 }
 
 // dropSession 把会话从内存里摘掉并关掉它的 MCP 连接。存档不动。
@@ -581,7 +651,12 @@ func (s *Server) handleMCPProbe(ctx context.Context, f frame) {
 	probeCtx, cancel := context.WithTimeout(ctx, mcpProbeTimeout)
 	defer cancel()
 
+	var token func(context.Context) (string, error)
+	if params.Server.OAuth {
+		token = func(ctx context.Context) (string, error) { return s.oauth.AccessToken(ctx, params.Server.URL) }
+	}
 	client, err := mcpclient.Start(probeCtx, mcpclient.Config{
+		AccessToken:    token,
 		Command:        params.Server.Command,
 		Args:           params.Server.Args,
 		Env:            params.Server.Env,
@@ -613,6 +688,9 @@ func (s *Server) session(id string) *agent.Session {
 }
 
 func (s *Server) closeAll() {
+	if s.oauth != nil {
+		s.oauth.Close()
+	}
 	s.sessMu.Lock()
 	for id, session := range s.sessions {
 		session.Close()

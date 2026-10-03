@@ -40,6 +40,7 @@ export type TimelineEntry =
       text: string;
       images?: readonly string[];
       pending?: boolean;
+      requestId?: string;
       at?: number;
       /** 这条消息里 @ 引用的会话，显示成消息下面那排标签。 */
       references?: readonly { id: string; title: string }[];
@@ -136,11 +137,14 @@ function adoptOrAppendUser(
   text: string,
   at?: number,
   references?: { id: string; title: string }[],
+  requestId?: string,
 ): void {
-  for (let index = record.timeline.length - 1; index >= 0; index--) {
+  // Replayed notifications must not claim a second optimistic echo.
+  if (record.timeline.some((entry) => entry.kind === "user" && entry.id === id)) return;
+  for (let index = 0; index < record.timeline.length; index++) {
     const entry = record.timeline[index]!;
     if (entry.kind !== "user" || !entry.pending) continue;
-    if (entry.text !== text) continue;
+    if (requestId ? entry.requestId !== requestId : entry.text !== text) continue;
     // 内核的 id 是权威的：恢复历史时用的也是它，换过来两边才对得上。
     // 图片保留本机那份——它已经是能直接显示的 data URL。
     // 时间也换成内核的：它记的是进历史的时刻，恢复历史时显示的也是它。
@@ -304,6 +308,7 @@ export function applyAgentEvent(
             typeof item.text === "string" ? item.text : "",
             typeof item.at === "number" ? item.at : undefined,
             Array.isArray(item.references) ? (item.references as { id: string; title: string }[]) : undefined,
+            typeof item.requestId === "string" ? item.requestId : undefined,
           );
           return applied;
         }
@@ -382,6 +387,7 @@ export function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
         entries.push({
           kind: "user",
           id: item.id,
+          requestId: item.requestId,
           text: item.text ?? "",
           // 恢复出来的是裸 base64，界面要的是能直接塞进 <img> 的 data URL。
           // 内核那边统一成 JPEG，所以这里也按 JPEG 拼。

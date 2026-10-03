@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import WorkPanel from "./WorkPanel.vue";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
@@ -368,7 +369,11 @@ function attachmentLabel(item: Attachment): string {
 
 // 轮次进行中也允许发：内核会把输入排进那一轮，模型下一次开口前就看到了。
 // 拦住不让发是最难受的——用户想插话，正是因为看见这一轮跑偏了。
+const submitting = ref(false);
 async function submit(): Promise<void> {
+  if (submitting.value) return;
+  const originalDraft = draft.value;
+  const originalBindings = bindings.value;
   const pending = attachments.value;
   // 文本附件并进正文，图片单独走视觉通道。
   const text =
@@ -391,7 +396,17 @@ async function submit(): Promise<void> {
   attachError.value = "";
   bindings.value = [];
   mention.value = null;
-  await actions.send(text, images, audio, references);
+  submitting.value = true;
+  try {
+    if (!await actions.send(text, images, audio, references)) {
+      // Keep anything typed while sending and restore all original attachments.
+      draft.value = originalDraft + (draft.value ? "\n" + draft.value : "");
+      attachments.value = [...pending, ...attachments.value];
+      bindings.value = [...originalBindings, ...bindings.value];
+    }
+  } finally {
+    submitting.value = false;
+  }
   await scrollToEnd();
 }
 
@@ -565,6 +580,17 @@ const failedMounts = computed(() =>
 /** 代码模式下收进 exec 的那些也算：它们在脚本里照样能调。 */
 const folded = computed(() => store.sessionInfo?.foldedTools ?? []);
 const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded.value.length);
+async function forkAt(itemId: string): Promise<void> {
+  if (!store.sessionId || store.busy || forking.value) return;
+  forking.value=true;forkError.value="";
+  try {
+    const result = await window.aiclaw.session.fork(store.sessionId, itemId);
+    await actions.refreshSessions();
+    await actions.openSession(result.sessionId);
+  } catch (error) { console.error(error); forkError.value = describeError(error); } finally { forking.value=false; }
+}
+const forkError = ref("");
+const forking = ref(false);
 </script>
 
 <template>
@@ -596,6 +622,8 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
 
       <template v-else>
         <div ref="scroller" class="stream">
+          <WorkPanel />
+          <p v-if="forkError" role="alert">{{ forkError }}</p>
           <!-- 切会话时先切过去、历史随后到：这几秒里要有话说，不能是「还没有内容」，
                那句话在一个有几十条记录的会话上是假的。 -->
           <p v-if="store.loadingSession === store.sessionId && store.timeline.length === 0" class="blank">
@@ -655,6 +683,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                   <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
                 </svg>
               </button>
+              <button :disabled="store.busy || forking || turn.user.pending" @click="forkAt(turn.user.id)">{{ t("从这里分叉") }}</button>
               <time v-if="turn.user.at" :title="fullMessageTime(turn.user.at)">
                 {{ formatMessageTime(turn.user.at) }}
               </time>
@@ -694,6 +723,7 @@ const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded
                   <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
                 </svg>
               </button>
+              <button :disabled="store.busy || forking" @click="forkAt(turn.messages[turn.messages.length - 1]!.id)">{{ t("从这里分叉") }}</button>
               <time v-if="answerTime(turn.messages)" :title="fullMessageTime(answerTime(turn.messages))">
                 {{ formatMessageTime(answerTime(turn.messages)) }}
               </time>

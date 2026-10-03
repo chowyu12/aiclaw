@@ -52,6 +52,7 @@ type ApprovalFunc func(
 
 // Env 是工具执行时的环境。
 type Env struct {
+	WriteFile func(context.Context, string, []byte, []byte) error
 	// Workspace 是这个会话的工作区，可以为空（用户没设）。
 	//
 	// 它是**相对路径的基准**和「写这里不用问」的范围，不是围墙——

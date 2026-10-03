@@ -58,6 +58,7 @@ export interface ThreadRefView {
 
 /** 还原历史用的条目，字段与 claw-agent 的 Item 一致。 */
 export interface HistoryItemView {
+ requestId?: string;
   id: string;
   kind: string;
   /** 用户消息与助手消息的时间（Unix 毫秒）。 */
@@ -209,6 +210,10 @@ export interface McpProbeView {
 
 /** 用户自己配的 MCP server。 */
 export interface McpServerView {
+ oauth?: boolean;
+ oauthClientId?: string;
+ oauthScope?: string;
+ oauthRedirectPort?: number;
   id: string;
   /** 界面上显示的名字，也用作工具名前缀。 */
   label: string;

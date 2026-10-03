@@ -80,9 +80,9 @@ func init() {
 		"覆盖工作表 {name}（{stats}）":                              "overwrote sheet {name} ({stats})",
 
 		// PowerPoint
-		"（演示文稿里没有幻灯片）":                   "(The presentation has no slides)",
-		"共 {total} 页":                    "{total} slides in total",
-		"共 {total} 页，以下是第 {from}–{to} 页": "{total} slides in total; showing slides {from}–{to}",
+		"（演示文稿里没有幻灯片）":                               "(The presentation has no slides)",
+		"共 {total} 页":                                "{total} slides in total",
+		"共 {total} 页，以下是第 {from}–{to} 页":             "{total} slides in total; showing slides {from}–{to}",
 		"[内容已截断：只返回到第 {last} 页；用 slides={next} 接着读]": "[Content truncated: returned up to slide {last}; pass slides={next} to continue]",
 		"单页内容过长；可以缩小 slides 范围逐页读":                   "A single slide is too long; narrow slides to read one slide at a time",
 		"slides {slides} 不合法，应当形如 3 或 3-8":           "Invalid slides {slides}; expected something like 3 or 3-8",

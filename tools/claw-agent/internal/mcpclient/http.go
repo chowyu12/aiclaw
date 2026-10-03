@@ -29,10 +29,11 @@ import (
 // 端点发消息）。那是另一套握手，半吊子实现出来只会在连不上时给出误导的报错；
 // 遇到只支持旧版的服务端，这里会在握手阶段明确失败。
 type httpTransport struct {
-	url     string
-	headers map[string]string
-	client  *http.Client
-	nextID  atomic.Int64
+	accessToken func(context.Context) (string, error)
+	url         string
+	headers     map[string]string
+	client      *http.Client
+	nextID      atomic.Int64
 
 	sessionMu sync.Mutex
 	sessionID string
@@ -56,10 +57,11 @@ func startHTTP(config Config) (*httpTransport, error) {
 		headers[key] = value
 	}
 	return &httpTransport{
-		url:     url,
-		headers: headers,
+		url:         url,
+		accessToken: config.AccessToken,
+		headers:     headers,
 		// 不设 Timeout：单次工具调用可能很长，超时交给 ctx。这里只兜住连接建立。
-		client: &http.Client{},
+		client: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}, nil
 }
 
@@ -119,6 +121,13 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 	request.Header.Set("MCP-Protocol-Version", protocolVersion)
 	for key, value := range t.headers {
 		request.Header.Set(key, value)
+	}
+	if t.accessToken != nil {
+		token, e := t.accessToken(ctx)
+		if e != nil {
+			return rpcResponse{}, e
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	t.sessionMu.Lock()
 	if t.sessionID != "" {

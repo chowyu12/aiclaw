@@ -171,6 +171,15 @@ export interface ScheduledTask {
   enabled: boolean;
   /** 在哪个工作区跑；空表示不设。 */
   workspace: string;
+  mode?: "cron" | "followup";
+  sessionId?: string;
+  notificationPolicy?: "changes" | "all";
+  stopWhen?: string;
+  lastResult?: string;
+  lastResultKey?: string;
+  lastRunId?: string;
+  lastTurnId?: string;
+  stoppedReason?: string;
   createdAt: string;
   /** 下一次从哪个时刻往后算：建立、上次运行、或者错过太久被挪到的那一刻。 */
   anchorAt: string;
@@ -195,6 +204,10 @@ export interface ScheduledTaskInput {
   rule: ScheduleRule;
   enabled?: boolean;
   workspace?: string;
+  mode?: "cron" | "followup";
+  sessionId?: string;
+  notificationPolicy?: "changes" | "all";
+  stopWhen?: string;
 }
 
 export function toView(task: ScheduledTask, now = new Date()): ScheduledTaskView {

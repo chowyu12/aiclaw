@@ -24,8 +24,11 @@ func (s *Session) registerScheduleTools() error {
 		return nil
 	}
 	ruleSchema := map[string]any{
-		"name":   map[string]any{"type": "string", "description": "Task name, kept short, e.g. \"Daily email digest\""},
-		"prompt": map[string]any{"type": "string", "description": "The complete instruction to run when the task fires, treated as a message the user sends at that time. Spell out what to do and how to deliver the result (e.g. \"Summarize today's unread emails and list the ones I need to reply to\"). Don't rely on the current chat's context — it will run in a new chat"},
+		"mode":                map[string]any{"type": "string", "enum": []string{"followup", "cron"}, "description": "Default followup continues this chat; cron opens a new chat each run"},
+		"notification_policy": map[string]any{"type": "string", "enum": []string{"changes", "all"}, "description": "Followup defaults to notifying only changed results, errors, or completion"},
+		"stop_when":           map[string]any{"type": "string", "description": "User-requested completion condition. Leave empty for ongoing monitoring"},
+		"name":                map[string]any{"type": "string", "description": "Task name, kept short, e.g. \"Daily email digest\""},
+		"prompt":              map[string]any{"type": "string", "description": "The complete instruction to run when the task fires, treated as a message the user sends at that time. Spell out what to do and how to deliver the result (e.g. \"Summarize today's unread emails and list the ones I need to reply to\"). Followup keeps the current chat context; cron runs in a new chat"},
 		"kind": map[string]any{
 			"type": "string", "enum": []string{"daily", "weekdays", "weekly", "interval", "once"},
 			"description": "daily: every day; weekdays: every weekday (Monday to Friday); weekly: on chosen days each week; interval: every N minutes; once: run a single time",
@@ -40,21 +43,24 @@ func (s *Session) registerScheduleTools() error {
 
 	if err := register(tools.Tool{
 		Name: "schedule_create",
-		Description: "Create a scheduled task: when it fires, AIClaw automatically opens a new chat and runs the prompt as a user message. " +
+		Description: "Create a scheduled task. Default followup continues the current chat; mode cron opens a new chat on each run. " +
 			"Use it when the user says things like \"every day\", \"every week\", \"remind me\", \"on a schedule\" or \"in an hour\". Tasks only run while the app is open; " +
 			"the user is asked to confirm before the task is created. Times are in the user's local time zone.",
 		Schema: schemaOf(ruleSchema, "name", "prompt", "kind"),
 		Effect: tools.EffectExternal,
 		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
 			var args struct {
-				Name         string `json:"name"`
-				Prompt       string `json:"prompt"`
-				Kind         string `json:"kind"`
-				Time         string `json:"time"`
-				Days         []int  `json:"days"`
-				EveryMinutes int    `json:"every_minutes"`
-				At           string `json:"at"`
-				UseWorkspace *bool  `json:"use_workspace"`
+				Mode               string `json:"mode"`
+				NotificationPolicy string `json:"notification_policy"`
+				StopWhen           string `json:"stop_when"`
+				Name               string `json:"name"`
+				Prompt             string `json:"prompt"`
+				Kind               string `json:"kind"`
+				Time               string `json:"time"`
+				Days               []int  `json:"days"`
+				EveryMinutes       int    `json:"every_minutes"`
+				At                 string `json:"at"`
+				UseWorkspace       *bool  `json:"use_workspace"`
 			}
 			if err := decodeEmailArgs(raw, &args); err != nil {
 				return "", err
@@ -63,8 +69,12 @@ func (s *Session) registerScheduleTools() error {
 				return "", i18n.E("name 与 prompt 都要给")
 			}
 			task := &protocol.ScheduleTaskInput{
+				Mode: args.Mode, NotificationPolicy: args.NotificationPolicy, StopWhen: args.StopWhen,
 				Name: strings.TrimSpace(args.Name), Prompt: strings.TrimSpace(args.Prompt), Kind: args.Kind,
 				Time: args.Time, Days: args.Days, EveryMinutes: args.EveryMinutes, At: args.At,
+			}
+			if task.Mode == "" {
+				task.Mode = "followup"
 			}
 			if args.UseWorkspace == nil || *args.UseWorkspace {
 				task.Workspace = env.Workspace
@@ -72,7 +82,7 @@ func (s *Session) registerScheduleTools() error {
 			detail := i18n.D("名称：{value}", "value", task.Name) + "\n" +
 				i18n.D("运行时间：{value}", "value", describeTaskTime(task)) + "\n" +
 				i18n.D("工作区：{value}", "value", orDash(task.Workspace)) + "\n\n" +
-				i18n.D("到点时执行：") + "\n" + task.Prompt
+				i18n.D("到点时执行：") + "\n" + task.Prompt + "\nMode: " + task.Mode + "\nStop when: " + task.StopWhen
 			if err := env.RequestApproval(ctx, tools.EffectExternal, protocol.ApprovalTool, i18n.D("新建定时任务"), detail,
 				i18n.D("到点时会在你不在场的情况下自动执行这条指令（执行中遇到要确认的操作仍会问你）")); err != nil {
 				return "", err
@@ -95,6 +105,26 @@ func (s *Session) registerScheduleTools() error {
 		return err
 	}
 
+	if err := register(tools.Tool{
+		Name: "schedule_report", Effect: tools.EffectRead,
+		Description: "Report a scheduled follow-up check for the current run ONLY. Use task id and run_id supplied in its instruction. result_key must be a stable description of observed state, without timestamps or wording changes. Set complete only after verifying its explicit stop condition. The host compares state across runs and sends notifications only when appropriate.",
+		Schema:      schemaOf(map[string]any{"id": map[string]any{"type": "string"}, "run_id": map[string]any{"type": "string"}, "result": map[string]any{"type": "string"}, "result_key": map[string]any{"type": "string"}, "complete": map[string]any{"type": "boolean"}}, "id", "run_id", "result", "result_key"),
+		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
+			var args struct {
+				ID        string `json:"id"`
+				RunID     string `json:"run_id"`
+				Result    string `json:"result"`
+				ResultKey string `json:"result_key"`
+				Complete  bool   `json:"complete"`
+			}
+			if err := json.Unmarshal(raw, &args); err != nil {
+				return "", err
+			}
+			return s.requestSchedule(ctx, env, protocol.ScheduleRequestParams{Action: "report", ID: args.ID, RunID: args.RunID, Result: args.Result, ResultKey: args.ResultKey, Complete: args.Complete})
+		},
+	}); err != nil {
+		return err
+	}
 	return register(tools.Tool{
 		Name:        "schedule_delete",
 		Description: "Delete a scheduled task (id from schedule_list). The user is asked to confirm before it is deleted.",

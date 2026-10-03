@@ -93,6 +93,9 @@ function stage() {
     throw new Error(`没有找到 ${desktopDist}/main/index.js，先跑 make build-desktop`);
   }
   cpSync(desktopDist, join(STAGING, "dist"), { recursive: true });
+  for (const file of ["LICENSE", "LICENSE_CN.md"]) {
+    cpSync(join(REPO, file), join(STAGING, file));
+  }
 
   // 图标同时也要进包内：运行期 app.dock.setIcon 读的是这个相对路径。
   const assets = join(REPO, "apps", "desktop", "assets");
@@ -101,6 +104,7 @@ function stage() {
   // agent-client 拍平成一个真实目录，不留软链。
   const client = join(STAGING, "node_modules", "@aiclaw", "agent-client");
   mkdirSync(client, { recursive: true });
+  cpSync(join(REPO, "LICENSE"), join(client, "LICENSE"));
   cpSync(join(REPO, "packages", "agent-client", "dist"), join(client, "dist"), {
     recursive: true,
   });
@@ -117,6 +121,7 @@ function stage() {
         productName: APP_NAME,
         version,
         private: true,
+        license: "SEE LICENSE IN LICENSE",
         type: "module",
         main: "dist/main/index.js",
         // Windows 打包必须有 author：packager 拿它填 exe 的 CompanyName，

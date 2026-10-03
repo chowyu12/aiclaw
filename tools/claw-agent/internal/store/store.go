@@ -102,7 +102,7 @@ func Open(dataHome string) (*Store, error) {
 	// SQLITE_BUSY；这个库的写入量是「每轮一次」，不值得为并发写调优。
 	db.SetMaxOpenConns(1)
 
-	if _, err := db.ExecContext(context.Background(), schema); err != nil {
+	if _, err := db.ExecContext(context.Background(), schema+workSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("%s%w", i18n.D("初始化会话库失败："), err)
 	}
