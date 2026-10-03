@@ -15,6 +15,8 @@ DESKTOP   := $(ROOT)/apps/desktop
 AGENT_DIR := $(ROOT)/tools/claw-agent
 AGENT_BIN := $(AGENT_DIR)/claw-agent
 STAMP     := $(ROOT)/node_modules/.make-install-stamp
+# Follow the toolchain selected by go.mod, including automatic toolchain downloads.
+GOFMT     = $(shell go env GOROOT)/bin/gofmt
 
 # 渲染层热更用的端口。strictPort 保证要么就是它，要么直接失败——
 # 端口被占时静默换一个，Electron 那边还连着旧地址，会很难查。
@@ -134,10 +136,10 @@ typecheck: deps build-client ## TS 类型检查（主进程 + preload + 渲染�
 	cd $(DESKTOP) && npm run typecheck
 
 fmt: ## 格式化 Go 代码
-	gofmt -w $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg
+	"$(GOFMT)" -w $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg
 
 fmt-check: ## 检查 Go 格式与安装脚本语法（CI 用，不改文件）
-	@unformatted=$$(gofmt -l $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg); \
+	@unformatted=$$("$(GOFMT)" -l $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg); \
 	if [ -n "$$unformatted" ]; then \
 		echo "以下文件未格式化，跑 make fmt："; echo "$$unformatted"; exit 1; \
 	fi
