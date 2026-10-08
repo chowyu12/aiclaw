@@ -26,10 +26,13 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
+	"github.com/chowyu12/aiclaw/internal/telemetry"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/searchmcp"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/server"
+	"go.opentelemetry.io/otel/log"
 )
 
 var version = "dev"
@@ -88,13 +91,29 @@ func runServe(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	var skillLogger log.Logger
+	provider, err := telemetry.New(ctx, version)
+	if err != nil {
+		logf("Skill telemetry disabled: invalid exporter configuration")
+	}
+	if provider != nil {
+		skillLogger = provider.Logger("aiclaw.skills")
+		defer func() {
+			flush, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := provider.Shutdown(flush); err != nil {
+				logf("Skill telemetry shutdown incomplete")
+			}
+		}()
+	}
 
 	srv, err := server.New(server.Options{
-		Version:  version,
-		DataHome: *dataHome,
-		APIKey:   apiKey,
-		AppDB:    *appDB,
-		Logf:     logf,
+		Version:     version,
+		DataHome:    *dataHome,
+		APIKey:      apiKey,
+		AppDB:       *appDB,
+		Logf:        logf,
+		SkillLogger: skillLogger,
 	}, os.Stdout)
 	if err != nil {
 		return err

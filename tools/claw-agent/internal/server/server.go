@@ -32,6 +32,7 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/providers"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/searchengines"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
+	"go.opentelemetry.io/otel/log"
 )
 
 const (
@@ -42,7 +43,8 @@ const (
 )
 
 type Options struct {
-	Version string
+	SkillLogger log.Logger
+	Version     string
 	// DataHome 是会话文件目录。
 	DataHome string
 	// APIKey 从环境变量来，不经协议帧。会话没指定模型服务时用它。
@@ -450,11 +452,12 @@ func (s *Server) handleAudioTranscribe(ctx context.Context, f frame) {
 //
 // 邮箱只接给用户自己的会话：通道会话的另一头是外部的人，不该能让助手去翻用户的信箱。
 func (s *Server) sessionOptions(id string) []agent.Option {
+	options := []agent.Option{agent.WithSkillLogger(s.options.SkillLogger)}
 	if strings.HasPrefix(id, channelSessionPrefix) {
-		return nil
+		return options
 	}
 	// 子 agent 同理只给用户自己的会话：外部的人不该能借助手在用户电脑上开一群 agent。
-	options := []agent.Option{agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s}), agent.WithMCPAuth(s.oauth.AccessToken)}
+	options = append(options, agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s}), agent.WithMCPAuth(s.oauth.AccessToken))
 	if s.plugins != nil {
 		options = append(options, agent.WithMailbox(s.plugins.EmailAccount))
 	}
@@ -506,6 +509,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		return
 	}
 	pinChannelPolicy(params.SessionID, params.Refresh)
+	s.submissionMu.Lock()
 	if existing := s.session(params.SessionID); existing != nil {
 		// 已经在内存里的会话，配置没变就直接回它现在的样子。
 		//
@@ -513,7 +517,16 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		// 出口了）。重来之前先存一次——内核只在每轮结束后写库，不存的话
 		// 最后那一轮的历史会跟着被卸掉的会话一起没。
 		fresh := params.Refresh != nil && !existing.MountsMatch(*params.Refresh)
-		if !fresh || existing.Busy() {
+		// A submitted turn may not yet have entered RunTurn/Busy. Do not retire
+		// the session its scheduled goroutine is about to use.
+		running, err := s.db.HasRunningSubmission(ctx, params.SessionID)
+		if err != nil {
+			s.submissionMu.Unlock()
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		if !fresh || existing.Busy() || running {
+			s.submissionMu.Unlock()
 			s.writeResult(f.ID, protocol.SessionStartResult{
 				SessionID: existing.ID, Tools: existing.Tools(),
 				MCPStatus: existing.MCPStatus(), Model: existing.Model().Model,
@@ -523,10 +536,14 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 			return
 		}
 		if err := existing.Save(ctx, s.db); err != nil {
-			s.options.Logf("重挂前保存会话失败：%v", err)
+			s.submissionMu.Unlock()
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
 		}
 		s.dropSession(params.SessionID)
 	}
+	// Slow MCP mounting must not block submissions to unrelated sessions.
+	s.submissionMu.Unlock()
 	loadStarted := time.Now()
 	session, err := agent.Load(ctx, s.db, params.SessionID, s.keyFor, params.Refresh, s.sessionOptions(params.SessionID)...)
 	if err != nil {
@@ -562,13 +579,13 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInvalidParams, "invalid params")
 		return
 	}
+	s.submissionMu.Lock()
+	defer s.submissionMu.Unlock()
 	session := s.session(params.SessionID)
 	if session == nil {
 		s.writeError(f.ID, codeInvalidParams, i18n.D("会话不存在或尚未恢复：{id}", "id", params.SessionID))
 		return
 	}
-	s.submissionMu.Lock()
-	defer s.submissionMu.Unlock()
 	if params.RequestID == "" {
 		params.RequestID = fmt.Sprintf("request_%d", time.Now().UnixNano())
 	}

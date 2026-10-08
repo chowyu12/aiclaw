@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
+	"github.com/chowyu12/aiclaw/internal/sqlitehealth"
 	_ "github.com/glebarez/go-sqlite"
 )
 
@@ -93,7 +94,7 @@ func Open(dataHome string) (*Store, error) {
 	// 回滚日志模式下后者会把前者堵住。
 	// busy_timeout：撞上了就等，而不是立刻返回 SQLITE_BUSY——那会让
 	// 「保存会话失败」变成一个随机出现的错误。
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	dsn := "file:" + path + "?_pragma=foreign_keys(1)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("%s%w", i18n.D("打开会话库失败："), err)
@@ -101,6 +102,14 @@ func Open(dataHome string) (*Store, error) {
 	// 单连接。modernc 的驱动本身是并发安全的，但把写串起来能彻底避开
 	// SQLITE_BUSY；这个库的写入量是「每轮一次」，不值得为并发写调优。
 	db.SetMaxOpenConns(1)
+	if err := sqlitehealth.Check(context.Background(), db); err != nil {
+		db.Close()
+		return nil, sqlitehealth.Preserve(path, err)
+	}
+	if _, err := db.ExecContext(context.Background(), "PRAGMA busy_timeout(5000); PRAGMA journal_mode(WAL)"); err != nil {
+		db.Close()
+		return nil, sqlitehealth.Preserve(path, err)
+	}
 
 	if _, err := db.ExecContext(context.Background(), schema+workSchema); err != nil {
 		db.Close()

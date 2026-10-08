@@ -29,6 +29,7 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/skills"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
+	"go.opentelemetry.io/otel/log"
 )
 
 // maxIterations 是一轮里模型最多连续调用工具的次数。
@@ -72,6 +73,7 @@ type userInput struct {
 
 // Session 是一个会话：一份配置 + 一段对话历史 + 一套已挂载的工具。
 type Session struct {
+	skillLogger         log.Logger
 	mcpAuth             func(context.Context, string) (string, error)
 	db                  *store.Store
 	persistMu           sync.Mutex
@@ -366,7 +368,7 @@ func (s *Session) loadSkills(dirs []string) {
 		// 只读本机已有文件，不需要审批。
 		Effect: tools.EffectRead,
 		Schema: skillToolSchema(s.skills),
-		Handler: func(_ context.Context, args json.RawMessage, _ *tools.Env) (string, error) {
+		Handler: func(ctx context.Context, args json.RawMessage, env *tools.Env) (string, error) {
 			var input struct {
 				Name string `json:"name"`
 			}
@@ -375,6 +377,9 @@ func (s *Session) loadSkills(dirs []string) {
 			}
 			for _, skill := range s.skills {
 				if skill.Name == input.Name {
+					if env != nil && env.SkillLoaded != nil {
+						env.SkillLoaded(ctx, skill.Name)
+					}
 					// 带上目录：技能正文里常引用同目录下的脚本或模板，
 					// 模型需要知道去哪儿找它们。
 					return fmt.Sprintf("Instructions for skill \"%s\" (skill directory: %s):\n\n%s",
@@ -1295,16 +1300,23 @@ func Load(
 			config.ApprovalPolicy = refresh.ApprovalPolicy
 		}
 	}
-	var messages []llm.Message
-	if len(record.Messages) > 0 {
-		if err := json.Unmarshal(record.Messages, &messages); err != nil {
-			return nil, fmt.Errorf("%s%w", i18n.D("会话历史损坏："), err)
-		}
-	}
-
 	session, err := New(ctx, record.ID, config, keyFor, options...)
 	if err != nil {
 		return nil, err
+	}
+	// Mounting MCP may take seconds. Read the committed history after mounting,
+	// rather than restoring the snapshot used to discover the configuration.
+	record, err = db.Load(ctx, id)
+	if err != nil {
+		session.Close()
+		return nil, err
+	}
+	var messages []llm.Message
+	if len(record.Messages) > 0 {
+		if err := json.Unmarshal(record.Messages, &messages); err != nil {
+			session.Close()
+			return nil, fmt.Errorf("%s%w", i18n.D("会话历史损坏："), err)
+		}
 	}
 	session.Title = record.Title
 	session.CreatedAt = record.CreatedAt

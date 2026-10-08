@@ -1,6 +1,7 @@
 package gormstore
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/secrets"
+	"github.com/chowyu12/aiclaw/internal/sqlitehealth"
 )
 
 type GormStore struct {
@@ -43,6 +45,11 @@ func New(cfg config.DatabaseConfig) (*GormStore, error) {
 		SkipDefaultTransaction: true,
 	})
 	if err != nil {
+		if db != nil {
+			if sqlDB, closeErr := db.DB(); closeErr == nil {
+				sqlDB.Close()
+			}
+		}
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
@@ -56,9 +63,16 @@ func New(cfg config.DatabaseConfig) (*GormStore, error) {
 	if cfg.MaxIdleConns > 0 {
 		sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	}
+	if cfg.Driver == "sqlite" {
+		if err := sqlitehealth.Check(context.Background(), sqlDB); err != nil {
+			sqlDB.Close()
+			return nil, fmt.Errorf("check database: %w", err)
+		}
+	}
 
 	if cfg.AutoMigrate == nil || *cfg.AutoMigrate {
 		if err := autoMigrate(db); err != nil {
+			sqlDB.Close()
 			return nil, fmt.Errorf("auto migrate: %w", err)
 		}
 		log.WithField("driver", cfg.Driver).Info("database connected and migrated")

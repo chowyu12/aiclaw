@@ -8,6 +8,8 @@ package i18n
 // 中文照旧是全角冒号，英文是 ": "。
 func init() {
 	register(map[string]string{
+		"数据库损坏，原文件已保留；备份失败，请关闭应用后检查恢复":           "Database is corrupt. Original files were retained but backup failed; close the app before reviewing recovery",
+		"数据库损坏，原文件已保留，备份位于 {path}；请关闭应用后从有效备份恢复": "Database is corrupt. Original files were retained and copied to {path}; close the app before restoring from a valid backup",
 		"会话名称不能为空":                       "Chat name cannot be empty",
 		"会话名称最多 200 个字符":                 "Chat name must be at most 200 characters",
 		"会话名称不能包含换行或控制字符":                "Chat name cannot contain line breaks or control characters",

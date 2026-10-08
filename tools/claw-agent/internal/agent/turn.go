@@ -49,6 +49,7 @@ func (s *Session) RunTurn(
 	defer s.runMu.Unlock()
 	requestID, _ := parent.Value(inputRequestKey{}).(string)
 	ctx, cancel := context.WithCancel(parent)
+	ctx = context.WithValue(ctx, skillUsageKey{}, s.newSkillUsage(turnID))
 	s.mu.Lock()
 	// Another queued wakeup may already have consumed the mailbox while this
 	// goroutine waited for the preceding turn to finish.
@@ -201,6 +202,9 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 		message.Shown = &llm.Shown{Text: text, Images: images, References: toLLMRefs(refs)}
 	}
 	s.appendMessage(message)
+	if usage, _ := ctx.Value(skillUsageKey{}).(*skillUsage); usage != nil {
+		usage.markExplicit(text)
+	}
 	s.mu.Lock()
 	if s.Title == "" {
 		s.Title = firstLine(text, 40)
@@ -313,14 +317,15 @@ func (s *Session) drainPending(ctx context.Context, turnID string, emitter Emitt
 	}
 }
 
-func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (protocol.Usage, error) {
-	var total protocol.Usage
-	// 步骤序号按轮次重置：用户看的是「这一轮做了几步」，不是自会话开始以来的累计。
-	steps := &stepCounter{}
-	env := &tools.Env{
+// turnEnv captures permission policy and paths under the session lock. Code-mode
+// calls retain this environment; only explicit session directory grants stay live.
+func (s *Session) turnEnv(turnID string, emitter Emitter) *tools.Env {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return &tools.Env{
 		Workspace:      s.config.Workdir,
 		Home:           userHome(),
-		ProtectedPaths: s.config.ProtectedPaths,
+		ProtectedPaths: append([]string(nil), s.config.ProtectedPaths...),
 		Sandbox:        !s.config.DisableSandbox,
 		Grants:         s.Grants,
 		Grant:          s.Grant,
@@ -329,6 +334,17 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		Approve:        emitter.RequestApproval,
 		SessionID:      s.ID,
 		TurnID:         turnID,
+	}
+}
+
+func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (protocol.Usage, error) {
+	var total protocol.Usage
+	// 步骤序号按轮次重置：用户看的是「这一轮做了几步」，不是自会话开始以来的累计。
+	steps := &stepCounter{}
+	env := s.turnEnv(turnID, emitter)
+	if usage, _ := ctx.Value(skillUsageKey{}).(*skillUsage); usage != nil {
+		env.SkillLoaded = usage.loaded
+		env.FileRead = usage.read
 	}
 
 	if s.db != nil {

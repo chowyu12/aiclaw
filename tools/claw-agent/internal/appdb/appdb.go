@@ -13,6 +13,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/config"
 	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/secrets"
+	"github.com/chowyu12/aiclaw/internal/sqlitehealth"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
 )
 
@@ -32,7 +33,7 @@ func Open(path string) (*gormstore.GormStore, error) {
 	}
 	db, err := gormstore.New(config.DatabaseConfig{Driver: "sqlite", DSN: path})
 	if err != nil {
-		return nil, fmt.Errorf("%s%w", i18n.D("打开应用库失败："), err)
+		return nil, fmt.Errorf("%s%w", i18n.D("打开应用库失败："), sqlitehealth.Preserve(path, err))
 	}
 	db.UseCipher(cipher)
 	if _, err := db.MigrateSecrets(context.Background()); err != nil {

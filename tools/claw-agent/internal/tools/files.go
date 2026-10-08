@@ -82,7 +82,7 @@ func readTool() Tool {
 				"type": "integer", "description": "Maximum number of lines to read", "minimum": 1,
 			},
 		}, "path"),
-		Handler: func(_ context.Context, raw json.RawMessage, env *Env) (string, error) {
+		Handler: func(ctx context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
 				Path   string `json:"path"`
 				Offset int    `json:"offset"`
@@ -140,6 +140,9 @@ func readTool() Tool {
 			}
 			if truncated {
 				text += "\n\n" + i18n.D("[内容已截断]")
+			}
+			if env.FileRead != nil {
+				env.FileRead(ctx, path)
 			}
 			return text, nil
 		},

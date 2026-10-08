@@ -4,13 +4,104 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
+
+func TestResumeReadsHistoryCommittedWhileMounting(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	session := newTestSession(t, &fakeModel{}, protocol.ApprovalOnWrite)
+	db := newTestStore(t)
+	if err := session.Save(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	mcp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var call struct {
+			ID     *int64 `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&call)
+		if call.Method == "initialize" {
+			once.Do(func() { close(entered) })
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		if call.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := `{"tools":[]}`
+		if call.Method == "initialize" {
+			result = `{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"fake","version":"1"}}`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":%s}`, *call.ID, result)
+	}))
+	defer mcp.Close()
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	type outcome struct {
+		session *Session
+		err     error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		s, err := Load(ctx, db, session.ID, StaticKey("test"), &protocol.SessionRefresh{MCPServers: map[string]protocol.MCPServerConfig{"slow": {URL: mcp.URL}}})
+		done <- outcome{s, err}
+	}()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	session.mu.Lock()
+	session.messages = append(session.messages, llm.Message{ID: "late", Role: llm.RoleAssistant, Content: "latest committed result"})
+	session.Title = "latest title"
+	session.turnCount = 2
+	session.mu.Unlock()
+	if err := session.Save(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	var loaded outcome
+	select {
+	case loaded = <-done:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if loaded.err != nil {
+		t.Fatal(loaded.err)
+	}
+	defer loaded.session.Close()
+	if loaded.session.Title != "latest title" || loaded.session.turnCount != 2 || loaded.session.messages[len(loaded.session.messages)-1].Content != "latest committed result" {
+		t.Fatalf("restored stale state: %+v", loaded.session.messages)
+	}
+	if err := loaded.session.Save(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := db.Load(ctx, session.ID)
+	if err != nil || !strings.Contains(string(stored.Messages), "latest committed result") {
+		t.Fatalf("late result overwritten: %s %v", stored.Messages, err)
+	}
+}
 
 // 恢复会话时必须按**当前**配置重挂 MCP 与技能。
 //

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/chowyu12/aiclaw/internal/sqlitehealth"
 	"strings"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
@@ -22,7 +23,7 @@ func appDBGuards(path string) []string {
 	if path == "" {
 		return nil
 	}
-	return []string{path, path + "-wal", path + "-shm", path + "-journal", appdb.KeyFile(path)}
+	return []string{path, path + "-wal", path + "-shm", path + "-journal", appdb.KeyFile(path), sqlitehealth.BackupDir(path)}
 }
 
 // guard 给一个会话加上内核这边知道的敏感路径。每个建出来或恢复出来的会话都要过一遍。
