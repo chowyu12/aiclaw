@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { groupTurns, stepsElapsed } from "../apps/desktop/src/renderer/turns.ts";
+import { groupTurns, imageArtifacts, stepsElapsed } from "../apps/desktop/src/renderer/turns.ts";
 import type { TimelineEntry } from "../apps/desktop/src/renderer/store.ts";
 
 /**
@@ -28,6 +28,16 @@ const step = (id: string, extra: Record<string, unknown> = {}): TimelineEntry =>
     state: "done",
     ...extra,
   }) as TimelineEntry;
+
+test("图片预览按轮取结构化产物，去重并排除失败步骤与音频", () => {
+  const turns = groupTurns([
+    user("u1"), step("one", { artifacts: ["generated/cat.png", "generated/cat.png", "speech.wav"] }),
+    step("failed", { state: "failed", artifacts: ["failed.png"] }), agent("a1", "fake.png"),
+    user("u2"), step("two", { artifacts: ["second.JPG"] }),
+  ]);
+  assert.deepEqual(imageArtifacts(turns[0]!), ["generated/cat.png"]);
+  assert.deepEqual(imageArtifacts(turns[1]!), ["second.JPG"]);
+});
 
 test("一轮里交替出现的回答与步骤，步骤全部归成一块", () => {
   // 这正是界面上看到的形状：模型说一句 → 调几个工具 → 再说一句。

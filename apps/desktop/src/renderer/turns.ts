@@ -28,6 +28,13 @@ export interface Turn {
   steps: StepEntry[];
 }
 
+/** Only structured image artifacts, never paths guessed from assistant prose. */
+export function imageArtifacts(turn: Turn): string[] {
+  return [...new Set(turn.steps.filter(step => step.state === "done")
+    .flatMap(step => step.artifacts ?? [])
+    .filter(path => /\.(png|jpe?g|webp|gif)$/i.test(path)))];
+}
+
 export function groupTurns(timeline: readonly TimelineEntry[]): Turn[] {
   const turns: Turn[] = [];
   let current: Turn | null = null;

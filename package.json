@@ -3,7 +3,7 @@
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
-  "version": "3.7.3",
+  "version": "3.7.4",
   "description": "AIClaw：本地 Agent 桌面客户端（Electron 宿主 + Go 内核 claw-agent）",
   "repository": {
     "type": "git",

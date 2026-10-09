@@ -407,6 +407,7 @@ export function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
           title: describeTool(item as unknown as Record<string, unknown>),
           detail: toolDetail(item as unknown as Record<string, unknown>),
           state: item.toolFailed ? "failed" : "done",
+          artifacts: item.artifacts ?? [],
           ...stepStats(item as unknown as Record<string, unknown>),
         });
         break;

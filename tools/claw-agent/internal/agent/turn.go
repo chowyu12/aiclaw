@@ -878,7 +878,7 @@ func (s *Session) executeOne(
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
 
 	// 截断只作用于进历史的副本：界面上留的是工具实际返回的内容。
-	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: truncateForHistory(output), At: time.Now().UnixMilli()}
+	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: truncateForHistory(output), Artifacts: item.Artifacts, At: time.Now().UnixMilli()}
 	s.journalMessage(result)
 	return result
 }

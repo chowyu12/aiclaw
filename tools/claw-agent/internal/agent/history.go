@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"encoding/json"
+	"regexp"
 	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
@@ -33,9 +35,11 @@ func (s *Session) History() []protocol.Item {
 
 	// 先把工具结果按 call id 建索引，下面按 assistant 里的顺序取用。
 	results := make(map[string]string, len(messages))
+	artifacts := make(map[string][]string)
 	for _, message := range messages {
 		if message.Role == llm.RoleTool {
 			results[message.ToolCallID] = message.Content
+			artifacts[message.ToolCallID] = message.Artifacts
 		}
 	}
 
@@ -106,6 +110,7 @@ func (s *Session) History() []protocol.Item {
 					// 没有结果说明那次调用没跑完（中断过）。标成失败而不是留空，
 					// 免得看起来像执行成功但什么都没返回。
 					ToolResult: output,
+					Artifacts:  historyArtifacts(call.Name, output, artifacts[call.ID]),
 					ToolFailed: !answered || isToolErrorResult(output),
 					Summary:    summarizeCall(llm.ToolCall{Name: call.Name, Arguments: call.Arguments}),
 					Seq:        seq,
@@ -114,6 +119,32 @@ func (s *Session) History() []protocol.Item {
 		}
 	}
 	return items
+}
+
+// Older versions kept the standard generate_image result, but not its metadata.
+// Only recover the filename format emitted by that tool, never assistant prose.
+var legacyImageArtifact = regexp.MustCompile(`^(?:已生成并保存到 |Generated and saved to )(generated/image-[0-9]{8}-[0-9]{6}\.(?:png|jpg|jpeg|webp|gif))(?:（| \()[0-9]+ KB`)
+
+func historyArtifacts(tool, output string, paths []string) []string {
+	if len(paths) > 0 || (tool != "generate_image" && tool != "exec") {
+		return paths
+	}
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if tool == "exec" {
+			// Code Mode can print either the tool string or its JSON encoding.
+			var decoded string
+			if json.Unmarshal([]byte(line), &decoded) == nil {
+				line = decoded
+			}
+		}
+		if match := legacyImageArtifact.FindStringSubmatch(line); len(match) == 2 && !seen[match[1]] {
+			paths = append(paths, match[1])
+			seen[match[1]] = true
+		}
+	}
+	return paths
 }
 
 // toolErrorResult 是工具失败时回给模型、也进历史的那条结果：按界面语言加「错误：」前缀。

@@ -1,7 +1,7 @@
 /** Exercises the real Vue/preload workflow without touching user data or paid models. */
 const {app,BrowserWindow,ipcMain}=require('electron');
 const {join}=require('node:path');
-const {writeFileSync}=require('node:fs');
+const {writeFileSync,readFileSync}=require('node:fs');
 const desktop=join(__dirname,'../apps/desktop');
 const {IPC}=require(join(desktop,'dist/shared/ipc.cjs'));
 app.setPath('userData',join(app.getPath('temp'),'aiclaw-work-smoke'));
@@ -13,9 +13,13 @@ app.whenReady().then(async()=>{
  let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',renameFails=false;const renameCalls=[];
  let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[];
  let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
+ const mediaReads=[],openedFiles=[];
+ const imageData='data:image/png;base64,'+readFileSync(join(desktop,'assets/logo-source.png')).toString('base64');
  const changes=[{id:'c',path:'/tmp/smoke/example.txt',before:'old\nkeep\n',after:'new\nkeep\n',state:'applied',conflict:false,turnId:'t1',createdAt:1},{id:'conflict',path:'/tmp/smoke/other.txt',before:'x',after:'y',state:'applied',conflict:true,turnId:'t2',createdAt:2}];
  const list=()=>[{id:'s',title:sessionTitle,model:'test',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),turnCount:1,workdir:'/tmp/smoke'},...(forked?[{id:'fork',title:'Workflow test (fork)',model:'test',turnCount:1,workdir:'/tmp/smoke'}]:[])];
  const handle=(key,fn)=>ipcMain.handle(IPC[key],fn);
+ handle('fileMedia',(_e,path)=>{mediaReads.push(path);if(path==='generated/missing.png')throw Error('Image file missing');return {kind:'image',dataUrl:imageData};});
+ handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
  handle('configRead',()=>config);handle('configWrite',(_e,p)=>Object.assign(config,p));handle('runtimeStart',()=>undefined);
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>[{id:'on-write',label:'默认'}]);
  handle('groupRead',()=>({groups:[],assignments:{}}));handle('mcpRead',()=>mcpServers);handle('skillList',()=>[]);
@@ -28,7 +32,7 @@ app.whenReady().then(async()=>{
  handle('mcpOAuthStatus',()=>({state:authState}));handle('mcpOAuthLogin',(_e,input)=>{authCalls.push(input);authState='authorizing';return {state:authState};});handle('mcpOAuthLogout',()=>{authState='needs_login';return {disconnected:true};});
  handle('sessionConfigure',()=>({tools:[],mcpStatus:{}}));
  handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
- handle('sessionResume',(_e,id)=>({sessionId:id,workspace:'/tmp/smoke',tools:[],mcpStatus:{},model:'test',providerId:1,history:[{id:'u1',kind:'userMessage',text:'original prompt'},{id:'a1',kind:'agentMessage',text:'original answer'}]}));
+ handle('sessionResume',(_e,id)=>({sessionId:id,workspace:'/tmp/smoke',tools:[],mcpStatus:{},model:'test',providerId:1,history:[{id:'u1',kind:'userMessage',text:'original prompt'},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav']},{id:'a1',kind:'agentMessage',text:'original answer'}]}));
  handle('sessionWork',(_e,id)=>({goal:id==='s'?goal:null,pending:id==='s'?pending:[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
  handle('changesList',(_e,id)=>id==='s'?changes:[]);
  handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
@@ -52,6 +56,29 @@ app.whenReady().then(async()=>{
  check('uncertain input has no replay action',await js("[...document.querySelectorAll('.work-panel article')].find(a=>a.textContent.includes('uncertain input')).querySelectorAll('button').length===1"));
  await click('处理这条输入');await wait("!document.querySelector('.work-panel').textContent.includes('queued input')");
  await click('已检查，移除恢复提示');await wait("!document.querySelector('.work-panel').textContent.includes('uncertain input')");
+ check('generated image visible outside collapsed steps after history restore',await wait("document.querySelector('.generated-images img')?.naturalWidth>0 && !document.querySelector('.steps-body')"));
+ check('image artifacts deduplicated and audio excluded',mediaReads.filter(p=>p==='generated/cat.png').length===1&&!mediaReads.includes('generated/speech.wav'));
+ check('missing image reports local error without hiding answer',await wait("document.querySelector('.generated-images .image-error')?.textContent.includes('Image file missing') && document.querySelector('.prose')?.textContent.includes('original answer')"));
+ await js("document.querySelector('.generated-images .image-preview').click()");
+ check('image click opens full size dialog',await wait("document.querySelector('.image-viewer[open] img')?.naturalWidth>0"));
+ writeFileSync('/tmp/aiclaw-generated-image-viewer.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.querySelector('.viewer-close').click()");
+ check('image dialog closes',await wait("!document.querySelector('.image-viewer[open]')"));
+ await js("document.querySelector('.generated-images .image-preview').click()");
+ win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
+ win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
+ check('Escape closes image dialog',await wait("!document.querySelector('.image-viewer[open]')"));
+ await js("document.querySelector('.generated-images .image-path').click()");
+ check('image filename opens generated file',openedFiles[0]==='generated/cat.png');
+ check('multiple images form a thumbnail row',await js("document.querySelector('.generated-images.multiple').querySelectorAll('.image-preview').length===2"));
+ writeFileSync('/tmp/aiclaw-generated-images.png',(await win.webContents.capturePage()).toPNG());
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'image-turn'}});
+ win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',item:{id:'image-user',kind:'userMessage',text:'draw another cat'}}});
+ win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',item:{id:'image-live',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/live.png']}}});
+ check('single generated image previews before assistant prose arrives',await wait("[...document.querySelectorAll('.generated-images:not(.multiple) img')].some(img=>img.alt==='generated/live.png'&&img.naturalWidth>0)"));
+ check('single image is larger than thumbnails and scrolled into view',await wait("(()=>{const img=document.querySelector('.generated-images:not(.multiple) img');const stream=document.querySelector('.stream');return img?.getBoundingClientRect().width>document.querySelector('.generated-images.multiple img').getBoundingClientRect().width && img.getBoundingClientRect().bottom<=stream.getBoundingClientRect().bottom;})()"));
+ writeFileSync('/tmp/aiclaw-generated-single-image.png',(await win.webContents.capturePage()).toPNG());
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'image-turn'}});
  check('recovery actions use request identities',recoveries.length===2&&recoveries[0].action==='resume'&&recoveries[1].action==='dismiss');
 
  const openRename=async()=>{await js("document.querySelector('.sidebar button[aria-label=\"重命名会话\"]').click()");await wait("!!document.querySelector('.session-rename input')");};
