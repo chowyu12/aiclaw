@@ -318,6 +318,7 @@ export const actions = {
         workspace,
       })) as string;
       if (state.sessionInfo) state.sessionInfo = { ...state.sessionInfo, workspace: applied };
+      await actions.refreshSessions();
     } catch (error) {
       state.error = describeError(error);
     }
@@ -581,6 +582,11 @@ export const actions = {
    */
   async readMedia(path: string): Promise<{ dataUrl: string; kind: "image" | "audio" }> {
     return (await window.aiclaw.files.media(path)) as { dataUrl: string; kind: "image" | "audio" };
+  },
+
+  async revealWorkspace(path: string): Promise<void> {
+    try { await window.aiclaw.files.revealWorkspace(path); }
+    catch (error) { state.error = describeError(error); }
   },
 
   async openFile(path: string): Promise<void> {

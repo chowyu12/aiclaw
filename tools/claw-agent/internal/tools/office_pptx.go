@@ -406,6 +406,7 @@ func writePptxTool() Tool {
 			if err := writeFileAtomic(target, data); err != nil {
 				return "", err
 			}
+			Produce(ctx, args.Path)
 			return i18n.D("已写入 {path}（{slides} 页，{bytes} 字节）", "path", args.Path, "slides", len(args.Slides), "bytes", len(data)), nil
 		},
 	}

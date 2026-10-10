@@ -230,7 +230,8 @@ test("真实形状的一段回答", () => {
 
   const html = renderMarkdown(source);
   // 目录也是路径，点了就在访达里打开——这正是用户下一步想做的事。
-  assert.ok(html.includes('<code class="file-ref" title="点击打开">/Users/x/Workspace</code>'), html);
+  assert.ok(html.includes('data-file-path="/Users/x/Workspace"'), html);
+  assert.ok(html.includes('<span class="file-name">Workspace</span>'), html);
   assert.ok(html.includes("<ul>"), html);
   assert.equal((html.match(/<li>/g) ?? []).length, 2, html);
   // 反引号和列表符号不该以原样出现在输出里——那正是没渲染的样子。
@@ -470,8 +471,20 @@ test("文件名渲染成可点的", () => {
     assert.ok(looksLikePath(text), `${text} 应当被认成路径`);
   }
   const html = renderMarkdown("文档已生成：`报表.md`（工作区根目录）");
-  assert.match(html, /class="file-ref"/);
+  assert.match(html, /class="file-ref file-card"/);
   assert.match(html, /报表\.md/);
+});
+
+test("回复里的文件路径显示文件卡片，保留打开路径但不显示目录", () => {
+  const path = "/Users/user/reports/行业分析 2025.md";
+  const dom = new JSDOM(renderMarkdown(`文件：\`${path}\``));
+  const card = dom.window.document.querySelector(".file-card")!;
+  assert.equal(card.getAttribute("data-file-path"), path);
+  assert.equal(card.querySelector(".file-name")?.textContent, "行业分析 2025.md");
+  assert.doesNotMatch(card.textContent!, /Users|reports/);
+  assert.equal(card.getAttribute("role"), "button");
+  const link = new JSDOM(renderMarkdown("[打开报告](reports/report.docx)"));
+  assert.equal(link.window.document.querySelector(".file-card")?.getAttribute("data-file-path"), "reports/report.docx");
 });
 
 test("命令、版本号、普通词不会被认成文件", () => {
@@ -499,7 +512,7 @@ test("带空格的文件名仍然认，但必须有扩展名收尾", () => {
 test("file-ref 这个类名活过净化，而 onclick 之类活不过", () => {
   // 类名要留住，不然样式和点击委托都失效。
   const html = renderMarkdown("`a.md`");
-  assert.match(html, /<code class="file-ref"/);
+  assert.match(html, /class="file-ref file-card"/);
   // 模型自己写一个同名 class 也只是个 class——真正的校验在主进程。
   const forged = renderMarkdown('<code class="file-ref" onclick="alert(1)">x.md</code>');
   assert.doesNotMatch(forged, /onclick/);

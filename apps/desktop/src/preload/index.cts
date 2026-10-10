@@ -131,6 +131,7 @@ const api = {
   },
   files: {
     /** 打开模型在对话里提到的一个路径。主进程会校验，渲染层不碰文件系统。 */
+    revealWorkspace: (path: string) => ipcRenderer.invoke(IPC.workspaceReveal, path),
     open: (path: string) => ipcRenderer.invoke(IPC.fileOpen, path),
     /** 读一个图片/音频文件用于内联显示。校验同样在主进程。 */
     media: (path: string) => ipcRenderer.invoke(IPC.fileMedia, path),

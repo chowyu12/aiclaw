@@ -15,7 +15,7 @@ import {
   type ImageAttachment,
   type TextAttachment,
 } from "../attachments";
-import { groupTurns, imageArtifacts, stepsElapsed, type Turn } from "../turns";
+import { groupTurns, imageArtifacts, turnArtifacts, unmentionedArtifacts, stepsElapsed, type Turn } from "../turns";
 import { renderMarkdown } from "../markdown";
 import { answerText, answerTime, formatMessageTime, fullMessageTime } from "../message-meta";
 import { formatDuration as formatVoiceTime, MAX_SECONDS, VoiceRecorder } from "../voice";
@@ -30,6 +30,7 @@ import {
 import type { SessionSummaryView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
 import GeneratedImages from "./GeneratedImages.vue";
+import GeneratedFiles from "./GeneratedFiles.vue";
 import QuestionCard from "./QuestionCard.vue";
 
 defineProps<{ configured: boolean }>();
@@ -344,7 +345,15 @@ function onProseClick(event: MouseEvent): void {
   const target = (event.target as HTMLElement | null)?.closest?.(".file-ref");
   if (!target) return;
   event.preventDefault();
-  void actions.openFile(target.textContent ?? "");
+  void actions.openFile(target.getAttribute("data-file-path") ?? target.textContent ?? "");
+}
+
+function onProseKey(event: KeyboardEvent): void {
+  if (event.key !== " " && event.key !== "Enter") return;
+  const target = (event.target as HTMLElement | null)?.closest?.(".file-ref");
+  if (!target) return;
+  event.preventDefault();
+  void actions.openFile(target.getAttribute("data-file-path") ?? target.textContent ?? "");
 }
 
 async function chooseWorkspace(): Promise<void> {
@@ -501,6 +510,36 @@ function copyLabel(key: string): string {
   if (copiedKey.value === key) return t("已复制");
   if (failedKey.value === key) return t("复制失败");
   return t("复制");
+}
+
+type Feedback = "helpful" | "unhelpful";
+const feedback = ref<Record<string, Feedback>>({});
+
+watch(() => store.sessionId, sessionId => {
+  feedback.value = {};
+  if (!sessionId) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(`aiclaw:answer-feedback:${sessionId}`) ?? "{}");
+    if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+      feedback.value = Object.fromEntries(Object.entries(saved)
+        .filter(([, value]) => value === "helpful" || value === "unhelpful")) as Record<string, Feedback>;
+    }
+  } catch {
+    // Unreadable local feedback must not prevent loading the conversation.
+  }
+}, { immediate: true });
+
+function rateAnswer(key: string, value: Feedback): void {
+  if (!store.sessionId) return;
+  const updated = { ...feedback.value };
+  if (updated[key] === value) delete updated[key];
+  else updated[key] = value;
+  try {
+    localStorage.setItem(`aiclaw:answer-feedback:${store.sessionId}`, JSON.stringify(updated));
+    feedback.value = updated;
+  } catch (error) {
+    actions.showError(describeError(error));
+  }
 }
 
 /** 这一轮的回答说完了没有：还在流式输出的时候不给复制，复制到的是半句话。 */
@@ -671,6 +710,9 @@ const forking = ref(false);
             <!-- 时间与复制放在气泡外面一行：塞进气泡里会和正文挤在一起，
                  而且用户复制的只是自己打的字，不该带上时间。 -->
             <div class="msg-meta user-meta" :class="{ pinned: isMarked(`u-${turn.key}`) }">
+              <time v-if="turn.user.at" :title="fullMessageTime(turn.user.at)">
+                {{ formatMessageTime(turn.user.at) }}
+              </time>
               <button
                 class="meta-copy"
                 :title="copyLabel(`u-${turn.key}`)"
@@ -684,16 +726,12 @@ const forking = ref(false);
                   <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
                 </svg>
               </button>
-              <button class="meta-fork" :disabled="store.busy || forking || turn.user.pending" @click="forkAt(turn.user.id)">
+              <button class="meta-fork" :title="t('从这里分叉')" :aria-label="t('从这里分叉')" :disabled="store.busy || forking || turn.user.pending" @click="forkAt(turn.user.id)">
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M4 11V5m0 4h3a5 5 0 0 0 5-5" />
                   <circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="13" r="1.5" /><circle cx="12" cy="2.5" r="1.5" />
                 </svg>
-                <span>{{ t("从这里分叉") }}</span>
               </button>
-              <time v-if="turn.user.at" :title="fullMessageTime(turn.user.at)">
-                {{ formatMessageTime(turn.user.at) }}
-              </time>
             </div>
             </div>
 
@@ -707,11 +745,11 @@ const forking = ref(false);
             />
 
             <!-- 一轮的回答与它下面那一行包在一起，理由同提问。 -->
-            <div v-if="turn.messages.length > 0 || imageArtifacts(turn).length > 0" class="say">
+            <div v-if="turn.messages.length > 0 || turnArtifacts(turn).length > 0" class="say">
             <div v-for="message in turn.messages" :key="message.id" class="msg agent">
               <!-- 文件名点了直接打开。用事件委托而不是给每个 code 绑监听：
                    这段 HTML 是 v-html 塞进来的，Vue 的事件绑定管不到它。 -->
-              <div class="prose" @click="onProseClick" v-html="renderMarkdown(message.text)" />
+              <div class="prose" @click="onProseClick" @keydown="onProseKey" v-html="renderMarkdown(message.text)" />
               <span v-if="message.streaming" class="caret">▌</span>
             </div>
             <GeneratedImages
@@ -720,9 +758,13 @@ const forking = ref(false);
               :paths="imageArtifacts(turn)"
               @loaded="turn.key === runningKey && scrollToEnd()"
             />
+            <GeneratedFiles v-if="unmentionedArtifacts(turn).length > 0" :paths="unmentionedArtifacts(turn)" />
             <!-- 一轮一行，不是每截一行：一轮里模型会被采样好几次，回答散成几截，
                  每截都挂一个复制按钮只会满屏按钮，而用户要的是整段回答。 -->
             <div v-if="answerDone(turn)" class="msg-meta agent-meta" :class="{ pinned: isMarked(`a-${turn.key}`) }">
+              <time v-if="answerTime(turn.messages)" :title="fullMessageTime(answerTime(turn.messages))">
+                {{ formatMessageTime(answerTime(turn.messages)) }}
+              </time>
               <button
                 class="meta-copy"
                 :title="copiedKey === `a-${turn.key}` || failedKey === `a-${turn.key}` ? copyLabel(`a-${turn.key}`) : t(`复制回答（Markdown 原文）`)"
@@ -736,16 +778,23 @@ const forking = ref(false);
                   <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
                 </svg>
               </button>
-              <button class="meta-fork" :disabled="store.busy || forking" @click="forkAt(turn.messages[turn.messages.length - 1]!.id)">
+              <button class="meta-fork" :title="t('从这里分叉')" :aria-label="t('从这里分叉')" :disabled="store.busy || forking" @click="forkAt(turn.messages[turn.messages.length - 1]!.id)">
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M4 11V5m0 4h3a5 5 0 0 0 5-5" />
                   <circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="13" r="1.5" /><circle cx="12" cy="2.5" r="1.5" />
                 </svg>
-                <span>{{ t("从这里分叉") }}</span>
               </button>
-              <time v-if="answerTime(turn.messages)" :title="fullMessageTime(answerTime(turn.messages))">
-                {{ formatMessageTime(answerTime(turn.messages)) }}
-              </time>
+
+              <button v-for="rating in (['helpful', 'unhelpful'] as const)" :key="rating"
+                class="meta-feedback" :class="{ selected: feedback[turn.key] === rating }"
+                :title="rating === 'helpful' ? t('有帮助') : t('没帮助')"
+                :aria-label="rating === 'helpful' ? t('有帮助') : t('没帮助')"
+                :aria-pressed="feedback[turn.key] === rating" @click="rateAnswer(turn.key, rating)">
+                <svg viewBox="0 0 16 16" aria-hidden="true" :class="{ down: rating === 'unhelpful' }">
+                  <path d="M5.5 7l2.7-4.5c.7-1.1 2-.5 1.8.7L9.5 6H13c.8 0 1.3.7 1.1 1.5l-1.3 5c-.1.6-.7 1-1.3 1h-6z" />
+                  <rect x="1.5" y="7" width="4" height="6.5" rx="1" />
+                </svg>
+              </button>
             </div>
             </div>
 
@@ -1024,6 +1073,7 @@ const forking = ref(false);
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  background: var(--ground);
 
   /*
    * 正文栏宽。窗口大就跟着变宽，但有上限。
@@ -1128,9 +1178,13 @@ const forking = ref(false);
   opacity: 1;
 }
 
-/* 提问靠右：复制按钮贴着气泡的右边缘，时间在它左边。 */
+/* 与气泡使用同一栏宽和内边距，操作行沿气泡右侧对齐。 */
 .user-meta {
-  flex-direction: row-reverse;
+  justify-content: flex-end;
+  padding: 0 28px;
+  gap: 4px;
+  font-size: 14px;
+  opacity: 1;
 }
 
 .meta-copy {
@@ -1204,6 +1258,14 @@ const forking = ref(false);
   opacity: 0.4;
   cursor: default;
 }
+
+.agent-meta { margin: 6px auto 16px; padding: 0 28px; gap: 4px; opacity: 1; font-size: 14px; }
+.agent-meta time, .user-meta time { margin-right: 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.agent-meta button, .user-meta button { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
+.agent-meta button:hover:not(:disabled), .agent-meta button.selected, .user-meta button:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+.agent-meta button:focus-visible, .user-meta button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.meta-feedback svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.meta-feedback svg.down { transform: rotate(180deg); }
 
 .caret {
   color: var(--accent);
@@ -1284,7 +1346,7 @@ const forking = ref(false);
   color: var(--muted);
 }
 
-.prose :deep(a) {
+.prose :deep(a:not(.file-card)) {
   color: var(--accent);
   text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
   text-underline-offset: 2px;
@@ -1498,20 +1560,6 @@ const forking = ref(false);
 .composer.dragging {
   border-color: var(--accent, var(--rule-strong));
   background: var(--surface-2);
-}
-
-/* 文件名：看着就该点。下划线用虚线，与普通链接区分开——
-   点它打开的是本机文件，不是网页。 */
-.prose :deep(.file-ref) {
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;
-}
-
-.prose :deep(.file-ref:hover) {
-  background: var(--active);
-  text-decoration-style: solid;
 }
 
 .composer-wrap {

@@ -43,6 +43,44 @@ func TestToolArtifactsSurviveSaveLoad(t *testing.T) {
 	t.Fatal("missing restored image tool")
 }
 
+func TestDocumentArtifactsSurviveCodeModeAndSaveLoad(t *testing.T) {
+	for _, codeMode := range []bool{false, true} {
+		name, args := "write_file", `{"path":"report.md","content":"# Report"}`
+		if codeMode {
+			name, args = "exec", `{"code":"text(await tools.write_file({path: 'report.md', content: '# Report'}))"}`
+		}
+		model := &fakeModel{script: []string{sseToolCall("document", name, args), sseText("saved")}}
+		s := newTestSession(t, model, protocol.ApprovalOnWrite)
+		if codeMode {
+			s.config.CodeMode = true
+			s.installCodeMode()
+		}
+		ctx := context.Background()
+		s.RunTurn(ctx, "turn", "write a report", nil, nil, &recordingEmitter{approve: true})
+		db := newTestStore(t)
+		if err := s.Save(ctx, db); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := Load(ctx, db, "test", StaticKey("sk-test"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(loaded.Close)
+		found := false
+		for _, item := range loaded.History() {
+			if item.Kind == protocol.ItemToolCall && item.ToolName == name {
+				found = true
+				if item.ToolFailed || !reflect.DeepEqual(item.Artifacts, []string{"report.md"}) {
+					t.Fatalf("code mode %v: restored artifacts %v, failed %v, result %s", codeMode, item.Artifacts, item.ToolFailed, item.ToolResult)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("code mode %v: missing document tool", codeMode)
+		}
+	}
+}
+
 func TestHistoryRestoresLegacyCodeModeImage(t *testing.T) {
 	s := newTestSession(t, &fakeModel{}, protocol.ApprovalOnWrite)
 	path := "generated/image-20261009-112157.png"

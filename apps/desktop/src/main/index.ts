@@ -12,7 +12,7 @@ import { normalizeLocale, setCurrentLocale, tr } from "../shared/i18n.js";
 import { Updater } from "./updater.js";
 import { DiagnosticsLog, buildReport } from "./diagnostics.js";
 import { LogFile } from "./logfile.js";
-import { openFromChat } from "./open-file.js";
+import { openFromChat, revealWorkspace } from "./open-file.js";
 import { readMedia, stageAudio } from "./media-files.js";
 import { IPC } from "../shared/ipc.cjs";
 import type { ApprovalPayload, QuestionAnswer, QuestionPayload } from "../shared/types.js";
@@ -117,7 +117,7 @@ function createWindow(): void {
     minWidth: 860,
     minHeight: 600,
     title: "AIClaw",
-    backgroundColor: "#f4f7f4",
+    backgroundColor: "#f3f8f4",
     // macOS 忽略这个字段（那边走 app.dock.setIcon），Windows 与 Linux 看它。
     icon: existsSync(iconPath) ? iconPath : undefined,
     webPreferences: {
@@ -363,6 +363,7 @@ function registerIpc(): void {
 
   // 对话里点一个文件名就打开它。路径来自模型输出，所以校验全在主进程做：
   // 基准是当前会话的工作区，可执行的那几类只「在访达里显示」，凭据目录拒绝。
+  ipcMain.handle(IPC.workspaceReveal, (_event, path: string) => revealWorkspace(path));
   ipcMain.handle(IPC.fileOpen, (_event, path: string) =>
     openFromChat(path, {
       base: sessions.currentWorkspace(),

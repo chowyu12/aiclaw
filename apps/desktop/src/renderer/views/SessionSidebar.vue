@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { actions, store } from "../store";
 import { locale, t } from "../i18n";
+import { describeError } from "../errors";
+import { workspaceBuckets, workspaceName } from "../workspace-buckets";
 import BrandLogo from "./BrandLogo.vue";
 import SessionRename from "./SessionRename.vue";
 import type { SessionSummaryView } from "../../shared/types";
 
 /**
- * 左侧会话栏：新建、按分组归档、切换、删除。
+ * 左侧会话栏：新建、按工作区展示、切换、删除。
  *
- * 分组是用户自建的文件夹，归属存在宿主这边（session-groups.json），
- * 不进内核的会话存档——内核不该知道界面上有「文件夹」这回事。
+ * 工作区来自会话存档；旧分组数据只用于读取定时任务来源和保存折叠状态。
  */
 
 /** 设置态下左栏显示的导航。与会话行同一套样式，是同一个列表位置上的两种内容。 */
@@ -46,42 +47,90 @@ watch(keyword, (value) => {
 });
 const searching = computed(() => keyword.value.trim().length > 0);
 
+const workspaceLabels = computed(() => workspaceBuckets(store.sessions));
+function workspaceLabel(session: SessionSummaryView): string {
+  const path = session.workdir?.trim();
+  if (!path) return t("普通会话");
+  const bucket = workspaceLabels.value.find(bucket => bucket.path === path);
+  return bucket?.detail ? `${bucket.name} · ${bucket.detail}` : workspaceName(path);
+}
+
 const renamingSession = ref("");
 watch(() => [store.view, keyword.value], () => { renamingSession.value = ""; });
 watch(() => store.sessions.map(session => session.id), ids => {
   if (renamingSession.value && !ids.includes(renamingSession.value)) renamingSession.value = "";
 });
-const renaming = ref("");
-const renameDraft = ref("");
-/** 展开哪个会话的「移动到」菜单。空串表示都收着。 */
-const moving = ref("");
-
 interface Bucket {
   id: string;
   name: string;
+  path?: string;
+  detail?: string;
   sessions: SessionSummaryView[];
 }
 
-/**
- * 未分组这一档的哨兵 id。
- *
- * 不能用空串：renaming / moving 的「都收着」状态也是空串，撞上之后
- * 「未分组」的标题会被渲染成一个空的重命名输入框。用带前缀的字符串，
- * 与真实分组 id（g_ 前缀）也不会撞。
- */
-const UNGROUPED = "__ungrouped__";
-/**
- * 内置的「渠道会话」分组：微信、企业微信进来的会话（id 以 c_ 开头）没被用户挪走时都在这儿，
- * 默认折叠——它们是别人发来的，量大，不该把自己的会话挤下去。不能改名、不能删。
- */
-const CHANNELS = "__channels__";
+const pinned = ref<string[]>([]);
+try {
+  const saved = JSON.parse(localStorage.getItem("aiclaw:pinned-workspaces") ?? "[]");
+  if (Array.isArray(saved)) pinned.value = saved.filter(path => typeof path === "string");
+} catch { /* Invalid saved preferences do not block the sidebar. */ }
+const workspaceMenu = ref<Bucket | null>(null);
+const menuPosition = ref({ left: "0px", top: "0px" });
+const menuElement = ref<HTMLElement | null>(null);
+let menuTrigger: HTMLElement | null = null;
+const creatingWorkspace = ref("");
+const archivingWorkspace = ref("");
+watch(() => [store.view, keyword.value], () => { workspaceMenu.value = null; });
 
-/** 内置的「定时任务」分组：定时任务跑出来的会话由主进程归到这里（见 main/index.ts）。 */
+async function openWorkspaceMenu(bucket: Bucket, event: MouseEvent): Promise<void> {
+  if (workspaceMenu.value?.id === bucket.id) { closeWorkspaceMenu(); return; }
+  menuTrigger = event.currentTarget as HTMLElement;
+  const rect = menuTrigger.getBoundingClientRect();
+  menuPosition.value = { left: `${Math.max(8, rect.right - 192)}px`, top: `${Math.min(rect.bottom + 4, window.innerHeight - 140)}px` };
+  workspaceMenu.value = bucket;
+  await nextTick();
+  menuElement.value?.querySelector<HTMLButtonElement>("button")?.focus();
+}
+function closeWorkspaceMenu(): void {
+  workspaceMenu.value = null;
+  menuTrigger?.focus();
+}
+function pinWorkspace(bucket: Bucket): void {
+  if (!bucket.path) return;
+  const updated = pinned.value.includes(bucket.path) ? pinned.value.filter(path => path !== bucket.path) : [...pinned.value, bucket.path];
+  try {
+    localStorage.setItem("aiclaw:pinned-workspaces", JSON.stringify(updated));
+    pinned.value = updated;
+    closeWorkspaceMenu();
+  } catch (error) { actions.showError(describeError(error)); }
+}
+async function newWorkspaceChat(bucket: Bucket): Promise<void> {
+  if (!bucket.path || creatingWorkspace.value) return;
+  creatingWorkspace.value = bucket.id;
+  try {
+    await actions.newSession(bucket.path);
+    await actions.collapseGroup(bucket.id, false);
+  } catch (error) { actions.showError(describeError(error)); }
+  finally { creatingWorkspace.value = ""; }
+}
+async function archiveWorkspace(bucket: Bucket): Promise<void> {
+  if (archivingWorkspace.value) return;
+  closeWorkspaceMenu();
+  const count = bucket.sessions.reduce((total, session) => total + 1 + descendants(session.id).length, 0);
+  if (!confirm(t("归档工作区「{name}」的 {n} 个会话？正在执行的任务会停止，可在设置中的已归档恢复。", { name: bucket.name, n: count }))) return;
+  archivingWorkspace.value = bucket.id;
+  try {
+    for (const session of bucket.sessions) await actions.archiveSession(session.id);
+  } catch (error) { actions.showError(describeError(error)); }
+  finally { archivingWorkspace.value = ""; }
+}
+
+/** Preserve the existing ordinary-chat collapse key. */
+const UNGROUPED = "__ungrouped__";
 const SCHEDULED = "__scheduled__";
 
-/** 内置分组不能改名、不能删。 */
-function isBuiltin(id: string): boolean {
-  return id === UNGROUPED || id === CHANNELS || id === SCHEDULED;
+function sourceLabel(session: SessionSummaryView): string {
+  if (isChannelSession(session)) return t("渠道会话");
+  return store.groups.assignments[session.id] === SCHEDULED ? t("定时任务") : "";
 }
 
 function isChannelSession(session: SessionSummaryView): boolean {
@@ -125,7 +174,6 @@ function agentsHoldCurrent(id: string): boolean {
 }
 
 async function archiveSession(session: SessionSummaryView): Promise<void> {
-  moving.value = "";
   await actions.archiveSession(session.id);
 }
 
@@ -138,36 +186,17 @@ function descendants(id: string, depth = 1): { session: SessionSummaryView; dept
 }
 
 const buckets = computed<Bucket[]>(() => {
-  const assignments = store.groups.assignments;
-  const byGroup = new Map<string, SessionSummaryView[]>();
-  for (const session of store.sessions) {
-    if (isNestedChild(session)) continue;
-    const groupId = assignments[session.id] ?? (isChannelSession(session) ? CHANNELS : UNGROUPED);
-    const list = byGroup.get(groupId);
-    if (list) list.push(session);
-    else byGroup.set(groupId, [session]);
-  }
-  const result: Bucket[] = [];
-  for (const group of store.groups.groups) {
-    result.push({ id: group.id, name: group.name, sessions: byGroup.get(group.id) ?? [] });
-  }
-  // 未分组排最后：用户建了分组就是想先看见分组，没建时它是唯一一组，
-  // 排哪儿都一样。
-  const loose = byGroup.get(UNGROUPED) ?? [];
-  const channels = byGroup.get(CHANNELS) ?? [];
-  const scheduled = byGroup.get(SCHEDULED) ?? [];
-  if (loose.length > 0 || (result.length === 0 && channels.length === 0 && scheduled.length === 0)) {
-    result.push({ id: UNGROUPED, name: t("未分组"), sessions: loose });
-  }
-  if (scheduled.length > 0) result.push({ id: SCHEDULED, name: t("定时任务"), sessions: scheduled });
-  // 渠道会话排最后：它们默认折叠，自己的会话在前面。
-  if (channels.length > 0) result.push({ id: CHANNELS, name: t("渠道会话"), sessions: channels });
+  const roots = store.sessions.filter(session => !isNestedChild(session));
+  const result: Bucket[] = workspaceBuckets(roots).sort((a, b) => Number(pinned.value.includes(b.path)) - Number(pinned.value.includes(a.path)));
+  const loose = roots.filter(session => !session.workdir?.trim())
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  if (loose.length) result.push({ id: UNGROUPED, name: t("普通会话"), sessions: loose });
   return result;
 });
 
-/** 没记过的：渠道会话默认折叠，其它默认展开。 */
+/** 工作区默认展开，已保存的折叠状态继续生效。 */
 function isCollapsed(bucket: Bucket): boolean {
-  return store.groups.collapsed?.[bucket.id] ?? bucket.id === CHANNELS;
+  return store.groups.collapsed?.[bucket.id] ?? false;
 }
 
 /**
@@ -199,36 +228,6 @@ function toggleBucket(bucket: Bucket): void {
   void actions.collapseGroup(bucket.id, !isCollapsed(bucket));
 }
 
-// 渠道会话分组第一次出现时记下「现在看过了」：不然一上来它所有的旧会话都算成新消息。
-watch(
-  () => buckets.value.some((bucket) => bucket.id === CHANNELS) && store.groups.seenAt?.[CHANNELS] === undefined,
-  (unseen) => {
-    if (unseen) void actions.collapseGroup(CHANNELS, true);
-  },
-  { immediate: true },
-);
-
-async function newGroup(): Promise<void> {
-  await actions.createGroup(t("分组 {n}", { n: store.groups.groups.length + 1 }));
-}
-
-function startRename(groupId: string, current: string): void {
-  renaming.value = groupId;
-  renameDraft.value = current;
-}
-
-async function commitRename(): Promise<void> {
-  const id = renaming.value;
-  renaming.value = "";
-  if (id) await actions.renameGroup(id, renameDraft.value);
-}
-
-async function removeGroup(groupId: string, name: string): Promise<void> {
-  // 说清楚会话不会跟着没：这是用户在这里最怕的事。
-  if (!confirm(t("删除分组「{name}」？里面的会话会回到「未分组」，不会被删除。", { name }))) return;
-  await actions.deleteGroup(groupId);
-}
-
 async function removeSession(session: SessionSummaryView): Promise<void> {
   // 子 agent 跟着父会话一起删：留下一串孤儿子会话，谁也说不清它们是干什么的。
   const children = descendants(session.id).length;
@@ -241,11 +240,6 @@ async function removeSession(session: SessionSummaryView): Promise<void> {
     return;
   }
   await actions.deleteSession(session.id);
-}
-
-async function moveTo(sessionId: string, groupId: string | null): Promise<void> {
-  moving.value = "";
-  await actions.assignSession(sessionId, groupId);
 }
 
 /** 底部那个更新按钮上写什么；没有新版本时是空串，按钮不显示。 */
@@ -309,7 +303,6 @@ function when(iso: string): string {
         <button class="new" :disabled="store.runtime.state !== 'ready'" @click="actions.newSession()">
           <span class="plus">+</span> {{ t("新对话") }}
         </button>
-        <button class="icon" :title="t(`新建分组`)" @click="newGroup()">▤</button>
       </template>
       <button v-else class="new" @click="actions.setView('chat')">
         <span class="plus">‹</span> {{ t("返回对话") }}
@@ -357,11 +350,13 @@ function when(iso: string): string {
           <div class="title">
             <span v-if="waiting(session.id)" class="asking" :title="t(`模型在等你回答一个问题`)">{{ t("待回答") }}</span>
             <span v-else-if="store.live[session.id]?.busy" class="running" :title="t(`正在执行`)"></span>
+            <span v-if="sourceLabel(session)" class="source-label">{{ sourceLabel(session) }}</span>
             {{ session.title || t("未命名会话") }}
           </div>
           <!-- 命中片段是搜索结果里最有用的一行：一列「未命名会话」挑不出来，
                看见命中的那句话就能认出是哪次。 -->
           <div v-if="session.snippet" class="snippet">{{ session.snippet }}</div>
+          <div class="meta workspace-label" :title="session.workdir">{{ workspaceLabel(session) }}</div>
           <div class="meta">
             {{ when(session.updatedAt) }}
             <template v-if="session.turnCount"> · {{ session.turnCount === 1 ? t("1 轮") : t("{n} 轮", { n: session.turnCount }) }}</template>
@@ -389,7 +384,7 @@ function when(iso: string): string {
         v-for="bucket in buckets"
         v-show="store.sessions.length > 0"
         :key="bucket.id"
-        class="bucket"
+        class="bucket" :data-bucket-id="bucket.id"
       >
         <header class="bucket-head" :class="{ collapsed: isCollapsed(bucket), current: isCollapsed(bucket) && holdsCurrent(bucket) }">
           <button
@@ -398,47 +393,37 @@ function when(iso: string): string {
             :aria-expanded="!isCollapsed(bucket)"
             @click="toggleBucket(bucket)"
           >
-            {{ isCollapsed(bucket) ? "▸" : "▾" }}
+            <svg class="folder-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5V3.5a1 1 0 0 1 1-1h3l1.5 2h6.5a1 1 0 0 1 1 1V7M1.5 6h12a1 1 0 0 1 1 1l-1.5 5a1 1 0 0 1-1 .7h-10a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z" /></svg>
+            <span class="folder-arrow" aria-hidden="true">{{ isCollapsed(bucket) ? "▸" : "▾" }}</span>
           </button>
-          <input
-            v-if="renaming === bucket.id && !isBuiltin(bucket.id)"
-            v-model="renameDraft"
-            class="rename"
-            autofocus
-            @keydown.enter="commitRename()"
-            @keydown.esc="renaming = ''"
-            @blur="commitRename()"
-          />
-          <template v-else>
             <span
               class="bucket-name"
-              :title="isCollapsed(bucket) && holdsCurrent(bucket) ? t(`正在看的会话在这个分组里`) : undefined"
+              :title="bucket.path || (isCollapsed(bucket) && holdsCurrent(bucket) ? t(`正在看的会话在这个分组里`) : undefined)"
               @click="toggleBucket(bucket)"
-              @dblclick="!isBuiltin(bucket.id) && startRename(bucket.id, bucket.name)"
             >
               {{ bucket.name }}
             </span>
+            <span v-if="bucket.path && pinned.includes(bucket.path)" class="workspace-pin" :title="t('已置顶')"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 2 5 5-2 1-2 3-2-2-4 4 M8 9 5 6l3-2Z" /></svg></span>
             <span class="count">{{ bucket.sessions.length }}</span>
+            <div v-if="bucket.path" class="workspace-actions" :class="{ open: workspaceMenu?.id === bucket.id }">
+              <button class="icon tiny" :title="t('工作区更多操作')" :aria-label="t('工作区更多操作')" :aria-expanded="workspaceMenu?.id === bucket.id" @click.stop="openWorkspaceMenu(bucket, $event)">⋯</button>
+              <button class="icon tiny" :title="t('在此工作区新建会话')" :aria-label="t('在此工作区新建会话')" :disabled="store.runtime.state !== 'ready' || !!creatingWorkspace || !!archivingWorkspace" @click.stop="newWorkspaceChat(bucket)">
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 2.5h-5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-5 M8 8l5-5-1.5-1.5-5 5-.5 2Z" /></svg>
+              </button>
+            </div>
             <!-- 折叠时：有新消息给个数，有会话在跑 / 在等回答亮个点。 -->
             <span v-if="isCollapsed(bucket) && unread(bucket) > 0" class="unread" :title="t(`上次看过之后有 {n} 个会话有新消息`, { n: unread(bucket) })">
               {{ t("{n} 新", { n: unread(bucket) }) }}
             </span>
             <span v-if="isCollapsed(bucket) && active(bucket)" class="running" :title="t(`有会话正在执行或在等你回答`)"></span>
-            <button
-              v-if="!isBuiltin(bucket.id)"
-              class="icon tiny"
-              :title="t(`删除分组（会话会回到未分组）`)"
-              @click="removeGroup(bucket.id, bucket.name)"
-            >
-              ×
-            </button>
-          </template>
         </header>
+        <div v-if="bucket.detail" class="bucket-detail" :title="bucket.path">{{ bucket.detail }}</div>
 
         <template v-for="session in visibleSessions(bucket)" :key="session.id">
         <div
           class="item"
           :class="{ active: session.id === store.sessionId }"
+          :title="[session.title || t('未命名会话'), when(session.updatedAt), session.turnCount ? t('{n} 轮', { n: session.turnCount }) : '', session.model].filter(Boolean).join(' · ')"
           @click="actions.openSession(session.id)"
         >
           <div class="item-main">
@@ -446,12 +431,8 @@ function when(iso: string): string {
               <!-- 后台还在跑的会话点亮一个点：切走之后它没停，用户得看得见它在哪。 -->
               <span v-if="waiting(session.id)" class="asking" :title="t(`模型在等你回答一个问题`)">{{ t("待回答") }}</span>
             <span v-else-if="store.live[session.id]?.busy" class="running" :title="t(`正在执行`)"></span>
-              {{ session.title || t("未命名会话") }}
-            </div>
-            <div class="meta">
-              {{ when(session.updatedAt) }}
-              <template v-if="session.turnCount"> · {{ session.turnCount === 1 ? t("1 轮") : t("{n} 轮", { n: session.turnCount }) }}</template>
-              <template v-if="session.model"> · {{ session.model }}</template>
+              <span v-if="sourceLabel(session)" class="source-label">{{ sourceLabel(session) }}</span>
+            {{ session.title || t("未命名会话") }}
             </div>
             <!-- 开出过子 agent 的会话：一个折叠开关，默认收着。 -->
             <button
@@ -469,13 +450,6 @@ function when(iso: string): string {
             <button class="icon tiny" :title="t(`重命名会话`)" :aria-label="t(`重命名会话`)" :disabled="!!renamingSession" @click="renamingSession = session.id">
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 2 4 4-7.5 7.5-4.5.5.5-4.5Z M8.5 3.5l4 4" /></svg>
             </button>
-            <button
-              class="icon tiny"
-              :title="t(`移动到分组`)"
-              @click="moving = moving === session.id ? '' : session.id"
-            >
-              ⤴
-            </button>
             <button class="icon tiny" :title="t(`归档（设置 → 已归档里能恢复）`)" :aria-label="t(`归档`)" @click="archiveSession(session)">
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
                 <path fill="currentColor" d="M2 2.5h12a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-2a1 1 0 0 1 1-1Zm0 5h12v5.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V7.5Zm4 1.8v.9h4v-.9H6Z" />
@@ -486,22 +460,6 @@ function when(iso: string): string {
 
           <SessionRename v-if="renamingSession === session.id" :session-id="session.id" :title="session.title || ''" @close="renamingSession = ''" />
 
-          <div v-if="moving === session.id" class="move" @click.stop>
-            <button
-              v-for="group in store.groups.groups"
-              :key="group.id"
-              class="move-option"
-              @click="moveTo(session.id, group.id)"
-            >
-              {{ group.name }}
-            </button>
-            <button class="move-option" @click="moveTo(session.id, null)">
-              {{ isChannelSession(session) ? t("渠道会话") : t("未分组") }}
-            </button>
-            <p v-if="store.groups.groups.length === 0" class="move-hint">
-              {{ t("还没有分组，先用右上角的 ▤ 建一个。") }}
-            </p>
-          </div>
         </div>
         <!-- 这个会话开出去的子 agent：缩进挂在下面，跑着的亮点。 -->
         <div
@@ -509,7 +467,7 @@ function when(iso: string): string {
           :key="child.session.id"
           class="item child"
           :class="{ active: child.session.id === store.sessionId }"
-          :style="{ paddingLeft: `${10 + child.depth * 14}px` }"
+          :style="{ paddingLeft: `${32 + child.depth * 14}px` }"
           :title="child.session.title"
           @click="actions.openSession(child.session.id)"
         >
@@ -536,6 +494,15 @@ function when(iso: string): string {
         </template>
       </section>
     </div>
+
+    <template v-if="workspaceMenu">
+      <div class="workspace-menu-backdrop" @click="closeWorkspaceMenu()" />
+      <div ref="menuElement" class="workspace-menu" :style="menuPosition" role="group" :aria-label="t('工作区更多操作')" @keydown.esc.prevent.stop="closeWorkspaceMenu()">
+        <button @click="pinWorkspace(workspaceMenu)">{{ workspaceMenu.path && pinned.includes(workspaceMenu.path) ? t('取消置顶') : t('置顶') }}</button>
+        <button @click="actions.revealWorkspace(workspaceMenu.path!); closeWorkspaceMenu()">{{ t('在 Finder 中显示') }}</button>
+        <button :disabled="!!archivingWorkspace" @click="archiveWorkspace(workspaceMenu)">{{ t('归档工作区会话') }}</button>
+      </div>
+    </template>
 
     <!-- 底部：运行状态 + 设置。插件与配置都是低频的全局设置，收在这里
          比在顶上常驻一整行合适。 -->
@@ -662,6 +629,17 @@ function when(iso: string): string {
   font-size: 12px;
 }
 
+.workspace-actions { display: flex; gap: 2px; opacity: 0; pointer-events: none; }
+.bucket-head:hover .workspace-actions, .bucket-head:focus-within .workspace-actions, .workspace-actions.open { opacity: 1; pointer-events: auto; }
+.workspace-pin { color: var(--muted); font-size: 13px; }
+.workspace-menu-backdrop { position: fixed; inset: 0; z-index: 50; }
+.workspace-menu { position: fixed; z-index: 51; width: 192px; padding: 5px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-3); }
+.workspace-menu button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
+.workspace-menu button:hover, .workspace-menu button:focus-visible { background: var(--hover); }
+.workspace-menu button:disabled { opacity: .5; cursor: default; }
+
+.bucket-detail { margin: 0 9px 4px 32px; color: var(--muted); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .snippet {
   margin-top: 2px;
   color: var(--ink-2);
@@ -688,18 +666,17 @@ function when(iso: string): string {
 }
 
 .bucket + .bucket {
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .bucket-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  color: var(--muted);
-  font-size: 11px;
+  gap: 7px;
+  padding: 6px 8px;
+  color: var(--ink-2);
+  font-size: 13px;
   font-weight: 500;
-  letter-spacing: 0.04em;
 }
 
 .bucket-name {
@@ -711,18 +688,22 @@ function when(iso: string): string {
 }
 
 .count {
-  font-variant-numeric: tabular-nums;
-}
-
-.rename {
-  flex: 1;
-  border: 1px solid var(--accent);
-  border-radius: 5px;
-  padding: 2px 5px;
+  color: var(--muted);
   font-size: 11px;
-  background: var(--surface);
-  color: inherit;
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
 }
+.bucket-head:hover .count, .bucket-head:focus-within .count { opacity: 1; }
+
+.bucket .item { min-height: 32px; padding: 6px 8px 6px 32px; align-items: center; }
+.bucket .item .title { line-height: 20px; }
+.bucket .item.active { background: var(--hover); }
+.bucket .item.active .title { font-weight: 400; }
+.bucket .item-actions { position: absolute; right: 6px; top: 5px; pointer-events: none; }
+.bucket .item:hover, .bucket .item:focus-within { padding-right: 78px; }
+.bucket .item:hover .item-actions, .bucket .item:focus-within .item-actions { pointer-events: auto; }
+.bucket .item.child { min-height: 28px; }
+.bucket .item.child:hover, .bucket .item.child:focus-within { padding-right: 78px; }
 
 .item {
   position: relative;
@@ -769,6 +750,8 @@ function when(iso: string): string {
   padding-bottom: 4px;
 }
 
+.source-label { margin-right: 5px; padding: 1px 4px; border-radius: 4px; background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 400; }
+
 .item.child .title {
   color: var(--ink-2);
   font-size: 12px;
@@ -813,13 +796,21 @@ function when(iso: string): string {
 
 /* 正在执行的会话：标题前一个呼吸的小点。 */
 .fold {
-  padding: 0 2px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 18px;
+  padding: 0;
   border: none;
   background: none;
-  color: var(--muted);
-  font-size: 10px;
+  color: inherit;
+  font-size: 11px;
   cursor: pointer;
 }
+.folder-icon { grid-area: 1 / 1; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; }
+.folder-arrow { grid-area: 1 / 1; opacity: 0; }
+.bucket-head:hover .folder-icon, .fold:focus-visible .folder-icon { opacity: 0; }
+.bucket-head:hover .folder-arrow, .fold:focus-visible .folder-arrow { opacity: 1; }
 
 .bucket-name {
   cursor: pointer;
@@ -875,46 +866,8 @@ function when(iso: string): string {
 }
 
 .item:focus-within .item-actions,
-.item:hover .item-actions,
-.item.active .item-actions {
+.item:hover .item-actions {
   opacity: 1;
-}
-
-.move {
-  position: absolute;
-  right: 6px;
-  top: 30px;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  min-width: 128px;
-  padding: 4px;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-3);
-}
-
-.move-option {
-  padding: 5px 8px;
-  border: none;
-  border-radius: var(--r-sm);
-  background: none;
-  text-align: left;
-  font-size: 12px;
-  color: inherit;
-  cursor: pointer;
-}
-
-.move-option:hover {
-  background: var(--hover);
-}
-
-.move-hint {
-  margin: 4px 8px;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.5;
 }
 
 /* ---------- 底部 ---------- */

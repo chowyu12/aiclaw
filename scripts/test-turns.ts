@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { groupTurns, imageArtifacts, stepsElapsed } from "../apps/desktop/src/renderer/turns.ts";
+import { groupTurns, imageArtifacts, turnArtifacts, unmentionedArtifacts, stepsElapsed } from "../apps/desktop/src/renderer/turns.ts";
 import type { TimelineEntry } from "../apps/desktop/src/renderer/store.ts";
 
 /**
@@ -28,6 +28,17 @@ const step = (id: string, extra: Record<string, unknown> = {}): TimelineEntry =>
     state: "done",
     ...extra,
   }) as TimelineEntry;
+
+test("产物汇总按轮去重，保留文档并排除失败、运行中和正文路径", () => {
+  const turns = groupTurns([
+    user("u1"), step("docs", { artifacts: ["报告.md", "报告.docx", "报告.pptx", "报告.md", ""] }),
+    step("failed", { state: "failed", artifacts: ["failed.pdf"] }),
+    step("running", { state: "running", artifacts: ["pending.xlsx"] }), agent("a1", "fake.pdf"),
+    user("u2"), step("next", { artifacts: ["报告.md"] }),
+  ]);
+  assert.deepEqual(turnArtifacts(turns[0]!), ["报告.md", "报告.docx", "报告.pptx"]);
+  assert.deepEqual(turnArtifacts(turns[1]!), ["报告.md"]);
+});
 
 test("图片预览按轮取结构化产物，去重并排除失败步骤与音频", () => {
   const turns = groupTurns([
@@ -106,4 +117,10 @@ test("用时覆盖首尾：最后一步结束减第一步开始", () => {
 
 test("没有时间戳时用时是 0，不显示", () => {
   assert.equal(stepsElapsed([step("s1")] as Extract<TimelineEntry, { kind: "step" }>[]), 0);
+});
+
+test("末尾仅保留未提到的产物，绝对路径匹配相对路径，同名文件不误合并", () => {
+  const turn = groupTurns([user("files"), step("files", { artifacts: ["report.md", "other.docx", "a/same.pdf", "b/same.pdf"] }),
+    agent("answer", "已生成 `/Users/user/work/report.md` 和 `same.pdf`。")])[0]!;
+  assert.deepEqual(unmentionedArtifacts(turn), ["other.docx", "a/same.pdf", "b/same.pdf"]);
 });

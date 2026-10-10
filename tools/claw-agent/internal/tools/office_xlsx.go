@@ -402,6 +402,7 @@ func writeXlsxTool() Tool {
 			if err != nil {
 				return "", err
 			}
+			Produce(ctx, args.Path)
 			return i18n.D("已写入 {path}：{summary}", "path", args.Path, "summary", summary), nil
 		},
 	}

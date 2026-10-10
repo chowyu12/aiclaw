@@ -1,6 +1,8 @@
 import createDOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
+import { tr } from "../shared/i18n.js";
+import { filename, fileType } from "./file-card.js";
 
 /**
  * 把模型输出渲染成 HTML。Markdown 与内联 HTML 都渲染。
@@ -98,7 +100,12 @@ md.use(footnote);
 // 在一个满屏文件名和包名的工具里那是纯噪音。
 md.linkify.set({ fuzzyLink: false });
 
-md.validateLink = isSafeHref;
+function isLocalFileLink(href: string): boolean {
+  return looksLikePath(href) && /\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(href)
+    && !/^[a-z][a-z0-9+.-]*:/i.test(href);
+}
+
+md.validateLink = href => isSafeHref(href) || isLocalFileLink(href);
 
 /** 标题压到 h3 起步：对话气泡里的 h1 会大得离谱，而模型很爱用 `#` 开头。 */
 md.renderer.rules.heading_open = (tokens, index) => `<h${headingTag(tokens[index]!.tag)}>`;
@@ -160,12 +167,47 @@ md.renderer.rules.fence = (tokens, index) => {
  * 可执行的那几类不给直接打开。所以这里认错了最多是点下去提示「找不到」，
  * 而模型伪造一个 `class="file-ref"` 也拿不到任何额外能力。
  */
-md.renderer.rules.code_inline = (tokens, index) => {
+function fileCard(path: string): string {
+  const escape = md.utils.escapeHtml;
+  const name = filename(path);
+  const kind = fileType(path);
+  return `<a href="#local-file" class="file-ref file-card" data-file-path="${escape(path)}" role="button" aria-label="${escape(tr("打开文件 {name}", { name }))}"><span class="file-type" data-type="${escape(kind)}" aria-hidden="true">${escape(kind)}</span><span class="file-name">${escape(name)}</span></a>`;
+}
+
+md.renderer.rules.code_inline = (tokens, index, _options, env) => {
   const text = tokens[index]!.content;
-  const escaped = md.utils.escapeHtml(text);
-  if (!looksLikePath(text)) return `<code>${escaped}</code>`;
-  return `<code class="file-ref" title="点击打开">${escaped}</code>`;
+  if (!looksLikePath(text)) return `<code>${md.utils.escapeHtml(text)}</code>`;
+  if (env?.files instanceof Set) env.files.add(text);
+  return fileCard(text);
 };
+
+// Local Markdown links use the same host-validated file action as inline paths.
+md.core.ruler.after("inline", "local-file-cards", state => {
+  for (const token of state.tokens) {
+    const children = token.children;
+    if (!children) continue;
+    for (let i = 0; i < children.length; i++) {
+      if (children[i]!.type !== "link_open") continue;
+      const href = String(children[i]!.attrGet("href") ?? "");
+      if (!isLocalFileLink(href)) continue;
+      const end = children.findIndex((child, index) => index > i && child.type === "link_close");
+      if (end < 0) continue;
+      let path = href;
+      try { path = decodeURIComponent(href); } catch { /* Keep literal paths with percent signs. */ }
+      if (state.env?.files instanceof Set) state.env.files.add(path);
+      const card = new state.Token("html_inline", "", 0);
+      card.content = fileCard(path);
+      children.splice(i, end - i + 1, card);
+    }
+  }
+});
+
+/** File references actually rendered as cards, used to avoid duplicate trailing outputs. */
+export function referencedFiles(source: string): string[] {
+  const files = new Set<string>();
+  md.render(source, { files });
+  return [...files];
+}
 
 /** 删除线统一成 `<del>`：markdown-it 默认出 `<s>`，样式那边只认 del。 */
 md.renderer.rules.s_open = () => "<del>";
@@ -225,7 +267,7 @@ const PURIFY_CONFIG = {
   ALLOWED_ATTR: [
     "href", "target", "rel", "title",
     "src", "alt", "width", "height", "loading", "referrerpolicy",
-    "class", "id", "style", "data-lang",
+    "class", "id", "style", "data-lang", "data-file-path", "data-type", "role",
     "colspan", "rowspan", "align", "start", "reversed", "open",
     "type", "checked", "disabled", "datetime",
   ],

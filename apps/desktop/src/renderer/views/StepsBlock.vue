@@ -42,7 +42,7 @@ const media = reactive<Record<string, { dataUrl?: string; kind?: string; error?:
 
 function loadArtifacts(step: { artifacts?: readonly string[] }): void {
   for (const path of step.artifacts ?? []) {
-    if (media[path]) continue;
+    if (media[path] || !/\.(png|jpe?g|webp|gif|mp3|wav|ogg|m4a|aac|flac)$/i.test(path)) continue;
     media[path] = {};
     void actions
       .readMedia(path)
@@ -126,7 +126,7 @@ function llmSubline(step: Turn["steps"][number]): string {
           />
           <audio v-else-if="media[path]?.kind === 'audio'" :src="media[path]!.dataUrl" controls />
           <p v-else-if="media[path]?.error" class="artifact-note bad">{{ media[path]!.error }}</p>
-          <p v-else class="artifact-note">{{ t("正在读取…") }}</p>
+          <p v-else-if="media[path]" class="artifact-note">{{ t("正在读取…") }}</p>
           <button class="artifact-path" @click="actions.openFile(path)">{{ path }}</button>
         </div>
       </details>

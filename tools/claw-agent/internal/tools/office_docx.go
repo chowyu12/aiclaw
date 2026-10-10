@@ -433,6 +433,7 @@ func writeDocxTool() Tool {
 			if err := writeFileAtomic(target, data); err != nil {
 				return "", err
 			}
+			Produce(ctx, args.Path)
 			return i18n.D("已写入 {path}（{paragraphs} 段，{tables} 个表格，{bytes} 字节）",
 				"path", args.Path, "paragraphs", stats.paragraphs, "tables", stats.tables, "bytes", len(data)), nil
 		},

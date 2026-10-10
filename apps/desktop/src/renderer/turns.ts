@@ -1,3 +1,4 @@
+import { referencedFiles } from "./markdown.js";
 import type { TimelineEntry } from "./store.js";
 
 /**
@@ -28,11 +29,30 @@ export interface Turn {
   steps: StepEntry[];
 }
 
-/** Only structured image artifacts, never paths guessed from assistant prose. */
-export function imageArtifacts(turn: Turn): string[] {
+/** Only successful structured artifacts, never paths guessed from assistant prose. */
+export function turnArtifacts(turn: Turn): string[] {
   return [...new Set(turn.steps.filter(step => step.state === "done")
-    .flatMap(step => step.artifacts ?? [])
-    .filter(path => /\.(png|jpe?g|webp|gif)$/i.test(path)))];
+    .flatMap(step => step.artifacts ?? []).filter(path => path.trim() !== ""))];
+}
+
+export function imageArtifacts(turn: Turn): string[] {
+  return turnArtifacts(turn).filter(path => /\.(png|jpe?g|webp|gif)$/i.test(path));
+}
+
+/** Hide only unambiguous matches; identical filenames in different folders remain distinct. */
+export function unmentionedArtifacts(turn: Turn): string[] {
+  const images = new Set(imageArtifacts(turn));
+  const paths = turnArtifacts(turn).filter(path => !images.has(path));
+  const mentioned = new Set<string>();
+  const normalize = (path: string) => path.replaceAll("\\", "/").replace(/^\.\//, "");
+  for (const ref of turn.messages.flatMap(message => referencedFiles(message.text))) {
+    const normalized = normalize(ref);
+    const exact = paths.filter(path => normalize(path) === normalized);
+    const matches = exact.length ? exact : paths.filter(path =>
+      normalize(path).endsWith(`/${normalized}`) || normalized.endsWith(`/${normalize(path)}`));
+    if (matches.length === 1) mentioned.add(matches[0]!);
+  }
+  return paths.filter(path => !mentioned.has(path));
 }
 
 export function groupTurns(timeline: readonly TimelineEntry[]): Turn[] {

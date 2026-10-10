@@ -1,5 +1,14 @@
 /** 英文词典：shell 这一组界面（中文原文 → 英文）。 */
 export const shell: Record<string, string> = {
+  "置顶": "Pin",
+  "取消置顶": "Unpin",
+  "已置顶": "Pinned",
+  "工作区更多操作": "Workspace actions",
+  "在此工作区新建会话": "New chat in this workspace",
+  "在 Finder 中显示": "Show in Finder",
+  "归档工作区会话": "Archive workspace chats",
+  "找不到工作区目录": "Workspace directory not found",
+  "归档工作区「{name}」的 {n} 个会话？正在执行的任务会停止，可在设置中的已归档恢复。": "Archive {n} chats in workspace “{name}”? Running tasks will stop. Restore them in Settings → Archived.",
   // 定时任务的时间规则（shared/schedule.ts）
   "时间要写成 09:00 这样": "Use a time like 09:00",
   "至少选一天": "Pick at least one day",
@@ -65,6 +74,7 @@ export const shell: Record<string, string> = {
   "收起来的会话，可以恢复或彻底删除": "Archived chats you can restore or delete for good",
   "用量": "Usage",
   "token、模型调用、工具与技能": "Tokens, model calls, tools and skills",
+  "普通会话": "General chats",
   "未分组": "Ungrouped",
   "渠道会话": "Channel chats",
   "分组 {n}": "Group {n}",

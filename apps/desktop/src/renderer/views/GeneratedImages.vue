@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { actions } from "../store";
 import { describeError } from "../errors";
 import { t } from "../i18n";
+import { filename } from "../file-card";
 
 const props = defineProps<{ paths: string[] }>();
 defineEmits<{ loaded: [] }>();
@@ -53,12 +54,12 @@ watch(() => [visible.value, props.paths] as const, () => {
       </button>
       <p v-else-if="media[path]?.error" class="image-error" role="status">{{ media[path]!.error }}</p>
       <p v-else class="image-loading">{{ t("正在读取…") }}</p>
-      <figcaption><button class="image-path" @click="actions.openFile(path)">{{ path }}</button></figcaption>
+      <figcaption><button class="image-path" @click="actions.openFile(path)">{{ filename(path) }}</button></figcaption>
     </figure>
     <dialog ref="viewer" class="image-viewer" :aria-label="t('查看大图')" @click="closeBackdrop" @close="selected = ''">
       <button class="viewer-close" :aria-label="t('关闭图片预览')" @click="viewer?.close()">×</button>
       <img v-if="selected" :src="media[selected]?.dataUrl" :alt="selected" />
-      <p>{{ selected }}</p>
+      <p>{{ filename(selected) }}</p>
     </dialog>
   </div>
 </template>

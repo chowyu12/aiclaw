@@ -182,6 +182,7 @@ func writeTool() Tool {
 			if err := env.writeFile(ctx, path, []byte(args.Content), nil); err != nil {
 				return "", fmt.Errorf("%s: %w", i18n.D("写入失败"), err)
 			}
+			Produce(ctx, args.Path)
 			return i18n.D("已写入 {path}（{bytes} 字节）", "path", args.Path, "bytes", len(args.Content)), nil
 		},
 	}

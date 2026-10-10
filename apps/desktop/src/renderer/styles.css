@@ -110,6 +110,7 @@ body,
 
 body {
   background: var(--ground);
+  background-image: none;
   color: var(--ink);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
@@ -270,3 +271,14 @@ progress {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* 文件引用与未提及的生成文件共用卡片外观。 */
+.file-card { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; padding: 6px 8px; border: 1px solid var(--rule); border-radius: 9px; background: var(--surface); color: var(--ink); font: inherit; text-align: left; text-decoration: none; vertical-align: middle; cursor: pointer; }
+.file-card:hover { border-color: var(--muted); background: var(--surface); }
+.file-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.file-type { flex: none; max-width: 64px; overflow: hidden; padding: 2px 3px; border-radius: 4px; background: var(--surface-2); color: var(--muted); font-size: 9px; font-weight: 600; }
+.file-type[data-type="MD"] { color: #7865d8; }
+.file-type[data-type="DOCX"] { color: #2876cf; }
+.file-type[data-type="PPTX"] { color: #d86732; }
+.file-type[data-type="XLSX"] { color: #299166; }
+.file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
