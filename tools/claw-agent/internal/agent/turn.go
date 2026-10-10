@@ -863,7 +863,9 @@ func (s *Session) executeOne(
 
 	// 产出物按调用收集：一轮里的工具可能并发跑，挂在 Env 上会串。
 	artifacts := &tools.ArtifactSink{}
-	output, err := s.runTool(tools.WithArtifacts(ctx, artifacts), call, env)
+	sources := &tools.SourceSink{}
+	output, err := s.runTool(tools.WithSources(tools.WithArtifacts(ctx, artifacts), sources), call, env)
+	item.Sources = sources.Sources()
 	item.Artifacts = artifacts.Paths()
 	if err != nil {
 		item.ToolFailed = true
@@ -878,7 +880,7 @@ func (s *Session) executeOne(
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
 
 	// 截断只作用于进历史的副本：界面上留的是工具实际返回的内容。
-	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: truncateForHistory(output), Artifacts: item.Artifacts, At: time.Now().UnixMilli()}
+	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: truncateForHistory(output), Artifacts: item.Artifacts, Sources: item.Sources, At: time.Now().UnixMilli()}
 	s.journalMessage(result)
 	return result
 }

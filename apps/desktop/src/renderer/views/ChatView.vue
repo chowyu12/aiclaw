@@ -15,7 +15,7 @@ import {
   type ImageAttachment,
   type TextAttachment,
 } from "../attachments";
-import { groupTurns, imageArtifacts, turnArtifacts, unmentionedArtifacts, stepsElapsed, type Turn } from "../turns";
+import { groupTurns, imageArtifacts, turnArtifacts, unmentionedArtifacts, turnSources, stepsElapsed, type Turn } from "../turns";
 import { renderMarkdown } from "../markdown";
 import { answerText, answerTime, formatMessageTime, fullMessageTime } from "../message-meta";
 import { formatDuration as formatVoiceTime, MAX_SECONDS, VoiceRecorder } from "../voice";
@@ -31,6 +31,7 @@ import type { SessionSummaryView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
 import GeneratedImages from "./GeneratedImages.vue";
 import GeneratedFiles from "./GeneratedFiles.vue";
+import SearchSources from "./SearchSources.vue";
 import QuestionCard from "./QuestionCard.vue";
 
 defineProps<{ configured: boolean }>();
@@ -745,7 +746,7 @@ const forking = ref(false);
             />
 
             <!-- 一轮的回答与它下面那一行包在一起，理由同提问。 -->
-            <div v-if="turn.messages.length > 0 || turnArtifacts(turn).length > 0" class="say">
+            <div v-if="turn.messages.length > 0 || turnArtifacts(turn).length > 0 || turnSources(turn).length > 0" class="say">
             <div v-for="message in turn.messages" :key="message.id" class="msg agent">
               <!-- 文件名点了直接打开。用事件委托而不是给每个 code 绑监听：
                    这段 HTML 是 v-html 塞进来的，Vue 的事件绑定管不到它。 -->
@@ -759,6 +760,7 @@ const forking = ref(false);
               @loaded="turn.key === runningKey && scrollToEnd()"
             />
             <GeneratedFiles v-if="unmentionedArtifacts(turn).length > 0" :paths="unmentionedArtifacts(turn)" />
+            <SearchSources v-if="turnSources(turn).length > 0" :key="`${store.sessionId}:${turn.key}`" :sources="turnSources(turn)" />
             <!-- 一轮一行，不是每截一行：一轮里模型会被采样好几次，回答散成几截，
                  每截都挂一个复制按钮只会满屏按钮，而用户要的是整段回答。 -->
             <div v-if="answerDone(turn)" class="msg-meta agent-meta" :class="{ pinned: isMarked(`a-${turn.key}`) }">

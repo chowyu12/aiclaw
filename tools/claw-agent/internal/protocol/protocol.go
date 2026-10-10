@@ -985,7 +985,8 @@ type Item struct {
 	 * 只给路径不给字节：图片进时间线与会话库会让两者都胀几个数量级，而界面
 	 * 要显示时按路径读一次就够了。
 	 */
-	Artifacts []string `json:"artifacts,omitempty"`
+	Artifacts []string       `json:"artifacts,omitempty"`
+	Sources   []SearchSource `json:"sources,omitempty"`
 
 	// ---------- 执行步骤的计时与统计 ----------
 	//
@@ -1118,4 +1119,11 @@ type ConfigLocaleParams struct {
 type SessionRenameParams struct {
 	SessionID string `json:"sessionId"`
 	Title     string `json:"title"`
+}
+
+// SearchSource is local UI metadata from a successful structured search result.
+type SearchSource struct {
+	Title   string `json:"title"`
+	URL     string `json:"url"`
+	Snippet string `json:"snippet"`
 }

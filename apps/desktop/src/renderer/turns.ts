@@ -1,3 +1,4 @@
+import type { SearchSource } from "../shared/types";
 import { referencedFiles } from "./markdown.js";
 import type { TimelineEntry } from "./store.js";
 
@@ -94,4 +95,22 @@ export function stepsElapsed(steps: readonly StepEntry[]): number {
   }
   if (first === Infinity || last <= first) return 0;
   return last - first;
+}
+
+/** Sources are tool metadata, independent of which links the model includes in its answer. */
+export function turnSources(turn: Turn): SearchSource[] {
+  const sources = new Map<string, SearchSource>();
+  for (const step of turn.steps) for (const source of step.sources ?? []) {
+    if (!source || typeof source.url !== "string") continue;
+    try {
+      const url = new URL(source.url);
+      if (!["http:", "https:"].includes(url.protocol) || !url.hostname || url.username || url.password) continue;
+      url.hash = "";
+      if (!sources.has(url.href)) sources.set(url.href, {
+        url: url.href, title: typeof source.title === "string" ? source.title : "",
+        snippet: typeof source.snippet === "string" ? source.snippet : "",
+      });
+    } catch { /* Invalid persisted URLs are not navigation targets. */ }
+  }
+  return [...sources.values()];
 }

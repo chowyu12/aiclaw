@@ -59,6 +59,7 @@ export interface ThreadRefView {
 /** 还原历史用的条目，字段与 claw-agent 的 Item 一致。 */
 export interface HistoryItemView {
   artifacts?: string[];
+  sources?: SearchSource[];
  requestId?: string;
   id: string;
   kind: string;
@@ -389,3 +390,5 @@ export interface BrowserBridgeView {
     fromStore: boolean;
   }[];
 }
+
+export interface SearchSource { title: string; url: string; snippet: string; }

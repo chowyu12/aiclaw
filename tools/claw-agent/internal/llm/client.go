@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
 type Role string
@@ -49,8 +50,9 @@ type Message struct {
 	Content    string
 	ToolCalls  []ToolCall
 	ToolCallID string
-	// Artifacts are local UI metadata, omitted from model requests.
-	Artifacts []string `json:"artifacts,omitempty"`
+	// Artifacts and Sources are local UI metadata, omitted from model requests.
+	Artifacts []string                `json:"artifacts,omitempty"`
+	Sources   []protocol.SearchSource `json:"sources,omitempty"`
 	// Images 是随这条消息一起发给模型的图片（PNG 字节）。
 	//
 	// 只在 RoleUser 上有意义：Chat Completions 的 tool 结果消息必须是纯字符串，

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -8,6 +9,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
 
 // History 把会话历史还原成宿主能直接渲染的时间线条目。
@@ -36,10 +38,12 @@ func (s *Session) History() []protocol.Item {
 	// 先把工具结果按 call id 建索引，下面按 assistant 里的顺序取用。
 	results := make(map[string]string, len(messages))
 	artifacts := make(map[string][]string)
+	sources := make(map[string][]protocol.SearchSource)
 	for _, message := range messages {
 		if message.Role == llm.RoleTool {
 			results[message.ToolCallID] = message.Content
 			artifacts[message.ToolCallID] = message.Artifacts
+			sources[message.ToolCallID] = message.Sources
 		}
 	}
 
@@ -111,6 +115,7 @@ func (s *Session) History() []protocol.Item {
 					// 免得看起来像执行成功但什么都没返回。
 					ToolResult: output,
 					Artifacts:  historyArtifacts(call.Name, output, artifacts[call.ID]),
+					Sources:    historySources(call.Name, output, sources[call.ID]),
 					ToolFailed: !answered || isToolErrorResult(output),
 					Summary:    summarizeCall(llm.ToolCall{Name: call.Name, Arguments: call.Arguments}),
 					Seq:        seq,
@@ -202,4 +207,28 @@ func messageID(m llm.Message, prefix string, index int) string {
 		return m.ID
 	}
 	return historyID(prefix, index)
+}
+
+// Recover only complete structured search responses from legacy tool output.
+func historySources(tool, output string, sources []protocol.SearchSource) []protocol.SearchSource {
+	if len(sources) > 0 {
+		return sources
+	}
+	if tool == "web_search" || strings.HasSuffix(tool, "__web_search") {
+		return tools.ParseSearchSources(output)
+	}
+	if tool != "exec" {
+		return nil
+	}
+	sink := &tools.SourceSink{}
+	ctx := tools.WithSources(context.Background(), sink)
+	tools.RecordSearchSources(ctx, output)
+	for _, line := range strings.Split(output, "\n") {
+		var decoded string
+		if json.Unmarshal([]byte(line), &decoded) == nil {
+			line = decoded
+		}
+		tools.RecordSearchSources(ctx, line)
+	}
+	return sink.Sources()
 }

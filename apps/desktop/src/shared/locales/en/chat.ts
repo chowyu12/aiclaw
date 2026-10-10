@@ -1,5 +1,9 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "参考来源": "Search sources",
+  "参考来源 · {n}": "Search sources · {n}",
+  "关闭来源面板": "Close sources panel",
+  "本轮联网搜索返回的网页，供核对回答。": "Pages returned by this turn's web searches, for checking the answer.",
   "重命名会话": "Rename chat",
   "会话名称": "Chat name",
   "保存中…": "Saving…",

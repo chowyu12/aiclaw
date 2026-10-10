@@ -24,6 +24,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { deflateSync } from "node:zlib";
+import type { SearchSource } from "../packages/agent-client/src/protocol.ts";
 import { ClawAgentClient } from "../packages/agent-client/dist/index.js";
 
 // ---------- 配置 ----------
@@ -85,6 +86,7 @@ interface ToolCall {
   failed: boolean;
   result: string;
   artifacts: string[];
+  sources: SearchSource[];
 }
 interface TurnResult {
   text: string;
@@ -115,6 +117,7 @@ function attach(client: ClawAgentClient): void {
             failed: !!item.toolFailed,
             result: typeof item.toolResult === "string" ? item.toolResult : "",
             artifacts: Array.isArray(item.artifacts) ? (item.artifacts as string[]) : [],
+            sources: Array.isArray(item.sources) ? (item.sources as SearchSource[]) : [],
           });
         }
         return;
@@ -422,15 +425,30 @@ const scenarios: Scenario[] = [
     async run(ctx) {
       const engines = await ctx.client.searchList();
       if (!engines.some((e) => e.enabled && e.apiKeySet)) return { skip: "没有启用且配了 Key 的搜索引擎" };
-      const session = await openSession(ctx, "search", {
-        mcpServers: { web_search: { command: ctx.bin, args: ["mcp-search", `--app-db=${ctx.appDB}`], trusted: true } },
-      });
-      const result = await turn(ctx.client, session.id, "用搜索工具查「阿里云百炼」，把第一条结果的标题回复我。");
-      if (result.error) throw new Error(result.error);
-      const call = result.tools.find((t) => t.name.startsWith("web_search"));
-      if (!call) throw new Error(`没有调用搜索工具：${result.tools.map((t) => t.name).join(",")}`);
-      if (call.failed) throw new Error(`搜索失败：${call.result.slice(0, 160)}`);
-      return result.text.trim().slice(0, 40);
+      const counts: number[] = [];
+      for (const codeMode of [false, true]) {
+        const session = await openSession(ctx, codeMode ? "search-code" : "search", {
+          codeMode,
+          mcpServers: { web_search: { command: ctx.bin, args: ["mcp-search", `--app-db=${ctx.appDB}`], trusted: true } },
+        });
+        const result = await turn(ctx.client, session.id, "用搜索工具查「阿里云百炼」，把第一条结果的标题回复我。");
+        if (result.error) throw new Error(result.error);
+        const call = result.tools.find((t) => codeMode ? t.name === "exec" : t.name.startsWith("web_search"));
+        if (!call) throw new Error(`没有调用搜索工具：${result.tools.map((t) => t.name).join(",")}`);
+        if (call.failed) throw new Error(`搜索失败：${call.result.slice(0, 160)}`);
+        if (!call.sources.length || call.sources.some(source => !/^https?:\/\//.test(source.url))) {
+          throw new Error(`codeMode=${codeMode} 没有返回有效参考来源`);
+        }
+        await ctx.client.sessionResume(session.id);
+        const restored = await ctx.client.sessionHistory(session.id);
+        const sources = restored.flatMap(item => item.sources ?? []);
+        if (JSON.stringify(sources) !== JSON.stringify(result.tools.flatMap(tool => tool.sources))) {
+          throw new Error(`codeMode=${codeMode} 历史参考来源与实时结果不一致`);
+        }
+        counts.push(call.sources.length);
+      }
+      return `普通搜索 ${counts[0]} 个来源，Code Mode ${counts[1]} 个来源，历史恢复一致`;
+
     },
   },
   {

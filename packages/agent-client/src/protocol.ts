@@ -555,6 +555,7 @@ export interface Item {
   toolName?: string;
   /** 这一步产出的文件（相对工作区）：生成的图、合成的语音。 */
   artifacts?: string[];
+  sources?: SearchSource[];
   toolArgs?: string;
   toolResult?: string;
   toolFailed?: boolean;
@@ -748,3 +749,5 @@ export interface FileChange { id: string; path: string; turnId: string; before: 
 
 export interface MCPOAuthInput { url: string; clientId?: string; clientSecret?: string; scope?: string; redirectPort?: number }
 export interface MCPOAuthStatus { state: "connected" | "expired" | "needs_login" | "authorizing"; expiresAt?: number; error?: string; authorizationUrl?: string }
+
+export interface SearchSource { title: string; url: string; snippet: string; }

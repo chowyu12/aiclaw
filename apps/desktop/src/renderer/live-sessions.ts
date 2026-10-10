@@ -12,7 +12,7 @@
  */
 
 import { tr } from "../shared/i18n.js";
-import type { AgentEventPayload, HistoryItemView } from "../shared/types";
+import type { AgentEventPayload, HistoryItemView, SearchSource } from "../shared/types";
 
 /** 用户点停止之后 turn/completed 带的 error：内核按界面语言给出，两种都认。 */
 const INTERRUPTED = new Set(["已中断", "Interrupted"]);
@@ -62,6 +62,7 @@ export type TimelineEntry =
       durationMs?: number;
       /** 这一步产出的文件（相对工作区）：生成的图、合成的语音。 */
       artifacts?: readonly string[];
+      sources?: readonly SearchSource[];
       /** 仅 llm：模型名、第几次采样、首字节、推理耗时、发起了几个工具调用、用量。 */
       round?: number;
       ttftMs?: number;
@@ -110,6 +111,7 @@ type StepStats = Pick<
   | "toolCalls"
   | "tokens"
   | "artifacts"
+  | "sources"
 >;
 
 function findEntry(record: LiveSession, id: string): TimelineEntry | undefined {
@@ -263,6 +265,7 @@ export function applyAgentEvent(
           const detail = toolDetail(item);
           const stats = stepStats(item);
           const artifacts = Array.isArray(item.artifacts) ? (item.artifacts as string[]) : [];
+          const sources = Array.isArray(item.sources) ? (item.sources as SearchSource[]) : [];
           const entry = findEntry(record, id);
           if (!entry || entry.kind !== "step") {
             pushStep(
@@ -272,7 +275,7 @@ export function applyAgentEvent(
               describeTool(item),
               item.toolFailed ? "failed" : "done",
               detail,
-              { ...stats, artifacts },
+              { ...stats, artifacts, sources },
             );
             return applied;
           }
@@ -280,6 +283,7 @@ export function applyAgentEvent(
           entry.detail = detail;
           entry.title = describeTool(item);
           entry.artifacts = artifacts;
+          entry.sources = sources;
           Object.assign(entry, stats);
           return applied;
         }
@@ -408,6 +412,7 @@ export function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
           detail: toolDetail(item as unknown as Record<string, unknown>),
           state: item.toolFailed ? "failed" : "done",
           artifacts: item.artifacts ?? [],
+          sources: item.sources ?? [],
           ...stepStats(item as unknown as Record<string, unknown>),
         });
         break;

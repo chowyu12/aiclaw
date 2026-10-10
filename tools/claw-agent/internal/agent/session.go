@@ -762,7 +762,11 @@ func (s *Session) mountMCP(
 				); err != nil {
 					return "", err
 				}
-				return mcp.CallTool(ctx, toolName, args)
+				output, err := mcp.CallTool(ctx, toolName, args)
+				if err == nil && toolName == "web_search" {
+					tools.RecordSearchSources(ctx, output)
+				}
+				return output, err
 			},
 		})
 		if err != nil {

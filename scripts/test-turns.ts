@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { groupTurns, imageArtifacts, turnArtifacts, unmentionedArtifacts, stepsElapsed } from "../apps/desktop/src/renderer/turns.ts";
+import { groupTurns, imageArtifacts, turnArtifacts, unmentionedArtifacts, turnSources, stepsElapsed } from "../apps/desktop/src/renderer/turns.ts";
 import type { TimelineEntry } from "../apps/desktop/src/renderer/store.ts";
 
 /**
@@ -123,4 +123,15 @@ test("末尾仅保留未提到的产物，绝对路径匹配相对路径，同�
   const turn = groupTurns([user("files"), step("files", { artifacts: ["report.md", "other.docx", "a/same.pdf", "b/same.pdf"] }),
     agent("answer", "已生成 `/Users/user/work/report.md` 和 `same.pdf`。")])[0]!;
   assert.deepEqual(unmentionedArtifacts(turn), ["other.docx", "a/same.pdf", "b/same.pdf"]);
+});
+
+test("search sources deduplicate within a turn and reject unsafe URLs without guessing prose", () => {
+  const source = { title: "Docs", url: "https://example.com/docs#one", snippet: "Summary" };
+  const turns = groupTurns([
+    user("search-1"), step("search", { sources: [source, { ...source, url: "file:///etc/passwd" }, { ...source, url: "javascript:alert(1)" }, { ...source, url: "https://user:secret@example.com" }] }),
+    step("exec", { state: "failed", sources: [{ ...source, url: "https://example.com/docs#two" }] }), agent("reply", "https://not-a-source.example"),
+    user("search-2"), agent("ordinary"),
+  ]);
+  assert.deepEqual(turnSources(turns[0]!), [{ ...source, url: "https://example.com/docs" }]);
+  assert.deepEqual(turnSources(turns[1]!), []);
 });

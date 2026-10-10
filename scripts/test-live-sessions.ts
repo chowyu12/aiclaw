@@ -13,6 +13,8 @@ import { reactive } from "vue";
 import {
   applyAgentEvent,
   ensureLive,
+  restoreHistory,
+  type TimelineEntry,
   newLive,
   type LiveSession,
 } from "../apps/desktop/src/renderer/live-sessions.ts";
@@ -167,4 +169,14 @@ test("请求身份认领相同文字的消息；重复通知不消费第二条�
   assert.equal(record.timeline.length, 2);
   assert.equal(record.timeline[0]!.id, "server1");
   assert.equal(record.timeline[1]!.id, "local2");
+});
+
+test("search sources propagate through both live completion and history restoration", () => {
+  const sources = [{title: "Docs", url: "https://example.com", snippet: "Summary"}];
+  const live: Record<string, LiveSession> = {};
+  applyAgentEvent(live, event("item/started", "A", {item: {id:"search", kind:"toolCall", toolName:"search__web_search"}}), "A");
+  applyAgentEvent(live, event("item/completed", "A", {item: {id:"search", kind:"toolCall", sources}}), "A");
+  assert.deepEqual((live.A!.timeline[0] as Extract<TimelineEntry,{kind:"step"}>).sources, sources);
+  const restored = restoreHistory([{id:"search", kind:"toolCall", sources}]);
+  assert.deepEqual((restored[0] as Extract<TimelineEntry,{kind:"step"}>).sources, sources);
 });

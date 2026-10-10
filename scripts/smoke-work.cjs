@@ -35,7 +35,7 @@ app.whenReady().then(async()=>{
  handle('mcpOAuthStatus',()=>({state:authState}));handle('mcpOAuthLogin',(_e,input)=>{authCalls.push(input);authState='authorizing';return {state:authState};});handle('mcpOAuthLogout',()=>{authState='needs_login';return {disconnected:true};});
  handle('sessionConfigure',()=>({tools:[],mcpStatus:{}}));
  handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
- handle('sessionResume',(_e,id)=>({sessionId:id,workspace:sessionWorkspace,tools:[],mcpStatus:{},model:'test',providerId:1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md']},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论',at:Date.now()}]}));
+ handle('sessionResume',(_e,id)=>({sessionId:id,workspace:sessionWorkspace,tools:[],mcpStatus:{},model:'test',providerId:1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论',at:Date.now()}]}));
  handle('sessionWork',(_e,id)=>({goal:id==='s'?goal:null,pending:id==='s'?pending:[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
  handle('changesList',(_e,id)=>id==='s'?changes:[]);
  handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
@@ -86,6 +86,21 @@ app.whenReady().then(async()=>{
  await click('处理这条输入');await wait("!document.querySelector('.work-panel').textContent.includes('queued input')");
  await click('已检查，移除恢复提示');await wait("!document.querySelector('.work-panel').textContent.includes('uncertain input')");
  check('generated image visible outside collapsed steps after history restore',await wait("document.querySelector('.generated-images img')?.naturalWidth>0 && !document.querySelector('.steps-body')"));
+ check('history search sources render one deduplicated entry per safe URL',await wait("document.querySelector('.sources-trigger')?.textContent.includes('参考来源 · 2')"));
+ await js("document.querySelector('.sources-trigger').click()");
+ check('sources drawer shows domains titles and snippets as plain text with focus',await wait("document.querySelectorAll('.source-card').length===2")&&await js("document.querySelector('.sources-drawer').contains(document.activeElement) && [...document.querySelectorAll('.source-title')].some(b=>b.textContent==='版本更新 <b>说明</b>') && !document.querySelector('.source-title b') && document.querySelector('.source-domain').textContent.includes('example.com') && document.querySelector('.source-snippet').textContent.includes('功能说明')"));
+ const sourceLinks=[];win.webContents.setWindowOpenHandler(({url})=>{sourceLinks.push(url);return {action:'deny'};});
+ await js("document.querySelector('.source-card').click()");
+ check('source card opens its exact HTTP URL',await wait("!!document.querySelector('.sources-drawer')")&&sourceLinks[0]==='https://example.com/docs');
+ writeFileSync('/tmp/aiclaw-search-sources.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.querySelector('.source-card:last-child').focus();document.querySelector('.sources-drawer').dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}))");
+ check('source dialog traps keyboard focus',await js("document.activeElement.classList.contains('sources-close')"));
+ win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});
+ check('Escape closes sources and restores trigger focus',await wait("!document.querySelector('.sources-drawer')")&&await js("document.activeElement.classList.contains('sources-trigger')"));
+ await js("document.querySelector('.sources-trigger').click()");
+ await wait("!!document.querySelector('.sources-overlay')");
+ await js("document.querySelector('.sources-overlay').click()");
+ check('click outside closes source panel',await wait("!document.querySelector('.sources-drawer')"));
  check('user timestamp leads compact labelled icon buttons',await js("document.querySelector('.user-meta')?.firstElementChild.tagName==='TIME' && document.querySelectorAll('.user-meta button').length===2 && [...document.querySelectorAll('.user-meta button')].every(b=>b.getAttribute('aria-label')&&b.querySelector('svg')&&!b.querySelector('span'))"));
  check('user toolbar aligns with bubble right edge',await js("Math.abs(document.querySelector('.bubble').getBoundingClientRect().right-document.querySelector('.user-meta button:last-child').getBoundingClientRect().right)<1"));
  check('answer timestamp leads the icon toolbar',await js("document.querySelector('.agent-meta')?.firstElementChild.tagName==='TIME'"));
@@ -181,6 +196,10 @@ app.whenReady().then(async()=>{
  await click('撤销此改动');await wait("document.querySelector('.work-panel').textContent.includes('已撤销')");check('undo uses selected change',changes[0].state==='undone');
  await js("document.querySelector('.user-meta .meta-fork').click()");await wait("document.querySelector('.work-panel').textContent.includes('查看来源会话')");
  check('fork uses chosen message and opens provenance',forks.length===1&&forks[0].itemId==='u1'&&await js("document.querySelector('.work-panel').textContent.includes('查看来源会话')"));
+ check('ordinary chat does not display another chats sources',await wait("!document.querySelector('.sources-trigger') && !document.querySelector('.sources-drawer')"));
+ win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'fork',item:{id:'live-search',kind:'toolCall',toolName:'search__web_search',sources:[{title:'Live result',url:'https://live.example.com/',snippet:'Live summary'}]}}});
+ check('live tool completion displays sources without reloading history',await wait("document.querySelector('.sources-trigger')?.textContent.includes('参考来源 · 1')"));
+
 
  await click('⚙');
  const nav = async title => { const selector=`[...document.querySelectorAll('.sidebar .item')].find(item=>item.querySelector('.title')?.textContent.trim()===${JSON.stringify(title)})`;await wait(`!!(${selector})`);await js(`(${selector}).click()`); };

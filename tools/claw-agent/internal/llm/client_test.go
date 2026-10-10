@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
 // sse 把若干 chunk 拼成一段 SSE 响应体。
@@ -246,5 +248,17 @@ func TestToolCallMessageStillNullsContentEvenWithNoImages(t *testing.T) {
 	})
 	if wire.Messages[0].Content != nil {
 		t.Errorf("带 tool_calls 的 assistant 消息 content 必须是 null，实际 %v", wire.Messages[0].Content)
+	}
+}
+
+func TestSearchSourceMetadataIsNotSentToModel(t *testing.T) {
+	body, err := json.Marshal(buildWireRequest(Request{Model: "test", Messages: []Message{{Role: RoleTool, ToolCallID: "search", Content: "result", Sources: []protocol.SearchSource{{Title: "local-ui-title", URL: "https://local-ui.example", Snippet: "local-ui-snippet"}}}}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, hidden := range []string{"sources", "local-ui-title", "local-ui.example", "local-ui-snippet"} {
+		if strings.Contains(string(body), hidden) {
+			t.Fatalf("metadata leaked into model request: %s", body)
+		}
 	}
 }
