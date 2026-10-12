@@ -239,22 +239,6 @@ function pickMention(session: SessionSummaryView): void {
   });
 }
 
-/** 「@ 引用会话」按钮：在光标处插一个 @，弹出列表。 */
-function startMention(): void {
-  const element = input.value;
-  if (!element) return;
-  const caret = element.selectionStart ?? draft.value.length;
-  const before = draft.value.slice(0, caret);
-  const glue = before && !/\s$/.test(before) ? " " : "";
-  draft.value = `${before}${glue}@${draft.value.slice(caret)}`;
-  void nextTick(() => {
-    element.focus();
-    const position = caret + glue.length + 1;
-    element.setSelectionRange(position, position);
-    updateMention();
-  });
-}
-
 /** 输入框的键盘：列表开着时 ↑↓ / Enter / Tab / Esc 归它，不然照常。 */
 function onMentionKey(event: KeyboardEvent): boolean {
   if (!mention.value || mentionList.value.length === 0 || event.isComposing) return false;
@@ -899,10 +883,6 @@ const forking = ref(false);
                 <button class="chip" :title="t(`贴图片或文本文件（也可以直接粘贴/拖进来）`)" @click="picker?.click()">
                   <span class="chip-icon">+</span>
                   {{ t("附件") }}
-                </button>
-                <button class="chip" :title="t(`引用另一个会话：模型会先读它（也可以直接打 @）`)" @mousedown.prevent @click="startMention()">
-                  <span class="chip-icon">@</span>
-                  {{ t("引用会话") }}
                 </button>
 
                 <!-- 工作区按会话设。摆在这里而不是配置页：它是「这次要在哪儿
