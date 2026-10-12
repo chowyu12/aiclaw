@@ -207,6 +207,13 @@ export const shell: Record<string, string> = {
   "新建会话失败：{error}": "Couldn't create a chat: {error}",
 
   // 检查更新（main/updater.ts）
+  "检查更新…": "Check for Updates…",
+  "检查更新": "Check for Updates",
+  "暂时无法检查更新": "Unable to check for updates right now",
+  "发现新版本 {version}": "Version {version} is available",
+  "当前已是最新版本": "You're up to date",
+  "当前版本 {version}": "Current version: {version}",
+  "当前版本 {current}，最新版本 {latest}。请通过侧边栏的更新按钮升级。": "Current version: {current}. Latest version: {latest}. Use the update button in the sidebar to upgrade.",
   "升级并重启": "Update and restart",
   "下载新版本": "Download new version",
   "这个平台不支持自动下载": "Automatic download isn't supported on this platform",

@@ -283,6 +283,10 @@ export const actions = {
       const { received, total } = payload as { received: number; total: number };
       state.updateProgress = total > 0 ? Math.round((received / total) * 100) : -1;
     });
+    window.aiclaw.on.updateCheck((payload) => {
+      state.update = payload as UpdateStatusView;
+      if (state.update.hasUpdate && state.update.canInstall) void actions.prepareUpdate();
+    });
   },
 
   /** 重读配置：主进程自己改了配置（比如重新生成了浏览器配对码）之后调。 */

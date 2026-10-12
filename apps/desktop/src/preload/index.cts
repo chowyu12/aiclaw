@@ -220,6 +220,11 @@ const api = {
       ipcRenderer.on(IPC.onUpdateProgress, listener);
       return () => ipcRenderer.off(IPC.onUpdateProgress, listener);
     },
+    updateCheck: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => handler(payload);
+      ipcRenderer.on(IPC.onUpdateCheck, listener);
+      return () => ipcRenderer.off(IPC.onUpdateCheck, listener);
+    },
   },
 };
 

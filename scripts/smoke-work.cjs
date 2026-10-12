@@ -21,6 +21,7 @@ app.whenReady().then(async()=>{
  const extraSessions=[{id:'other',title:'Other workspace',workdir:'/other/smoke'},{id:'other-child',title:'Other child',workdir:'/other/smoke',parentId:'other'},{id:'general',title:'General chat',workdir:''},{id:'c_channel',title:'Channel chat',workdir:'/tmp/smoke'},{id:'scheduled',title:'Scheduled chat',workdir:'/tmp/smoke'},{id:'child',title:'Child agent',workdir:'/tmp/smoke',parentId:'s'}].map(s=>({...s,model:'test',turnCount:1,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z'}));
  const list=()=>[{id:'s',title:sessionTitle,model:'test',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),turnCount:1,workdir:sessionWorkspace},...(forked?[{id:'fork',title:'Workflow test (fork)',model:'test',turnCount:1,workdir:'/tmp/smoke',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}]:[]),...extraSessions,...newSessions].filter(s=>!archivedIds.has(s.id));
  const handle=(key,fn)=>ipcMain.handle(IPC[key],fn);
+ let updatePreparations=0;handle('updatePrepare',()=>{updatePreparations++;return {ready:false,version:'99.0.0',detail:''};});
  handle('fileMedia',(_e,path)=>{mediaReads.push(path);if(path==='generated/missing.png')throw Error('Image file missing');return {kind:'image',dataUrl:imageData};});
  handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}return {path:input.path,language:'markdown',content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">'};});
  handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
@@ -265,6 +266,10 @@ app.whenReady().then(async()=>{
  await js("window.confirm=message=>{window.archiveConfirmation=message;return true};true");
  await click('归档工作区会话');
  check('workspace archive includes children and leaves other workspaces untouched',await wait("!document.querySelector('[data-bucket-id=\"workspace:/other/smoke\"]')")&&archiveCalls.length===2&&archivedIds.has('other-child')&&!archivedIds.has('s')&&!archivedIds.has('child')&&await js("window.archiveConfirmation.includes('3 个会话')"));
+ win.webContents.send(IPC.onUpdateCheck,{current:'3.7.8',latest:'99.0.0',hasUpdate:true,canInstall:true,error:''});
+ check('menu update result crosses preload and uses existing upgrade entry',await wait("document.querySelector('.sidebar .update')?.textContent.includes('99.0.0')")&&updatePreparations>0);
+ win.webContents.send(IPC.onUpdateCheck,{current:'3.7.8',latest:'3.7.8',hasUpdate:false,canInstall:true,error:''});
+ check('up-to-date menu result clears upgrade entry',await wait("!document.querySelector('.sidebar .update')"));
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);

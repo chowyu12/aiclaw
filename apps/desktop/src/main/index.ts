@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, Notification, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, systemPreferences } from "electron";
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -111,6 +111,35 @@ function logApp(line: string): void {
   logFile.append("app", line);
 }
 
+function installAppMenu(): void {
+  if (process.platform !== "darwin") return;
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: "AIClaw", submenu: [
+      { role: "about" },
+      { label: tr("检查更新…"), click: async (item) => {
+        item.enabled = false;
+        try {
+          if (!mainWindow) createWindow();
+          mainWindow?.show();
+          const status = await updater.check();
+          push(IPC.onUpdateCheck, status);
+          await dialog.showMessageBox({
+            type: status.error ? "warning" : "info",
+            title: tr("检查更新"),
+            message: status.error ? tr("暂时无法检查更新") : status.hasUpdate ? tr("发现新版本 {version}", { version: status.latest }) : tr("当前已是最新版本"),
+            detail: status.error || (status.hasUpdate ? tr("当前版本 {current}，最新版本 {latest}。请通过侧边栏的更新按钮升级。", { current: status.current, latest: status.latest }) : tr("当前版本 {version}", { version: status.current })),
+            buttons: [tr("知道了")],
+          });
+        } finally { item.enabled = true; }
+      } },
+      { type: "separator" }, { role: "services" },
+      { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" },
+      { type: "separator" }, { role: "quit" },
+    ] },
+    { role: "fileMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" },
+  ]));
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1180,
@@ -194,6 +223,7 @@ function registerIpc(): void {
     // 主进程发的系统通知、对话框也跟着换语言。
     if ("language" in patch) {
       setCurrentLocale(normalizeLocale(result.language));
+      installAppMenu();
       await sessions.setKernelLocale(result.language);
     }
     // 通道会话（微信、企业微信）是内核自己建的，角色配置要推过去才用得上。
@@ -606,6 +636,7 @@ if (!app.requestSingleInstanceLock()) {
     setCurrentLocale(normalizeLocale(store.readConfig().language));
     registerIpc();
     createWindow();
+    installAppMenu();
     void sessions.syncBrowserBridge();
     scheduler.start();
     app.on("activate", () => {

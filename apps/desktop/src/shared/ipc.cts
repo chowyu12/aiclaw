@@ -136,4 +136,5 @@ export const IPC = {
   /** 要渲染层打开某个会话（点了定时任务的系统通知）。 */
   onOpenSession: "push:openSession",
   onUpdateProgress: "push:updateProgress",
+  onUpdateCheck: "push:updateCheck",
 } as const;
