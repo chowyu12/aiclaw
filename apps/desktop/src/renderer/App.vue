@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, watch } from "vue";
 import { actions, store } from "./store";
 import ChatView from "./views/ChatView.vue";
 import SettingsShell from "./views/SettingsShell.vue";
@@ -8,6 +8,9 @@ import ApprovalDialog from "./views/ApprovalDialog.vue";
 import { locale, t } from "./i18n";
 
 /** 「配完了」= 选好了默认模型（它所属的模型服务在库里带着端点与 Key）。 */
+const FilePreview = defineAsyncComponent(() => import("./views/FilePreview.vue"));
+watch(() => [store.sessionId, store.view], () => actions.closeFilePreview());
+
 const configured = computed(() => Boolean(store.config?.providerId && store.config.model));
 
 onMounted(async () => {
@@ -54,8 +57,9 @@ onMounted(() => {
       </div>
 
 
-      <div class="content">
+      <div class="content" :class="{ 'with-preview': store.view === 'chat' && !!store.filePreview }">
         <ChatView v-if="store.view === 'chat'" :configured="configured" />
+        <FilePreview v-if="store.view === 'chat' && store.filePreview && store.filePreview.sessionId === store.sessionId" :key="store.filePreview.request" :preview="store.filePreview" />
         <!-- 其余四项是同一个设置页的分栏，外壳带顶部分栏与「返回对话」。 -->
         <SettingsShell v-else />
       </div>
@@ -87,9 +91,17 @@ onMounted(() => {
 }
 
 .content {
+  display: flex;
+  position: relative;
   flex: 1;
+  min-width: 0;
   min-height: 0;
 }
+.content > :first-child { flex: 1; min-width: 0; }
+.content > .file-preview { flex: none; }
+.content.with-preview :deep(.bar), .content.with-preview :deep(.bar-left) { flex-wrap: wrap; }
+.content.with-preview :deep(.chip) { white-space: nowrap; flex-shrink: 0; }
+.content.with-preview :deep(.bar-right) { margin-left: auto; }
 
 
 

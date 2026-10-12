@@ -1,4 +1,6 @@
 import { reactive, readonly } from "vue";
+import type { FileChange } from "@aiclaw/agent-client";
+import { fileLanguage, type TextFilePreview } from "../shared/file-preview";
 import { describeError } from "./errors";
 import { defaultModelChoice, modelChoices, usable, type ModelChoice } from "./model-choices";
 import {
@@ -45,11 +47,18 @@ declare global {
 
 const EMPTY_TIMELINE: TimelineEntry[] = [];
 
+export interface FilePreviewState {
+  request: number; sessionId: string; path: string; content: string; language: string;
+  loading: boolean; error: string; change?: FileChange;
+}
+let previewRequest = 0;
+
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
   view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules" | "archived",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
+  filePreview: null as FilePreviewState | null,
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
   sessionInfo: null as SessionStartView | null,
   /** 当前会话用的模型与模型服务。与配置页的默认值分开：切模型只影响当前会话。 */
@@ -589,7 +598,30 @@ export const actions = {
     catch (error) { state.error = describeError(error); }
   },
 
+  closeFilePreview(): void { state.filePreview = null; },
+
+  previewChange(change: FileChange): void {
+    state.filePreview = { request: ++previewRequest, sessionId: state.sessionId, path: change.path,
+      content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, error: "", change: plain(change) };
+  },
+
   async openFile(path: string): Promise<void> {
+    if (!fileLanguage(path) || !state.sessionId) return actions.openSystemFile(path);
+    const sessionId = state.sessionId, request = ++previewRequest;
+    state.filePreview = { request, sessionId, path, content: "", language: fileLanguage(path)!, loading: true, error: "" };
+    try {
+      const result = await window.aiclaw.files.preview(path, sessionId) as TextFilePreview | null;
+      if (request !== state.filePreview?.request || sessionId !== state.sessionId) return;
+      if (!result) { state.filePreview = null; await actions.openSystemFile(path); return; }
+      state.filePreview = { ...state.filePreview, ...result, loading: false };
+    } catch (error) {
+      if (request === state.filePreview?.request && sessionId === state.sessionId) {
+        state.filePreview.error = describeError(error); state.filePreview.loading = false;
+      }
+    }
+  },
+
+  async openSystemFile(path: string): Promise<void> {
     try {
       const result = (await window.aiclaw.files.open(path)) as {
         ok: boolean;

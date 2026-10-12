@@ -334,3 +334,8 @@ function sanitizer(): ReturnType<typeof createDOMPurify> {
 export function renderMarkdown(source: string): string {
   return sanitizer().sanitize(md.render(source), PURIFY_CONFIG) as unknown as string;
 }
+
+/** Local document previews never fetch embedded images or CSS resources automatically. */
+export function renderPreviewMarkdown(source: string): string {
+  return sanitizer().sanitize(md.render(source), { ...PURIFY_CONFIG, FORBID_TAGS: ["img"], FORBID_ATTR: ["style"] }) as unknown as string;
+}

@@ -4,15 +4,13 @@ import type { SessionWork, FileChange, GoalUpdate, PlanStep, Goal } from "@aicla
 import { store, actions } from "../store";
 import { t } from "../i18n";
 import { describeError } from "../errors";
-import { fileDiff } from "../file-diff";
 
 const sessionApi = window.aiclaw.session;
 const work = ref<SessionWork | null>(null);
 const changes = ref<FileChange[]>([]);
 const saving = ref(false), error = ref(""), creating = ref(false);
 const objective = ref(""), acceptance = ref(""), plan = ref(""), evidence = ref("");
-const tokenBudget = ref(0), minutes = ref(0), selected = ref("");
-const diff = computed(() => { const c = changes.value.find(c => c.id === selected.value); return c ? fileDiff(c.before, c.after, 3000) : []; });
+const tokenBudget = ref(0), minutes = ref(0);
 const statusLabels = computed(() => ({active:t("进行中"),paused:t("已暂停"),blocked:t("等待处理"),complete:t("已完成"),budget_exhausted:t("预算已用尽")}));
 let generation = 0;
 async function refresh() {
@@ -25,7 +23,7 @@ async function refresh() {
   } catch(e) { if(ticket===generation) error.value=describeError(e); }
 }
 watch(() => [store.sessionId,store.sessionInfo?.sessionId,store.busy],()=>{void refresh();},{immediate:true});
-watch(() => store.sessionId,()=>{error.value="";creating.value=false;selected.value="";});
+watch(() => store.sessionId,()=>{error.value="";creating.value=false;});
 const unsubscribe=window.aiclaw.on.agentEvent((raw:unknown)=>{
  const event=raw as {method?:string;params?:{sessionId?:string;goal?:Goal;item?:{toolName?:string}}};
  if(event.params?.sessionId===store.sessionId && event.method==="session/workUpdated" && event.params.goal && work.value){work.value.goal=event.params.goal;return;}
@@ -108,19 +106,16 @@ function editBudget(){tokenBudget.value=work.value?.goal?.tokenBudget??0;minutes
   <summary>{{t("文件改动")}} ({{changes.length}})</summary>
   <p>{{t("记录 write_file 和 edit_file 的文本改动；命令及外部工具改动不在此列表。")}}</p>
   <article v-for="change in changes" :key="change.id">
-   <button @click="selected=selected===change.id?'':change.id">{{change.path}}</button>
+   <button @click="actions.previewChange(change)">{{change.path}}</button>
    <span v-if="change.state==='undone'">{{t("已撤销")}}</span>
    <span v-else-if="change.conflict">{{t("文件已变化，禁止覆盖撤销")}}</span>
    <button v-else :disabled="saving||store.busy" @click="perform(id=>sessionApi.undo(id,change.id))">{{t("撤销此改动")}}</button>
-   <div v-if="selected===change.id" class="diff" role="region" :aria-label="t('文本差异')">
-    <div v-for="(line,index) in diff" :key="index" :class="line.kind"><span>{{line.kind==='add'?'+':line.kind==='remove'?'-':' '}}</span>{{line.text}}</div>
-    <small>{{t("最多显示 3000 行差异；撤销前会校验完整文件内容。")}}</small>
-   </div>
+
   </article>
  </details>
  <small>{{t("分叉仅复制对话历史，继续共用原工作目录。")}}</small>
 </section>
 </template>
 <style scoped>
-.work-panel{margin:0 auto 18px;max-width:860px;padding:12px;border:1px solid var(--rule);border-radius:10px;font-size:12px}.work-toolbar{display:flex;gap:8px;flex-wrap:wrap}.work-panel details{margin-top:10px}.work-panel summary{cursor:pointer}.work-panel label{display:flex;flex-direction:column;gap:4px;margin:8px 0}.work-panel textarea{min-height:55px;width:100%;box-sizing:border-box}.work-panel input{max-width:200px}.work-panel button{cursor:pointer;padding:5px 10px;border:1px solid var(--rule-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--ink-2);font:inherit}.work-panel button:hover:not(:disabled){background:var(--hover)}.work-panel button:disabled{opacity:.45;cursor:default}.work-panel select{display:inline-block;width:125px;padding:5px;margin-right:8px}.work-panel li{line-height:1.8}.work-panel article{padding:8px 0;border-bottom:1px solid var(--rule)}.work-panel p{white-space:pre-wrap;overflow-wrap:anywhere}.work-panel ol{padding-left:24px}.work-panel li{margin:6px 0}.diff{max-height:360px;overflow:auto;white-space:pre;font-family:monospace;margin-top:8px}.diff .add{background:#19875420}.diff .remove{background:#dc354520}.diff span{display:inline-block;width:16px}.work-panel small{display:block;margin-top:8px;opacity:.7}
+.work-panel{margin:0 auto 18px;max-width:860px;padding:12px;border:1px solid var(--rule);border-radius:10px;font-size:12px}.work-toolbar{display:flex;gap:8px;flex-wrap:wrap}.work-panel details{margin-top:10px}.work-panel summary{cursor:pointer}.work-panel label{display:flex;flex-direction:column;gap:4px;margin:8px 0}.work-panel textarea{min-height:55px;width:100%;box-sizing:border-box}.work-panel input{max-width:200px}.work-panel button{cursor:pointer;padding:5px 10px;border:1px solid var(--rule-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--ink-2);font:inherit}.work-panel button:hover:not(:disabled){background:var(--hover)}.work-panel button:disabled{opacity:.45;cursor:default}.work-panel select{display:inline-block;width:125px;padding:5px;margin-right:8px}.work-panel li{line-height:1.8}.work-panel article{padding:8px 0;border-bottom:1px solid var(--rule)}.work-panel p{white-space:pre-wrap;overflow-wrap:anywhere}.work-panel ol{padding-left:24px}.work-panel li{margin:6px 0}.work-panel small{display:block;margin-top:8px;opacity:.7}
 </style>

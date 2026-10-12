@@ -23,7 +23,7 @@ if (!(globalThis as { window?: unknown }).window) {
   (globalThis as { document?: unknown }).document = dom.window.document;
 }
 
-const { renderMarkdown, looksLikePath, referencedFiles } = await import("../apps/desktop/src/renderer/markdown.ts");
+const { renderMarkdown, looksLikePath, referencedFiles, renderPreviewMarkdown } = await import("../apps/desktop/src/renderer/markdown.ts");
 
 /**
  * 把块之间的换行挤掉再比对。
@@ -577,4 +577,11 @@ test("mp4 当音频收：模型读不了视频，但录屏配音是常见的输�
   assert.deepEqual(classifyFile({ name: "a.mp4", type: "video/mp4", size: 100 }, 0, 0), {
     accept: "audio",
   });
+});
+
+test("local Markdown previews never fetch images or inline CSS resources", () => {
+ const html=renderPreviewMarkdown('# Title\n\n![remote](https://example.com/image.png)\n\n<img src="https://example.com/raw.png"><span style="background:url(https://example.com/private)">Text</span><script>alert(1)</script>');
+ const doc=new JSDOM(html).window.document;
+ assert.ok(doc.querySelector('h3'));assert.equal(doc.querySelector('img'),null);assert.equal(doc.querySelector('[style]'),null);assert.equal(doc.querySelector('script'),null);
+ assert.ok(doc.body.textContent?.includes('Text'));
 });

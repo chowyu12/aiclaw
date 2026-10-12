@@ -98,6 +98,7 @@ export const IPC = {
   diagnosticsRead: "diagnostics:read",
   workspaceReveal: "workspace:reveal",
   fileOpen: "file:open",
+  filePreview: "file:preview",
   /** 读一个图片/音频文件，回 data URL，界面内联显示用。 */
   fileMedia: "file:media",
   /** 把贴进来的音频落到磁盘，回路径。 */

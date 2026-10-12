@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {fileDiff} from "../apps/desktop/src/renderer/file-diff.ts";
+import {fileDiff, numberedDiff, splitDiff} from "../apps/desktop/src/renderer/file-diff.ts";
 
 test("diff reconstructs both versions including trailing newlines",()=>{
  for(const [before,after] of [["a\nb\nc\n","a\nnew\nc\n"],["","new"],["old",""],["same","same"],["x\n","x"],["<script>\n你好","<img>\n你好"]]) {
@@ -43,4 +43,13 @@ test("bounded previews preserve the prefix of the full diff in every size branch
   const full = fileDiff(before!, after!);
   for (const limit of [0, 1, 5, 100, 2000]) assert.deepEqual(fileDiff(before!, after!, limit), full.slice(0, limit));
  }
+});
+
+test("numbered unified and side-by-side diffs retain both line number sequences", () => {
+ const lines=numberedDiff("same\nold\nremoved\nend","same\nnew\nend");
+ assert.deepEqual(lines.map(l=>[l.kind,l.beforeLine,l.afterLine]),[["same",1,1],["remove",2,undefined],["remove",3,undefined],["add",undefined,2],["same",4,3]]);
+ const rows=splitDiff(lines);
+ assert.equal(rows.length,4);assert.equal(rows[1]?.before?.text,"old");assert.equal(rows[1]?.after?.text,"new");
+ assert.equal(rows[2]?.before?.text,"removed");assert.equal(rows[2]?.after,undefined);
+ assert.equal(rows[3]?.after?.afterLine,3);
 });

@@ -13,15 +13,16 @@ app.whenReady().then(async()=>{
  let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',sessionWorkspace='/tmp/smoke',renameFails=false;const renameCalls=[];
  let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[];
  let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
- const mediaReads=[],openedFiles=[];
+ const mediaReads=[],openedFiles=[],previewReads=[];let deferPreview=false,resolvePreview;
  const imageData='data:image/png;base64,'+readFileSync(join(desktop,'assets/logo-source.png')).toString('base64');
- const changes=[{id:'c',path:'/tmp/smoke/example.txt',before:'old\nkeep\n',after:'new\nkeep\n',state:'applied',conflict:false,turnId:'t1',createdAt:1},{id:'conflict',path:'/tmp/smoke/other.txt',before:'x',after:'y',state:'applied',conflict:true,turnId:'t2',createdAt:2}];
+ const changes=[{id:'c',path:'/tmp/smoke/example.sql',before:'-- Users\nSELECT id FROM users WHERE active = 0;\n',after:'-- Users\nSELECT id, email FROM users WHERE active = 1;\n',state:'applied',conflict:false,turnId:'t1',createdAt:1},{id:'conflict',path:'/tmp/smoke/other.txt',before:'x',after:'y',state:'applied',conflict:true,turnId:'t2',createdAt:2}];
  const groups={groups:[{id:'g_saved',name:'原有分组'}],assignments:{s:'g_saved',scheduled:'__scheduled__',c_channel:'g_saved'},collapsed:{},seenAt:{}};
  const newSessions=[],archivedIds=new Set(),startedWorkspaces=[],archiveCalls=[],revealedWorkspaces=[];
  const extraSessions=[{id:'other',title:'Other workspace',workdir:'/other/smoke'},{id:'other-child',title:'Other child',workdir:'/other/smoke',parentId:'other'},{id:'general',title:'General chat',workdir:''},{id:'c_channel',title:'Channel chat',workdir:'/tmp/smoke'},{id:'scheduled',title:'Scheduled chat',workdir:'/tmp/smoke'},{id:'child',title:'Child agent',workdir:'/tmp/smoke',parentId:'s'}].map(s=>({...s,model:'test',turnCount:1,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z'}));
  const list=()=>[{id:'s',title:sessionTitle,model:'test',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),turnCount:1,workdir:sessionWorkspace},...(forked?[{id:'fork',title:'Workflow test (fork)',model:'test',turnCount:1,workdir:'/tmp/smoke',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}]:[]),...extraSessions,...newSessions].filter(s=>!archivedIds.has(s.id));
  const handle=(key,fn)=>ipcMain.handle(IPC[key],fn);
  handle('fileMedia',(_e,path)=>{mediaReads.push(path);if(path==='generated/missing.png')throw Error('Image file missing');return {kind:'image',dataUrl:imageData};});
+ handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}return {path:input.path,language:'markdown',content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">'};});
  handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
  handle('configRead',()=>config);handle('configWrite',(_e,p)=>Object.assign(config,p));handle('runtimeStart',()=>undefined);
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>[{id:'on-write',label:'默认'}]);
@@ -123,7 +124,15 @@ app.whenReady().then(async()=>{
  check('document card opens exact path through preload',openedFiles.pop()==='generated/2026 AI 行业趋势.docx');
  check('inline file cards hide directories while retaining exact paths',await js("document.querySelector('.prose .file-card').getAttribute('data-file-path')==='/tmp/smoke/generated/2026 AI 行业趋势.md' && !document.querySelector('.prose').textContent.includes('/tmp/smoke/')"));
  await js("document.querySelector('.prose .file-card').dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}))");
- check('inline file card opens by keyboard using full path',openedFiles.pop()==='/tmp/smoke/generated/2026 AI 行业趋势.md');
+ check('inline file card opens by keyboard using full path and owning session',previewReads.at(-1)?.path==='/tmp/smoke/generated/2026 AI 行业趋势.md'&&previewReads.at(-1)?.sessionId==='s');
+ check('Markdown card opens rendered preview without loading embedded remote images',await wait("document.querySelector('.file-preview .markdown-preview')?.textContent.includes('文件预览')")&&await js("!document.querySelector('.file-preview img')"));
+ await click('原文');check('source preview has line numbers and escaped HTML',await wait("document.querySelector('.file-preview .source-code')?.textContent.includes('SELECT id FROM users')")&&await js("!!document.querySelector('.file-preview .line-numbers') && !document.querySelector('.file-preview img')"));
+ check('opening a preview keeps composer actions on readable horizontal labels',await js("[...document.querySelectorAll('.composer .chip')].every(button=>getComputedStyle(button).whiteSpace==='nowrap')"));
+ await click('用系统应用打开');check('preview system-open action retains exact path',openedFiles.pop()==='/tmp/smoke/generated/2026 AI 行业趋势.md');
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-file-preview-source.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.querySelector('.file-preview button[aria-label=\"关闭文件预览\"]').focus()");
+ win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});check('Escape closes file preview',await wait("!document.querySelector('.file-preview')"));
  check('chat uses flat reference background',await js("getComputedStyle(document.querySelector('.chat')).backgroundColor==='rgb(243, 248, 244)' && getComputedStyle(document.body).backgroundImage==='none'"));
 
  writeFileSync('/tmp/aiclaw-inline-files.png',(await win.webContents.capturePage()).toPNG());
@@ -190,12 +199,26 @@ app.whenReady().then(async()=>{
  check('goal updates stream independently of tool display mode',await wait("document.querySelector('.work-panel').textContent.includes('123')"));
 
  await js("[...document.querySelectorAll('.work-panel summary')].find(s=>s.textContent.includes('文件改动')).click()");
- await click('/tmp/smoke/example.txt');check('file diff renders additions and deletions',await wait("document.querySelector('.diff .add')?.offsetHeight>0 && document.querySelector('.diff .remove')?.offsetHeight>0"));
+ await click('/tmp/smoke/example.sql');check('file diff renders additions and deletions',await wait("document.querySelector('.diff .add')?.offsetHeight>0 && document.querySelector('.diff .remove')?.offsetHeight>0"));
+ check('recorded SQL changes open in a side-by-side preview with both line numbers',await js("!!document.querySelector('.file-preview .split-diff') && document.querySelectorAll('.diff-labels span').length===2 && document.querySelectorAll('.split-row .line-number').length===6 && !!document.querySelector('.file-preview .hljs-keyword')"));
+ await click('统一');check('unified diff preserves added and removed markers',await wait("document.querySelectorAll('.unified-diff .diff-row').length===4"));
+ await click('修改前');check('before tab shows original content',await wait("document.querySelector('.file-preview .source-code')?.textContent.includes('active = 0')")&&await js("!document.querySelector('.file-preview .source-code').textContent.includes('active = 1')"));
+ await click('修改后');check('after tab shows new content',await wait("document.querySelector('.file-preview .source-code')?.textContent.includes('active = 1')"));
+ await click('差异');await click('并排');
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-file-preview-diff.png',(await win.webContents.capturePage()).toPNG());
  check('conflicting edit offers no undo',await js("[...document.querySelectorAll('.work-panel article')].find(a=>a.textContent.includes('other.txt')).querySelectorAll('button').length===1"));
  writeFileSync('/tmp/aiclaw-work-panel.png',(await win.webContents.capturePage()).toPNG());
  await click('撤销此改动');await wait("document.querySelector('.work-panel').textContent.includes('已撤销')");check('undo uses selected change',changes[0].state==='undone');
+ deferPreview=true;
+ await js("document.querySelector('.prose .file-card').click()");await wait("document.querySelector('.file-preview')?.textContent.includes('正在读取文件')");
  await js("document.querySelector('.user-meta .meta-fork').click()");await wait("document.querySelector('.work-panel').textContent.includes('查看来源会话')");
  check('fork uses chosen message and opens provenance',forks.length===1&&forks[0].itemId==='u1'&&await js("document.querySelector('.work-panel').textContent.includes('查看来源会话')"));
+ check('switching chat closes its file preview',await wait("!document.querySelector('.file-preview')"));
+ resolvePreview({path:'/tmp/smoke/stale.md',content:'# stale preview',language:'markdown'});
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ check('late file read cannot reopen another chats preview',await js("!document.querySelector('.file-preview')"));
+
  check('ordinary chat does not display another chats sources',await wait("!document.querySelector('.sources-trigger') && !document.querySelector('.sources-drawer')"));
  win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'fork',item:{id:'live-search',kind:'toolCall',toolName:'search__web_search',sources:[{title:'Live result',url:'https://live.example.com/',snippet:'Live summary'}]}}});
  check('live tool completion displays sources without reloading history',await wait("document.querySelector('.sources-trigger')?.textContent.includes('参考来源 · 1')"));

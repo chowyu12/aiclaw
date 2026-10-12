@@ -52,6 +52,10 @@ const PROTECTED_RELATIVE = [
   "Library/Keychains",
 ];
 
+export function protectedLocations(home: string, extra: string[]): string[] {
+  return [...PROTECTED_RELATIVE.map(relative => join(home, relative)), ...extra];
+}
+
 function within(root: string, target: string): boolean {
   if (target === root) return true;
   return target.startsWith(root.endsWith(sep) ? root : root + sep);
@@ -73,10 +77,7 @@ export function classifyOpen(
   path: string,
   options: { home: string; protectedPaths: string[]; executable: boolean },
 ): OpenVerdict {
-  const candidates = [
-    ...PROTECTED_RELATIVE.map((relative) => join(options.home, relative)),
-    ...options.protectedPaths,
-  ];
+  const candidates = protectedLocations(options.home, options.protectedPaths);
   for (const candidate of candidates) {
     if (candidate && within(candidate, path)) {
       return { action: "refuse", reason: tr("这是存放凭据的位置，不能从对话里打开") };

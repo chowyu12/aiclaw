@@ -23,3 +23,24 @@ export function fileDiff(before: string, after: string, maxLines = Infinity): Di
   }
   return out;
 }
+
+export interface NumberedDiffLine extends DiffLine { beforeLine?: number; afterLine?: number; }
+export function numberedDiff(before: string, after: string, maxLines = 3001): NumberedDiffLine[] {
+  let left = 1, right = 1;
+  return fileDiff(before, after, maxLines).map(line => ({ ...line,
+    beforeLine: line.kind === "add" ? undefined : left++, afterLine: line.kind === "remove" ? undefined : right++,
+  }));
+}
+export interface SplitDiffRow { before?: NumberedDiffLine; after?: NumberedDiffLine; }
+export function splitDiff(lines: readonly NumberedDiffLine[]): SplitDiffRow[] {
+  const rows: SplitDiffRow[] = [];
+  for (let i = 0; i < lines.length;) {
+    if (lines[i]!.kind === "same") { rows.push({ before: lines[i], after: lines[i] }); i++; continue; }
+    const left: NumberedDiffLine[] = [], right: NumberedDiffLine[] = [];
+    while (i < lines.length && lines[i]!.kind !== "same") {
+      const line = lines[i++]!; (line.kind === "remove" ? left : right).push(line);
+    }
+    for (let n = 0; n < Math.max(left.length, right.length); n++) rows.push({ before: left[n], after: right[n] });
+  }
+  return rows;
+}

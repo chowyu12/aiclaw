@@ -12,6 +12,7 @@ import { normalizeLocale, setCurrentLocale, tr } from "../shared/i18n.js";
 import { Updater } from "./updater.js";
 import { DiagnosticsLog, buildReport } from "./diagnostics.js";
 import { LogFile } from "./logfile.js";
+import { readTextPreview } from "./file-preview.js";
 import { openFromChat, revealWorkspace } from "./open-file.js";
 import { readMedia, stageAudio } from "./media-files.js";
 import { IPC } from "../shared/ipc.cjs";
@@ -364,6 +365,11 @@ function registerIpc(): void {
   // 对话里点一个文件名就打开它。路径来自模型输出，所以校验全在主进程做：
   // 基准是当前会话的工作区，可执行的那几类只「在访达里显示」，凭据目录拒绝。
   ipcMain.handle(IPC.workspaceReveal, (_event, path: string) => revealWorkspace(path));
+  ipcMain.handle(IPC.filePreview, async (_event, input: { path: string; sessionId: string }) => {
+    const session = (await sessions.listSessions()).find(session => session.id === input.sessionId && !session.archivedAt);
+    if (!session) throw new Error(tr("找不到预览文件所属的会话。"));
+    return readTextPreview(input.path, { base: session.workdir, protectedPaths: [store.dataDir] });
+  });
   ipcMain.handle(IPC.fileOpen, (_event, path: string) =>
     openFromChat(path, {
       base: sessions.currentWorkspace(),
