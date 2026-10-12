@@ -23,7 +23,7 @@ if (!(globalThis as { window?: unknown }).window) {
   (globalThis as { document?: unknown }).document = dom.window.document;
 }
 
-const { renderMarkdown, looksLikePath } = await import("../apps/desktop/src/renderer/markdown.ts");
+const { renderMarkdown, looksLikePath, referencedFiles } = await import("../apps/desktop/src/renderer/markdown.ts");
 
 /**
  * 把块之间的换行挤掉再比对。
@@ -485,6 +485,27 @@ test("回复里的文件路径显示文件卡片，保留打开路径但不显�
   assert.equal(card.getAttribute("role"), "button");
   const link = new JSDOM(renderMarkdown("[打开报告](reports/report.docx)"));
   assert.equal(link.window.document.querySelector(".file-card")?.getAttribute("data-file-path"), "reports/report.docx");
+});
+
+test("含斜杠的字段列表、日期和仓库名保留行内代码与完整文本", () => {
+  for (const text of ["pro_sno/pro_sup_sno/...", "pro_sno/pro_sup_sno/…", "字段A/字段B", "2026/10/12", "openai/codex", "src/components", "/tmp/...", "./reports/…/report.md"]) {
+    assert.equal(looksLikePath(text), false, text);
+    const source = `字段：\`${text}\``;
+    const doc = new JSDOM(renderMarkdown(source)).window.document;
+    assert.equal(doc.querySelector(".file-card"), null, text);
+    assert.equal(doc.querySelector("code")?.textContent, text);
+    assert.deepEqual(referencedFiles(source), [], text);
+  }
+});
+
+test("明确路径前缀仍可打开无扩展名的文件或目录", () => {
+  for (const text of ["/Users/user/Workspace", "./README", "../reports", "~/Desktop", String.raw`C:\Users\user\report`, "C:/Users/user/report", String.raw`\\server\share\report`, "generated/report.md", "src/main.ts"]) {
+    assert.equal(looksLikePath(text), true, text);
+    const source = `文件：\`${text}\``;
+    const doc = new JSDOM(renderMarkdown(source)).window.document;
+    assert.equal(doc.querySelector(".file-card")?.getAttribute("data-file-path"), text);
+    assert.deepEqual(referencedFiles(source), [text]);
+  }
 });
 
 test("命令、版本号、普通词不会被认成文件", () => {

@@ -56,7 +56,9 @@ function isSafeHref(href: string): boolean {
  *
  * 宁可漏不可滥：判错了会把 `npm run build` 这种命令变成一个点下去报错的链接。
  * 所以两条硬要求——要么末尾是**字母开头的扩展名**（`.md`、`.json`、`.tar`），
- * 要么里面有路径分隔符；并且不能带 `<>|*?"` 这类路径里不合法的字符。
+ * 要么以绝对路径、`./`、`../`、`~/` 等明确路径前缀开头；
+ * 单纯包含斜杠的字段列表、日期和仓库名不能作为路径依据。
+ * 并且不能带 `<>|*?"` 这类路径里不合法的字符或省略号路径段。
  *
  * 扩展名要求字母开头是为了挡住版本号：`v0.1.5` 的 `.5` 不算扩展名。
  */
@@ -68,8 +70,9 @@ export function looksLikePath(raw: string): boolean {
   if (/[<>|*?"\n\r]/.test(text)) return false;
   // 纯粹的命令行：有空格且不以扩展名收尾的，一律不认。
   const hasExtension = /\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(text);
-  const hasSeparator = text.includes("/") || /^[A-Za-z]:\\/.test(text);
-  if (!hasExtension && !hasSeparator) return false;
+  const hasPathPrefix = /^(?:\/(?!\/)|\.{1,2}[\\/]|~[\\/]|[A-Za-z]:[\\/]|\\\\[^\\]+\\)/.test(text);
+  if (!hasExtension && !hasPathPrefix) return false;
+  if (/(?:^|[\\/])(?:\.{3,}|…+)(?:[\\/]|$)/.test(text)) return false;
   if (/\s/.test(text) && !hasExtension) return false;
   return true;
 }
@@ -162,7 +165,7 @@ md.renderer.rules.fence = (tokens, index) => {
  * 模型写完文件会说「已生成 `双色球最近30期开奖号码.md`」，而用户要做的下一件
  * 事十有八九就是打开它看看——在没有这条之前他得自己去 Finder 里找。
  *
- * 判断只看形状（末尾是扩展名，或者带 /），**不看文件存不存在**——渲染层不该
+ * 判断只看形状（末尾是扩展名，或者有明确路径前缀），**不看文件存不存在**——渲染层不该
  * 去碰文件系统。真正的判断在主进程：路径按会话工作区解析、必须真的存在、
  * 可执行的那几类不给直接打开。所以这里认错了最多是点下去提示「找不到」，
  * 而模型伪造一个 `class="file-ref"` 也拿不到任何额外能力。
