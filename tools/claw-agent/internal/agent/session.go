@@ -32,9 +32,8 @@ import (
 	"go.opentelemetry.io/otel/log"
 )
 
-// maxIterations 是一轮里模型最多连续调用工具的次数。
-// 防止模型陷入「调工具 → 看结果 → 再调」的死循环把额度烧光。
-const maxIterations = 40
+// iterationCheckpointInterval is a progress checkpoint, not a turn execution limit.
+const iterationCheckpointInterval = 200
 
 // Emitter 把事件推给宿主。
 type Emitter interface {

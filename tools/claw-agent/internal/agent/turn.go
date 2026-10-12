@@ -354,13 +354,7 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 	}
 	var lastGoalRevision int64
 	stalls := 0
-	limit := maxIterations
-	for iteration := 0; iteration < limit; iteration++ {
-		if iteration == limit-1 {
-			if g, _ := s.Goal(); g != nil && g.Status == "active" {
-				limit += maxIterations
-			}
-		}
+	for iteration := 0; ; iteration++ {
 		if err := s.Checkpoint(); err != nil {
 			return total, err
 		}
@@ -369,6 +363,10 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		}
 		if ctx.Err() != nil {
 			return total, ctx.Err()
+		}
+
+		if iteration > 0 && iteration%iterationCheckpointInterval == 0 {
+			s.notify(emitter, turnID, i18n.D("已完成 {n} 次模型循环，进度已保存，继续执行；可随时停止。", "n", iteration))
 		}
 
 		// 转向输入必须在采样之前插进去，不然模型这一次看到的还是旧要求，
@@ -508,11 +506,6 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			return total, ctx.Err()
 		}
 	}
-	if g, _ := s.Goal(); g != nil && g.Status == "active" {
-		reason := "Turn iteration limit reached; review and resume to continue."
-		_, _ = s.UpdateGoal(GoalUpdate{Status: "paused", Evidence: &reason}, true)
-	}
-	return total, i18n.E("单轮内工具调用超过 {n} 次，已停止；请把任务拆小", "n", maxIterations)
 }
 
 // sample 打一次模型，按失败的类型决定重试、压缩还是直接放弃。

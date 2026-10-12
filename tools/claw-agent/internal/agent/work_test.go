@@ -66,9 +66,9 @@ func TestGoalRequiresEvidenceAndPreservesBudgetOnResume(t *testing.T) {
 		t.Fatalf("goal not persisted: %+v %v", saved, err)
 	}
 }
-func TestGoalContinuesBeyondOrdinaryIterationLimit(t *testing.T) {
+func TestGoalContinuesBeyondIterationCheckpoint(t *testing.T) {
 	script := []string{}
-	for i := 0; i < maxIterations+1; i++ {
+	for i := 0; i < iterationCheckpointInterval+1; i++ {
 		script = append(script, sseToolCall(fmt.Sprint(i), "get_goal", `{}`))
 	}
 	script = append(script, sseToolCall("complete", "update_goal", `{"status":"complete","evidence":"checked all steps"}`), sseText("finished"))
