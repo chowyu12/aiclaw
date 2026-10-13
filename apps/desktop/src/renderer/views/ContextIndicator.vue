@@ -18,11 +18,18 @@ const unsubscribe=window.aiclaw.on.agentEvent((raw:unknown)=>{
 onUnmounted(()=>{generation++;clearTimeout(timer);unsubscribe();});
 const remaining=computed(()=>status.value&&status.value.window>0?Math.max(0,status.value.window-status.value.estimatedTokens):null);
 const percent=computed(()=>status.value&&status.value.window>0?Math.round(status.value.estimatedTokens/status.value.window*100):null);
+const label=computed(()=>`${t('上下文')} · ${status.value ? (percent.value===null?t('窗口未知'):t('约 {percent}%',{percent:percent.value})) : t('未知')}`);
 const number=(value:number)=>value.toLocaleString();
 </script>
 <template>
  <div class="context-control" @keydown.esc="opened=false">
-  <button class="context-trigger" :aria-expanded="opened" :title="t('查看上下文用量和压缩记录')" @click="opened=!opened">{{ t('上下文') }} · {{ status ? (percent===null?t('窗口未知'):t('约 {percent}%',{percent})) : t('未知') }}</button>
+  <button class="context-trigger" :aria-expanded="opened" :aria-label="label" :title="`${label} · ${t('查看上下文用量和压缩记录')}`" @click="opened=!opened">
+   <svg viewBox="0 0 20 20" aria-hidden="true">
+    <circle class="context-track" cx="10" cy="10" r="7" />
+    <circle v-if="percent!==null" class="context-meter" cx="10" cy="10" r="7" pathLength="100" :stroke-dasharray="`${Math.min(percent,100)} 100`" />
+    <text v-else x="10" y="13" text-anchor="middle">?</text>
+   </svg>
+  </button>
   <div v-if="opened" class="context-details">
    <header><strong>{{ t('上下文用量') }}</strong><button @click="load">{{ t('刷新') }}</button><button :aria-label="t('关闭上下文详情')" @click="opened=false">×</button></header>
    <template v-if="status">
@@ -41,5 +48,5 @@ const number=(value:number)=>value.toLocaleString();
  </div>
 </template>
 <style scoped>
-.context-control{display:flex;justify-content:flex-end;position:relative;padding:0 2px 4px}.context-control button{font:inherit;font-size:11px;border:0;background:transparent;color:var(--muted);cursor:pointer;border-radius:6px;padding:3px 7px}.context-trigger:hover{background:var(--accent-soft);color:var(--accent)}.context-details{position:absolute;right:0;bottom:100%;z-index:25;width:min(400px,calc(100vw - 290px));max-height:60vh;overflow:auto;padding:16px;background:var(--surface);border:1px solid var(--rule);border-radius:12px;box-shadow:0 8px 30px #0001;font-size:12px;line-height:1.7}.context-details header{display:flex;align-items:center;gap:8px}.context-details header strong{flex:1}.context-details p{margin:9px 0}.context-details .note{color:var(--muted);font-size:11px}.context-details progress{width:100%;height:5px;accent-color:var(--accent)}.context-details ol{padding-left:20px}.context-details li{padding:4px 0}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.context-control{display:inline-flex;align-items:center;flex:none}.context-control button{font:inherit;font-size:11px;border:0;background:transparent;color:var(--muted);cursor:pointer;border-radius:6px;padding:3px 7px}.context-control .context-trigger{display:grid;place-items:center;width:24px;height:24px;padding:2px;border-radius:50%}.context-trigger svg{width:18px;height:18px;overflow:visible}.context-trigger circle{fill:none;stroke-width:1.5}.context-track{stroke:var(--rule)}.context-meter{stroke:var(--accent);transform:rotate(-90deg);transform-origin:center}.context-trigger text{fill:currentColor;font-size:9px}.context-trigger:hover{background:var(--accent-soft);color:var(--accent)}.context-details{position:absolute;right:0;bottom:calc(100% + 8px);z-index:25;width:min(400px,calc(100vw - 290px));max-height:60vh;overflow:auto;padding:16px;background:var(--surface);border:1px solid var(--rule);border-radius:12px;box-shadow:0 8px 30px #0001;font-size:12px;line-height:1.7}.context-details header{display:flex;align-items:center;gap:8px}.context-details header strong{flex:1}.context-details p{margin:9px 0}.context-details .note{color:var(--muted);font-size:11px}.context-details progress{width:100%;height:5px;accent-color:var(--accent)}.context-details ol{padding-left:20px}.context-details li{padding:4px 0}button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 </style>

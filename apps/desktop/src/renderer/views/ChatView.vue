@@ -822,7 +822,6 @@ const forking = ref(false);
             @dragleave="dragging = false"
             @drop="onDrop"
           >
-            <ContextIndicator v-if="store.sessionId" />
             <!-- 附件排在输入框上面：它们是这条消息的一部分，
                  放在下面会被工具条挤成「设置」的样子。 -->
             <div v-if="attachments.length > 0" class="chips">
@@ -965,6 +964,7 @@ const forking = ref(false);
               </div>
 
               <div class="bar-right">
+                <ContextIndicator v-if="store.sessionId" />
                 <div class="model">
                   <button class="model-button" @click="openModelMenu()">
                     {{ store.model || t("选择模型") }}
