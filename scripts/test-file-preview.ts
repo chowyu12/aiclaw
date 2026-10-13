@@ -1,3 +1,5 @@
+import { readMemoryDocument, saveMemoryDocument } from "../apps/desktop/src/main/memory-files.ts";
+import { memoryEntries, memoryBytes, MAX_MEMORY_BYTES } from "../apps/desktop/src/shared/memory.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
@@ -66,4 +68,58 @@ test("preview refuses named pipes without waiting for a writer", { skip: process
   execFileSync('mkfifo',[join(dir,'pipe.txt')]);
   assert.throws(()=>readTextPreview('pipe.txt',{base:dir,protectedPaths:[]}),/文件|file/);
  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test("memory settings distinguish saved content, missing files and read failures without writing", () => {
+  const dir = mkdtempSync(join(tmpdir(),"aiclaw-memory-view-"));
+  try {
+    const path = join(dir,"memory.md");
+    assert.deepEqual(readMemoryDocument(path,[]),{path,content:"",exists:false,error:""});
+    writeFileSync(path,"- Prefer SQL examples\n<script>not executable</script>");
+    const memory=readMemoryDocument(path,[]);
+    assert.equal(memory.exists,true);assert.equal(memory.content,"- Prefer SQL examples\n<script>not executable</script>");assert.equal(memory.error,"");
+    const protectedMemory=readMemoryDocument(path,[dir]);assert.equal(protectedMemory.exists,null);assert.ok(protectedMemory.error);assert.equal(protectedMemory.content,"");
+    writeFileSync(path,Buffer.from([0xff]));assert.ok(readMemoryDocument(path,[]).error);
+    rmSync(path);mkdirSync(path);assert.ok(readMemoryDocument(path,[]).error);
+  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test("memory entry grouping preserves exact text and continuation lines", () => {
+  const text = "# Notes\n\n- (2026-10-13) Use Go\n  continuation\n- Prefer SQL\n";
+  const entries = memoryEntries(text);
+  assert.equal(entries.length,3);assert.equal(entries.join(""),text);
+  assert.equal(entries[1],"- (2026-10-13) Use Go\n  continuation\n");
+  assert.equal(memoryBytes("中文"),6);
+});
+
+test("memory edits enforce capacity, conflicts and protected paths", () => {
+  const dir=mkdtempSync(join(tmpdir(),"aiclaw-memory-edit-")), path=join(dir,".aiclaw","memory.md");
+  try {
+    const first={content:"- Original\n",expectedContent:"",expectedExists:false};
+    assert.equal(saveMemoryDocument(path,dir,[],first).content,first.content);
+    const edit={content:"- Edited\n",expectedContent:first.content,expectedExists:true};
+    assert.throws(()=>saveMemoryDocument(path,dir,[dir],edit));
+    assert.throws(()=>saveMemoryDocument(path,dir,[],{...edit,content:"中".repeat(Math.ceil(MAX_MEMORY_BYTES/3))}));
+    assert.throws(()=>saveMemoryDocument(path,dir,[],{...edit,content:"bad\0text"}));
+    assert.equal(saveMemoryDocument(path,dir,[],edit).content,edit.content);
+    assert.throws(()=>saveMemoryDocument(path,dir,[],edit),/刷新|Refresh/);
+    assert.equal(readMemoryDocument(path,[]).content,edit.content);
+    assert.equal(saveMemoryDocument(path,dir,[],{content:"",expectedContent:edit.content,expectedExists:true}).content,"");
+    assert.equal(readMemoryDocument(path,[]).exists,true);
+  } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test("memory editing refuses redirected directories and symlink files", {skip:process.platform==="win32"}, () => {
+  const dir=mkdtempSync(join(tmpdir(),"aiclaw-memory-link-")), outside=mkdtempSync(join(tmpdir(),"aiclaw-memory-outside-"));
+  try {
+    symlinkSync(outside,join(dir,".aiclaw"),"dir");
+    const input={content:"new",expectedContent:"",expectedExists:false};
+    assert.throws(()=>saveMemoryDocument(join(dir,".aiclaw","memory.md"),dir,[],input));
+    rmSync(join(dir,".aiclaw"));mkdirSync(join(dir,".aiclaw"));
+    const target=join(outside,"missing.md");symlinkSync(target,join(dir,".aiclaw","memory.md"));
+    assert.throws(()=>saveMemoryDocument(join(dir,".aiclaw","memory.md"),dir,[],input));
+    writeFileSync(target,"original");
+    assert.throws(()=>saveMemoryDocument(join(dir,".aiclaw","memory.md"),dir,[],{...input,expectedContent:"original",expectedExists:true}));
+    assert.equal(readMemoryDocument(target,[]).content,"original");
+  } finally {rmSync(dir,{recursive:true,force:true});rmSync(outside,{recursive:true,force:true});}
 });

@@ -109,6 +109,7 @@ const api = {
     write: (servers: unknown) => ipcRenderer.invoke(IPC.mcpWrite, servers),
     probe: (server: unknown) => ipcRenderer.invoke(IPC.mcpProbe, server),
   },
+  memory: { read: (sessionId = "") => ipcRenderer.invoke(IPC.memoryRead, sessionId), save: (input: import("../shared/types.js").MemorySaveInput) => ipcRenderer.invoke(IPC.memorySave, input) },
   skills: {
     list: () => ipcRenderer.invoke(IPC.skillList),
     toggle: (input: unknown) => ipcRenderer.invoke(IPC.skillToggle, input),

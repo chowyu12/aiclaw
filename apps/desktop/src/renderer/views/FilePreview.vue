@@ -12,11 +12,38 @@ const props = defineProps<{ preview: FilePreviewState }>();
 const mode = ref("source"), layout = ref("split"), copied = ref(false);
 const closeButton = ref<HTMLButtonElement>();
 const previousFocus = document.activeElement as HTMLElement | null;
-watch(() => [props.preview.request, props.preview.loading], () => {
-  mode.value = props.preview.change ? "diff" : props.preview.language === "markdown" ? "rendered" : "source";
+const body = ref<HTMLElement>();
+let restoring = false, restoreTicket = 0;
+const positionKey = () => mode.value === "diff" ? `diff:${layout.value}` : mode.value;
+function restorePosition(): void {
+  const saved = props.preview.reading?.positions[positionKey()];
+  if (body.value) { body.value.scrollTop = saved?.top ?? 0; body.value.scrollLeft = saved?.left ?? 0; }
+}
+function saveReading(scroll = false): void {
+  if (restoring) return;
+  const positions = { ...props.preview.reading?.positions };
+  if (scroll && body.value) positions[positionKey()] = { top: body.value.scrollTop, left: body.value.scrollLeft };
+  actions.savePreviewReading(props.preview.request, { mode: mode.value, layout: layout.value, positions });
+}
+watch(() => [props.preview.request, props.preview.loading], async () => {
+  const ticket = ++restoreTicket;
+  restoring = true;
+  const saved = props.preview.reading;
+  const allowed = ["source", ...(props.preview.change ? ["diff", "before", "after"] : []), ...(props.preview.language === "markdown" ? ["rendered"] : [])];
+  mode.value = saved && allowed.includes(saved.mode) ? saved.mode : props.preview.change ? "diff" : props.preview.language === "markdown" ? "rendered" : "source";
+  layout.value = saved?.layout ?? "split";
   copied.value = false;
+  await nextTick();
+  if (ticket === restoreTicket) { restorePosition(); restoring = false; }
 }, { immediate: true });
-watch(mode, () => { copied.value = false; });
+watch([mode, layout], async () => {
+  if (restoring) return;
+  saveReading(); copied.value = false;
+  const ticket = ++restoreTicket;
+  restoring = true;
+  await nextTick();
+  if (ticket === restoreTicket) { restorePosition(); restoring = false; }
+});
 const content = computed(() => mode.value === "before" ? props.preview.change?.before ?? "" : mode.value === "after" ? props.preview.change?.after ?? "" : props.preview.content);
 const visibleLines = computed(() => content.value.slice(0, 512 * 1024).split("\n", 3001));
 const displayText = computed(() => visibleLines.value.slice(0, 3000).join("\n"));
@@ -96,7 +123,7 @@ onUnmounted(() => { previousFocus?.focus(); });
     <p v-if="preview.loading" class="preview-note" role="status">{{ t('正在读取文件…') }}</p>
     <p v-else-if="preview.error" class="preview-error" role="alert">{{ preview.error }}</p>
     <template v-else>
-      <div v-if="mode === 'diff'" class="preview-body diff">
+      <div v-if="mode === 'diff'" ref="body" class="preview-body diff" @scroll="saveReading(true)">
         <p v-if="!diff.length" class="preview-note">{{ t('没有文本差异') }}</p>
         <div v-else-if="layout === 'split'" class="split-diff">
           <div class="diff-labels"><span>{{ t('修改前') }}</span><span>{{ t('修改后') }}</span></div>
@@ -112,8 +139,8 @@ onUnmounted(() => { previousFocus?.focus(); });
         </div>
         <p v-if="diff.length > 3000" class="preview-note">{{ t('差异超过显示范围，仅预览前 3000 行。') }}</p>
       </div>
-      <div v-else-if="mode === 'rendered'" class="preview-body markdown-preview prose" @click="openReference" v-html="markup" />
-      <div v-else class="preview-body source-code"><pre class="line-numbers" aria-hidden="true">{{ visibleLines.slice(0,3000).map((_,i)=>i+1).join('\n') }}</pre><pre><code v-html="code" /></pre></div>
+      <div v-else-if="mode === 'rendered'" ref="body" class="preview-body markdown-preview prose" @scroll="saveReading(true)" @click="openReference" v-html="markup" />
+      <div v-else ref="body" class="preview-body source-code" @scroll="saveReading(true)"><pre class="line-numbers" aria-hidden="true">{{ visibleLines.slice(0,3000).map((_,i)=>i+1).join('\n') }}</pre><pre><code v-html="code" /></pre></div>
       <p v-if="mode !== 'diff' && truncated" class="preview-note">{{ t('内容超过显示范围，仅预览前 3000 行或 512 KB。') }}</p>
     </template>
   </aside>

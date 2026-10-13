@@ -50,12 +50,13 @@ const EMPTY_TIMELINE: TimelineEntry[] = [];
 export interface FilePreviewState {
   request: number; sessionId: string; path: string; content: string; language: string;
   loading: boolean; error: string; notice?: string; referencePath?: string; change?: FileChange;
+  reading?: { mode: string; layout: string; positions: Record<string, { top: number; left: number }> };
 }
 let previewRequest = 0;
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules" | "archived",
+  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "usage" | "schedules" | "archived",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   filePreview: null as FilePreviewState | null,
@@ -175,6 +176,7 @@ function putFilePreview(preview: FilePreviewState, activate = true, previousRequ
   const duplicateActive = state.filePreviews.some(tab => tab.request === state.filePreview?.request && tab.sessionId === preview.sessionId && tab.path === preview.path);
   if (index >= 0) {
     preview.referencePath ??= state.filePreviews[index]!.referencePath;
+    preview.reading ??= state.filePreviews[index]!.reading;
     state.filePreviews[index] = preview;
   } else state.filePreviews.push(preview);
   state.filePreviews = state.filePreviews.filter(tab => tab.request === preview.request || tab.sessionId !== preview.sessionId || tab.path !== preview.path);
@@ -616,6 +618,11 @@ export const actions = {
     catch (error) { state.error = describeError(error); }
   },
 
+  savePreviewReading(request: number, reading: NonNullable<FilePreviewState["reading"]>): void {
+    const tab = state.filePreviews.find(tab => tab.request === request);
+    if (tab) tab.reading = plain(reading);
+  },
+
   closeFilePreview(): void { state.filePreview = null; state.filePreviews = []; },
 
   activateFilePreview(request: number): void {
@@ -633,7 +640,7 @@ export const actions = {
 
   previewChange(change: FileChange): void {
     putFilePreview({ request: ++previewRequest, sessionId: state.sessionId, path: change.path,
-      content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, error: "", change: plain(change) });
+      content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, error: "", change: plain(change), reading: { mode: "diff", layout: "split", positions: {} } });
   },
 
   async compareFilePreview(): Promise<void> {
@@ -646,7 +653,7 @@ export const actions = {
       const tab = state.filePreviews.find(tab => tab.request === request);
       if (!tab || state.sessionId !== preview.sessionId) return;
       const change = changes.filter(change => change.path === preview.path).sort((a, b) => b.createdAt - a.createdAt)[0];
-      if (change) putFilePreview({ ...tab, content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, change: plain(change) }, false);
+      if (change) putFilePreview({ ...tab, content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, change: plain(change), reading: { mode: "diff", layout: tab.reading?.layout ?? "split", positions: {} } }, false);
       else { tab.loading = false; tab.notice = t("暂无改动记录"); }
     } catch (error) {
       const tab = state.filePreviews.find(tab => tab.request === request);
@@ -1265,7 +1272,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "settings" | "usage" | "schedules" | "archived"): void {
+  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "usage" | "schedules" | "archived"): void {
     state.view = view;
   },
 

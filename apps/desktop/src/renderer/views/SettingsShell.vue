@@ -5,6 +5,7 @@ import ProvidersView from "./ProvidersView.vue";
 import PluginsView from "./PluginsView.vue";
 import SearchEnginesView from "./SearchEnginesView.vue";
 import McpView from "./McpView.vue";
+import MemoryView from "./MemoryView.vue";
 import SkillsView from "./SkillsView.vue";
 import UsageView from "./UsageView.vue";
 import SchedulesView from "./SchedulesView.vue";
@@ -26,6 +27,7 @@ import ArchivedView from "./ArchivedView.vue";
   <PluginsView v-else-if="store.view === 'plugins'" />
   <McpView v-else-if="store.view === 'mcp'" />
   <SkillsView v-else-if="store.view === 'skills'" />
+  <MemoryView v-else-if="store.view === 'memory'" />
   <UsageView v-else-if="store.view === 'usage'" />
   <SchedulesView v-else-if="store.view === 'schedules'" />
   <ArchivedView v-else-if="store.view === 'archived'" />
