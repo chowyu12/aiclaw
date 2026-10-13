@@ -49,7 +49,7 @@ const EMPTY_TIMELINE: TimelineEntry[] = [];
 
 export interface FilePreviewState {
   request: number; sessionId: string; path: string; content: string; language: string;
-  loading: boolean; error: string; change?: FileChange;
+  loading: boolean; error: string; notice?: string; change?: FileChange;
 }
 let previewRequest = 0;
 
@@ -607,6 +607,29 @@ export const actions = {
   previewChange(change: FileChange): void {
     state.filePreview = { request: ++previewRequest, sessionId: state.sessionId, path: change.path,
       content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, error: "", change: plain(change) };
+  },
+
+  async compareFilePreview(): Promise<void> {
+    const preview = state.filePreview;
+    if (!preview || preview.loading || preview.sessionId !== state.sessionId) return;
+    const request = ++previewRequest;
+    state.filePreview = { ...preview, request, loading: true, error: "", notice: "" };
+    try {
+      const changes = await window.aiclaw.session.changes(preview.sessionId) as FileChange[];
+      if (state.filePreview?.request !== request || state.sessionId !== preview.sessionId) return;
+      const change = changes.filter(change => change.path === preview.path).sort((a, b) => b.createdAt - a.createdAt)[0];
+      if (change) actions.previewChange(change);
+      else { state.filePreview.loading = false; state.filePreview.notice = t("暂无改动记录"); }
+    } catch (error) {
+      if (state.filePreview?.request === request && state.sessionId === preview.sessionId) {
+        state.filePreview.loading = false; state.filePreview.error = describeError(error);
+      }
+    }
+  },
+
+  async refreshFilePreview(): Promise<void> {
+    const preview = state.filePreview;
+    if (preview && !preview.loading && preview.sessionId === state.sessionId) await actions.openFile(preview.path);
   },
 
   async openFile(path: string): Promise<void> {

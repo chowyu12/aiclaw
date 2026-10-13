@@ -57,7 +57,7 @@ onMounted(() => {
       </div>
 
 
-      <div class="content" :class="{ 'with-preview': store.view === 'chat' && !!store.filePreview }">
+      <div class="content">
         <ChatView v-if="store.view === 'chat'" :configured="configured" />
         <FilePreview v-if="store.view === 'chat' && store.filePreview && store.filePreview.sessionId === store.sessionId" :key="store.filePreview.request" :preview="store.filePreview" />
         <!-- 其余四项是同一个设置页的分栏，外壳带顶部分栏与「返回对话」。 -->
@@ -99,9 +99,6 @@ onMounted(() => {
 }
 .content > :first-child { flex: 1; min-width: 0; }
 .content > .file-preview { flex: none; }
-.content.with-preview :deep(.bar), .content.with-preview :deep(.bar-left) { flex-wrap: wrap; }
-.content.with-preview :deep(.chip) { white-space: nowrap; flex-shrink: 0; }
-.content.with-preview :deep(.bar-right) { margin-left: auto; }
 
 
 

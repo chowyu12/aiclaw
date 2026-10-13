@@ -1,6 +1,10 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
   "文件预览": "File preview",
+  "对比": "Compare",
+  "暂无改动记录": "No recorded changes",
+  "重新读取当前文件": "Reload the current file",
+  "查看此文件最近一次记录的改动": "View this file's latest recorded change",
   "关闭文件预览": "Close file preview",
   "预览视图": "Preview views",
   "差异": "Diff",
