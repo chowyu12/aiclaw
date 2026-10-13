@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences } from "electron";
 import { join, dirname } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -99,6 +99,7 @@ sessions.on("log", (source: string, chunk: string) => {
 });
 
 let mainWindow: BrowserWindow | null = null;
+let previewWindowBounds: { x: number; width: number } | null = null;
 /** 待回应的审批。渲染层只拿到 id，真正的回应句柄留在主进程。 */
 const pendingApprovals = new Map<string, PendingApproval>();
 /** 同一批审批推给渲染层的样子。渲染进程重新加载后按它补发（见 approvalPending）。 */
@@ -141,6 +142,7 @@ function installAppMenu(): void {
 }
 
 function createWindow(): void {
+  previewWindowBounds = null;
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 800,
@@ -395,6 +397,21 @@ function registerIpc(): void {
   // 对话里点一个文件名就打开它。路径来自模型输出，所以校验全在主进程做：
   // 基准是当前会话的工作区，可执行的那几类只「在访达里显示」，凭据目录拒绝。
   ipcMain.handle(IPC.workspaceReveal, (_event, path: string) => revealWorkspace(path));
+  ipcMain.handle(IPC.filePreviewLayout, (_event, open: boolean) => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (open) {
+      if (previewWindowBounds || mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
+      const bounds = mainWindow.getBounds(), area = screen.getDisplayMatching(bounds).workArea;
+      const width = Math.min(bounds.width + 640, area.width);
+      previewWindowBounds = { x: bounds.x, width: bounds.width };
+      mainWindow.setBounds({ x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)), width });
+    } else if (previewWindowBounds) {
+      const bounds = mainWindow.getBounds(), area = screen.getDisplayMatching(bounds).workArea;
+      const width = Math.min(previewWindowBounds.width, area.width);
+      mainWindow.setBounds({ x: Math.max(area.x, Math.min(previewWindowBounds.x, area.x + area.width - width)), width });
+      previewWindowBounds = null;
+    }
+  });
   ipcMain.handle(IPC.filePreview, async (_event, input: { path: string; sessionId: string }) => {
     const session = (await sessions.listSessions()).find(session => session.id === input.sessionId && !session.archivedAt);
     if (!session) throw new Error(tr("找不到预览文件所属的会话。"));

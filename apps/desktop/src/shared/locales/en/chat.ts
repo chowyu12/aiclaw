@@ -1,5 +1,7 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "已打开的文件": "Open files",
+  "关闭文件 {file}": "Close file {file}",
   "文件预览": "File preview",
   "对比": "Compare",
   "暂无改动记录": "No recorded changes",

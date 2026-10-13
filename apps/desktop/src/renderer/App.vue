@@ -10,6 +10,9 @@ import { locale, t } from "./i18n";
 /** 「配完了」= 选好了默认模型（它所属的模型服务在库里带着端点与 Key）。 */
 const FilePreview = defineAsyncComponent(() => import("./views/FilePreview.vue"));
 watch(() => [store.sessionId, store.view], () => actions.closeFilePreview());
+watch(() => store.view === 'chat' && !!store.filePreview, open => {
+  void window.aiclaw.files.previewLayout(open).catch(() => undefined);
+});
 
 const configured = computed(() => Boolean(store.config?.providerId && store.config.model));
 
@@ -59,7 +62,7 @@ onMounted(() => {
 
       <div class="content">
         <ChatView v-if="store.view === 'chat'" :configured="configured" />
-        <FilePreview v-if="store.view === 'chat' && store.filePreview && store.filePreview.sessionId === store.sessionId" :key="store.filePreview.request" :preview="store.filePreview" />
+        <FilePreview v-if="store.view === 'chat' && store.filePreview && store.filePreview.sessionId === store.sessionId" :preview="store.filePreview" />
         <!-- 其余四项是同一个设置页的分栏，外壳带顶部分栏与「返回对话」。 -->
         <SettingsShell v-else />
       </div>

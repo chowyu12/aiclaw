@@ -49,7 +49,7 @@ const EMPTY_TIMELINE: TimelineEntry[] = [];
 
 export interface FilePreviewState {
   request: number; sessionId: string; path: string; content: string; language: string;
-  loading: boolean; error: string; notice?: string; change?: FileChange;
+  loading: boolean; error: string; notice?: string; referencePath?: string; change?: FileChange;
 }
 let previewRequest = 0;
 
@@ -59,6 +59,7 @@ const state = reactive({
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   filePreview: null as FilePreviewState | null,
+  filePreviews: [] as FilePreviewState[],
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
   sessionInfo: null as SessionStartView | null,
   /** 当前会话用的模型与模型服务。与配置页的默认值分开：切模型只影响当前会话。 */
@@ -166,6 +167,19 @@ export type { AppConfigView, TimelineEntry, LiveSession };
 
 export const store = readonly(state);
 
+
+function putFilePreview(preview: FilePreviewState, activate = true, previousRequest = preview.request): void {
+  let index = state.filePreviews.findIndex(tab => tab.request === previousRequest);
+  if (index < 0) index = state.filePreviews.findIndex(tab => tab.sessionId === preview.sessionId && tab.path === preview.path);
+  const wasActive = index >= 0 && state.filePreview?.request === state.filePreviews[index]!.request;
+  const duplicateActive = state.filePreviews.some(tab => tab.request === state.filePreview?.request && tab.sessionId === preview.sessionId && tab.path === preview.path);
+  if (index >= 0) {
+    preview.referencePath ??= state.filePreviews[index]!.referencePath;
+    state.filePreviews[index] = preview;
+  } else state.filePreviews.push(preview);
+  state.filePreviews = state.filePreviews.filter(tab => tab.request === preview.request || tab.sessionId !== preview.sessionId || tab.path !== preview.path);
+  if (activate || wasActive || duplicateActive) state.filePreview = preview;
+}
 
 export const actions = {
   /**
@@ -602,49 +616,64 @@ export const actions = {
     catch (error) { state.error = describeError(error); }
   },
 
-  closeFilePreview(): void { state.filePreview = null; },
+  closeFilePreview(): void { state.filePreview = null; state.filePreviews = []; },
+
+  activateFilePreview(request: number): void {
+    const preview = state.filePreviews.find(tab => tab.request === request && tab.sessionId === state.sessionId);
+    if (preview) state.filePreview = preview;
+  },
+
+  closePreviewTab(request: number): void {
+    const index = state.filePreviews.findIndex(tab => tab.request === request);
+    if (index < 0) return;
+    const active = state.filePreview?.request === request;
+    state.filePreviews.splice(index, 1);
+    if (active) state.filePreview = state.filePreviews[Math.min(index, state.filePreviews.length - 1)] ?? null;
+  },
 
   previewChange(change: FileChange): void {
-    state.filePreview = { request: ++previewRequest, sessionId: state.sessionId, path: change.path,
-      content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, error: "", change: plain(change) };
+    putFilePreview({ request: ++previewRequest, sessionId: state.sessionId, path: change.path,
+      content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, error: "", change: plain(change) });
   },
 
   async compareFilePreview(): Promise<void> {
     const preview = state.filePreview;
     if (!preview || preview.loading || preview.sessionId !== state.sessionId) return;
     const request = ++previewRequest;
-    state.filePreview = { ...preview, request, loading: true, error: "", notice: "" };
+    putFilePreview({ ...preview, request, loading: true, error: "", notice: "" });
     try {
       const changes = await window.aiclaw.session.changes(preview.sessionId) as FileChange[];
-      if (state.filePreview?.request !== request || state.sessionId !== preview.sessionId) return;
+      const tab = state.filePreviews.find(tab => tab.request === request);
+      if (!tab || state.sessionId !== preview.sessionId) return;
       const change = changes.filter(change => change.path === preview.path).sort((a, b) => b.createdAt - a.createdAt)[0];
-      if (change) actions.previewChange(change);
-      else { state.filePreview.loading = false; state.filePreview.notice = t("暂无改动记录"); }
+      if (change) putFilePreview({ ...tab, content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, change: plain(change) }, false);
+      else { tab.loading = false; tab.notice = t("暂无改动记录"); }
     } catch (error) {
-      if (state.filePreview?.request === request && state.sessionId === preview.sessionId) {
-        state.filePreview.loading = false; state.filePreview.error = describeError(error);
-      }
+      const tab = state.filePreviews.find(tab => tab.request === request);
+      if (tab && state.sessionId === preview.sessionId) { tab.loading = false; tab.error = describeError(error); }
     }
   },
 
   async refreshFilePreview(): Promise<void> {
     const preview = state.filePreview;
-    if (preview && !preview.loading && preview.sessionId === state.sessionId) await actions.openFile(preview.path);
+    if (preview && !preview.loading && preview.sessionId === state.sessionId) await actions.openFile(preview.path, true);
   },
 
-  async openFile(path: string): Promise<void> {
+  async openFile(path: string, refresh = false): Promise<void> {
     if (!fileLanguage(path) || !state.sessionId) return actions.openSystemFile(path);
+    const existing = state.filePreviews.find(tab => tab.sessionId === state.sessionId && (tab.path === path || tab.referencePath === path));
+    if (existing && !refresh) { actions.activateFilePreview(existing.request); return; }
     const sessionId = state.sessionId, request = ++previewRequest;
-    state.filePreview = { request, sessionId, path, content: "", language: fileLanguage(path)!, loading: true, error: "" };
+    putFilePreview({ request, sessionId, path, referencePath: existing?.referencePath ?? path, content: "", language: fileLanguage(path)!, loading: true, error: "" });
     try {
       const result = await window.aiclaw.files.preview(path, sessionId) as TextFilePreview | null;
-      if (request !== state.filePreview?.request || sessionId !== state.sessionId) return;
-      if (!result) { state.filePreview = null; await actions.openSystemFile(path); return; }
-      state.filePreview = { ...state.filePreview, ...result, loading: false };
+      const tab = state.filePreviews.find(tab => tab.request === request);
+      if (!tab || sessionId !== state.sessionId) return;
+      if (!result) { actions.closePreviewTab(request); await actions.openSystemFile(path); return; }
+      putFilePreview({ ...tab, ...result, loading: false }, false);
     } catch (error) {
-      if (request === state.filePreview?.request && sessionId === state.sessionId) {
-        state.filePreview.error = describeError(error); state.filePreview.loading = false;
-      }
+      const tab = state.filePreviews.find(tab => tab.request === request);
+      if (tab && sessionId === state.sessionId) { tab.error = describeError(error); tab.loading = false; }
     }
   },
 
