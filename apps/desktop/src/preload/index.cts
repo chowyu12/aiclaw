@@ -21,6 +21,7 @@ const api = {
     status: () => ipcRenderer.invoke(IPC.runtimeStatus),
   },
   session: {
+    context: (id: string) => ipcRenderer.invoke(IPC.sessionContext, id),
     work: (id: string) => ipcRenderer.invoke(IPC.sessionWork, id),
     setGoal: (id: string, goal: unknown) => ipcRenderer.invoke(IPC.goalSet, id, goal),
     updateGoal: (id: string, update: unknown) => ipcRenderer.invoke(IPC.goalUpdate, id, update),
@@ -131,6 +132,7 @@ const api = {
     read: () => ipcRenderer.invoke(IPC.diagnosticsRead),
   },
   files: {
+    browse: (sessionId: string, path = "", query = "") => ipcRenderer.invoke(IPC.workspaceFiles, { sessionId, path, query }),
     /** 打开模型在对话里提到的一个路径。主进程会校验，渲染层不碰文件系统。 */
     revealWorkspace: (path: string) => ipcRenderer.invoke(IPC.workspaceReveal, path),
     previewLayout: (open: boolean) => ipcRenderer.invoke(IPC.filePreviewLayout, open),

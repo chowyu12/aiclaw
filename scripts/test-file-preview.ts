@@ -1,5 +1,7 @@
 import { readMemoryDocument, saveMemoryDocument } from "../apps/desktop/src/main/memory-files.ts";
 import { memoryEntries, memoryBytes, MAX_MEMORY_BYTES } from "../apps/desktop/src/shared/memory.ts";
+import { workspaceFiles } from "../apps/desktop/src/main/workspace-files.ts";
+import { textMatches } from "../apps/desktop/src/renderer/file-find.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
@@ -122,4 +124,34 @@ test("memory editing refuses redirected directories and symlink files", {skip:pr
     assert.throws(()=>saveMemoryDocument(join(dir,".aiclaw","memory.md"),dir,[],{...input,expectedContent:"original",expectedExists:true}));
     assert.equal(readMemoryDocument(target,[]).content,"original");
   } finally {rmSync(dir,{recursive:true,force:true});rmSync(outside,{recursive:true,force:true});}
+});
+
+test("workspace browser expands directories and searches metadata within its root", async () => {
+ const dir=mkdtempSync(join(tmpdir(),"aiclaw-explorer-"));
+ try{
+  mkdirSync(join(dir,"src"));mkdirSync(join(dir,"node_modules"));writeFileSync(join(dir,"src","query.sql"),"private contents should not be enumerated");writeFileSync(join(dir,"README.md"),"notes");writeFileSync(join(dir,"node_modules","query.sql"),"dependency");
+  const listed=await workspaceFiles(dir,"","",[]);assert.equal(listed.entries[0].directory,true);assert.ok(listed.entries.some(entry=>entry.name==="README.md"));assert.ok(!JSON.stringify(listed).includes("private contents"));
+  const child=await workspaceFiles(dir,"src","",[]);assert.equal(child.entries[0]?.path,"src/query.sql");
+  const search=await workspaceFiles(dir,"","QUERY",[]);assert.deepEqual(search.entries.map(entry=>entry.path),["src/query.sql"]);
+  await assert.rejects(workspaceFiles(dir,"../","",[]));await assert.rejects(workspaceFiles(dir,"","",[dir]));await assert.rejects(workspaceFiles("","","",[]));
+ }finally{rmSync(dir,{recursive:true,force:true})}
+});
+test("workspace browser hides escaping links and handles internal cycles", {skip:process.platform==="win32"}, async () => {
+ const dir=mkdtempSync(join(tmpdir(),"aiclaw-explorer-link-")),outside=mkdtempSync(join(tmpdir(),"aiclaw-explorer-outside-"));
+ try{
+  writeFileSync(join(outside,"secret.txt"),"secret");symlinkSync(outside,join(dir,"outside"),"dir");symlinkSync(dir,join(dir,"cycle"),"dir");writeFileSync(join(dir,"inside.txt"),"okay");
+  const result=await workspaceFiles(dir,"","txt",[]);assert.deepEqual(result.entries.map(entry=>entry.name),["inside.txt"]);
+  await assert.rejects(workspaceFiles(dir,"outside","",[]));
+  assert.ok(!(await workspaceFiles(dir,"","",[])).entries.some(entry=>entry.name==="outside"));
+ }finally{rmSync(dir,{recursive:true,force:true});rmSync(outside,{recursive:true,force:true})}
+});
+test("workspace search reports truncation rather than implying complete results", async () => {
+ const dir=mkdtempSync(join(tmpdir(),"aiclaw-explorer-limit-"));
+ try{for(let i=0;i<205;i++)writeFileSync(join(dir,`match-${i}.txt`),"");const found=await workspaceFiles(dir,"","match",[]);assert.equal(found.entries.length,200);assert.equal(found.truncated,true)}finally{rmSync(dir,{recursive:true,force:true})}
+});
+test("file find is literal, case-insensitive and bounded", () => {
+ assert.deepEqual(textMatches("SELECT id; select ID;","select").matches,[{start:0,length:6},{start:11,length:6}]);
+ assert.equal(textMatches("a.b axb","a.b").matches.length,1);assert.equal(textMatches("[x] <script>","[x]").matches[0]?.length,3);
+ assert.equal(textMatches("中文中文","中文").matches.length,2);assert.equal(textMatches("aaa","",2).matches.length,0);
+ assert.equal(textMatches("aaa","a",2).truncated,true);
 });

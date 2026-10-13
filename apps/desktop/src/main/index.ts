@@ -12,6 +12,7 @@ import { normalizeLocale, setCurrentLocale, tr } from "../shared/i18n.js";
 import { Updater } from "./updater.js";
 import { DiagnosticsLog, buildReport } from "./diagnostics.js";
 import { LogFile } from "./logfile.js";
+import { workspaceFiles } from "./workspace-files.js";
 import { readTextPreview } from "./file-preview.js";
 import { readMemoryDocument, saveMemoryDocument } from "./memory-files.js";
 import { openFromChat, revealWorkspace } from "./open-file.js";
@@ -281,6 +282,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionStart, (_event, input?: { workspace?: string }) =>
     sessions.startSession(input?.workspace),
   );
+  ipcMain.handle(IPC.sessionContext, (_event, id: string) => sessions.sessionContext(id));
   ipcMain.handle(IPC.sessionWork, (_event, id: string) => sessions.sessionWork(id));
   ipcMain.handle(IPC.goalSet, (_event, id: string, goal) => sessions.goalSet(id, goal));
   ipcMain.handle(IPC.goalUpdate, (_event, id: string, update) => sessions.goalUpdate(id, update));
@@ -398,6 +400,11 @@ function registerIpc(): void {
   // 对话里点一个文件名就打开它。路径来自模型输出，所以校验全在主进程做：
   // 基准是当前会话的工作区，可执行的那几类只「在访达里显示」，凭据目录拒绝。
   ipcMain.handle(IPC.workspaceReveal, (_event, path: string) => revealWorkspace(path));
+  ipcMain.handle(IPC.workspaceFiles, async (_event, input: {sessionId:string;path:string;query:string}) => {
+    const session = (await sessions.listSessions()).find(session => session.id === input.sessionId && !session.archivedAt);
+    if (!session) throw new Error(tr("找不到文件所属的会话。"));
+    return workspaceFiles(session.workdir,input.path,input.query,[store.dataDir]);
+  });
   ipcMain.handle(IPC.memoryRead, async (_event, sessionId = "") => {
     const global = readMemoryDocument(store.memoryFile, [store.dataDir]);
     if (!sessionId) return { global, workspace: null };

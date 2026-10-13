@@ -7,6 +7,9 @@
  * 运行时常量在 ipc.cts 里，那个只给主进程和 preload 用。
  */
 
+export interface WorkspaceFileEntry { name: string; path: string; absolutePath: string; directory: boolean; }
+export interface WorkspaceFilesView { root: string; entries: WorkspaceFileEntry[]; truncated: boolean; }
+
 export interface MemoryDocumentView { path: string; content: string; exists: boolean | null; error: string; }
 export interface MemorySaveInput { scope: "global" | "workspace"; sessionId: string; content: string; expectedContent: string; expectedExists: boolean; }
 export interface MemoryView { global: MemoryDocumentView; workspace: MemoryDocumentView | null; }

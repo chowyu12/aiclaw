@@ -108,6 +108,7 @@ func init() {
 		"看看子 agent 们在干什么":           "Check what the sub-agents are doing",
 		"打断 {target}":               "Interrupt {target}",
 
+		"压缩记录保存失败：{err}": "Could not save compaction record: {err}",
 		// 压缩
 		"历史为空，无从压缩": "The history is empty; nothing to compact",
 		"模型没有给出摘要":  "The model returned no summary",

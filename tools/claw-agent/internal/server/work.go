@@ -35,6 +35,8 @@ func (s *Server) handleWork(ctx context.Context, f frame) {
 	var result any
 	var err error
 	switch f.Method {
+	case "session/context":
+		result, err = session.ContextStatus()
 	case "session/work":
 		g, e := session.Goal()
 		err = e

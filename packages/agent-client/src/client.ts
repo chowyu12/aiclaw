@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { AgentTransport, type TransportOptions } from "./transport.js";
 import type {
-  Goal, GoalInput, GoalUpdate, SessionWork, FileChange,
+  ContextStatus, Goal, GoalInput, GoalUpdate, SessionWork, FileChange,
   AgentNotification,
   RoleModels,
   ApprovalRequestParams,
@@ -456,6 +456,7 @@ export class ClawAgentClient extends EventEmitter {
 
   /** 取会话历史，还原成可直接渲染的时间线条目。 */
   sessionWork(sessionId: string): Promise<SessionWork> { return this.transport.request("session/work", { sessionId }); }
+  sessionContext(sessionId: string): Promise<ContextStatus> { return this.transport.request("session/context", { sessionId }); }
   goalSet(sessionId: string, goal: GoalInput): Promise<Goal> { return this.transport.request("goal/set", { sessionId, goal }); }
   goalUpdate(sessionId: string, update: GoalUpdate): Promise<Goal> { return this.transport.request("goal/update", { sessionId, update }); }
   sessionFork(sessionId: string, itemId?: string, model?: ModelConfig): Promise<{sessionId: string}> { return this.transport.request("session/fork", { sessionId, itemId, model }); }

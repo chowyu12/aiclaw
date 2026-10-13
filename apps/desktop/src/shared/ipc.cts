@@ -17,6 +17,7 @@ export const IPC = {
   runtimeStop: "runtime:stop",
   runtimeStatus: "runtime:status",
 
+  sessionContext: "session:context",
   sessionWork: "session:work",
   goalSet: "goal:set",
   goalUpdate: "goal:update",
@@ -96,6 +97,7 @@ export const IPC = {
   mcpWrite: "mcp:write",
   mcpProbe: "mcp:probe",
   diagnosticsRead: "diagnostics:read",
+  workspaceFiles: "workspace:files",
   workspaceReveal: "workspace:reveal",
   fileOpen: "file:open",
   filePreview: "file:preview",

@@ -438,6 +438,7 @@ export class SessionManager extends EventEmitter {
    * 不还原的话点开旧会话是一片空白，看起来像记录丢了。
    */
   sessionWork(id: string) { return this.requireClient().sessionWork(id); }
+  sessionContext(id: string) { return this.requireClient().sessionContext(id); }
   goalSet(id: string, goal: import("@aiclaw/agent-client").GoalInput) { return this.requireClient().goalSet(id, goal); }
   goalUpdate(id: string, update: import("@aiclaw/agent-client").GoalUpdate) { return this.requireClient().goalUpdate(id, update); }
   forkSession(id: string, itemId?: string) { return this.requireClient().sessionFork(id, itemId); }

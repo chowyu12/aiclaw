@@ -220,7 +220,7 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 
 func (s *Server) dispatch(ctx context.Context, f frame) {
 	switch f.Method {
-	case "session/work", "session/fork", "session/recover", "goal/set", "goal/update", "changes/list", "changes/undo":
+	case "session/work", "session/context", "session/fork", "session/recover", "goal/set", "goal/update", "changes/list", "changes/undo":
 		s.handleWork(ctx, f)
 	case protocol.MethodInitialize:
 		s.writeResult(f.ID, protocol.InitializeResult{

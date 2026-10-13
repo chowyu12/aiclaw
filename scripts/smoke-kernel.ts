@@ -222,6 +222,13 @@ async function main(): Promise<number> {
       bare.tools.join(", "),
     );
 
+    const contextStatus = await client.sessionContext(bare.sessionId);
+    record(
+      "上下文 RPC 返回估算，不推断未知窗口或服务用量",
+      contextStatus.window === 0 && contextStatus.lastInputTokens === 0 && contextStatus.estimatedTokens > 0 && Array.isArray(contextStatus.records),
+      JSON.stringify(contextStatus),
+    );
+
     const withRoles = await client.sessionStart({
       model: { providerId: provider.id, baseUrl: "", model: "m1" },
       approvalPolicy: "never",

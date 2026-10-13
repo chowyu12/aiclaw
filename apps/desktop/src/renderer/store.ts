@@ -59,6 +59,7 @@ const state = reactive({
   view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "usage" | "schedules" | "archived",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
+  fileBrowser: false,
   filePreview: null as FilePreviewState | null,
   filePreviews: [] as FilePreviewState[],
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
@@ -623,9 +624,12 @@ export const actions = {
     if (tab) tab.reading = plain(reading);
   },
 
+  toggleFileBrowser(): void { state.fileBrowser = !state.fileBrowser; },
+  closeFileBrowser(): void { state.fileBrowser = false; },
   closeFilePreview(): void { state.filePreview = null; state.filePreviews = []; },
 
   activateFilePreview(request: number): void {
+    state.fileBrowser = false;
     const preview = state.filePreviews.find(tab => tab.request === request && tab.sessionId === state.sessionId);
     if (preview) state.filePreview = preview;
   },
@@ -639,6 +643,7 @@ export const actions = {
   },
 
   previewChange(change: FileChange): void {
+    state.fileBrowser = false;
     putFilePreview({ request: ++previewRequest, sessionId: state.sessionId, path: change.path,
       content: change.after, language: fileLanguage(change.path) ?? "plaintext", loading: false, error: "", change: plain(change), reading: { mode: "diff", layout: "split", positions: {} } });
   },
@@ -667,6 +672,7 @@ export const actions = {
   },
 
   async openFile(path: string, refresh = false): Promise<void> {
+    state.fileBrowser = false;
     if (!fileLanguage(path) || !state.sessionId) return actions.openSystemFile(path);
     const existing = state.filePreviews.find(tab => tab.sessionId === state.sessionId && (tab.path === path || tab.referencePath === path));
     if (existing && !refresh) { actions.activateFilePreview(existing.request); return; }
@@ -1173,14 +1179,16 @@ export const actions = {
     // 窗口优先用清单里记着的；切回默认模型时退回配置里那个（用户可能手填过）。
     // 变量名别叫 window——那会遮蔽全局的 window，而下一行正要用它。
     const isDefault = modelId === state.config?.model && providerId === state.config?.providerId;
+    const sessionId = state.sessionId;
     const limit = contextWindow || (isDefault ? (state.config?.contextWindow ?? 0) : 0);
     try {
       await window.aiclaw.session.configure({
-        sessionId: state.sessionId,
+        sessionId,
         providerId,
         model: modelId,
         contextWindow: limit,
       });
+      if (state.sessionId === sessionId && state.sessionInfo?.sessionId === sessionId) state.sessionInfo = { ...state.sessionInfo, model: modelId, providerId };
       await actions.refreshSessions();
     } catch (error) {
       // 切失败就把显示切回去，别让界面显示一个内核并没有在用的模型。

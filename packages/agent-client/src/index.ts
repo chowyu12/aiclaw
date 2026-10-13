@@ -62,3 +62,5 @@ export type {
 export type { Goal, GoalInput, GoalUpdate, PlanStep, SessionWork, PendingSubmission, FileChange } from "./protocol.js";
 
 export type { MCPOAuthInput, MCPOAuthStatus } from "./protocol.js";
+
+export type { ContextStatus } from "./protocol.js";

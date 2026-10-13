@@ -108,6 +108,9 @@ func (s *Session) compact(ctx context.Context, turnID string, emitter Emitter) e
 	s.lastInputTokens = 0
 	s.mu.Unlock()
 
+	if err := s.recordCompaction(history, compacted); err != nil {
+		s.notify(emitter, turnID, i18n.D("压缩记录保存失败：{err}", "err", err))
+	}
 	s.notify(emitter, turnID, i18n.D("上下文接近上限，已压缩历史：保留了近期的用户消息和一份进度摘要。"))
 	return nil
 }

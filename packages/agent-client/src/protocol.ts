@@ -751,3 +751,5 @@ export interface MCPOAuthInput { url: string; clientId?: string; clientSecret?: 
 export interface MCPOAuthStatus { state: "connected" | "expired" | "needs_login" | "authorizing"; expiresAt?: number; error?: string; authorizationUrl?: string }
 
 export interface SearchSource { title: string; url: string; snippet: string; }
+
+export interface ContextStatus { model: string; window: number; estimatedTokens: number; lastInputTokens: number; hasImages: boolean; compactions: number; records: {at:number;before:number;after:number}[]; }

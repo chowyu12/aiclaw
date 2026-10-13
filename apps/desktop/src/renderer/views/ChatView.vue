@@ -15,6 +15,7 @@ import {
   type ImageAttachment,
   type TextAttachment,
 } from "../attachments";
+import ContextIndicator from "./ContextIndicator.vue";
 import { groupTurns, imageArtifacts, turnArtifacts, unmentionedArtifacts, turnSources, stepsElapsed, type Turn } from "../turns";
 import { renderMarkdown } from "../markdown";
 import { answerText, answerTime, formatMessageTime, fullMessageTime } from "../message-meta";
@@ -821,6 +822,7 @@ const forking = ref(false);
             @dragleave="dragging = false"
             @drop="onDrop"
           >
+            <ContextIndicator v-if="store.sessionId" />
             <!-- 附件排在输入框上面：它们是这条消息的一部分，
                  放在下面会被工具条挤成「设置」的样子。 -->
             <div v-if="attachments.length > 0" class="chips">
@@ -909,6 +911,7 @@ const forking = ref(false);
                     {{ t("清除（回到未设置）") }}
                   </button>
                 </div>
+                <button class="chip" :disabled="!store.sessionInfo?.workspace" :title="t('浏览工作区文件')" @click="actions.toggleFileBrowser()"><span class="chip-icon">▤</span>{{ t('文件') }}</button>
                 <!-- 工具数是「这次能用什么」最直接的一个数；有挂载失败时标红。 -->
                 <button
                   class="chip"

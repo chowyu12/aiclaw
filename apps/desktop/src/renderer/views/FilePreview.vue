@@ -5,6 +5,7 @@ import { previewReference } from "../../shared/file-preview";
 import { filename, fileType } from "../file-card";
 import { highlightCode } from "../code-highlight";
 import { renderPreviewMarkdown } from "../markdown";
+import { textMatches } from "../file-find";
 import { numberedDiff, splitDiff } from "../file-diff";
 import { t } from "../i18n";
 
@@ -13,6 +14,57 @@ const mode = ref("source"), layout = ref("split"), copied = ref(false);
 const closeButton = ref<HTMLButtonElement>();
 const previousFocus = document.activeElement as HTMLElement | null;
 const body = ref<HTMLElement>();
+const findOpen = ref(false), findQuery = ref(""), findIndex = ref(0), findInput = ref<HTMLInputElement>();
+const findCount = ref(0), findTruncated = ref(false), lineNumber = ref(""), activeLine = ref(0), lineError = ref("");
+let ranges: Range[] = [];
+function highlightFind(): void {
+  CSS.highlights.delete("aiclaw-file-find");CSS.highlights.delete("aiclaw-file-active");
+  findCount.value = 0; findTruncated.value = false; ranges = [];
+  if (!findOpen.value || !findQuery.value || !body.value) return;
+  const walker = document.createTreeWalker(body.value,NodeFilter.SHOW_TEXT);
+  const parts: {node:Text;start:number;end:number}[]=[];let text="", block:Element|null=null;
+  while (walker.nextNode()) {
+    const node=walker.currentNode as Text;
+    if (mode.value !== "rendered" && !node.parentElement?.closest("code")) continue;
+    const nextBlock=node.parentElement?.closest("code,p,li,h1,h2,h3,h4,h5,h6,td,th,blockquote")??null;
+    if(block!==nextBlock && text)text+="\n";
+    block=nextBlock;
+    parts.push({node,start:text.length,end:text.length+node.data.length});text+=node.data;
+  }
+  const found=textMatches(text,findQuery.value);findTruncated.value=found.truncated;
+  for (const match of found.matches) {
+    const first=parts.find(part=>part.start<=match.start && part.end>match.start),last=parts.find(part=>part.end>=match.start+match.length);
+    if (!first || !last) continue;
+    const range=document.createRange();range.setStart(first.node,match.start-first.start);range.setEnd(last.node,match.start+match.length-last.start);ranges.push(range);
+  }
+  findCount.value=ranges.length;findIndex.value=Math.min(findIndex.value,Math.max(0,ranges.length-1));
+  CSS.highlights.set("aiclaw-file-find",new Highlight(...ranges));
+  if (ranges[findIndex.value]) CSS.highlights.set("aiclaw-file-active",new Highlight(ranges[findIndex.value]!));
+}
+function moveFind(direction:number): void {
+  if (!ranges.length || !body.value) return;
+  findIndex.value=(findIndex.value+direction+ranges.length)%ranges.length;
+  const range=ranges[findIndex.value]!;
+  CSS.highlights.set("aiclaw-file-active",new Highlight(range));
+  const rect=range.getBoundingClientRect(),pane=body.value.getBoundingClientRect();
+  body.value.scrollTop+=rect.top-pane.top-body.value.clientHeight/3;
+  if(rect.left<pane.left||rect.right>pane.right)body.value.scrollLeft+=rect.left-pane.left;
+}
+async function openFind(): Promise<void> { findOpen.value=true;await nextTick();findInput.value?.focus();findInput.value?.select(); }
+function closeFind(): void {findOpen.value=false;lineError.value="";CSS.highlights.delete("aiclaw-file-find");CSS.highlights.delete("aiclaw-file-active");}
+async function jumpLine(): Promise<void> {
+  const value=Number(lineNumber.value),max=Math.min(3000,visibleLines.value.length);
+  if (!Number.isInteger(value)||value<1||value>max) {lineError.value=t("请输入 1 到 {max} 的行号",{max});return;}
+  lineError.value="";mode.value=props.preview.change ? (mode.value==="before"?"before":"after") : "source";
+  await nextTick();await nextTick();activeLine.value=value;
+  if(body.value)body.value.scrollTop=12+(value-1)*21;
+}
+function onFindKey(event:KeyboardEvent):void {
+  if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="f"&&!event.altKey){event.preventDefault();void openFind();}
+}
+watch([findOpen,findQuery,mode,layout,()=>props.preview.request,()=>props.preview.content,()=>props.preview.loading],async()=>{await nextTick();highlightFind();if(findOpen.value&&findQuery.value)moveFind(0);},{flush:"post"});
+watch(findQuery,()=>{findIndex.value=0;});
+watch(()=>props.preview.request,()=>{findIndex.value=0;activeLine.value=0;lineError.value="";});
 let restoring = false, restoreTicket = 0;
 const positionKey = () => mode.value === "diff" ? `diff:${layout.value}` : mode.value;
 function restorePosition(): void {
@@ -68,7 +120,7 @@ function onTabKey(event: KeyboardEvent, index: number): void {
 }
 function close(): void { actions.closeFilePreview(); previousFocus?.focus(); }
 function onKey(event: KeyboardEvent): void {
-  if (event.key === "Escape") { event.preventDefault(); close(); }
+  if (event.key === "Escape") { event.preventDefault(); if(findOpen.value)closeFind();else close(); }
 }
 async function copy(): Promise<void> {
   try { await navigator.clipboard.writeText(content.value); copied.value = true; }
@@ -78,8 +130,8 @@ function openReference(event: MouseEvent): void {
   const target = (event.target as HTMLElement)?.closest(".file-ref");
   if (target) { event.preventDefault(); void actions.openFile(previewReference(props.preview.path, target.getAttribute("data-file-path") ?? "")); }
 }
-onMounted(async () => { await nextTick(); closeButton.value?.focus(); });
-onUnmounted(() => { previousFocus?.focus(); });
+onMounted(async () => { window.addEventListener("keydown",onFindKey);await nextTick(); closeButton.value?.focus(); });
+onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();previousFocus?.focus(); });
 </script>
 <template>
   <aside class="file-preview" :aria-label="t('文件预览')" @keydown="onKey">
@@ -87,6 +139,8 @@ onUnmounted(() => { previousFocus?.focus(); });
       <span class="preview-file-mark" aria-hidden="true">{{ fileType(preview.path) }}</span>
       <div class="preview-heading"><strong>{{ filename(preview.path) }}</strong><small :title="preview.path">{{ preview.path }}</small></div>
       <div class="preview-header-actions">
+        <button :aria-label="t('浏览工作区文件')" :title="t('浏览工作区文件')" @click="actions.toggleFileBrowser()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg></button>
+        <button :aria-label="t('查找文件内容')" :title="t('查找文件内容')" @click="openFind"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg></button>
         <button :disabled="preview.loading" :aria-label="t('刷新')" :title="t('重新读取当前文件')" @click="actions.refreshFilePreview()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg><span class="sr-only">{{ t('刷新') }}</span></button>
         <button :disabled="preview.loading" :aria-label="t('对比')" :title="t('查看此文件最近一次记录的改动')" @click="actions.compareFilePreview()"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M6 9h3M15 15h3M16.5 13.5v3"/></svg><span class="sr-only">{{ t('对比') }}</span></button>
         <button :disabled="preview.loading || !!preview.error" :aria-label="t('用系统应用打开')" :title="t('用系统应用打开')" @click="actions.openSystemFile(preview.path)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M21 3l-9 9"/><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg><span class="sr-only">{{ t('用系统应用打开') }}</span></button>
@@ -114,6 +168,12 @@ onUnmounted(() => { previousFocus?.focus(); });
         <button v-if="mode !== 'diff'" :disabled="preview.loading || !!preview.error" @click="copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>{{ copied ? t('已复制') : t('复制内容') }}</button>
       </div>
     </nav>
+    <div v-if="findOpen" class="file-find-bar">
+      <input ref="findInput" v-model="findQuery" :aria-label="t('查找文件内容')" :placeholder="t('查找文件内容')" @keydown.enter.prevent="moveFind($event.shiftKey?-1:1)" />
+      <span role="status">{{ findCount ? `${findIndex+1}/${findCount}${findTruncated?'+':''}` : t('无匹配') }}</span>
+      <button :disabled="!findCount" :aria-label="t('上一个匹配')" @click="moveFind(-1)">↑</button><button :disabled="!findCount" :aria-label="t('下一个匹配')" @click="moveFind(1)">↓</button><button :aria-label="t('关闭查找')" @click="closeFind">×</button>
+      <input v-model="lineNumber" class="line-input" inputmode="numeric" :aria-label="t('跳到行号')" :placeholder="t('行号')" @keydown.enter.prevent="jumpLine" /><button @click="jumpLine">{{ t('跳行') }}</button>
+    </div><p v-if="lineError" class="preview-error" role="alert">{{ lineError }}</p>
     <div v-if="mode === 'diff'" class="preview-tools">
       <button :aria-pressed="layout === 'split'" @click="layout='split'">{{ t('并排') }}</button>
       <button :aria-pressed="layout === 'unified'" @click="layout='unified'">{{ t('统一') }}</button>
@@ -140,7 +200,7 @@ onUnmounted(() => { previousFocus?.focus(); });
         <p v-if="diff.length > 3000" class="preview-note">{{ t('差异超过显示范围，仅预览前 3000 行。') }}</p>
       </div>
       <div v-else-if="mode === 'rendered'" ref="body" class="preview-body markdown-preview prose" @scroll="saveReading(true)" @click="openReference" v-html="markup" />
-      <div v-else ref="body" class="preview-body source-code" @scroll="saveReading(true)"><pre class="line-numbers" aria-hidden="true">{{ visibleLines.slice(0,3000).map((_,i)=>i+1).join('\n') }}</pre><pre><code v-html="code" /></pre></div>
+      <div v-else ref="body" class="preview-body source-code" @scroll="saveReading(true)"><pre class="line-numbers" aria-hidden="true"><span v-for="(_,index) in visibleLines.slice(0,3000)" :key="index" :class="{current:index+1===activeLine}">{{ index+1 }}</span></pre><pre><code v-html="code" /></pre></div>
       <p v-if="mode !== 'diff' && truncated" class="preview-note">{{ t('内容超过显示范围，仅预览前 3000 行或 512 KB。') }}</p>
     </template>
   </aside>
@@ -162,4 +222,8 @@ onUnmounted(() => { previousFocus?.focus(); });
 .file-preview pre code,.file-preview .diff code{background:none;padding:0;font:inherit;line-height:inherit}
 .file-preview :deep(.hljs-keyword),.file-preview :deep(.hljs-selector-tag){color:#8b4197}.file-preview :deep(.hljs-string),.file-preview :deep(.hljs-attr){color:var(--accent)}.file-preview :deep(.hljs-number),.file-preview :deep(.hljs-literal){color:#996515}.file-preview :deep(.hljs-comment){color:var(--muted)}.file-preview :deep(.hljs-title),.file-preview :deep(.hljs-built_in){color:#2869a3}
 @media(prefers-color-scheme:dark){.file-preview :deep(.hljs-keyword),.file-preview :deep(.hljs-selector-tag){color:#d79de5}.file-preview :deep(.hljs-number),.file-preview :deep(.hljs-literal){color:#dfbd76}.file-preview :deep(.hljs-title),.file-preview :deep(.hljs-built_in){color:#84bcec}}
+.file-find-bar{display:flex;align-items:center;gap:4px;padding:8px 12px;border-bottom:1px solid var(--rule);flex-wrap:wrap;font-size:11px}.file-find-bar input{width:130px;min-width:0;flex:1;padding:6px 8px;border:1px solid var(--rule);border-radius:6px;background:var(--surface-2);color:var(--ink);font:inherit}.file-find-bar .line-input{flex:none;width:45px}.file-find-bar span{color:var(--muted);white-space:nowrap}.source-code .line-numbers span{display:block;height:21px}.source-code .line-numbers .current{background:var(--accent-soft);color:var(--accent)}
+</style>
+<style>
+::highlight(aiclaw-file-find){background:#ffe69b;color:#222}::highlight(aiclaw-file-active){background:#f2b74d;color:#111}
 </style>

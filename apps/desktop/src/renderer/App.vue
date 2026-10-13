@@ -8,9 +8,10 @@ import ApprovalDialog from "./views/ApprovalDialog.vue";
 import { locale, t } from "./i18n";
 
 /** 「配完了」= 选好了默认模型（它所属的模型服务在库里带着端点与 Key）。 */
+const WorkspaceFiles = defineAsyncComponent(() => import("./views/WorkspaceFiles.vue"));
 const FilePreview = defineAsyncComponent(() => import("./views/FilePreview.vue"));
-watch(() => [store.sessionId, store.view], () => actions.closeFilePreview());
-watch(() => store.view === 'chat' && !!store.filePreview, open => {
+watch(() => [store.sessionId, store.view], () => { actions.closeFileBrowser(); actions.closeFilePreview(); });
+watch(() => store.view === 'chat' && (store.fileBrowser || !!store.filePreview), open => {
   void window.aiclaw.files.previewLayout(open).catch(() => undefined);
 });
 
@@ -61,9 +62,11 @@ onMounted(() => {
 
 
       <div class="content">
-        <ChatView v-if="store.view === 'chat'" :configured="configured" />
-        <FilePreview v-if="store.view === 'chat' && store.filePreview && store.filePreview.sessionId === store.sessionId" :preview="store.filePreview" />
-        <!-- 其余四项是同一个设置页的分栏，外壳带顶部分栏与「返回对话」。 -->
+        <template v-if="store.view === 'chat'">
+          <ChatView :configured="configured" />
+          <WorkspaceFiles v-if="store.fileBrowser" />
+          <FilePreview v-else-if="store.filePreview && store.filePreview.sessionId === store.sessionId" :preview="store.filePreview" />
+        </template>
         <SettingsShell v-else />
       </div>
     </main>
@@ -101,7 +104,7 @@ onMounted(() => {
   min-height: 0;
 }
 .content > :first-child { flex: 1; min-width: 0; }
-.content > .file-preview { flex: none; }
+.content > .file-preview, .content > .workspace-files { flex: none; }
 
 
 
