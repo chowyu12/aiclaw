@@ -3,7 +3,6 @@ export const chat: Record<string, string> = {
   "这不是一个目录": "This is not a directory",
   "未知": "Unknown",
   "浏览工作区文件": "Browse workspace files",
-  "文件": "Files",
   "工作区文件": "Workspace files",
   "关闭文件浏览": "Close file browser",
   "搜索文件名或相对路径…": "Search file names or relative paths…",

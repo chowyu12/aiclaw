@@ -271,7 +271,8 @@ app.whenReady().then(async()=>{
  check('closing inactive tab keeps current reading content',await wait("document.querySelectorAll('.preview-file-tabs [role=tab]').length===1 && !!document.querySelector('.markdown-preview')"));
  await js("document.querySelector('.preview-file-tab.active .tab-close').click()");
  check('closing final reading tab restores original window',await wait("!document.querySelector('.file-preview')")&&win.getBounds().width===1200);
- await js("document.querySelector('.composer button[title=\"浏览工作区文件\"]').click()");check('workspace browser opens inside expanded reading area',await wait("document.querySelectorAll('.workspace-files .file-row').length===2")&&browseReads.at(-1)?.sessionId==='s'&&win.getBounds().width===1840);
+ await js("document.querySelector('.prose .file-card').click()");await wait("!!document.querySelector('.file-preview')");
+ await js("document.querySelector('.file-preview button[aria-label=\"浏览工作区文件\"]').click()");check('reading-area workspace browser opens without a composer file button',await wait("document.querySelectorAll('.workspace-files .file-row').length===2")&&browseReads.at(-1)?.sessionId==='s'&&win.getBounds().width===1840&&await js("!document.querySelector('.composer button[title=\"浏览工作区文件\"]')"));
  await js("document.querySelector('.workspace-files .file-row').click()");check('workspace directory expansion is lazy',await wait("document.querySelectorAll('.workspace-files .file-row').length===3")&&browseReads.at(-1)?.path==='src');
  await js("(()=>{const input=document.querySelector('.workspace-files input');input.value='example';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
  check('workspace file-name search crosses preload',await wait("document.querySelectorAll('.workspace-files .file-row').length===1")&&browseReads.at(-1)?.query==='example');

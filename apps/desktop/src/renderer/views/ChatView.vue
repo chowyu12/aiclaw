@@ -910,7 +910,6 @@ const forking = ref(false);
                     {{ t("清除（回到未设置）") }}
                   </button>
                 </div>
-                <button class="chip" :disabled="!store.sessionInfo?.workspace" :title="t('浏览工作区文件')" @click="actions.toggleFileBrowser()"><span class="chip-icon">▤</span>{{ t('文件') }}</button>
                 <!-- 工具数是「这次能用什么」最直接的一个数；有挂载失败时标红。 -->
                 <button
                   class="chip"
