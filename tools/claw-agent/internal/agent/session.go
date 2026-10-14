@@ -287,6 +287,10 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		return nil, err
 	}
 
+	if err := session.registerOutputTool(); err != nil {
+		return nil, err
+	}
+
 	// 代码模式在技能与 computer use **之前**装：它要把注册表里已有的工具
 	// 全部收进 exec，而 load_skill / computer_* 是之后才注册的——那几个
 	// 留在外面是对的，模型读技能、点屏幕不需要写脚本。
@@ -299,6 +303,12 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 				"after", formatTokens(session.codeModeTokens[1]),
 			)
 			session.foldStatusIntoExec()
+		}
+	}
+
+	if config.CodeMode {
+		if err := session.registerOutputTool(); err != nil {
+			return nil, err
 		}
 	}
 
@@ -873,6 +883,7 @@ func buildSystemPrompt(
 	// 回复用什么语言：这份提示词是中文写的，不说的话模型容易被它带着一律用中文回答，
 	// 而界面是英文的用户多半用英文提问、也想看英文。
 	builder.WriteString(replyLanguage(config.Locale))
+	builder.WriteString("Treat truncated output and deliberate head/tail/slice previews as partial evidence. Before claiming data is absent, inspect the relevant retained pages or source fields and follow API pagination. Use read_tool_output for output_id references; read_file supports continuation. If the missing portion cannot be retrieved, state that the available evidence is incomplete. Never rerun a side-effecting command merely to recover its output.\n")
 	// 说清楚「基准在哪、什么会被问」。模型不知道这两件事时，
 	// 要么不敢碰工作区外面的文件，要么写一堆会被拦下的路径。
 	if workspace := strings.TrimSpace(config.Workdir); workspace != "" {

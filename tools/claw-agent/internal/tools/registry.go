@@ -52,6 +52,7 @@ type ApprovalFunc func(
 
 // Env 是工具执行时的环境。
 type Env struct {
+	SaveOutput OutputSaver
 	// Optional observation hooks receive successful known skill loads/file reads.
 	SkillLoaded func(context.Context, string)
 	FileRead    func(context.Context, string)

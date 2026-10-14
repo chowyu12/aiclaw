@@ -13,6 +13,7 @@ import (
 	"github.com/dop251/goja"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
 
 /*
@@ -61,8 +62,9 @@ func DefaultLimits() Limits {
 
 // Runtime 执行脚本。一个会话一个，store/load 的数据存在这里。
 type Runtime struct {
-	tools  []Tool
-	limits Limits
+	tools      []Tool
+	limits     Limits
+	SaveOutput tools.OutputSaver
 	// stored 是脚本之间共享的键值，给 store()/load() 用。
 	// 一段脚本查出来的东西，下一段还能接着用，不必重新查一遍。
 	//
@@ -87,19 +89,10 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 	// 严格模式会直接报错，比默默建个全局变量好查。
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 
-	var output strings.Builder
-	truncated := false
-	appendOutput := func(text string) {
-		if truncated {
-			return
-		}
-		if output.Len()+len(text) > r.limits.MaxOutput {
-			output.WriteString(text[:max(0, r.limits.MaxOutput-output.Len())])
-			output.WriteString("\n…" + i18n.D("（输出过长已截断）"))
-			truncated = true
-			return
-		}
-		output.WriteString(text)
+	output := tools.OutputBuffer{Complete: true}
+	appendOutput := func(text string) { _, _ = output.Write([]byte(text)) }
+	preview := func() string {
+		return tools.OutputPreview(ctx, output.String(), min(r.limits.MaxOutput, tools.MaxOutputPreview), output.Complete, r.SaveOutput)
 	}
 
 	var calls atomic.Int64
@@ -146,30 +139,30 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 	wrapped := "(async () => {\n" + StripFences(source) + "\n})()"
 	value, err := vm.RunString(wrapped)
 	if err != nil {
-		return output.String(), scriptError(err)
+		return preview(), scriptError(err)
 	}
 
 	promise, ok := value.Export().(*goja.Promise)
 	if !ok {
 		// 理论上不会：上面包成了 async 函数。真出现就如实说，别装作成功。
-		return output.String(), i18n.E("脚本没有返回预期的结果")
+		return preview(), i18n.E("脚本没有返回预期的结果")
 	}
 	switch promise.State() {
 	case goja.PromiseStateRejected:
 		reason := promise.Result()
 		if isExit(reason) {
-			return finish(output.String(), calls.Load()), nil
+			return finish(preview(), calls.Load()), nil
 		}
-		return output.String(), i18n.E("脚本抛出异常：{error}", "error", describe(reason))
+		return preview(), i18n.E("脚本抛出异常：{error}", "error", describe(reason))
 	case goja.PromiseStatePending:
 		// await 了一个永远不会完成的东西。说清楚，别让模型以为是工具的问题。
-		return output.String(), i18n.E("脚本结束时仍有未完成的等待，可能 await 了一个不会返回的东西")
+		return preview(), i18n.E("脚本结束时仍有未完成的等待，可能 await 了一个不会返回的东西")
 	}
 
 	if result := promise.Result(); result != nil && !goja.IsUndefined(result) && !goja.IsNull(result) {
 		appendOutput(stringify(result))
 	}
-	return finish(output.String(), calls.Load()), nil
+	return finish(preview(), calls.Load()), nil
 }
 
 func finish(text string, calls int64) string {
@@ -221,6 +214,15 @@ func (r *Runtime) install(
 				// 这正是写代码比一次次单独调用强的地方。
 				_ = reject(vm.ToValue(callErr.Error()))
 				return vm.ToValue(promise)
+			}
+			// Keep an oversized raw result even if the script prints only a slice of it.
+			if len(result) > tools.MaxOutputPreview && r.SaveOutput != nil {
+				id, err := r.SaveOutput(ctx, result, true)
+				if err != nil {
+					appendOutput("Partial evidence: oversized tool result could not be retained: " + err.Error() + "\n")
+				} else {
+					appendOutput(fmt.Sprintf("Retained oversized result from tools.%s: output_id=%s; use read_tool_output to inspect omitted fields. Retention is capped at 8 MiB; inspect complete before assuming this is the whole source.\n", tool.Ident, id))
+				}
 			}
 			_ = resolve(toolValue(vm, result))
 			return vm.ToValue(promise)

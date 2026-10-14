@@ -1,13 +1,13 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -26,7 +26,7 @@ const (
 
 	defaultExecTimeout = 60 * time.Second
 	maxExecTimeout     = 10 * time.Minute
-	maxExecOutput      = 64 * 1024
+	maxExecOutput      = MaxOutputPreview
 )
 
 // dangerousCommands 是硬拒绝名单：命中即失败，**没有「仍然执行」的选项**。
@@ -170,7 +170,9 @@ func RegisterExecTool(registry *Registry) error {
 	})
 }
 
-func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (string, error) {
+var partialCommand = regexp.MustCompile(`(?:^|[|;&]\s*)(?:head\b|tail\b|sed\s+-n\b)`)
+
+func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (result string, err error) {
 	var args struct {
 		Command        string `json:"command"`
 		Cwd            string `json:"cwd"`
@@ -185,6 +187,11 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (string, err
 	if command == "" {
 		return "", i18n.E("command 不能为空")
 	}
+	defer func() {
+		if partialCommand.MatchString(command) {
+			result += "\nPartial command selection: this command appears to use head/tail/sed -n. Its output may only be a selected portion of the source; inspect relevant source fields/pages before concluding data is absent. A retained copy only contains what this command printed."
+		}
+	}()
 	if err := checkDangerous(command); err != nil {
 		return "", err
 	}
@@ -259,24 +266,24 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (string, err
 		cmd = sandboxedShellCommand(execCtx, command, env)
 	}
 	cmd.Dir = cwd
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &limitedWriter{buffer: &stdout, limit: maxExecOutput}
-	cmd.Stderr = &limitedWriter{buffer: &stderr, limit: maxExecOutput}
+	stdout, stderr := OutputBuffer{Complete: true}, OutputBuffer{Complete: true}
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 
 	runErr := cmd.Run()
 
 	var builder strings.Builder
 	if stdout.Len() > 0 {
-		builder.Write(stdout.Bytes())
+		builder.WriteString(stdout.String())
 	}
 	if stderr.Len() > 0 {
 		if builder.Len() > 0 {
 			builder.WriteString("\n")
 		}
 		builder.WriteString("[stderr]\n")
-		builder.Write(stderr.Bytes())
+		builder.WriteString(stderr.String())
 	}
-	output := builder.String()
+	output := OutputPreview(ctx, builder.String(), maxExecOutput, stdout.Complete && stderr.Complete && execCtx.Err() == nil && !errors.Is(runErr, exec.ErrWaitDelay), env.SaveOutput)
 
 	if runErr != nil && sandboxed && strings.Contains(output, "Operation not permitted") {
 		// 沙箱拒绝时系统只说 "Operation not permitted"，看起来像权限配错了。
@@ -356,30 +363,4 @@ func prepareContext(cmd *exec.Cmd) *exec.Cmd {
 	prepare(cmd)
 	cancelByProcessGroup(cmd)
 	return cmd
-}
-
-// limitedWriter 只保留前 limit 字节，之后丢弃并记一个截断标记。
-// 命令刷屏不该把模型上下文撑爆。
-type limitedWriter struct {
-	buffer    *bytes.Buffer
-	limit     int
-	truncated bool
-}
-
-func (w *limitedWriter) Write(p []byte) (int, error) {
-	remaining := w.limit - w.buffer.Len()
-	if remaining <= 0 {
-		if !w.truncated {
-			w.buffer.WriteString("\n" + i18n.D("[输出已截断]"))
-			w.truncated = true
-		}
-		return len(p), nil
-	}
-	if len(p) > remaining {
-		w.buffer.Write(p[:remaining])
-		w.buffer.WriteString("\n" + i18n.D("[输出已截断]"))
-		w.truncated = true
-		return len(p), nil
-	}
-	return w.buffer.Write(p)
 }

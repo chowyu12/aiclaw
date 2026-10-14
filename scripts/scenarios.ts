@@ -272,6 +272,40 @@ async function openSession(
 
 const scenarios: Scenario[] = [
   {
+    name: "输出续读：Code Mode 的 slice 不丢失原返回",
+    async run(ctx) {
+      const session = await openSession(ctx, "output-slice", {codeMode:true});
+      const marker = "slice-tail-" + Date.now().toString(36);
+      writeFileSync(join(session.dir,"large-response.txt"),"padding\n".repeat(40000)+"personal_value="+marker+"\n");
+      const result = await turn(ctx.client,session.id,"先执行一段 exec：const r=await tools.run_command({command:\"printf '1\\n' >> executions.txt; cat large-response.txt\"}); return r.slice(0,30); 然后根据框架给出的 output_id 用 read_tool_output 补读原返回，找到其中指向完整命令输出的 output_id，再补读完整输出末尾的 personal_value。只回复字段值。这个命令只执行一次，不允许重复执行或另外读原文件。");
+      if (result.error || !result.text.includes(marker) || readFileSync(join(session.dir,"executions.txt"),"utf8").trim()!=="1") throw new Error(result.error || "slice 原返回未补读或命令被重复执行");
+      return "slice 预览之后补读原返回，一次命令找到了末尾字段";
+    },
+  },
+  {
+    name: "输出续读：命令尾部数据不靠重复执行获取",
+    async run(ctx) {
+      const session = await openSession(ctx, "output-pages");
+      const marker = "tail-key-" + Date.now().toString(36);
+      writeFileSync(join(session.dir,"large-response.txt"), "padding\n".repeat(40000) + "personal_value=" + marker + "\n");
+      const result = await turn(ctx.client, session.id, "运行 cat large-response.txt 一次。输出里最后一行的 personal_value 是什么？若输出截断，必须用 read_tool_output 根据 output_id 补读末尾，不能重跑命令或凭开头判断无数据。只回复字段值。");
+      if (result.error) throw new Error(result.error);
+      if (!result.text.includes(marker) || result.tools.filter(t=>t.name==="run_command").length!==1 || !result.tools.some(t=>t.name==="read_tool_output")) throw new Error("尾部数据或续读调用不符合要求");
+      return "一次命令，续读后找到了末尾字段";
+    },
+  },
+  {
+    name: "输出续读：文件行号越过原 256 KiB 边界",
+    async run(ctx) {
+      const session = await openSession(ctx, "file-pages");
+      const marker = "late-row-" + Date.now().toString(36);
+      writeFileSync(join(session.dir,"large.txt"), "padding\n".repeat(40000) + marker + "\n");
+      const result = await turn(ctx.client, session.id, "用 read_file 读取 large.txt 的第 40001 行（offset=40001，limit=1），只回复这一行。");
+      if (result.error || !result.text.includes(marker) || !result.tools.some(t=>t.name==="read_file")) throw new Error(result.error || "大文件行号读取失败");
+      return "直接读到了 256 KiB 之后的行";
+    },
+  },
+  {
     name: "对话：按要求回复",
     async run(ctx) {
       const session = await openSession(ctx, "chat");

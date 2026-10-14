@@ -86,6 +86,7 @@ func Description(tools []Tool) string {
 - When the name is in a variable, write tools[name], **without the tools. prefix in the name** — the list below shows the call form
   tools.some_tool(...), where the tool name is only the "some_tool" part.
 - A failing tool throws an exception; catch it with try/catch and try another approach.
+- Oversized printed output is a partial preview. Follow output_id with the top-level read_tool_output tool to recover pages. Store complete structured results before selecting fields. A deliberate head/tail/slice is also partial evidence; inspect relevant fields/pages before claiming data is absent.
 - **Return only the results you need**: keep intermediate data inside the script instead of text()-ing all of it.
   That is the whole point of exec — a dozen queries, and only the last few lines come back.
 

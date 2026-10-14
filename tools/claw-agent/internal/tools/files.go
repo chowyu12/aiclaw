@@ -69,7 +69,7 @@ func readTool() Tool {
 	return Tool{
 		Name: "read_file",
 		Description: "Read a file's contents. Files outside the workspace can be read too (except directories that hold credentials). " +
-			"Large files are truncated.",
+			"Read bounded pages of text; follow the reported byte_offset or offset to continue. Offsets apply to the full file.",
 		Effect: EffectRead,
 		Schema: schema(map[string]any{
 			"path": map[string]any{
@@ -78,15 +78,17 @@ func readTool() Tool {
 			"offset": map[string]any{
 				"type": "integer", "description": "Line to start reading from, 1-based; omit to read from the beginning", "minimum": 1,
 			},
+			"byte_offset": map[string]any{"type": "integer", "description": "UTF-8 byte position to resume from; cannot be combined with offset", "minimum": 0},
 			"limit": map[string]any{
 				"type": "integer", "description": "Maximum number of lines to read", "minimum": 1,
 			},
 		}, "path"),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *Env) (string, error) {
 			var args struct {
-				Path   string `json:"path"`
-				Offset int    `json:"offset"`
-				Limit  int    `json:"limit"`
+				Path       string `json:"path"`
+				Offset     int    `json:"offset"`
+				Limit      int    `json:"limit"`
+				ByteOffset *int64 `json:"byte_offset"`
 			}
 			if err := decodeArgs(raw, &args); err != nil {
 				return "", err
@@ -102,6 +104,9 @@ func readTool() Tool {
 			if info.IsDir() {
 				return "", i18n.E("{path} 是目录，不是文件；用 list_dir 看目录内容", "path", args.Path)
 			}
+			if !info.Mode().IsRegular() {
+				return "", errors.New("read_file requires a regular file")
+			}
 			// Office 文件是 zip 包，按文本读出来只是一串乱码，还白占上下文。
 			// 直接指到 read_office；老格式则直接说清读不了。
 			if kind, legacy := officeKind(path); kind != "" {
@@ -111,36 +116,11 @@ func readTool() Tool {
 				return "", i18n.E("{path} 是 Office 文件（压缩包格式），read_file 读不出文字；请改用 read_office", "path", args.Path)
 			}
 
-			content, err := os.ReadFile(path)
+			text, err := readFilePage(ctx, path, args.Offset, args.Limit, args.ByteOffset)
 			if err != nil {
-				return "", fmt.Errorf("%s: %w", i18n.D("读取失败"), err)
-			}
-			truncated := false
-			if len(content) > maxReadBytes {
-				content = content[:maxReadBytes]
-				truncated = true
+				return "", err
 			}
 
-			text := string(content)
-			if args.Offset > 0 || args.Limit > 0 {
-				lines := strings.Split(text, "\n")
-				start := 0
-				if args.Offset > 0 {
-					start = args.Offset - 1
-				}
-				if start >= len(lines) {
-					return "", i18n.E("offset {offset} 超出文件行数 {lines}", "offset", args.Offset, "lines", len(lines))
-				}
-				end := len(lines)
-				if args.Limit > 0 && start+args.Limit < end {
-					end = start + args.Limit
-					truncated = true
-				}
-				text = strings.Join(lines[start:end], "\n")
-			}
-			if truncated {
-				text += "\n\n" + i18n.D("[内容已截断]")
-			}
 			if env.FileRead != nil {
 				env.FileRead(ctx, path)
 			}

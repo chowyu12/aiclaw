@@ -60,6 +60,7 @@ func (s *Session) installCodeMode() int {
 	bridged = codemode.AssignIdentifiers(bridged)
 
 	runtime := codemode.New(bridged, codemode.DefaultLimits())
+	runtime.SaveOutput = s.saveToolOutput
 	description := codemode.Description(bridged)
 	before, after := codeModeSavings(existing, description)
 	s.codeModeTokens = [2]int{before, after}

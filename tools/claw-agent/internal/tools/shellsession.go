@@ -87,7 +87,7 @@ func (p *ShellPool) Run(
 	defer session.mu.Unlock()
 	session.lastUsed = time.Now()
 
-	out, err := session.run(ctx, command, timeout)
+	out, err := session.run(ctx, command, timeout, env.SaveOutput)
 	if err != nil {
 		// 会话已经不可用了（shell 退了、超时被杀），别留着让下一次调用再撞一次。
 		p.drop(session.id)
@@ -205,7 +205,7 @@ func startShellSession(env *Env) (*shellSession, error) {
 	}, nil
 }
 
-func (s *shellSession) run(ctx context.Context, command string, timeout time.Duration) (string, error) {
+func (s *shellSession) run(ctx context.Context, command string, timeout time.Duration, save OutputSaver) (string, error) {
 	// 命令与哨兵之间用 `;` 而不是 `&&`：命令失败了也要打印哨兵，
 	// 否则一条失败的命令会让这次读取一直等到超时。
 	script := fmt.Sprintf("%s\nprintf '\\n%s %%s\\n' \"$?\"\n", command, s.sentinel)
@@ -220,31 +220,19 @@ func (s *shellSession) run(ctx context.Context, command string, timeout time.Dur
 	}
 	done := make(chan result, 1)
 	go func() {
-		var builder strings.Builder
+		builder := OutputBuffer{Complete: true}
 		for {
 			line, err := s.output.ReadString('\n')
 			if marker := strings.Index(line, s.sentinel); marker >= 0 {
-				builder.WriteString(line[:marker])
+				_, _ = builder.Write([]byte(line[:marker]))
 				code := strings.TrimSpace(line[marker+len(s.sentinel):])
-				done <- result{text: builder.String(), code: code}
+				done <- result{text: OutputPreview(ctx, builder.String(), maxExecOutput, builder.Complete, save), code: code}
 				return
 			}
-			builder.WriteString(line)
+			_, _ = builder.Write([]byte(line))
 			if err != nil {
-				done <- result{text: builder.String(), err: err}
+				done <- result{text: OutputPreview(ctx, builder.String(), maxExecOutput, builder.Complete, save), err: err}
 				return
-			}
-			if builder.Len() > maxExecOutput {
-				// 刷屏的命令不该把上下文撑爆。这里只截断给模型看的部分，
-				// 剩下的仍要读完，否则哨兵永远等不到。
-				builder.WriteString("\n…" + i18n.D("（输出过长已截断）") + "\n")
-				for {
-					next, readErr := s.output.ReadString('\n')
-					if strings.Contains(next, s.sentinel) || readErr != nil {
-						done <- result{text: builder.String(), err: readErr}
-						return
-					}
-				}
 			}
 		}
 	}()
