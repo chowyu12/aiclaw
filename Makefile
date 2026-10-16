@@ -106,6 +106,7 @@ test-go: ## Go 单元与集成测试（内核 + 插件系统 + 存储层）
 #   - computer use 的自身进程名表是自点审批的防护。
 test-renderer: ## 纯函数测试（Markdown 渲染与转义、配置归一化、版本比较……）
 	npm run test:renderer
+	npm run test:updater
 
 smoke: deps build-go build-client ## 内核冒烟：真拉起 claw-agent，走模型服务、插件、搜索引擎；不需要凭据
 	npm run smoke

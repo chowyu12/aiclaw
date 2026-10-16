@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { app, shell } from "electron";
@@ -11,13 +12,13 @@ import { isNewer, normalizeVersion } from "./version.js";
 /**
  * 检查更新。
  *
- * **这不是自动更新。** 真正的静默自动更新（Squirrel.Mac / electron-updater）
- * 要求安装包有 Developer ID 签名，而这个项目的包是未签名的——没有签名的更新包
- * Squirrel 会直接拒绝。所以这里做的是「发现新版本并帮你装」：
+ * macOS 的 Squirrel.Mac 自动更新要求 Developer ID 签名；当前包未签名，
+ * 因此 macOS 做的是「发现新版本并帮你装」：
  * 提示 → 用户点一下 → 下载 zip → 一段脱离父进程的脚本替换 .app 并重开。
+ * Windows 下载并校验 Setup.exe，启动交互安装器后退出，由用户确认安装；Linux 下载 ZIP。
  *
  * 检查走 GitHub Releases 的公开接口，**不需要任何凭据**。包名与
- * .github/workflows/release.yml 里的 zip 命名一致：改一处要改另一处。
+ * .github/workflows/release.yml 与 package-win-installer.mjs 的产物命名一致。
  */
 
 const REPO = "chowyu12/aiclaw";
@@ -33,9 +34,7 @@ export interface UpdateStatus {
   /**
    * 这个平台点一下能不能把新版本弄下来。
    *
-   * macOS 是真·一键（替换 .app、自动重开）；Windows 与 Linux 只到「下载好并指给你」
-   * ——自替换在那边风险太高且我们无法验证。三者都比让用户自己去发布页找文件强，
-   * 所以都算 true，文案由界面按平台分。
+   * macOS 替换 .app 并重开；Windows 启动安装器（旧 Release 退回 ZIP）；Linux 下载 ZIP。
    */
   canInstall: boolean;
   /** 界面上那个按钮该写什么。 */
@@ -69,7 +68,7 @@ export class Updater {
   async check(): Promise<UpdateStatus> {
     const current = app.getVersion();
     const canInstall = true;
-    const installLabel = process.platform === "darwin" ? tr("升级并重启") : tr("下载新版本");
+    let installLabel = process.platform === "darwin" ? tr("升级并重启") : tr("下载新版本");
     try {
       const response = await fetch(LATEST_RELEASE, {
         signal: AbortSignal.timeout(10_000),
@@ -88,6 +87,9 @@ export class Updater {
           .filter((asset) => asset.name && asset.browser_download_url)
           .map((asset) => [asset.name!, asset.browser_download_url!]),
       );
+      if (process.platform === "win32" && this.assets.has(this.windowsInstallerName(latest))) {
+        installLabel = tr("下载安装更新");
+      }
       return { current, latest, hasUpdate: isNewer(latest, current), canInstall, installLabel, error: "" };
     } catch (error) {
       // 查不到不是错误状态，只是这次没查到。网络不通时不该在界面上报红。
@@ -141,6 +143,7 @@ export class Updater {
   private async download(
     file: string,
     onProgress?: (received: number, total: number) => void,
+    directory = tmpdir(),
   ): Promise<string> {
     const url = this.assets.get(file);
     if (!url) throw new Error(tr("最新版本里没有 {file}", { file }));
@@ -148,7 +151,7 @@ export class Updater {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const total = Number(response.headers.get("content-length") ?? 0);
 
-    const target = join(tmpdir(), file);
+    const target = join(directory, file);
     const chunks: Uint8Array[] = [];
     let received = 0;
     const reader = response.body?.getReader();
@@ -171,15 +174,13 @@ export class Updater {
    * 就是**正在运行的我们自己**，所以这个子进程必须 detached + unref，
    * 不然它会跟着我们一起死，用户看到的是应用退了但没升级。
    *
-   * Windows / Linux：只下载并在文件管理器里指给用户，**不自动替换**。
-   * 「替换正在运行的自己」在那两边比 macOS 还难（文件被占用、杀进程的时机、
-   * 失败后没有回滚），而我们没有机器去验证，写一个没验证过的自替换脚本，
-   * 失败方式正好是「应用打不开了」。下载这一段是能验的，也已经省掉了最烦的
-   * 一步——找到该下哪个文件。
+   * Windows 交给交互安装器，不传静默安装参数；旧版本只有 ZIP 时保持下载行为。
+   * Linux 仍只下载并在文件管理器里显示。
    */
   async install(
     onProgress?: (received: number, total: number) => void,
   ): Promise<{ started: boolean; detail: string }> {
+    if (process.platform === "win32") return this.installWindows(onProgress);
     if (process.platform !== "darwin") return this.downloadOnly(onProgress);
     if (!app.isPackaged) {
       return { started: false, detail: tr("开发模式下不替换自己；打好的包才能一键升级。") };
@@ -202,6 +203,41 @@ export class Updater {
         started: false,
         detail: tr("自动升级失败（{error}），已打开发布页。", { error: error instanceof Error ? error.message : String(error) }),
       };
+    }
+  }
+
+  private windowsInstallerName(version: string): string {
+    return `AIClaw-v${version}-win-x64-setup.exe`;
+  }
+
+  private async installWindows(
+    onProgress?: (received: number, total: number) => void,
+  ): Promise<{ started: boolean; detail: string }> {
+    if (!app.isPackaged) {
+      return { started: false, detail: tr("开发模式下不替换自己；打好的包才能一键升级。") };
+    }
+    let directory = "";
+    try {
+      const status = await this.check();
+      if (status.error) throw new Error(status.error);
+      if (!status.hasUpdate) return { started: false, detail: tr("当前已是最新版本") };
+      if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(status.latest)) throw new Error(tr("查不到最新版本"));
+      const name = this.windowsInstallerName(status.latest);
+      if (!this.assets.has(name)) return this.downloadOnly(onProgress);
+      directory = await mkdtemp(join(tmpdir(), "aiclaw-update-"));
+      const installer = await this.download(name, onProgress, directory);
+      const sums = await this.download("SHA256SUMS.txt", undefined, directory);
+      const entry = (await readFile(sums, "utf8")).split(/\r?\n/).map(line => /^([a-f0-9]{64})\s+\*?(?:\.\/)?(.+)$/i.exec(line)).find(match => match?.[2] === name);
+      const actual = createHash("sha256").update(await readFile(installer)).digest("hex");
+      if (!entry || entry[1]!.toLowerCase() !== actual) throw new Error(tr("安装包校验失败，请重新下载。"));
+      const error = await shell.openPath(installer);
+      if (error) throw new Error(error);
+      app.quit();
+      return { started: true, detail: tr("已启动安装器，请确认安装；完成后可重新打开 AIClaw。") };
+    } catch (error) {
+      if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+      await shell.openExternal(RELEASES_PAGE);
+      return { started: false, detail: tr("自动升级失败（{error}），已打开发布页。", { error: error instanceof Error ? error.message : String(error) }) };
     }
   }
 

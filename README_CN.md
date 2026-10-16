@@ -71,10 +71,16 @@ Apple Silicon 与 Intel 都认；已经手动下好 zip 的话 `install-mac.sh -
 `~/Downloads` 里最新的那个。脚本只做四件事：找包 → 退掉正在跑的 → 替换 `.app` →
 `xattr -dr com.apple.quarantine`——包未签名，不去这个标记 Gatekeeper 会拒绝打开。
 
-**Windows / Linux**：到 [Releases](https://github.com/chowyu12/aiclaw/releases) 下载
-`AIClaw-<版本>-win-x64.zip` 或 `AIClaw-<版本>-linux-x64.zip`，解压到任意目录运行。
+**Windows**：到 [Releases](https://github.com/chowyu12/aiclaw/releases) 下载
+`AIClaw-<版本>-win-x64-setup.exe`，按安装向导确认安装。后续安装到同一位置并覆盖升级，
+配置、会话和记忆保留在原用户数据目录。仍提供 `AIClaw-<版本>-win-x64.zip` 便携版。
+原 ZIP 用户首次使用安装版后从新快捷方式启动；原解压目录不自动删除。
 
-应用内也会检查新版本：macOS 一键替换并重开，其余平台下载到「下载」目录并指给你。
+**Linux**：下载 `AIClaw-<版本>-linux-x64.zip`，解压到任意目录运行。
+
+应用内也会检查新版本：macOS 一键替换并重开；Windows 下载并校验安装包，成功启动安装器后退出，
+由用户确认覆盖安装（取消时可重新打开旧版本）。只有 ZIP 的旧 Release 仍下载到「下载」目录。
+Linux 保持下载 ZIP 的方式。Windows 安装包目前未签名，系统可能提示发布者未知；SHA256 校验不等同于发布者签名。
 
 ## 目录
 
@@ -118,7 +124,9 @@ make help     # 其余 target
 
 `make package` 用 `@electron/packager` 在一台机器上出四个包（macOS arm64 / x64、
 Windows x64、Linux x64），内核 `CGO_ENABLED=0` 交叉编译。推 `v*` tag 触发
-GitHub Actions：测试 → 打包 → 建 Release（tag 注释作发布说明，附 SHA256SUMS）。
+GitHub Actions：测试 → 打包 → Windows runner 生成 NSIS 安装包并验证安装/覆盖/卸载和数据保留 →
+建 Release（tag 注释作发布说明，附 ZIP、Windows Setup.exe 和 SHA256SUMS）。
+本地可在 `make package-win` 后运行 `npm run package:win-installer`；推荐在 Windows 上构建和验收安装器。
 
 macOS 包未签名：用上面的安装脚本装不用管；手动解压的话第一次打开要右键「打开」，
 或 `xattr -dr com.apple.quarantine /Applications/AIClaw.app`。本机 `make install-mac`

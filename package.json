@@ -3,7 +3,7 @@
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
-  "version": "3.7.14",
+  "version": "3.7.15",
   "description": "AIClaw：本地 Agent 桌面客户端（Electron 宿主 + Go 内核 claw-agent）",
   "repository": {
     "type": "git",
@@ -23,6 +23,8 @@
   "scripts": {
     "build": "npm run build -w @aiclaw/agent-client && npm run build:go",
     "build:go": "cd tools/claw-agent && CGO_ENABLED=0 go build -o claw-agent .",
+    "package:win-installer": "node scripts/package-win-installer.mjs",
+    "test:updater": "node --test --experimental-test-module-mocks --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-updater.ts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test:go": "go test ./tools/claw-agent/... ./internal/...",
     "smoke": "node --experimental-strip-types scripts/smoke-kernel.ts",
@@ -36,6 +38,7 @@
     "@types/markdown-it": "^14.2.0",
     "@types/markdown-it-footnote": "^3.0.4",
     "dompurify": "^3.4.15",
+    "electron-builder": "26.15.3",
     "jsdom": "^29.1.1",
     "markdown-it": "^15.0.2",
     "markdown-it-footnote": "^4.0.0",

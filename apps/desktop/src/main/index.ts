@@ -25,6 +25,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // 必须在第一次取 userData 之前设置：Electron 默认拿 package.json 的 name，
 // 带 scope 的话数据目录会变成 "@aiclaw/desktop" 这种带斜杠的两级目录。
 app.setName("aiclaw");
+if (process.platform === "win32") app.setAppUserModelId("com.github.chowyu12.aiclaw");
 
 /**
  * 应用图标。由 `scripts/make-icon.cjs` 从品牌标识生成，提交在仓库里。

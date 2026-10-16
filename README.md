@@ -113,12 +113,20 @@ installs the newest one in `~/Downloads`. The script does four things:
 
 The package is unsigned, so Gatekeeper refuses it without that last step.
 
-**Windows / Linux.** Download `AIClaw-<version>-win-x64.zip` or
-`AIClaw-<version>-linux-x64.zip` from [Releases](https://github.com/chowyu12/aiclaw/releases),
-unzip anywhere, and run it.
+**Windows.** Download `AIClaw-<version>-win-x64-setup.exe` from
+[Releases](https://github.com/chowyu12/aiclaw/releases) and confirm the installation wizard.
+Subsequent installs replace the installed app while keeping configuration, chats and memory
+in their existing user-data locations. A portable `AIClaw-<version>-win-x64.zip` is also available.
+Existing ZIP users can install once and use the new shortcut; the original extracted folder
+is not removed automatically.
 
-The app checks for updates itself. On macOS it replaces and relaunches in one click; on other
-platforms it downloads to your Downloads folder and points you to it.
+**Linux.** Download `AIClaw-<version>-linux-x64.zip`, unzip anywhere, and run it.
+
+The app checks for updates itself. On macOS it replaces and relaunches in one click.
+On Windows it downloads and checksum-verifies the installer, starts it, then quits so you can
+confirm replacement. If you cancel, reopen the old version. ZIP-only older releases still
+download to your Downloads folder. Linux continues to download ZIPs. Windows installers are
+currently unsigned, so the OS may show an unknown publisher; checksums are not publisher signatures.
 
 ## Layout
 
@@ -173,9 +181,13 @@ Windows x64, Linux x64) on one machine; the kernel cross-compiles with `CGO_ENAB
 
 Pushing a `v*` tag triggers GitHub Actions:
 1. tests,
-2. packaging,
-3. creating the Release. The tag annotation becomes the release notes, and SHA256SUMS is
-   attached.
+2. packaging, then building the NSIS installer on a Windows runner and checking installation,
+   file replacement, uninstallation and user-data retention,
+3. creating the Release. The tag annotation becomes the release notes; ZIPs, the Windows
+   Setup.exe and SHA256SUMS are attached.
+
+To build the installer locally, run `make package-win` followed by `npm run package:win-installer`.
+Use Windows for native installation acceptance checks.
 
 macOS packages are unsigned:
 - If you install with the script above, there's nothing to do.
