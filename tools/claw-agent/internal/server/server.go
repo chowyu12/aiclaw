@@ -61,6 +61,9 @@ type Options struct {
 type Server struct {
 	oauth          *mcpclient.OAuthManager
 	submissionMu   sync.Mutex
+	activeTurns    map[string]string
+	turnCancels    map[string]context.CancelFunc
+	queuedTurns    map[string][]queuedTurn
 	sessionTitleMu sync.Mutex
 	options        Options
 	out            io.Writer
@@ -389,6 +392,12 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 			return
 		}
 		if session := s.session(params.SessionID); session != nil {
+			s.submissionMu.Lock()
+			delete(s.queuedTurns, params.SessionID)
+			if cancel := s.turnCancels[params.SessionID]; cancel != nil {
+				cancel()
+			}
+			s.submissionMu.Unlock()
 			session.Interrupt()
 		}
 		s.collab.InterruptTree(params.SessionID)
@@ -579,6 +588,10 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInvalidParams, "invalid params")
 		return
 	}
+	if params.Mode != "" && params.Mode != "queue" && params.Mode != "steer" {
+		s.writeError(f.ID, codeInvalidParams, "mode must be queue or steer")
+		return
+	}
 	s.submissionMu.Lock()
 	defer s.submissionMu.Unlock()
 	session := s.session(params.SessionID)
@@ -596,7 +609,7 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 		if prior.Fingerprint != fingerprint {
 			s.writeError(f.ID, codeInvalidParams, "requestId already used for different input")
 		} else {
-			s.writeResult(f.ID, protocol.TurnStartResult{TurnID: prior.TurnID})
+			s.writeResult(f.ID, protocol.TurnStartResult{TurnID: prior.TurnID, Queued: prior.State == "queued"})
 		}
 		return
 	}
@@ -624,6 +637,16 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
 	}
+	if params.Mode == "queue" {
+		result.Queued, err = s.scheduleTurn(ctx, session, result.TurnID, params, false)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		s.writeResult(f.ID, result)
+		s.notifyQueue(params.SessionID)
+		return
+	}
 	if running, queued, enqueueErr := session.EnqueueDurable(params, func(turn string) error { return s.db.RelinkSubmission(ctx, params.SessionID, params.RequestID, turn) }); enqueueErr != nil {
 		s.writeError(f.ID, codeInternal, enqueueErr.Error())
 		return
@@ -632,20 +655,25 @@ func (s *Server) handleTurnStart(ctx context.Context, f frame) {
 		result.Queued = true
 	}
 	if !result.Queued {
-		if err = s.db.SetSubmission(ctx, params.SessionID, params.RequestID, result.TurnID, "running"); err != nil {
+		result.Queued, err = s.scheduleTurn(ctx, session, result.TurnID, params, false)
+		if err != nil {
 			s.writeError(f.ID, codeInternal, err.Error())
 			return
 		}
 	}
 	s.writeResult(f.ID, result)
-	if !result.Queued {
-		go session.RunRequest(ctx, result.TurnID, params, &emitter{server: s})
-	}
 
 }
 
 // dropSession 把会话从内存里摘掉并关掉它的 MCP 连接。存档不动。
+// Caller holds submissionMu while replacing a mounted session.
 func (s *Server) dropSession(id string) {
+	if cancel := s.turnCancels[id]; cancel != nil {
+		cancel()
+	}
+	delete(s.turnCancels, id)
+	delete(s.activeTurns, id)
+	delete(s.queuedTurns, id)
 	s.sessMu.Lock()
 	session := s.sessions[id]
 	delete(s.sessions, id)
@@ -1123,6 +1151,12 @@ func (e *emitter) Notify(method string, params any) {
 		return
 	}
 	e.server.write(frame{JSONRPC: "2.0", Method: method, Params: raw})
+	if method == protocol.NotifyTurnCompleted {
+		var completed protocol.TurnNotification
+		if json.Unmarshal(raw, &completed) == nil {
+			e.server.advanceQueue(completed)
+		}
+	}
 }
 
 func (e *emitter) RequestApproval(

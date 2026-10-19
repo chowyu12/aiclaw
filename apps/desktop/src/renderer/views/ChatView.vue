@@ -425,8 +425,7 @@ function attachmentLabel(item: Attachment): string {
   return item.truncated ? t("{name}（已截断）", { name: item.name }) : item.name;
 }
 
-// 轮次进行中也允许发：内核会把输入排进那一轮，模型下一次开口前就看到了。
-// 拦住不让发是最难受的——用户想插话，正是因为看见这一轮跑偏了。
+// 运行中发送默认排队；已排队消息可显式选择“立即引导”。
 const submitting = ref(false);
 async function submit(): Promise<void> {
   if (submitting.value) return;
@@ -597,7 +596,16 @@ function answerDone(turn: Turn): boolean {
 }
 
 /** 按轮分组：一条提问 + 它触发的全部步骤 + 全部回答。 */
-const turns = computed<Turn[]>(() => groupTurns(store.timeline));
+const turns = computed<Turn[]>(() => groupTurns(store.timeline.filter(entry => entry.kind !== "user" || !entry.queued)));
+const queuedInputs = computed(() => store.queuedInputs[store.sessionId] ?? []);
+const queuedAutomatic = computed(() => store.queuedAutomatic[store.sessionId] ?? []);
+const queueAction = ref("");
+async function handleQueued(requestId: string, action: "steer" | "dismiss"): Promise<void> {
+  if (queueAction.value) return;
+  queueAction.value = requestId;
+  try { await actions.queuedInput(requestId, action); }
+  finally { queueAction.value = ""; }
+}
 
 /**
  * 正在跑的是哪一轮。只有最后一轮可能在跑。
@@ -878,6 +886,15 @@ const forking = ref(false);
             @answer="(answer) => actions.answerQuestion(question.id, answer)"
           />
 
+          <section v-if="queuedInputs.length" class="input-queue" :aria-label="t('待发送消息')">
+            <div class="queue-head">{{ t('待发送消息') }} · {{ queuedInputs.length }}<span>{{ queuedAutomatic.length ? t('当前轮结束后依次发送') : t('已暂停，请选择发送或取消') }}</span></div>
+            <article v-for="item in queuedInputs" :key="item.requestId" class="queue-item">
+              <p>{{ item.payload.text || t('附件消息') }}</p>
+              <span v-if="!queuedAutomatic.includes(item.requestId)" class="queue-paused">{{ t('已暂停') }}</span>
+              <button :disabled="!!queueAction" :title="t('立即影响当前轮次，而不是等待下一轮')" @click="handleQueued(item.requestId, 'steer')">{{ store.busy ? t('立即引导') : t('立即发送') }}</button>
+              <button :disabled="!!queueAction" :aria-label="t('取消排队')" :title="t('取消排队')" @click="handleQueued(item.requestId, 'dismiss')">×</button>
+            </article>
+          </section>
           <div
             class="composer"
             :class="{ busy: store.busy, dragging }"
@@ -942,7 +959,7 @@ const forking = ref(false);
               @paste="onPaste"
               :placeholder="
                 store.busy
-                  ? t(`这一轮还在跑，现在发的会插进这一轮`)
+                  ? t(`正在执行，发送后排队；可在队列中选择立即引导`)
                   : t(`随心输入…… Enter 发送，Shift+Enter 换行`)
               "
               @keydown="onKeydown"
@@ -1109,10 +1126,10 @@ const forking = ref(false);
                   ■
                 </button>
                 <button
-                  v-else
                   class="send"
-                  :disabled="!draft.trim()"
-                  :title="t(`发送`)"
+                  :disabled="submitting || (!draft.trim() && !attachments.length)"
+                  :title="store.busy ? t('排队发送') : t('发送')"
+                  :aria-label="store.busy ? t('排队发送') : t('发送')"
                   @click="submit()"
                 >
                   ↑
@@ -1128,6 +1145,14 @@ const forking = ref(false);
 </template>
 
 <style scoped>
+.input-queue { max-width: var(--content-width); margin: 0 auto 8px; padding: 10px 12px; max-height: 180px; overflow: auto; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); font-size: 12px; }
+.queue-head { display: flex; flex-wrap: wrap; gap: 6px; color: var(--ink-2); }
+.queue-head span { margin-left: auto; color: var(--muted); }
+.queue-item { display: flex; align-items: center; gap: 8px; padding-top: 8px; }
+.queue-item p { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.queue-item button { flex-shrink: 0; border: 0; border-radius: 6px; padding: 4px 6px; background: var(--hover); color: var(--ink-2); font: inherit; cursor: pointer; }
+.queue-item button:disabled { opacity: .5; cursor: default; }
+.queue-paused { color: var(--muted); white-space: nowrap; }
 .chat {
   display: flex;
   flex-direction: column;

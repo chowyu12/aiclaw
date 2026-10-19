@@ -12,6 +12,7 @@ const saving = ref(false), error = ref(""), creating = ref(false);
 const objective = ref(""), acceptance = ref(""), plan = ref(""), evidence = ref("");
 const tokenBudget = ref(0), minutes = ref(0);
 const statusLabels = computed(() => ({active:t("进行中"),paused:t("已暂停"),blocked:t("等待处理"),complete:t("已完成"),budget_exhausted:t("预算已用尽")}));
+const recoveryPending = computed(() => work.value?.pending.filter(item => item.state !== 'queued' || item.payload.mode !== 'queue') ?? []);
 let generation = 0;
 async function refresh() {
   const id = store.sessionId, ticket = ++generation;
@@ -92,9 +93,9 @@ function editBudget(){tokenBudget.value=work.value?.goal?.tokenBudget??0;minutes
   </details>
   <small>{{t("重启后目标会暂停；处理恢复记录后可继续。")}}</small>
  </details>
- <details v-if="work?.pending.length" open>
-  <summary>{{t("待恢复的输入")}} ({{work.pending.length}})</summary>
-  <article v-for="pending in work.pending" :key="pending.requestId">
+ <details v-if="recoveryPending.length" open>
+  <summary>{{t("待恢复的输入")}} ({{recoveryPending.length}})</summary>
+  <article v-for="pending in recoveryPending" :key="pending.requestId">
    <strong>{{pending.state==='queued'?t("已接收，尚未处理"):t("执行结果待确认")}}</strong>
    <p>{{pending.payload.text||t("附件消息")}}</p>
    <p v-if="pending.state==='uncertain'">{{t("请先检查执行结果，再发送后续指令；这条输入不会自动重放。")}}</p>

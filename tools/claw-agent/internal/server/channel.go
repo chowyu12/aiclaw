@@ -88,7 +88,7 @@ func (g *channelGateway) Submit(ctx context.Context, pluginUUID string, message 
 	}
 
 	turnID := fmt.Sprintf("t_%d", time.Now().UnixNano())
-	emitter := &channelEmitter{observe: observe, kinds: map[string]protocol.ItemKind{}}
+	emitter := &channelEmitter{server: s, observe: observe, kinds: map[string]protocol.ItemKind{}}
 	session.RunTurn(ctx, turnID, text, images, audioPaths, emitter)
 	if err := session.Save(ctx, s.db); err != nil {
 		s.options.Logf("保存通道会话失败：%v", err)
@@ -178,6 +178,7 @@ func bindingLabel(binding *model.ChannelBinding) string {
 // 只翻三种：模型正文的增量（流式回复用）、轮次完成（带最终正文）、轮次失败。
 // 工具步骤不翻——对聊天窗口另一头的人来说那是噪音。
 type channelEmitter struct {
+	server  *Server
 	observe func(legacy.Event) error
 
 	mu    sync.Mutex
@@ -209,6 +210,9 @@ func (e *channelEmitter) Notify(method string, params any) {
 		n, ok := params.(protocol.TurnNotification)
 		if !ok {
 			return
+		}
+		if e.server != nil {
+			defer e.server.advanceQueue(n)
 		}
 		if n.Error != "" {
 			e.emit(legacy.Event{Kind: legacy.EventTurnFailed, Error: n.Error})

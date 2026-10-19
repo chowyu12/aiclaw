@@ -247,9 +247,12 @@ async function removeSession(session: SessionSummaryView): Promise<void> {
 const updateLabel = computed(() => {
   const update = store.update;
   if (!update?.hasUpdate) return "";
-  if (store.updating) return t("正在更新…");
-  if (store.updateDownloading) {
-    return store.updateProgress >= 0 ? t("下载 {percent}%", { percent: store.updateProgress }) : t("下载中…");
+  if (store.updating || store.updateDownloading) {
+    if (store.updatePhase === "checking") return t("检查中…");
+    if (store.updatePhase === "verifying") return t("校验中…");
+    if (store.updatePhase === "installing") return t("安装中…");
+    if (store.updateProgress >= 0) return t("下载 {percent}%", { percent: store.updateProgress });
+    return store.updateReceived > 0 ? t("下载 {size} MB", { size: (store.updateReceived / 1048576).toFixed(1) }) : t("连接中…");
   }
   // 侧边栏只有两百来像素宽：按钮文字要短，版本号放在悬停说明里。
   if (store.updateReady) return t("重启更新");
@@ -260,8 +263,8 @@ const updateLabel = computed(() => {
 const updateTitle = computed(() => {
   const update = store.update;
   if (!update?.hasUpdate) return "";
+  if (store.updating || store.updateDownloading) return t("正在更新到 {version}：{stage}", { version: update.latest, stage: updateLabel.value });
   if (store.updateReady) return t("新版本 {version} 已下载好，点一下替换并重启", { version: update.latest });
-  if (store.updateDownloading) return t("正在后台下载 {version}", { version: update.latest });
   return update.canInstall
     ? t("当前 {current}，新版本 {latest}：{action}", { current: update.current, latest: update.latest, action: update.installLabel ?? "" })
     : t("当前 {current}，新版本 {latest}：打开发布页下载", { current: update.current, latest: update.latest });
@@ -888,13 +891,15 @@ function when(iso: string): string {
   color: var(--muted);
   font-style: normal;
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 更新按钮：小，但颜色要够让人注意到；下载好之后换成强调色。 */
 .update {
   margin-left: auto;
   margin-right: 6px;
-  min-width: 0;
+  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 2px 8px;
@@ -925,10 +930,12 @@ function when(iso: string): string {
   color: var(--muted);
   font-family: var(--mono);
   white-space: nowrap;
-  flex-shrink: 0;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .dot {
+  flex-shrink: 0;
   width: 7px;
   height: 7px;
   border-radius: 50%;

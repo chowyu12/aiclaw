@@ -40,6 +40,7 @@ export type TimelineEntry =
       text: string;
       images?: readonly string[];
       pending?: boolean;
+      queued?: boolean;
       requestId?: string;
       at?: number;
       /** 这条消息里 @ 引用的会话，显示成消息下面那排标签。 */
@@ -150,7 +151,11 @@ function adoptOrAppendUser(
     // 内核的 id 是权威的：恢复历史时用的也是它，换过来两边才对得上。
     // 图片保留本机那份——它已经是能直接显示的 data URL。
     // 时间也换成内核的：它记的是进历史的时刻，恢复历史时显示的也是它。
-    record.timeline[index] = { ...entry, id, pending: undefined, at: at ?? entry.at, references: references ?? entry.references };
+    const adopted = { ...entry, id, pending: undefined, queued: undefined, at: at ?? entry.at, references: references ?? entry.references };
+    if (entry.queued) {
+      record.timeline.splice(index, 1);
+      record.timeline.push(adopted);
+    } else record.timeline[index] = adopted;
     return;
   }
   record.timeline.push({ kind: "user", id, text, at, references });

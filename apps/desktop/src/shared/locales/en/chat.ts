@@ -168,7 +168,15 @@ export const chat: Record<string, string> = {
   "结果": "Result",
 
   // ---------- 输入框 ----------
-  "这一轮还在跑，现在发的会插进这一轮": "This turn is still running. Anything you send now joins it.",
+  "正在执行，发送后排队；可在队列中选择立即引导": "Running. New messages are queued; choose Steer now in the queue to change direction.",
+  "待发送消息": "Queued messages",
+  "当前轮结束后依次发送": "Sent in order after the current turn",
+  "已暂停，请选择发送或取消": "Paused. Choose to send or cancel",
+  "立即引导": "Steer now",
+  "立即发送": "Send now",
+  "立即影响当前轮次，而不是等待下一轮": "Guide the current turn instead of waiting for the next one",
+  "取消排队": "Cancel queued message",
+  "排队发送": "Queue message",
   "随心输入…… Enter 发送，Shift+Enter 换行": "Ask anything… Enter to send, Shift+Enter for a new line",
   "贴图片或文本文件（也可以直接粘贴/拖进来）": "Attach images or text files (you can also paste or drag them in)",
   "附件": "Attach",

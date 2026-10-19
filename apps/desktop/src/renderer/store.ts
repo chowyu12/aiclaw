@@ -1,5 +1,5 @@
 import { reactive, readonly } from "vue";
-import type { FileChange } from "@aiclaw/agent-client";
+import type { FileChange, PendingSubmission, SessionWork } from "@aiclaw/agent-client";
 import { fileLanguage, type TextFilePreview } from "../shared/file-preview";
 import { describeError } from "./errors";
 import { defaultModelChoice, modelChoices, usable, type ModelChoice } from "./model-choices";
@@ -34,6 +34,7 @@ import type {
   SessionStartView,
   SessionSummaryView,
   UpdateStatusView,
+  UpdatePhase,
 } from "../shared/types";
 import type { ScheduledTaskInput, ScheduledTaskView } from "../shared/schedule";
 import { normalizeLocale } from "../shared/i18n";
@@ -53,12 +54,15 @@ export interface FilePreviewState {
   reading?: { mode: string; layout: string; positions: Record<string, { top: number; left: number }> };
 }
 let previewRequest = 0;
+const queueRevisions = new Map<string, number>();
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
   view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "usage" | "schedules" | "archived",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
+  queuedInputs: {} as Record<string, PendingSubmission[]>,
+  queuedAutomatic: {} as Record<string, string[]>,
   fileBrowser: false,
   filePreview: null as FilePreviewState | null,
   filePreviews: [] as FilePreviewState[],
@@ -136,6 +140,8 @@ const state = reactive({
   updateReady: false,
   /** 升级包的下载进度，0~100；没有 content-length 时是 -1（只知道在下）。 */
   updateProgress: -1,
+  updateReceived: 0,
+  updatePhase: "checking" as UpdatePhase,
   error: "",
 });
 
@@ -168,6 +174,15 @@ function sessionLabel(sessionId: string): string {
 export type { AppConfigView, TimelineEntry, LiveSession };
 
 export const store = readonly(state);
+
+function updateQueue(id: string, pending: PendingSubmission[], automatic: string[] = []): void {
+  state.queuedAutomatic[id] = automatic;
+  state.queuedInputs[id] = pending.filter(item => item.state === "queued" && item.payload.mode === "queue");
+  const ids = new Set(state.queuedInputs[id].map(item => item.requestId));
+  for (const entry of state.live[id]?.timeline ?? []) {
+    if (entry.kind === "user" && entry.pending && ids.has(entry.requestId ?? "")) entry.queued = true;
+  }
+}
 
 
 function putFilePreview(preview: FilePreviewState, activate = true, previousRequest = preview.request): void {
@@ -226,6 +241,12 @@ export const actions = {
       .catch(() => undefined);
 
     window.aiclaw.on.agentEvent((payload) => {
+      const event = payload as AgentEventPayload;
+      const queued = event.params as { sessionId?: string; pending?: PendingSubmission[]; queuedRequestIds?: string[] };
+      if (event.method === "session/queueUpdated" && queued.sessionId) {
+        queueRevisions.set(queued.sessionId, (queueRevisions.get(queued.sessionId) ?? 0) + 1);
+        updateQueue(queued.sessionId, queued.pending ?? [], queued.queuedRequestIds);
+      }
       const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId);
       // 错误条是全局的：后台那个会话出错也要让人看见，不然它就静静地停了。
       if (applied.error) {
@@ -247,7 +268,7 @@ export const actions = {
         // 一轮结束（完成、失败、中断），它没回答的问题就作废了：内核那边已经不等了。
         state.questions = state.questions.filter((question) => question.sessionId !== applied.sessionId);
         // 跑着时被推迟的重挂，现在补上（只补当前看着的会话；别的会话点开时自然会重挂）。
-        if (state.remountPending && applied.sessionId === state.sessionId) {
+        if (state.remountPending && applied.sessionId === state.sessionId && !state.queuedInputs[applied.sessionId]?.length) {
           void actions.remountCurrentSession();
         }
       }
@@ -297,7 +318,9 @@ export const actions = {
       }
     });
     window.aiclaw.on.updateProgress((payload) => {
-      const { received, total } = payload as { received: number; total: number };
+      const { received, total, phase } = payload as { received: number; total: number; phase?: UpdatePhase };
+      state.updateReceived = received;
+      state.updatePhase = phase ?? "downloading";
       state.updateProgress = total > 0 ? Math.round((received / total) * 100) : -1;
     });
     window.aiclaw.on.updateCheck((payload) => {
@@ -430,6 +453,7 @@ export const actions = {
       state.sessionInfo = info;
       state.model = info.model;
       state.providerId = info.providerId;
+      void actions.refreshQueue(sessionId);
       // 正在跑的会话用它自己的活动记录：内核给的历史只到上一条已完成的消息，
       // 进行中的那几步只存在于事件流里，换成历史就把它们弄丢了。
       // 没在跑的以内核的历史为准——那是权威的，也覆盖了这期间排队进去的输入。
@@ -1039,9 +1063,11 @@ export const actions = {
    * 点「重启更新」时还会再试一次，那时候失败才该说。
    */
   async prepareUpdate(): Promise<void> {
-    if (state.updateDownloading || state.updateReady) return;
+    if (state.updating || state.updateDownloading || state.updateReady) return;
     state.updateDownloading = true;
     state.updateProgress = -1;
+    state.updateReceived = 0;
+    state.updatePhase = "checking";
     try {
       const result = (await window.aiclaw.update.prepare()) as {
         ready: boolean;
@@ -1059,7 +1085,11 @@ export const actions = {
   async installUpdate(): Promise<void> {
     if (state.updating) return;
     state.updating = true;
-    state.updateProgress = -1;
+    if (!state.updateDownloading) {
+      state.updateProgress = -1;
+      state.updateReceived = 0;
+      state.updatePhase = "checking";
+    }
     try {
       const result = (await window.aiclaw.update.install()) as {
         started: boolean;
@@ -1201,9 +1231,7 @@ export const actions = {
   // ---------- 对话 ----------
 
   /**
-   * 发一条消息。轮次进行中也能发——内核会把它排进那一轮，模型下一次
-   * 开口前就能看到。用户想纠正方向往往正是因为看见这一轮跑偏了，
-   * 让他先等完一轮是最不该做的。
+   * 运行中发送默认等待下一轮；队列上的“立即引导”才会影响当前轮次。
    */
   async send(
     text: string,
@@ -1236,6 +1264,7 @@ export const actions = {
       // 内核随后会为这条输入发来 userMessage 事件；标记之后由它认领，
       // 不标记的话通道会话与本机发送没法区分，二选一必错一头。
       pending: true,
+      queued: wasBusy,
       at: Date.now(),
       references: references.length > 0 ? references : undefined,
     });
@@ -1246,7 +1275,8 @@ export const actions = {
       for (const item of audio) {
         audioPaths.push((await window.aiclaw.audio.stage(plain(item))) as string);
       }
-      await window.aiclaw.session.send({ sessionId, requestId: optimisticId, text, images, audioPaths, references: plain(references) });
+      await window.aiclaw.session.send({ sessionId, requestId: optimisticId, text, images, audioPaths, references: plain(references), mode: "queue" });
+      void actions.refreshQueue(sessionId);
       return true;
     } catch (error) {
       // A userMessage event can confirm delivery before the RPC response is lost.
@@ -1262,6 +1292,29 @@ export const actions = {
 
   async interrupt(): Promise<void> {
     if (state.sessionId) await window.aiclaw.session.interrupt(state.sessionId);
+  },
+
+  async refreshQueue(sessionId = state.sessionId): Promise<void> {
+    if (!sessionId) return;
+    const revision = (queueRevisions.get(sessionId) ?? 0) + 1;
+    queueRevisions.set(sessionId, revision);
+    try {
+      const work = await window.aiclaw.session.work(sessionId) as SessionWork;
+      if (queueRevisions.get(sessionId) === revision) updateQueue(sessionId, work.pending, work.queuedRequestIds);
+    } catch { /* The existing work panel reports recovery lookup failures. */ }
+  },
+
+  async queuedInput(requestId: string, action: "steer" | "dismiss"): Promise<void> {
+    const id = state.sessionId;
+    if (!id) return;
+    try {
+      await window.aiclaw.session.recover(id, requestId, action);
+      if (action === "dismiss") {
+        const record = ensureLive(state.live, id);
+        record.timeline = record.timeline.filter(entry => !(entry.kind === "user" && entry.queued && entry.requestId === requestId));
+      }
+      await actions.refreshQueue(id);
+    } catch (error) { state.error = describeError(error); }
   },
 
   /** 回答（或跳过）模型提的问题。 */

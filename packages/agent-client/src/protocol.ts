@@ -531,8 +531,7 @@ export interface SessionConfigureParams {
 export interface TurnStartResult {
   turnId: string;
   /**
-   * true 表示这条输入被排进了正在跑的轮次，没有另起一轮。
-   * turnId 此时是那个进行中轮次的 id，不会再有一次 turn/started。
+   * true 表示输入正在等待：queue 模式等待新轮次，steer 模式加入当前轮次。
    */
   queued?: boolean;
 }
@@ -742,9 +741,9 @@ export interface GoalInput { objective: string; acceptance: string; steps: PlanS
 export interface GoalUpdate { status?: Goal["status"]; steps?: PlanStep[]; evidence?: string; tokenBudget?: number; timeBudgetMs?: number }
 export interface PendingSubmission {
   requestId: string; turnId: string; state: "queued" | "uncertain"; createdAt: number;
-  payload: { text: string; images?: string[]; audioPaths?: string[] };
+  payload: { text: string; images?: string[]; audioPaths?: string[]; mode?: "queue" | "steer" };
 }
-export interface SessionWork { goal: Goal | null; pending: PendingSubmission[]; forkSourceId: string; forkItemId: string }
+export interface SessionWork { goal: Goal | null; pending: PendingSubmission[]; forkSourceId: string; forkItemId: string; queuedRequestIds?: string[] }
 export interface FileChange { id: string; path: string; turnId: string; before: string; after: string; existed: boolean; state: "pending" | "applied" | "undoing" | "undone"; createdAt: number; conflict: boolean }
 
 export interface MCPOAuthInput { url: string; clientId?: string; clientSecret?: string; scope?: string; redirectPort?: number }

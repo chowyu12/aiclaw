@@ -442,7 +442,7 @@ export class SessionManager extends EventEmitter {
   goalSet(id: string, goal: import("@aiclaw/agent-client").GoalInput) { return this.requireClient().goalSet(id, goal); }
   goalUpdate(id: string, update: import("@aiclaw/agent-client").GoalUpdate) { return this.requireClient().goalUpdate(id, update); }
   forkSession(id: string, itemId?: string) { return this.requireClient().sessionFork(id, itemId); }
-  recoverSession(id: string, requestId: string, action: "resume" | "dismiss") { return this.requireClient().sessionRecover(id, requestId, action); }
+  recoverSession(id: string, requestId: string, action: "resume" | "dismiss" | "steer") { return this.requireClient().sessionRecover(id, requestId, action); }
   changesList(id: string) { return this.requireClient().changesList(id); }
   changesUndo(id: string, changeId: string) { return this.requireClient().changesUndo(id, changeId); }
 
@@ -498,9 +498,10 @@ export class SessionManager extends EventEmitter {
     audioPaths?: string[];
     /** 这条消息里 @ 引用的会话。 */
     references?: { id: string; title: string }[];
+    mode?: "queue" | "steer";
   }): Promise<string> {
     const result = await this.requireClient().turnStart(
-      input.sessionId, input.text, input.images, input.audioPaths, input.references, input.requestId,
+      input.sessionId, input.text, input.images, input.audioPaths, input.references, input.requestId, undefined, input.mode ?? "queue",
     );
     return result.turnId;
   }

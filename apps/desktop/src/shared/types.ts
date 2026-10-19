@@ -250,6 +250,8 @@ export interface SkillView {
   writable: boolean;
 }
 
+export type UpdatePhase = "checking" | "downloading" | "verifying" | "installing";
+
 /** 检查更新的结果。 */
 export interface UpdateStatusView {
   current: string;

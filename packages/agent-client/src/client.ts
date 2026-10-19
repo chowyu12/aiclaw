@@ -460,7 +460,7 @@ export class ClawAgentClient extends EventEmitter {
   goalSet(sessionId: string, goal: GoalInput): Promise<Goal> { return this.transport.request("goal/set", { sessionId, goal }); }
   goalUpdate(sessionId: string, update: GoalUpdate): Promise<Goal> { return this.transport.request("goal/update", { sessionId, update }); }
   sessionFork(sessionId: string, itemId?: string, model?: ModelConfig): Promise<{sessionId: string}> { return this.transport.request("session/fork", { sessionId, itemId, model }); }
-  sessionRecover(sessionId: string, requestId: string, action: "resume" | "dismiss"): Promise<unknown> { return this.transport.request("session/recover", { sessionId, requestId, action }); }
+  sessionRecover(sessionId: string, requestId: string, action: "resume" | "dismiss" | "steer"): Promise<unknown> { return this.transport.request("session/recover", { sessionId, requestId, action }); }
   changesList(sessionId: string): Promise<FileChange[]> { return this.transport.request("changes/list", { sessionId }); }
   changesUndo(sessionId: string, changeId: string): Promise<unknown> { return this.transport.request("changes/undo", { sessionId, changeId }); }
 
@@ -499,10 +499,11 @@ export class ClawAgentClient extends EventEmitter {
     references?: ThreadRef[],
     requestId?: string,
     idleOnly?: boolean,
+    mode?: "queue" | "steer",
   ): Promise<TurnStartResult> {
     this.assertReady();
     return this.transport.request<{ turnId: string }>("turn/start", {
-      sessionId, text, images, audioPaths, references, requestId, idleOnly,
+      sessionId, text, images, audioPaths, references, requestId, idleOnly, mode,
     });
   }
 

@@ -180,3 +180,15 @@ test("search sources propagate through both live completion and history restorat
   const restored = restoreHistory([{id:"search", kind:"toolCall", sources}]);
   assert.deepEqual((restored[0] as Extract<TimelineEntry,{kind:"step"}>).sources, sources);
 });
+
+test("queued optimistic input moves after the preceding answer when execution starts", () => {
+  const live = { A: newLive() };
+  live.A.timeline.push(
+    {kind:"user",id:"first",text:"first task"},
+    {kind:"user",id:"local",requestId:"queued-request",text:"next task",pending:true,queued:true},
+    {kind:"agent",id:"answer",text:"first answer",streaming:false},
+  );
+  applyAgentEvent(live,event("item/completed","A",{item:{id:"confirmed",requestId:"queued-request",kind:"userMessage",text:"next task"}}),"A");
+  assert.deepEqual(live.A.timeline.map(item=>item.id),["first","answer","confirmed"]);
+  assert.equal(live.A.timeline[2]?.kind==="user" && live.A.timeline[2].queued,undefined);
+});

@@ -38,6 +38,8 @@ func (s *Server) handleWork(ctx context.Context, f frame) {
 	case "session/context":
 		result, err = session.ContextStatus()
 	case "session/work":
+		s.submissionMu.Lock()
+		defer s.submissionMu.Unlock()
 		g, e := session.Goal()
 		err = e
 		pending, e := s.db.PendingSubmissions(ctx, p.SessionID)
@@ -50,7 +52,7 @@ func (s *Server) handleWork(ctx context.Context, f frame) {
 			pending = append(pending, store.Submission{TurnID: execution.TurnID, State: "uncertain", CreatedAt: execution.StartedAt, Payload: json.RawMessage(`{"text":"Previous execution stopped; inspect its outcome before continuing."}`)})
 		}
 		source, item := session.ForkOrigin()
-		result = map[string]any{"goal": g, "pending": pending, "forkSourceId": source, "forkItemId": item}
+		result = map[string]any{"goal": g, "pending": queueSummaries(pending), "forkSourceId": source, "forkItemId": item, "queuedRequestIds": s.queuedRequestIDs(p.SessionID)}
 	case "goal/set":
 		result, err = session.SetGoal(p.Goal)
 	case "goal/update":
@@ -91,6 +93,39 @@ func (s *Server) handleWork(ctx context.Context, f frame) {
 	case "session/recover":
 		s.submissionMu.Lock()
 		defer s.submissionMu.Unlock()
+		if p.RequestID != "" && (p.Action == "steer" || p.Action == "dismiss") {
+			record, e := s.db.Submission(ctx, p.SessionID, p.RequestID)
+			var input protocol.TurnStartParams
+			if e == nil && record.State == "queued" && json.Unmarshal(record.Payload, &input) == nil && input.Mode == "queue" {
+				if p.Action == "dismiss" {
+					err = s.db.ResolveSubmission(ctx, p.SessionID, p.RequestID)
+					result = map[string]any{"dismissed": err == nil}
+				} else {
+					var turn string
+					var steered bool
+					turn, steered, err = session.EnqueueDurable(input, func(turn string) error {
+						return s.db.SetSubmission(ctx, p.SessionID, p.RequestID, turn, "running")
+					})
+					if err == nil && !steered {
+						turn = record.TurnID
+					}
+					if err == nil {
+						s.removeQueued(p.SessionID, p.RequestID)
+						if !steered {
+							_, err = s.scheduleTurn(ctx, session, turn, input, true)
+						}
+						result = protocol.TurnStartResult{TurnID: turn, Queued: true}
+					}
+				}
+				if err == nil {
+					if p.Action == "dismiss" {
+						s.removeQueued(p.SessionID, p.RequestID)
+					}
+					s.notifyQueue(p.SessionID)
+				}
+				break
+			}
+		}
 		if session.Busy() {
 			err = i18n.E("请等待当前轮次结束")
 			break
@@ -140,13 +175,12 @@ func (s *Server) handleWork(ctx context.Context, f frame) {
 		}
 		turn := fmt.Sprintf("t_%d", time.Now().UnixNano())
 		// Claim before scheduling, so a second click cannot start it twice.
-		err = s.db.SetSubmission(ctx, p.SessionID, p.RequestID, turn, "running")
+		_, err = s.scheduleTurn(ctx, session, turn, recovered, false)
 		if err != nil {
 			break
 		}
 		result = protocol.TurnStartResult{TurnID: turn}
 		session.RemovePending(p.RequestID)
-		go session.RunRequest(ctx, turn, recovered, &emitter{server: s})
 	case "changes/list":
 		result, err = s.db.Changes(ctx, p.SessionID)
 	case "changes/undo":

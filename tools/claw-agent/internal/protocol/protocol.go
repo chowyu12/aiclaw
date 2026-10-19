@@ -875,6 +875,9 @@ type SessionStartResult struct {
 }
 
 type TurnStartParams struct {
+	// queue waits for a new turn; steer interrupts the current sampling/tool batch.
+	// Empty retains the legacy steering behavior for existing clients.
+	Mode      string `json:"mode,omitempty"`
 	IdleOnly  bool   `json:"idleOnly,omitempty"`
 	RequestID string `json:"requestId,omitempty"`
 	SessionID string `json:"sessionId"`
@@ -910,8 +913,8 @@ type ThreadRef struct {
 type TurnStartResult struct {
 	TurnID string `json:"turnId"`
 	/**
-	 * true 表示这条输入被排进了正在跑的轮次，没有另起一轮。
-	 * TurnID 此时是那个进行中轮次的 id，宿主不会再收到一次 turn/started。
+	 * true 表示输入正在等待：queue 模式等待新轮次，steer 模式加入当前轮次。
+	 * TurnID 是该输入所属轮次；queue 模式开始处理时会发出 turn/started。
 	 */
 	Queued bool `json:"queued,omitempty"`
 }

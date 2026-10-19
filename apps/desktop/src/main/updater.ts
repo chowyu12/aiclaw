@@ -1,12 +1,13 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { app, shell } from "electron";
 
 import { tr } from "../shared/i18n.js";
+import type { UpdatePhase } from "../shared/types.js";
 import { isNewer, normalizeVersion } from "./version.js";
 
 /**
@@ -24,6 +25,7 @@ import { isNewer, normalizeVersion } from "./version.js";
 const REPO = "chowyu12/aiclaw";
 const LATEST_RELEASE = `https://api.github.com/repos/${REPO}/releases/latest`;
 const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
+type Progress = (received: number, total: number, phase?: UpdatePhase) => void;
 
 export interface UpdateStatus {
   current: string;
@@ -64,6 +66,12 @@ export class Updater {
   private prepared = { tag: "", path: "" };
   /** 最近一次查到的各资源下载地址，按文件名。 */
   private assets = new Map<string, string>();
+  private downloads = new Map<string, { promise: Promise<string>; listeners: Set<Progress>; received: number; total: number }>();
+  private installing: Promise<{ started: boolean; detail: string }> | undefined;
+
+  private readonly log: (line: string) => void;
+
+  constructor(log: (line: string) => void = () => undefined) { this.log = log; }
 
   async check(): Promise<UpdateStatus> {
     const current = app.getVersion();
@@ -106,11 +114,10 @@ export class Updater {
    * 发现新版本就先下好，点下去只剩替换与重开——两三秒的事；否则那几十秒
    * 卡在用户按下按钮之后，他只能盯着一个不动的界面等。
    *
-   * 只在 macOS 上做：别的平台没有「重启即更新」这条路，下好了也还是要用户
-   * 自己解压，不如等他点了再下。
+   * 只在 macOS 上做；Windows 安装包等用户主动点击后再下载。
    */
   async prepare(
-    onProgress?: (received: number, total: number) => void,
+    onProgress?: Progress,
   ): Promise<{ ready: boolean; version: string; detail: string }> {
     if (process.platform !== "darwin") {
       return { ready: false, version: "", detail: tr("这个平台不支持自动下载") };
@@ -140,31 +147,69 @@ export class Updater {
    * 分片读而不是 arrayBuffer()：后者要等下完才有第一个字节，也就没有进度可报——
    * 用户点完「升级」看到的会是一个不动的按钮，几十秒后应用突然退出。
    */
-  private async download(
+  private download(
     file: string,
-    onProgress?: (received: number, total: number) => void,
-    directory = tmpdir(),
+    onProgress?: Progress,
+    directory?: string,
   ): Promise<string> {
+    const key = `${directory ?? ""}/${file}`;
+    const active = this.downloads.get(key);
+    if (active) {
+      if (onProgress) active.listeners.add(onProgress);
+      onProgress?.(active.received, active.total, "downloading");
+      return active.promise;
+    }
+    const task = { promise: Promise.resolve(""), listeners: new Set(onProgress ? [onProgress] : []), received: 0, total: 0 };
+    task.promise = this.downloadFile(file, (received, total) => {
+      task.received = received; task.total = total;
+      for (const listener of task.listeners) listener(received, total, "downloading");
+    }, directory).finally(() => this.downloads.delete(key));
+    this.downloads.set(key, task);
+    return task.promise;
+  }
+
+  private async downloadFile(file: string, onProgress: Progress, directory?: string): Promise<string> {
     const url = this.assets.get(file);
     if (!url) throw new Error(tr("最新版本里没有 {file}", { file }));
-    const response = await fetch(url, { signal: AbortSignal.timeout(600_000) });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const total = Number(response.headers.get("content-length") ?? 0);
-
-    const target = join(directory, file);
-    const chunks: Uint8Array[] = [];
+    const folder = directory ?? await mkdtemp(join(tmpdir(), "aiclaw-download-"));
+    const target = join(folder, file);
+    const controller = new AbortController();
+    const stall = () => controller.abort(new Error(tr("下载连续 30 秒没有收到数据，请重试或从发布页下载。")));
+    let idle = setTimeout(stall, 30_000);
+    const deadline = setTimeout(() => controller.abort(new Error(tr("下载超过 10 分钟，请重试或从发布页下载。"))), 600_000);
     let received = 0;
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error(tr("这个平台的 fetch 不支持流式读取"));
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      received += value.length;
-      onProgress?.(received, total);
+    this.log(`Downloading ${file}`);
+    try {
+      onProgress(0, 0, "downloading");
+      const response = await fetch(url, { signal: controller.signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const total = Number(response.headers.get("content-length") ?? 0);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error(tr("这个平台的 fetch 不支持流式读取"));
+      const output = await open(target, "wx");
+      try {
+        clearTimeout(idle); idle = setTimeout(stall, 30_000);
+        onProgress(0, total, "downloading");
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          clearTimeout(idle); idle = setTimeout(stall, 30_000);
+          await output.writeFile(value);
+          received += value.length;
+          onProgress(received, total, "downloading");
+        }
+        if (!received || (total > 0 && received !== total)) throw new Error(tr("下载文件不完整，请重新下载。"));
+      } finally { await output.close(); }
+      this.log(`Downloaded ${file}: ${received} bytes`);
+      return target;
+    } catch (error) {
+      const failure = controller.signal.aborted ? controller.signal.reason : error;
+      this.log(`Download failed for ${file} after ${received} bytes: ${failure instanceof Error ? failure.message : String(failure)}`);
+      await rm(directory ? target : folder, { recursive: !directory, force: true }).catch(() => undefined);
+      throw failure;
+    } finally {
+      clearTimeout(idle); clearTimeout(deadline); controller.abort();
     }
-    await writeFile(target, Buffer.concat(chunks));
-    return target;
   }
 
   /**
@@ -177,9 +222,13 @@ export class Updater {
    * Windows 交给交互安装器，不传静默安装参数；旧版本只有 ZIP 时保持下载行为。
    * Linux 仍只下载并在文件管理器里显示。
    */
-  async install(
-    onProgress?: (received: number, total: number) => void,
-  ): Promise<{ started: boolean; detail: string }> {
+  install(onProgress?: Progress): Promise<{ started: boolean; detail: string }> {
+    if (!this.installing) this.installing = this.installOnce(onProgress).finally(() => { this.installing = undefined; });
+    return this.installing;
+  }
+
+  private async installOnce(onProgress?: Progress): Promise<{ started: boolean; detail: string }> {
+    onProgress?.(0, 0, "checking");
     if (process.platform === "win32") return this.installWindows(onProgress);
     if (process.platform !== "darwin") return this.downloadOnly(onProgress);
     if (!app.isPackaged) {
@@ -187,6 +236,8 @@ export class Updater {
     }
     try {
       const status = await this.check();
+      if (status.error) throw new Error(status.error);
+      if (!status.hasUpdate) return { started: false, detail: tr("当前已是最新版本") };
       const tag = status.latest ? `v${status.latest}` : "";
       if (!tag) throw new Error(status.error || tr("查不到最新版本"));
       // 后台已经下好同一个版本就直接用，别再下一遍。
@@ -194,6 +245,8 @@ export class Updater {
         this.prepared.tag === tag && existsSync(this.prepared.path)
           ? this.prepared.path
           : await this.download(assetName(tag), onProgress);
+      onProgress?.(0, 0, "installing");
+      this.log(`Starting macOS replacement for ${tag}`);
       this.replaceAndRelaunch(zip);
       app.quit();
       return { started: true, detail: tr("已下载完成，正在替换并重新打开。") };
@@ -211,7 +264,7 @@ export class Updater {
   }
 
   private async installWindows(
-    onProgress?: (received: number, total: number) => void,
+    onProgress?: Progress,
   ): Promise<{ started: boolean; detail: string }> {
     if (!app.isPackaged) {
       return { started: false, detail: tr("开发模式下不替换自己；打好的包才能一键升级。") };
@@ -226,10 +279,12 @@ export class Updater {
       if (!this.assets.has(name)) return this.downloadOnly(onProgress);
       directory = await mkdtemp(join(tmpdir(), "aiclaw-update-"));
       const installer = await this.download(name, onProgress, directory);
+      onProgress?.(0, 0, "verifying");
       const sums = await this.download("SHA256SUMS.txt", undefined, directory);
       const entry = (await readFile(sums, "utf8")).split(/\r?\n/).map(line => /^([a-f0-9]{64})\s+\*?(?:\.\/)?(.+)$/i.exec(line)).find(match => match?.[2] === name);
       const actual = createHash("sha256").update(await readFile(installer)).digest("hex");
       if (!entry || entry[1]!.toLowerCase() !== actual) throw new Error(tr("安装包校验失败，请重新下载。"));
+      onProgress?.(0, 0, "installing");
       const error = await shell.openPath(installer);
       if (error) throw new Error(error);
       app.quit();
@@ -269,7 +324,7 @@ export class Updater {
 
   /** Windows / Linux：把包下到「下载」目录并在文件管理器里选中它。 */
   private async downloadOnly(
-    onProgress?: (received: number, total: number) => void,
+    onProgress?: Progress,
   ): Promise<{ started: boolean; detail: string }> {
     try {
       const status = await this.check();
@@ -278,7 +333,8 @@ export class Updater {
       const name = assetName(tag);
       const downloaded = await this.download(name, onProgress);
       const target = join(app.getPath("downloads"), name);
-      await copyFile(downloaded, target);
+      try { await copyFile(downloaded, target); }
+      finally { await rm(dirname(downloaded), { recursive: true, force: true }); }
       shell.showItemInFolder(target);
       return { started: false, detail: tr("已下载到 {path}。退出 AIClaw 后解压覆盖原目录即可。", { path: target }) };
     } catch (error) {

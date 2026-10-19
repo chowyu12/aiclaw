@@ -90,7 +90,7 @@ After checking, call schedule_report with id=${JSON.stringify(task.id)}, run_id=
   },
 });
 scheduler.on("changed", (tasks) => push(IPC.onSchedules, tasks));
-const updater = new Updater();
+const updater = new Updater(line => logApp(`[update] ${line}`));
 // 内核 stderr 与宿主自己的关键事件都进这里，攒一小段供「诊断」页复制。
 const diagnostics = new DiagnosticsLog();
 // 内存那份给「现在出了什么事」，文件那份给「昨天那次」——用户第二天才提起时，
@@ -266,10 +266,10 @@ function registerIpc(): void {
   // 下载进度往渲染层推：没有进度的话，用户点完「升级」看到的是一个不动的
   // 按钮，几十秒后应用突然退出——那不是慢，是没有反馈，但感觉比慢更糟。
   ipcMain.handle(IPC.updatePrepare, () =>
-    updater.prepare((received, total) => push(IPC.onUpdateProgress, { received, total })),
+    updater.prepare((received, total, phase) => push(IPC.onUpdateProgress, { received, total, phase })),
   );
   ipcMain.handle(IPC.updateInstall, () =>
-    updater.install((received, total) => push(IPC.onUpdateProgress, { received, total })),
+    updater.install((received, total, phase) => push(IPC.onUpdateProgress, { received, total, phase })),
   );
   ipcMain.handle(IPC.purgeAll, async () => {
     await sessions.stop();
@@ -288,7 +288,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.goalSet, (_event, id: string, goal) => sessions.goalSet(id, goal));
   ipcMain.handle(IPC.goalUpdate, (_event, id: string, update) => sessions.goalUpdate(id, update));
   ipcMain.handle(IPC.sessionFork, (_event, id: string, itemId?: string) => sessions.forkSession(id, itemId));
-  ipcMain.handle(IPC.sessionRecover, (_event, id: string, requestId: string, action: "resume" | "dismiss") => sessions.recoverSession(id, requestId, action));
+  ipcMain.handle(IPC.sessionRecover, (_event, id: string, requestId: string, action: "resume" | "dismiss" | "steer") => sessions.recoverSession(id, requestId, action));
   ipcMain.handle(IPC.changesList, (_event, id: string) => sessions.changesList(id));
   ipcMain.handle(IPC.changesUndo, (_event, id: string, changeId: string) => sessions.changesUndo(id, changeId));
   ipcMain.handle(IPC.sessionResume, (_event, sessionId: string) => sessions.resumeSession(sessionId));
