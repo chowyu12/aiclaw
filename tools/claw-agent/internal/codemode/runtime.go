@@ -32,6 +32,8 @@ token、161 个 API 操作约 35K token，而工具清单每次请求都整份�
 
 // Tool 是暴露给脚本的一个工具。
 type Tool struct {
+	// Only tools explicitly known to be read-only may overlap other reads.
+	ParallelSafe bool
 	// Name 是原始工具名（可能带 `-`、`__`，不是合法 JS 标识符）。
 	Name string
 	// Ident 是脚本里用的名字，由 Identifier 规范化而来。
@@ -73,6 +75,7 @@ type Runtime struct {
 	// 那么简单——是直接 fatal，整个内核没了。
 	storeMu sync.Mutex
 	stored  map[string]any
+	gate    sync.RWMutex // Shared across cells: writes exclude every other tool call.
 }
 
 func New(tools []Tool, limits Limits) *Runtime {
@@ -83,35 +86,79 @@ func New(tools []Tool, limits Limits) *Runtime {
 var errExit = errors.New("codemode: exit")
 
 // Run 执行一段脚本，返回给模型看的输出。
-func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
+func (r *Runtime) Run(parent context.Context, source string) (string, error) {
+	ctx, cancel := context.WithCancel(parent)
 	vm := goja.New()
-	// 严格模式下不允许隐式全局变量。模型手写的脚本里 `x = 1` 这种笔误很常见，
-	// 严格模式会直接报错，比默默建个全局变量好查。
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
-
 	output := tools.OutputBuffer{Complete: true}
 	appendOutput := func(text string) { _, _ = output.Write([]byte(text)) }
 	preview := func() string {
-		return tools.OutputPreview(ctx, output.String(), min(r.limits.MaxOutput, tools.MaxOutputPreview), output.Complete, r.SaveOutput)
+		return tools.OutputPreview(parent, output.String(), min(r.limits.MaxOutput, tools.MaxOutputPreview), output.Complete, r.SaveOutput)
 	}
-
 	var calls atomic.Int64
-	// toolNanos 是**已经完成**的工具调用累计耗时；inflight 是当前那一次的
-	// 开始时刻（没有就是 0）。两个都要：只记已完成的话，一次正在等审批的
-	// 调用期间看门狗看到的就是「脚本跑了很久」，于是把它打断——
-	// 凡是需要确认的脚本都会这么死掉。
-	var toolNanos atomic.Int64
-	var inflight atomic.Int64
-
-	if err := r.install(ctx, vm, appendOutput, &calls, &toolNanos, &inflight); err != nil {
+	var workers sync.WaitGroup
+	defer func() { cancel(); workers.Wait() }()
+	// Only this goroutine touches the VM. Workers send settlements to this loop.
+	completions := make(chan func() error, r.limits.MaxCalls)
+	pending := 0
+	schedule := func(tool Tool, arguments json.RawMessage, resolve, reject func(any) error) {
+		pending++
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			if tool.ParallelSafe {
+				r.gate.RLock()
+			} else {
+				r.gate.Lock()
+			}
+			result, callErr := "", ctx.Err()
+			if callErr == nil {
+				result, callErr = tool.Call(ctx, arguments)
+			}
+			if tool.ParallelSafe {
+				r.gate.RUnlock()
+			} else {
+				r.gate.Unlock()
+			}
+			warning := ""
+			if callErr == nil && len(result) > tools.MaxOutputPreview && r.SaveOutput != nil {
+				id, err := r.SaveOutput(ctx, result, true)
+				if err != nil {
+					warning = "Partial evidence: oversized tool result could not be retained: " + err.Error() + "\n"
+				} else {
+					warning = fmt.Sprintf("Retained oversized result from tools.%s: output_id=%s; use read_tool_output to inspect omitted fields. Retention is capped at 8 MiB; inspect complete before assuming this is the whole source.\n", tool.Ident, id)
+				}
+			}
+			settle := func() error {
+				pending--
+				if callErr != nil {
+					return reject(vm.ToValue(callErr.Error()))
+				}
+				appendOutput(warning)
+				return resolve(toolValue(vm, result))
+			}
+			select {
+			case completions <- settle:
+			case <-ctx.Done():
+			}
+		}()
+	}
+	if err := r.install(ctx, vm, appendOutput, &calls, schedule); err != nil {
 		return "", err
 	}
-
-	// 看门狗：只按「脚本自己跑的时间」算，等工具的时间不算。
+	// Charge only VM execution, not wall time waiting for concurrent tools/approval.
+	var spent, active atomic.Int64
+	runVM := func(fn func()) {
+		started := time.Now()
+		active.Store(started.UnixNano())
+		defer func() { active.Store(0); spent.Add(int64(time.Since(started))) }()
+		fn()
+	}
 	done := make(chan struct{})
+	budgetExceeded := make(chan struct{})
+	budgetError := i18n.E("脚本运行超过 {budget}，已中断", "budget", r.limits.Budget)
 	defer close(done)
 	go func() {
-		started := time.Now()
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -122,30 +169,50 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 				vm.Interrupt(i18n.D("上层已取消"))
 				return
 			case <-ticker.C:
-				waiting := time.Duration(0)
-				if at := inflight.Load(); at != 0 {
-					waiting = time.Since(time.Unix(0, at))
+				elapsed := time.Duration(spent.Load())
+				if at := active.Load(); at != 0 {
+					elapsed += time.Since(time.Unix(0, at))
 				}
-				spent := time.Since(started) - time.Duration(toolNanos.Load()) - waiting
-				if spent > r.limits.Budget {
-					vm.Interrupt(i18n.D("脚本运行超过 {budget}，已中断", "budget", r.limits.Budget))
+				if elapsed > r.limits.Budget {
+					close(budgetExceeded)
+					vm.Interrupt(budgetError)
 					return
 				}
 			}
 		}
 	}()
-
-	// 包成异步立即执行函数：这样顶层就能 await，而模型写的就是这个形态。
-	wrapped := "(async () => {\n" + StripFences(source) + "\n})()"
-	value, err := vm.RunString(wrapped)
+	var value goja.Value
+	var err error
+	runVM(func() { value, err = vm.RunString("(async () => {\n" + StripFences(source) + "\n})()") })
+	if ctx.Err() != nil {
+		return preview(), ctx.Err()
+	}
 	if err != nil {
 		return preview(), scriptError(err)
 	}
-
 	promise, ok := value.Export().(*goja.Promise)
 	if !ok {
-		// 理论上不会：上面包成了 async 函数。真出现就如实说，别装作成功。
 		return preview(), i18n.E("脚本没有返回预期的结果")
+	}
+	// Drain admitted calls even if the script forgot to await them; none may outlive Run.
+	for pending > 0 && promise.State() != goja.PromiseStateRejected {
+		select {
+		case <-budgetExceeded:
+			return preview(), budgetError
+		case <-ctx.Done():
+			return preview(), ctx.Err()
+		case settle := <-completions:
+			if ctx.Err() != nil {
+				return preview(), ctx.Err()
+			}
+			runVM(func() { err = settle() })
+			if ctx.Err() != nil {
+				return preview(), ctx.Err()
+			}
+			if err != nil {
+				return preview(), scriptError(err)
+			}
+		}
 	}
 	switch promise.State() {
 	case goja.PromiseStateRejected:
@@ -155,10 +222,8 @@ func (r *Runtime) Run(ctx context.Context, source string) (string, error) {
 		}
 		return preview(), i18n.E("脚本抛出异常：{error}", "error", describe(reason))
 	case goja.PromiseStatePending:
-		// await 了一个永远不会完成的东西。说清楚，别让模型以为是工具的问题。
 		return preview(), i18n.E("脚本结束时仍有未完成的等待，可能 await 了一个不会返回的东西")
 	}
-
 	if result := promise.Result(); result != nil && !goja.IsUndefined(result) && !goja.IsNull(result) {
 		appendOutput(stringify(result))
 	}
@@ -179,8 +244,7 @@ func (r *Runtime) install(
 	vm *goja.Runtime,
 	appendOutput func(string),
 	calls *atomic.Int64,
-	toolNanos *atomic.Int64,
-	inflight *atomic.Int64,
+	schedule func(Tool, json.RawMessage, func(any) error, func(any) error),
 ) error {
 	bridge := newToolBridge(vm)
 	catalog := make([]any, 0, len(r.tools))
@@ -202,29 +266,11 @@ func (r *Runtime) install(
 				return vm.ToValue(promise)
 			}
 
-			// 等工具的时间不算进脚本预算：里面可能在等用户点审批。
-			started := time.Now()
-			inflight.Store(started.UnixNano())
-			result, callErr := tool.Call(ctx, arguments)
-			inflight.Store(0)
-			toolNanos.Add(int64(time.Since(started)))
-
-			if callErr != nil {
-				// 工具失败**在脚本里是个异常**，模型可以 try/catch 接住换个做法——
-				// 这正是写代码比一次次单独调用强的地方。
-				_ = reject(vm.ToValue(callErr.Error()))
-				return vm.ToValue(promise)
+			if err := ctx.Err(); err != nil {
+				_ = reject(vm.ToValue(err.Error()))
+			} else {
+				schedule(tool, arguments, resolve, reject)
 			}
-			// Keep an oversized raw result even if the script prints only a slice of it.
-			if len(result) > tools.MaxOutputPreview && r.SaveOutput != nil {
-				id, err := r.SaveOutput(ctx, result, true)
-				if err != nil {
-					appendOutput("Partial evidence: oversized tool result could not be retained: " + err.Error() + "\n")
-				} else {
-					appendOutput(fmt.Sprintf("Retained oversized result from tools.%s: output_id=%s; use read_tool_output to inspect omitted fields. Retention is capped at 8 MiB; inspect complete before assuming this is the whole source.\n", tool.Ident, id))
-				}
-			}
-			_ = resolve(toolValue(vm, result))
 			return vm.ToValue(promise)
 		}))
 	}

@@ -247,6 +247,9 @@ func (s *Session) EnqueueDurable(input protocol.TurnStartParams, before func(str
 	if s.cancelSample != nil {
 		s.cancelSample()
 	}
+	if s.cancelTools != nil {
+		s.cancelTools()
+	}
 	defer s.signalPending()
 	return s.currentTurn, true, nil
 }
@@ -377,8 +380,8 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		// 主动压缩：等上游报超窗再压要白花一次请求，而那一次请求恰恰是
 		// 历史最长、最贵的一次。
 		if s.needsCompaction() {
-			if err := s.compact(ctx, turnID, emitter); err != nil && ctx.Err() != nil {
-				return total, ctx.Err()
+			if err := s.compact(ctx, turnID, emitter); err != nil {
+				return total, err
 			}
 		}
 
@@ -428,14 +431,6 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			ToolCalls: response.ToolCalls,
 		})
 
-		// finish_reason=length 是「输出撞上长度上限」的权威信号，比看参数结尾准。
-		// 没有工具调用时是回答被截断，说给用户听；有工具调用时最后那条的参数
-		// 不完整，让它的结果说明原因——即便截断处恰好凑成了合法 JSON。
-		cut := response.FinishReason == "length"
-		if cut && len(response.ToolCalls) == 0 {
-			s.notify(emitter, turnID, i18n.D("回答在模型的输出长度上限处被截断了，后面的内容没有生成。可以让它接着说，或把问题拆小。"))
-		}
-
 		if len(response.ToolCalls) == 0 {
 			// 没有工具调用就是这一轮说完了——除非用户在期间又发了话，
 			// 那就接着跑，别让他等下一次回车。
@@ -483,14 +478,25 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		if err := s.Checkpoint(); err != nil {
 			return total, err
 		}
-		toolCtx := ctx
-		if cut {
-			toolCtx = context.WithValue(ctx, truncatedCallKey{}, response.ToolCalls[len(response.ToolCalls)-1].ID)
+		toolCtx, cancelTools := context.WithCancel(ctx)
+		s.mu.Lock()
+		s.cancelTools = cancelTools
+		if len(s.pending) > 0 {
+			cancelTools()
 		}
+		s.mu.Unlock()
 		// 每个 tool_call 都必须有一条对应的结果消息，中断也不例外——
 		// 缺一条下一次请求就是 400。executeTools 因此保证返回等长的结果。
 		for _, result := range s.executeTools(toolCtx, turnID, response.ToolCalls, env, emitter, steps) {
 			s.appendMessage(result)
+		}
+		s.mu.Lock()
+		s.cancelTools = nil
+		steeredTools := toolCtx.Err() != nil && ctx.Err() == nil
+		s.mu.Unlock()
+		cancelTools()
+		if steeredTools {
+			s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "The user changed direction while tools were running. Canceled operations may have partially executed. Preserve completed results, follow the new input, and verify actual state before repeating any action.", Shown: &llm.Shown{Hidden: true}})
 		}
 		// 工具产出的图片（截屏）作为紧随其后的一条 user 消息送进去。
 		// Chat Completions 的 tool 消息必须是纯字符串，图没地方放；
@@ -560,7 +566,7 @@ func (s *Session) sample(
 			if !compacted {
 				s.notify(emitter, turnID, i18n.D("历史超出模型上下文，正在压缩后重试。"))
 				if cerr := s.compact(ctx, turnID, emitter); cerr != nil {
-					return response, err
+					return response, cerr
 				}
 				compacted = true
 				continue
@@ -863,9 +869,12 @@ func (s *Session) executeOne(
 	item.Artifacts = artifacts.Paths()
 	if err != nil {
 		item.ToolFailed = true
-		item.ToolResult = err.Error()
+		if output != "" {
+			output += "\n"
+		}
+		item.ToolResult = output + err.Error()
 		// 失败原因回给模型，它据此改参数重试；这和 MCP 的 isError 语义一致。
-		output = toolErrorResult(err.Error())
+		output += toolErrorResult(err.Error())
 	} else {
 		item.ToolResult = output
 	}
@@ -879,21 +888,11 @@ func (s *Session) executeOne(
 	return result
 }
 
-// truncatedCallKey 标记「这一批里哪条调用的参数被长度上限截断了」。
-// 用 context 传而不是挂在 Session 上：一批工具可能并发跑，字段会串。
-type truncatedCallKey struct{}
-
 func (s *Session) runTool(ctx context.Context, call llm.ToolCall, env *tools.Env) (string, error) {
 	// 取消之后仍然会走到这里（一批调用里排在后面的那些）。提前退出，
 	// 但仍旧返回一条结果，让历史保持完整。
 	if ctx.Err() != nil {
 		return "", i18n.E("用户中断，这次调用未执行")
-	}
-	if id, _ := ctx.Value(truncatedCallKey{}).(string); id != "" && id == call.ID {
-		return "", i18n.E(
-			"这次输出在第 {n} 个字符处撞上了模型的长度上限（finish_reason=length），这条调用的参数不完整，没有执行。把这一步拆成几次调用：先产出一部分、用 store() 存着，或者让工具自己去读文件而不是把内容写进参数。",
-			"n", len([]rune(call.Arguments)),
-		)
 	}
 	tool, ok := s.registry.Get(call.Name)
 	if !ok {

@@ -26,9 +26,12 @@ import {
   mentionCandidates,
   mentionQuery,
   mentionTitle,
+  skillQuery,
+  skillCandidates,
+  applySkill,
   type MentionBinding,
 } from "../mentions";
-import type { SessionSummaryView } from "../../shared/types";
+import type { SessionSummaryView, SkillView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
 import GeneratedImages from "./GeneratedImages.vue";
 import GeneratedFiles from "./GeneratedFiles.vue";
@@ -193,6 +196,65 @@ function insertAtCursor(text: string): void {
 // Esc 关掉。选中插入「@标题 」并记下绑定；发送时只交还留在正文里的那几个。
 
 const bindings = ref<MentionBinding[]>([]);
+const slash = ref<ReturnType<typeof skillQuery>>(null);
+const skillIndex = ref(0);
+const skillMenu = ref<HTMLElement | null>(null);
+const skillCatalog = ref<SkillView[]>([]);
+const skillsLoading = ref(false);
+const skillsError = ref("");
+let skillRequest = 0;
+const skillList = computed(() => skillCandidates(slash.value?.query ?? "", skillCatalog.value)
+  .filter(skill => !store.sessionInfo?.skills || store.sessionInfo.skills.includes(skill.name)));
+
+async function loadSkillCatalog(): Promise<void> {
+  const ticket = ++skillRequest;
+  skillsLoading.value = true; skillsError.value = ""; skillCatalog.value = [];
+  try {
+    const skills = await window.aiclaw.skills.list() as SkillView[];
+    if (ticket === skillRequest) skillCatalog.value = skills;
+  } catch (error) {
+    if (ticket === skillRequest) skillsError.value = describeError(error);
+  } finally { if (ticket === skillRequest) skillsLoading.value = false; }
+}
+
+function closeSuggestions(): void {
+  slash.value = null; mention.value = null; skillRequest++;
+}
+
+function updateSuggestions(): void {
+  const found = input.value ? skillQuery(draft.value, input.value.selectionStart ?? draft.value.length) : null;
+  if (found?.query !== slash.value?.query || found?.start !== slash.value?.start) skillIndex.value = 0;
+  if (found && !slash.value) void loadSkillCatalog();
+  slash.value = found;
+  updateMention();
+}
+
+function pickSkill(skill: SkillView): void {
+  const element = input.value;
+  if (!element || !slash.value) return;
+  const next = applySkill(draft.value, slash.value.start, element.selectionStart ?? draft.value.length, skill.name);
+  draft.value = next.text;
+  closeSuggestions();
+  void nextTick(() => { element.focus(); element.setSelectionRange(next.caret, next.caret); });
+}
+
+function onSkillKey(event: KeyboardEvent): boolean {
+  if (!slash.value || event.isComposing || event.shiftKey) return false;
+  if (event.key === "Escape") { event.preventDefault(); closeSuggestions(); return true; }
+  if (!["ArrowDown", "ArrowUp", "Enter", "Tab"].includes(event.key)) return false;
+  event.preventDefault();
+  if (skillList.value.length) {
+    if (event.key === "Enter" || event.key === "Tab") pickSkill(skillList.value[skillIndex.value] ?? skillList.value[0]!);
+    else {
+      skillIndex.value = (skillIndex.value + (event.key === "ArrowDown" ? 1 : skillList.value.length-1)) % skillList.value.length;
+      void nextTick(() => skillMenu.value?.querySelector('[aria-selected="true"]')?.scrollIntoView({block:"nearest"}));
+    }
+  }
+  return true;
+}
+
+watch(() => store.sessionId, closeSuggestions);
+onUnmounted(() => { skillRequest++; clearTimeout(mentionSearch); });
 const mention = ref<{ start: number; query: string } | null>(null);
 const mentionIndex = ref(0);
 const mentionHits = ref<SessionSummaryView[]>([]);
@@ -391,7 +453,7 @@ async function submit(): Promise<void> {
   attachments.value = [];
   attachError.value = "";
   bindings.value = [];
-  mention.value = null;
+  closeSuggestions();
   submitting.value = true;
   try {
     if (!await actions.send(text, images, audio, references)) {
@@ -409,6 +471,7 @@ async function submit(): Promise<void> {
 // Enter 发送、Shift+Enter 换行。中文输入法组字期间的 Enter 不能当发送，
 // 否则选词就把半句话发出去了。
 function onKeydown(event: KeyboardEvent): void {
+  if (onSkillKey(event)) return;
   if (onMentionKey(event)) return;
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
   event.preventDefault();
@@ -838,6 +901,16 @@ const forking = ref(false);
               <button v-if="!sttReady" class="link" @click="actions.setView('settings')">{{ t("去配置") }}</button>
             </p>
 
+            <div v-if="slash" id="composer-skills" ref="skillMenu" class="mention-menu skill-menu" role="listbox" :aria-label="t('选择技能')">
+              <div class="mention-head">{{ t('选择技能 · ↑↓ 选择，Enter / Tab 插入，Esc 关闭') }}</div>
+              <p v-if="skillsLoading" class="mention-head" role="status">{{ t('正在读取技能…') }}</p>
+              <p v-else-if="skillsError" class="attach-error" role="alert">{{ skillsError }}</p>
+              <p v-else-if="!skillList.length" class="mention-head" role="status">{{ t('没有匹配的已启用技能') }}</p>
+              <button v-for="(skill,index) in skillList" :id="`composer-skill-${index}`" :key="skill.id" class="mention-option skill-option" :class="{on:index===skillIndex}" role="option" :aria-selected="index===skillIndex" tabindex="-1" @mousedown.prevent @click="pickSkill(skill)" @mouseenter="skillIndex=index">
+                <span class="mention-title">{{ skill.name }}</span>
+                <span v-if="skill.description" class="skill-description">{{ skill.description }}</span>
+              </button>
+            </div>
             <!-- @ 引用会话的候选列表：浮在输入框上面。 -->
             <div v-if="mention && mentionList.length > 0" class="mention-menu" role="listbox">
               <div class="mention-head">{{ t("引用会话：模型会先读它，再回答你") }}</div>
@@ -859,10 +932,13 @@ const forking = ref(false);
               ref="input"
               v-model="draft"
               rows="2"
-              @input="updateMention"
-              @click="updateMention"
-              @keyup="(event: KeyboardEvent) => { if (!['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) updateMention(); }"
-              @blur="mention = null"
+              @input="updateSuggestions"
+              @click="updateSuggestions"
+              @keyup="(event: KeyboardEvent) => { if (!['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) updateSuggestions(); }"
+              @blur="closeSuggestions"
+              aria-autocomplete="list"
+              :aria-controls="slash ? 'composer-skills' : undefined"
+              :aria-activedescendant="slash && skillList[skillIndex] ? `composer-skill-${skillIndex}` : undefined"
               @paste="onPaste"
               :placeholder="
                 store.busy
@@ -1943,6 +2019,9 @@ const forking = ref(false);
   color: var(--muted);
   font-size: 11px;
 }
+
+.skill-option { flex-direction:column; align-items:stretch; gap:3px; flex-shrink:0; padding:9px 10px; }
+.skill-description { color:var(--muted); font-size:12px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; overflow-wrap:anywhere; }
 
 .mention-option {
   display: flex;

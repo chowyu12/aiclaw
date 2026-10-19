@@ -111,8 +111,9 @@ type Session struct {
 	turnCount int
 	// cancelTurn 是当前轮次的取消函数；没有进行中的轮次时为 nil。
 	cancelTurn context.CancelFunc
-	// Only model sampling/retry waits are preempted by user input; running tools finish normally.
+	// User steering cancels the active sampling request or tool batch, not the turn.
 	cancelSample context.CancelFunc
+	cancelTools  context.CancelFunc
 	// currentTurn 是进行中那一轮的 id，用于把排队的输入归到它名下。
 	currentTurn string
 	// emitter 是当轮的事件出口。computer use 的工具要靠它回调宿主，

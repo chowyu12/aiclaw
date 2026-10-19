@@ -11,6 +11,104 @@ import (
 	"time"
 )
 
+func TestPromiseAllRunsIndependentReadsConcurrently(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var entered atomic.Int32
+	both := make(chan struct{})
+	tool := Tool{Name: "read", Ident: "read", ParallelSafe: true, Call: func(ctx context.Context, _ json.RawMessage) (string, error) {
+		if entered.Add(1) == 2 {
+			close(both)
+		}
+		select {
+		case <-both:
+			return `{"ok":true}`, nil
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	}}
+	out, err := New([]Tool{tool}, DefaultLimits()).Run(ctx, `const results=await Promise.all([tools.read({}),tools.read({})]); return results.map(r=>r.ok).join(',');`)
+	if err != nil || out != "true,true" {
+		t.Fatalf("reads failed to overlap: %q %v", out, err)
+	}
+}
+
+func TestExhaustedScriptBudgetCancelsOutstandingTools(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	rt := New([]Tool{{Name: "blocked", Ident: "blocked", ParallelSafe: true, Call: func(ctx context.Context, _ json.RawMessage) (string, error) { <-ctx.Done(); return "", ctx.Err() }}}, Limits{Budget: time.Nanosecond, MaxCalls: 5, MaxOutput: 1024})
+	_, err := rt.Run(ctx, `await tools.blocked({});`)
+	if err == nil || !strings.Contains(err.Error(), "超过") || ctx.Err() != nil {
+		t.Fatalf("script budget did not cancel pending tool: %v", err)
+	}
+}
+
+func TestWritesExcludeReadsAcrossScripts(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	reading, release, writing := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	rt := New([]Tool{
+		{Name: "read", Ident: "read", ParallelSafe: true, Call: func(ctx context.Context, _ json.RawMessage) (string, error) {
+			close(reading)
+			select {
+			case <-release:
+				return "ok", nil
+			case <-ctx.Done():
+				return "", ctx.Err()
+			}
+		}},
+		{Name: "write", Ident: "write", Call: func(context.Context, json.RawMessage) (string, error) { close(writing); return "ok", nil }},
+	}, DefaultLimits())
+	done := make(chan error, 2)
+	go func() { _, err := rt.Run(ctx, `await tools.read({});`); done <- err }()
+	<-reading
+	go func() { _, err := rt.Run(ctx, `await tools.write({});`); done <- err }()
+	select {
+	case <-writing:
+		t.Error("write overlapped a read")
+	case <-time.After(40 * time.Millisecond):
+	}
+	close(release)
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestCancellationStopsNestedCallsAndKeepsOutput(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	entered := make(chan struct{})
+	var later atomic.Int32
+	rt := New([]Tool{
+		{Name: "blocked", Ident: "blocked", ParallelSafe: true, Call: func(ctx context.Context, _ json.RawMessage) (string, error) {
+			close(entered)
+			<-ctx.Done()
+			return "", ctx.Err()
+		}},
+		{Name: "later", Ident: "later", Call: func(context.Context, json.RawMessage) (string, error) { later.Add(1); return "", nil }},
+	}, DefaultLimits())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		out, err := rt.Run(ctx, `text('already done'); try {await tools.blocked({});} catch(e) {} await tools.later({});`)
+		if err == nil || !strings.Contains(out, "already done") {
+			t.Errorf("lost cancellation or output: %q %v", out, err)
+		}
+	}()
+	<-entered
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("nested tool did not stop")
+	}
+	if later.Load() != 0 {
+		t.Fatal("started another tool after cancellation")
+	}
+}
+
 /*
 脚本运行时。
 

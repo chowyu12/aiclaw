@@ -1215,14 +1215,18 @@ func TestLengthFinishReasonIsSurfaced(t *testing.T) {
 	emitter := &recordingEmitter{approve: true}
 	session.RunTurn(context.Background(), "t1", "写", nil, nil, emitter)
 
-	if !emitter.find(protocol.NotifyItemCompleted, "finish_reason=length") {
-		t.Error("被截断的工具调用应在结果里说明原因")
+	if !emitter.find(protocol.NotifyTurnCompleted, "finish_reason=length") {
+		t.Error("被截断的响应应作为失败结束，不重试或执行工具")
 	}
 	if _, err := os.Stat(filepath.Join(session.Workspace(), "a.txt")); err == nil {
 		t.Error("参数不完整的调用不该执行")
 	}
-	if !emitter.find(protocol.NotifyItemCompleted, "长度上限处被截断") {
-		t.Error("回答被截断时应给用户一条提示")
+	if model.calls != 1 {
+		t.Fatalf("不应重试不完整响应：%d", model.calls)
+	}
+	session.RunTurn(context.Background(), "t2", "接着说", nil, nil, emitter)
+	if !emitter.find(protocol.NotifyItemCompleted, "说到一半") || !emitter.find(protocol.NotifyTurnCompleted, "finish_reason=length") {
+		t.Error("部分回答应保留，轮次明确失败")
 	}
 }
 

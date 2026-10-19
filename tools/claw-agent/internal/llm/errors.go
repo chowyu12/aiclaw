@@ -40,6 +40,9 @@ func (e *Error) Unwrap() error { return e.Err }
 // 过一会儿重试有意义；参数错、鉴权失败、超出上下文窗口，重试只是把同一个
 // 错误再收一遍，还要多花一次额度。
 func (e *Error) Retryable() bool {
+	if e.Code == "response_incomplete" {
+		return false
+	}
 	// 额度用完、欠费：也常以 429 返回，但重试只会白等十几秒再收一遍同样的错。
 	if e.QuotaExhausted() {
 		return false

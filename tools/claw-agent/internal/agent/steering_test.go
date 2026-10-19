@@ -12,7 +12,59 @@ import (
 	"time"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
+
+func TestSteeringCancelsRunningToolsAndCodeMode(t *testing.T) {
+	for _, codeMode := range []bool{false, true} {
+		t.Run(fmt.Sprint(codeMode), func(t *testing.T) {
+			entered := make(chan struct{})
+			var later atomic.Int32
+			call := sseToolCall("c", "blocked", `{}`)
+			if codeMode {
+				call = sseToolCall("c", "exec", `{"code":"text('finished before steering'); await tools.blocked({}); await tools.later({});"}`)
+			}
+			model := &fakeModel{script: []string{call, sseText("new direction handled")}}
+			s := newTestSession(t, model, protocol.ApprovalBypass)
+			register(t, s, tools.Tool{Name: "blocked", Effect: tools.EffectRead, Handler: func(ctx context.Context, _ json.RawMessage, _ *tools.Env) (string, error) {
+				close(entered)
+				<-ctx.Done()
+				return "", ctx.Err()
+			}})
+			register(t, s, tools.Tool{Name: "later", Effect: tools.EffectWrite, Handler: func(context.Context, json.RawMessage, *tools.Env) (string, error) {
+				later.Add(1)
+				return "unexpected", nil
+			}})
+			if codeMode {
+				s.installCodeMode()
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			e := &recordingEmitter{}
+			done := make(chan struct{})
+			go func() { s.RunTurn(ctx, "t", "original", nil, nil, e); close(done) }()
+			select {
+			case <-entered:
+			case <-ctx.Done():
+				t.Fatal("tool did not start")
+			}
+			if _, ok := s.Enqueue("new direction", nil); !ok {
+				t.Fatal("not queued")
+			}
+			select {
+			case <-done:
+			case <-ctx.Done():
+				t.Fatal("steering did not cancel tool")
+			}
+			if later.Load() != 0 || !e.find(protocol.NotifyItemCompleted, "new direction handled") || e.find(protocol.NotifyTurnCompleted, `"error"`) {
+				t.Fatal(e.events)
+			}
+			if codeMode && !e.find(protocol.NotifyItemCompleted, "finished before steering") {
+				t.Fatal("lost completed script output")
+			}
+		})
+	}
+}
 
 func TestSteeringPreemptsBlockedModelAndKeepsPartialText(t *testing.T) {
 	entered := make(chan struct{})

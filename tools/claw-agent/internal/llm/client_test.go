@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,35 @@ import (
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
+
+func TestStreamRequiresCompletionAndKeepsPartialEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name, ending string
+		retryable    bool
+	}{
+		{"EOF", "", true},
+		{"output limit", `data: {"choices":[{"delta":{},"finish_reason":"length"}]}` + "\n\n", false},
+		{"content filter", `data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}` + "\n\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "data: {\"choices\":[{\"delta\":{\"content\":\"partial\",\"tool_calls\":[{\"index\":0,\"id\":\"c\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{}\"}}]}}]}\n\n" + tc.ending
+			response, err := consumeStream(strings.NewReader(body), nil)
+			var apiErr *Error
+			if !errors.As(err, &apiErr) || apiErr.Retryable() != tc.retryable {
+				t.Fatalf("expected classified failure, got %+v %v", response, err)
+			}
+			if response.Content != "partial" || len(response.ToolCalls) != 0 {
+				t.Fatalf("partial text must survive without executable calls: %+v", response)
+			}
+		})
+	}
+	// Compatible providers may send only [DONE], or a finish reason without [DONE].
+	for _, body := range []string{sse(`{"choices":[{"delta":{"content":"ok"}}]}`), "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n"} {
+		if response, err := consumeStream(strings.NewReader(body), nil); err != nil || response.Content != "ok" {
+			t.Fatalf("valid completion rejected: %+v %v", response, err)
+		}
+	}
+}
 
 // sse 把若干 chunk 拼成一段 SSE 响应体。
 func sse(chunks ...string) string {

@@ -16,6 +16,24 @@ export interface MentionBinding {
   title: string;
 }
 
+/** A slash command is only recognized at the beginning of the draft. */
+export function skillQuery(text: string, caret: number): { start: number; query: string } | null {
+  const match = /^([ \t]*)\/([^\s/@]*)$/.exec(text.slice(0, caret));
+  return match ? { start: match[1]!.length, query: match[2]! } : null;
+}
+
+export function skillCandidates<T extends { name: string; description: string; enabled: boolean }>(query: string, skills: readonly T[]): T[] {
+  const needle = query.toLowerCase();
+  return skills.filter(skill => skill.enabled && `${skill.name}\n${skill.description}`.toLowerCase().includes(needle))
+    .sort((a, b) => Number(b.name.toLowerCase().startsWith(needle)) - Number(a.name.toLowerCase().startsWith(needle)) || a.name.localeCompare(b.name));
+}
+
+export function applySkill(text: string, start: number, caret: number, name: string): { text: string; caret: number } {
+  const token = `$${name}`;
+  const tail = text.slice(caret);
+  return { text: text.slice(0, start) + token + (tail.startsWith(" ") ? "" : " ") + tail, caret: start + token.length + 1 };
+}
+
 /**
  * 光标前面是不是一个正在打的 @：@ 在开头或者前面是空白，@ 与光标之间没有空白。
  * 是的话给出 @ 的位置与已经打了的查询词。

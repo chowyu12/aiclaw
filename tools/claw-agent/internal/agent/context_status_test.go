@@ -2,12 +2,54 @@ package agent
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
+
+func TestIncompleteCompactionPreservesHistory(t *testing.T) {
+	for _, ending := range []string{"", "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n"} {
+		model := &fakeModel{script: []string{"data: {\"choices\":[{\"delta\":{\"content\":\"half summary\"}}]}\n\n" + ending}}
+		s := newTestSession(t, model, protocol.ApprovalBypass)
+		persistTestSession(t, s)
+		s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "original task"})
+		s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "important completed work"})
+		before := s.snapshotMessages()
+		if err := s.compact(context.Background(), "turn", &recordingEmitter{}); err == nil {
+			t.Fatal("incomplete summary accepted")
+		}
+		if !reflect.DeepEqual(before, s.snapshotMessages()) {
+			t.Fatal("failed compaction replaced history")
+		}
+		status, err := s.ContextStatus()
+		if err != nil || status.Compactions != 0 {
+			t.Fatalf("failed compaction counted: %+v %v", status, err)
+		}
+	}
+}
+
+func TestIncompleteAutomaticCompactionStopsWithoutRetry(t *testing.T) {
+	model := &fakeModel{script: []string{"data: {\"choices\":[{\"delta\":{\"content\":\"half summary\"},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n"}}
+	s := newTestSession(t, model, protocol.ApprovalBypass)
+	s.config.Model.ContextWindow = 100
+	s.lastInputTokens = 95
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: "keep this completed work"})
+	e := &recordingEmitter{}
+	s.RunTurn(context.Background(), "t", "continue", nil, nil, e)
+	if model.calls != 1 || !e.find(protocol.NotifyTurnCompleted, "finish_reason=length") {
+		t.Fatal(e.events)
+	}
+	found := false
+	for _, m := range s.snapshotMessages() {
+		found = found || m.Content == "keep this completed work"
+	}
+	if !found {
+		t.Fatal("incomplete automatic compaction discarded history")
+	}
+}
 
 func TestContextStatusSeparatesEstimatesFromProviderUsage(t *testing.T) {
 	s := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)

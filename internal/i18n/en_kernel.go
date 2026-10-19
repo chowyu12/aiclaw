@@ -87,6 +87,8 @@ func init() {
 		"会话历史损坏：":                                  "The session history is corrupted: ",
 
 		// ---------- 轮次 ----------
+		"模型返回不完整（finish_reason={reason}），未执行工具调用。":     "The model response is incomplete (finish_reason={reason}); no tool calls were executed.",
+		"模型流在完成前结束，已保留部分回答，未执行工具调用。":                   "The model stream ended before completion. Partial text was preserved; no tool calls were executed.",
 		"回答在模型的输出长度上限处被截断了，后面的内容没有生成。可以让它接着说，或把问题拆小。":  "The reply was cut off at the model's output length limit, so the rest wasn't generated. Ask it to continue, or break the question into smaller parts.",
 		"已完成 {n} 次模型循环，进度已保存，继续执行；可随时停止。":              "Completed {n} model iterations. Progress saved; continuing. You can stop at any time.",
 		"历史超出模型上下文，正在压缩后重试。":                           "The history exceeds the model's context window. Compacting and retrying.",

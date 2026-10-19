@@ -81,6 +81,7 @@ func Description(tools []Tool) string {
 - Pass raw JavaScript source; don't wrap it in markdown code fences.
 - Every tool lives on the global tools object and returns a Promise: const r = await tools.some_tool({ ... }).
   Pass the arguments as one object.
+- Use Promise.all for independent reads. Read-only tools may overlap; writes and tools with unknown effects are mutually exclusive, including across cells. Await dependent operations in order.
 - Return values: if a tool outputs JSON you get an object/array (use r.results directly); otherwise a string. String(r) and
   string concatenation give the raw JSON text; to .slice it, JSON.stringify(r) first. run_command returns a string with no .stdout.
 - When the name is in a variable, write tools[name], **without the tools. prefix in the name** — the list below shows the call form

@@ -191,6 +191,10 @@ export const chat: Record<string, string> = {
   "录音": "Recording",
 
   // ---------- 引用会话 ----------
+  "选择技能": "Choose a skill",
+  "选择技能 · ↑↓ 选择，Enter / Tab 插入，Esc 关闭": "Choose a skill · ↑↓ select, Enter / Tab insert, Esc close",
+  "正在读取技能…": "Loading skills…",
+  "没有匹配的已启用技能": "No matching enabled skills",
   "引用另一个会话：模型会先读它（也可以直接打 @）": "Reference another session: the model reads it first (or just type @)",
   "引用会话": "Reference",
   "引用会话：模型会先读它，再回答你": "Reference a session: the model reads it before answering",

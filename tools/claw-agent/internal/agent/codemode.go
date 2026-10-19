@@ -39,9 +39,10 @@ func (s *Session) installCodeMode() int {
 	for _, tool := range existing {
 		tool := tool
 		bridged = append(bridged, codemode.Tool{
-			Name:        tool.Name,
-			Description: tool.Description,
-			Schema:      tool.Schema,
+			ParallelSafe: tool.ParallelSafe(),
+			Name:         tool.Name,
+			Description:  tool.Description,
+			Schema:       tool.Schema,
 			Call: func(ctx context.Context, arguments json.RawMessage) (string, error) {
 				// env 由 exec 的 handler 在调用时塞进来——它是每轮新建的，
 				// 不能在这里捕获。

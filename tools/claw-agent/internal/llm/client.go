@@ -436,14 +436,20 @@ func (a *toolCallAccumulator) result() []ToolCall {
 	return calls
 }
 
-func consumeStream(body io.Reader, onDelta func(Delta)) (Response, error) {
+func consumeStream(body io.Reader, onDelta func(Delta)) (response Response, err error) {
 	scanner := bufio.NewScanner(body)
 	// 单个 SSE 事件可能很大（一次给出长参数的工具调用），放宽行上限。
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 
-	var response Response
 	accumulator := newToolCallAccumulator()
 	var content strings.Builder
+	complete := false
+	defer func() {
+		response.Content = content.String()
+		if err == nil {
+			response.ToolCalls = accumulator.result()
+		}
+	}()
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -452,6 +458,7 @@ func consumeStream(body io.Reader, onDelta func(Delta)) (Response, error) {
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
+			complete = true
 			break
 		}
 
@@ -488,6 +495,12 @@ func consumeStream(body io.Reader, onDelta func(Delta)) (Response, error) {
 			}
 			if choice.FinishReason != "" {
 				response.FinishReason = choice.FinishReason
+				switch choice.FinishReason {
+				case "stop", "tool_calls", "function_call":
+					complete = true
+				default:
+					return response, &Error{Code: "response_incomplete", Message: i18n.D("模型返回不完整（finish_reason={reason}），未执行工具调用。", "reason", choice.FinishReason)}
+				}
 			}
 		}
 	}
@@ -495,7 +508,8 @@ func consumeStream(body io.Reader, onDelta func(Delta)) (Response, error) {
 		return response, &Error{Message: i18n.D("读取模型流失败：{error}", "error", err), Err: err}
 	}
 
-	response.Content = content.String()
-	response.ToolCalls = accumulator.result()
+	if !complete {
+		return response, &Error{Message: i18n.D("模型流在完成前结束，已保留部分回答，未执行工具调用。"), Err: io.ErrUnexpectedEOF}
+	}
 	return response, nil
 }

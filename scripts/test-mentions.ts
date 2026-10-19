@@ -1,7 +1,22 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { activeReferences, applyMention, MAX_REFERENCES, mentionCandidates, mentionQuery, mentionTitle } from "../apps/desktop/src/renderer/mentions.ts";
+import { activeReferences, applyMention, MAX_REFERENCES, mentionCandidates, mentionQuery, mentionTitle, skillQuery, skillCandidates, applySkill } from "../apps/desktop/src/renderer/mentions.ts";
+
+test("slash skills only complete the leading token and preserve the remaining draft", () => {
+  assert.deepEqual(skillQuery("/", 1), {start:0,query:""});
+  assert.deepEqual(skillQuery("  /报告", 5), {start:2,query:"报告"});
+  for (const text of ["正文 /report", "https://example.com", "/tmp/file", "/report done", "\n/report"]) assert.equal(skillQuery(text,text.length),null,text);
+  assert.deepEqual(applySkill("/rep keep this",0,4,"report"),{text:"$report keep this",caret:8});
+  assert.deepEqual(applySkill("  /",2,3,"report"),{text:"  $report ",caret:10});
+});
+
+test("skill search uses enabled names and descriptions, with name prefixes first", () => {
+  const skills=[{name:"mail",description:"整理报告 / report helper",enabled:true},{name:"report",description:"Reports",enabled:true},{name:"disabled",description:"report",enabled:false}];
+  assert.deepEqual(skillCandidates("REPORT",skills).map(s=>s.name),["report","mail"]);
+  assert.deepEqual(skillCandidates("报告",skills).map(s=>s.name),["mail"]);
+  assert.deepEqual(skillCandidates("",skills).map(s=>s.name),["mail","report"]);
+});
 
 /** 输入框里的 @ 引用会话：什么时候弹、插进去什么、发送时交哪几个。 */
 
