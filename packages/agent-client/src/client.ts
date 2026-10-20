@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { AgentTransport, type TransportOptions } from "./transport.js";
 import type {
+  AppConfigRequest, AppConfigResult,
   ContextStatus, Goal, GoalInput, GoalUpdate, SessionWork, FileChange,
   AgentNotification,
   RoleModels,
@@ -81,7 +82,14 @@ export interface PendingScheduleAction {
   fail: (message: string) => void;
 }
 
+export interface PendingAppConfigAction {
+  request: AppConfigRequest;
+  respond: (result: AppConfigResult) => void;
+  fail: (message: string) => void;
+}
+
 export interface ClientEvents {
+  appConfig: (action: PendingAppConfigAction) => void;
   notification: (notification: AgentNotification) => void;
   approval: (request: PendingApproval) => void;
   computer: (action: PendingComputerAction) => void;
@@ -133,6 +141,14 @@ export class ClawAgentClient extends EventEmitter {
           respond: (result: BrowserResult) => this.transport.respond(id, result),
           fail: (message: string) =>
             this.transport.respondError(id, { code: -32000, message }),
+        });
+        return;
+      }
+      if (method === "appConfig/request") {
+        this.emit("appConfig", {
+          request: params as AppConfigRequest,
+          respond: (result: AppConfigResult) => this.transport.respond(id, result),
+          fail: (message: string) => this.transport.respondError(id, { code: -32000, message }),
         });
         return;
       }

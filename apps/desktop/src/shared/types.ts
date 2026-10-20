@@ -188,6 +188,7 @@ export interface ChannelBindingView {
   providerId?: number;
   model?: string;
   allowed: boolean;
+  approvalPolicy?: "never" | "bypass";
   allowedTools: string[];
   lastMessage?: string;
 }

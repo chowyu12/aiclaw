@@ -517,7 +517,14 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInvalidParams, "invalid params")
 		return
 	}
-	pinChannelPolicy(params.SessionID, params.Refresh)
+	if strings.HasPrefix(params.SessionID, channelSessionPrefix) {
+		refresh, err := s.channelSessionRefresh(ctx, params.SessionID, params.Refresh)
+		if err != nil {
+			s.writeError(f.ID, codeInternal, err.Error())
+			return
+		}
+		params.Refresh = refresh
+	}
 	s.submissionMu.Lock()
 	if existing := s.session(params.SessionID); existing != nil {
 		// 已经在内存里的会话，配置没变就直接回它现在的样子。
@@ -1343,4 +1350,16 @@ func DefaultDataHome() string {
 		return ".claw-agent"
 	}
 	return filepath.Join(home, ".claw-agent")
+}
+
+func (e *emitter) RequestAppConfig(ctx context.Context, params protocol.AppConfigRequest) (protocol.AppConfigResult, error) {
+	actionCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	raw, err := e.server.requestHost(actionCtx, "appConfig/request", params)
+	if err != nil {
+		return protocol.AppConfigResult{}, err
+	}
+	var result protocol.AppConfigResult
+	err = json.Unmarshal(raw, &result)
+	return result, err
 }

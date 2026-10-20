@@ -6,6 +6,7 @@ import type { PendingApproval, PendingUserInput } from "@aiclaw/agent-client";
 import { ConfigStore, type McpServer } from "./config.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
+import { ConfigurationAssistant } from "./app-config.js";
 import { Scheduler } from "./scheduler.js";
 import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
 import { normalizeLocale, setCurrentLocale, tr } from "../shared/i18n.js";
@@ -89,6 +90,8 @@ After checking, call schedule_report with id=${JSON.stringify(task.id)}, run_id=
     notification.show();
   },
 });
+const configuration = new ConfigurationAssistant(sessions, store, scheduler, cards => push(IPC.onConfiguration, cards));
+sessions.on("appConfig", action => { void configuration.request(action); });
 scheduler.on("changed", (tasks) => push(IPC.onSchedules, tasks));
 const updater = new Updater(line => logApp(`[update] ${line}`));
 // 内核 stderr 与宿主自己的关键事件都进这里，攒一小段供「诊断」页复制。
@@ -221,6 +224,8 @@ function push(channel: string, payload: unknown): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle(IPC.configurationPending, () => configuration.listPending());
+  ipcMain.handle(IPC.configurationRespond, (_event, reply: import("../shared/app-config.js").ConfigurationReply) => configuration.respond(reply));
   ipcMain.handle(IPC.configRead, () => store.readConfig());
   // 改配置不用重启运行时：模型、审批档位这些都是按会话下发的。
   ipcMain.handle(IPC.configWrite, async (_event, patch: Record<string, unknown>) => {
@@ -595,6 +600,7 @@ sessions.on("schedule", ({ request, respond, fail }) => {
 sessions.on("event", (method, params) => {
   if (method === "turn/completed") {
     const done = params as { sessionId?: string; turnId?: string; error?: string } | undefined;
+    if (done?.sessionId) configuration.clear(done.sessionId);
     if (done?.sessionId) scheduler.onTurnCompleted(done.sessionId, done.error, done.turnId);
   }
   // 一轮结束（完成、失败、中断）时，它还没回应的审批就作废了：内核那边已经
@@ -654,6 +660,7 @@ sessions.on("status", (state, detail) => {
     pendingApprovals.clear();
     pendingPayloads.clear();
     pendingQuestions.clear();
+    configuration.clear();
   }
   push(IPC.onRuntimeStatus, { state, detail });
 });

@@ -1034,9 +1034,10 @@ func summarizeCall(call llm.ToolCall) string {
 	case "interrupt_agent":
 		return i18n.D("打断 {target}", "target", pick("target"))
 	case "exec":
-		// 代码模式下参数是整段脚本。压成一行的话，步骤标题会变成一坨
-		// 带着 \n 的代码；只取第一行有内容的，完整脚本在展开的详情里。
-		return firstLine(strings.TrimSpace(pick("code")), 100)
+		if title := strings.TrimSpace(pick("title")); title != "" {
+			return firstLine(title, 100)
+		}
+		return summarizeCode(pick("code"))
 	default:
 		if detail := pick("query", "keyword", "path", "name", "text", "q"); detail != "" {
 			return detail

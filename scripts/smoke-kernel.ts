@@ -278,9 +278,12 @@ async function main(): Promise<number> {
         response.writeHead(200, { "Content-Type": "text/event-stream" });
         const usage = `data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}\n\n`;
         if (!toolResult) {
+          const configuring = String(messages[0]?.content).includes("use app_config_list then app_configure");
           const call = {
             choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", type: "function",
-              function: { name: "ask_user", arguments: JSON.stringify({ question: "删哪些？", options: [{ label: "日志" }, { label: "缓存" }] }) } }] } }],
+              function: configuring
+                ? {name:"app_configure",arguments:JSON.stringify({category:"schedule",operation:"save",values:{name:"Public project digest",prompt:"Check public releases",time:"08:00"}})}
+                : { name: "ask_user", arguments: JSON.stringify({ question: "删哪些？", options: [{ label: "日志" }, { label: "缓存" }] }) } }] } }],
           };
           response.end(`data: ${JSON.stringify(call)}\n\n${usage}data: [DONE]\n\n`);
           return;
@@ -318,6 +321,26 @@ async function main(): Promise<number> {
         answer.includes("用户选了：缓存") && answer.includes("别动 Downloads"),
         answer.slice(0, 80),
       );
+      const configSession = await client.sessionStart({model:{providerId:asker.id,baseUrl:"",model:"fake"},approvalPolicy:"bypass",enableAppConfig:true});
+      let configAnswer="";
+      let configuration: import("../packages/agent-client/dist/index.js").PendingAppConfigAction | undefined;
+      let receivedConfiguration:()=>void = () => {};
+      const configReceived = new Promise<void>(done => {receivedConfiguration=done;});
+      const configListener = (action:import("../packages/agent-client/dist/index.js").PendingAppConfigAction) => {configuration=action;receivedConfiguration();};
+      client.on("appConfig",configListener);
+      const configFinished = new Promise<void>(done => client.on("notification",note=>{
+        const p=note.params as {sessionId?:string;item?:{kind?:string;text?:string}};
+        if(p.sessionId!==configSession.sessionId)return;
+        if(note.method==="item/completed"&&p.item?.kind==="agentMessage")configAnswer=p.item.text??"";
+        if(note.method==="turn/completed")done();
+      }));
+      await client.turnStart(configSession.sessionId,"Create a daily public project digest");
+      await Promise.race([configReceived,new Promise((_,fail)=>setTimeout(()=>fail(Error("configuration request timed out")),15_000))]);
+      record("应用配置：内核请求通过客户端到达宿主并等待确认",configuration?.request.category==="schedule"&&configuration.request.sessionId===configSession.sessionId&&configAnswer==="");
+      configuration!.respond({text:"User confirmed configuration in the desktop card. Scheduled task saved."});
+      await Promise.race([configFinished,new Promise((_,fail)=>setTimeout(()=>fail(Error("configuration response timed out")),15_000))]);
+      record("应用配置：宿主确认结果回到模型并完成轮次",configAnswer.includes("Scheduled task saved."));
+      client.off("appConfig",configListener);
       // 用量记录是后台写的（每秒一批）：等它落盘。
       await new Promise((done) => setTimeout(done, 1500));
       const usage = await client.usageSummary(1);

@@ -43,6 +43,9 @@ under a custom license with use restrictions.
   - Daily, weekdays, chosen weekdays, every N minutes/hours, or once.
   - When one comes due, AIClaw opens a new chat, runs it, and sends a system notification.
   - You can also just say "every weekday at 9am, summarize my unread email".
+- **Configure through chat.** Manage email, search engines, MCP servers, plugins and scheduled
+  tasks using editable cards in your desktop conversation. Credentials are entered in the card
+  and are not returned to the model. See [how it works](#configure-aiclaw-through-chat).
 - **Office files.** Read Word, Excel and PowerPoint (docx/xlsx/pptx) and generate all three.
   The model can also make exact text replacements in a Word document and update individual
   sheets in an existing workbook.
@@ -61,8 +64,10 @@ under a custom license with use restrictions.
 
   You can also install your own plugins from a folder (skills, MCP servers).
   - Messages from external chats wait for your approval.
-  - Once approved, they run in a restricted chat with read-only tools, grouped under the
-    sidebar's collapsed **Channel chats** group.
+  - Once authorized, each external chat defaults to unattended mode: operations requiring
+    approval are refused. You can explicitly choose full access for that chat to allow file
+    writes and commands. Existing chats retain unattended mode. Configured built-in read-only
+    search is available in either mode.
 - **Web search.** Tavily, SerpAPI or Alibaba Cloud IQS; enabling one gives the model a
   `web_search` tool.
 - **Browser.**
@@ -94,6 +99,32 @@ under a custom license with use restrictions.
   - Commands the model runs use your terminal's PATH, so CLIs installed via nvm or Homebrew
     are found.
 - **Usage.** **Settings → Usage** shows tokens, model calls, tools and skills by day.
+
+### Configure AIClaw through chat
+
+Describe the change you want, for example:
+
+- "Set up my email and enable it after the connection test passes."
+- "Make Tavily my default search engine."
+- "Add an MCP server; I'll paste its JSON into the configuration card."
+- "Install a plugin from a local folder" or "configure this plugin's existing connection."
+- "Check public project releases every day at 8am" or "move this task to 9am."
+
+The assistant checks the current configuration, opens an editable card in the chat, and waits
+for you to confirm or cancel. Saving uses the same management interfaces as Settings and
+reports the save and connection-test results where supported. Passwords, authorization codes,
+API keys, MCP headers and environment variables go directly from the card to the desktop host;
+the model receives status only. Blank credential fields preserve existing values.
+
+This entry point is limited to interactive desktop parent chats. Plugin installation uses local
+folders; new channel connections and WeChat QR login still use Settings. Each MCP import card
+accepts one server. Tool changes are remounted after running and automatically queued work
+finishes, or when you reopen the chat. Scheduled tasks only run while the app is open.
+Saving and testing are separate operations: a failed test may leave some settings saved, and
+cancelling afterward does not undo those earlier changes.
+
+See the [detailed configuration guide (Chinese)](docs/conversation-configuration.md) for
+supported operations, OAuth behavior and validation boundaries.
 
 ## Install
 

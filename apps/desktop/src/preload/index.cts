@@ -8,6 +8,10 @@ import { IPC } from "../shared/ipc.cjs";
  * 审批形同虚设——没有沙箱之后审批是唯一的闸，所以这里每加一个方法都要想清楚。
  */
 const api = {
+  configuration: {
+    pending: () => ipcRenderer.invoke(IPC.configurationPending),
+    respond: (reply: unknown) => ipcRenderer.invoke(IPC.configurationRespond, reply),
+  },
   config: {
     read: () => ipcRenderer.invoke(IPC.configRead),
     write: (patch: unknown) => ipcRenderer.invoke(IPC.configWrite, patch),
@@ -184,6 +188,11 @@ const api = {
     pickDirectory: () => ipcRenderer.invoke(IPC.pickDirectory),
   },
   on: {
+    configuration: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => handler(payload);
+      ipcRenderer.on(IPC.onConfiguration, listener);
+      return () => ipcRenderer.off(IPC.onConfiguration, listener);
+    },
     agentEvent: (handler: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => handler(payload);
       ipcRenderer.on(IPC.onAgentEvent, listener);

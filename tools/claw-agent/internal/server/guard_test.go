@@ -19,7 +19,7 @@ func TestAppDBGuardsCoverSidecars(t *testing.T) {
 
 func TestChannelSessionsKeepTheUnattendedPolicyOnResume(t *testing.T) {
 	refresh := &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalBypass, CodeMode: true}
-	pinChannelPolicy("c_123", refresh)
+	pinChannelPolicy("c_123", refresh, protocol.ApprovalNever)
 	if refresh.ApprovalPolicy != protocol.ApprovalNever {
 		t.Errorf("通道会话恢复后应仍是无人值守，得到 %q", refresh.ApprovalPolicy)
 	}
@@ -27,9 +27,17 @@ func TestChannelSessionsKeepTheUnattendedPolicyOnResume(t *testing.T) {
 		t.Error("其余配置项不该被动")
 	}
 	desktop := &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalBypass}
-	pinChannelPolicy("s_123", desktop)
+	pinChannelPolicy("s_123", desktop, protocol.ApprovalNever)
 	if desktop.ApprovalPolicy != protocol.ApprovalBypass {
 		t.Error("桌面会话的档位应照宿主给的")
 	}
-	pinChannelPolicy("c_123", nil) // 不带 refresh 也不该炸
+	pinChannelPolicy("c_123", nil, protocol.ApprovalNever) // 不带 refresh 也不该炸
+}
+
+func TestExplicitChannelBypassSurvivesRefresh(t *testing.T) {
+	refresh := &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalAlways, EnableAppConfig: true, EnableEmail: true, EnableSchedule: true}
+	pinChannelPolicy("c_explicit", refresh, protocol.ApprovalBypass)
+	if refresh.ApprovalPolicy != protocol.ApprovalBypass || refresh.EnableAppConfig || refresh.EnableEmail || refresh.EnableSchedule {
+		t.Fatalf("incorrect pinned mode: %+v", refresh)
+	}
 }

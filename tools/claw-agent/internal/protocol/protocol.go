@@ -581,9 +581,10 @@ type ChannelBindingView struct {
 	ProviderID int64  `json:"providerId,omitempty"`
 	Model      string `json:"model,omitempty"`
 	Allowed    bool   `json:"allowed"`
-	/** 除只读工具外还放开了哪些内置工具。 */
-	AllowedTools []string `json:"allowedTools"`
-	LastMessage  string   `json:"lastMessage,omitempty"`
+	/** 兼容旧客户端；执行权限由 approvalPolicy 决定。 */
+	ApprovalPolicy ApprovalPolicy `json:"approvalPolicy"`
+	AllowedTools   []string       `json:"allowedTools"`
+	LastMessage    string         `json:"lastMessage,omitempty"`
 }
 
 type ChannelBindingKey struct {
@@ -595,9 +596,10 @@ type ChannelBindingKey struct {
 
 type ChannelAuthorizeParams struct {
 	ChannelBindingKey
-	ProviderID   int64    `json:"providerId"`
-	Model        string   `json:"model"`
-	AllowedTools []string `json:"allowedTools,omitempty"`
+	ProviderID     int64          `json:"providerId"`
+	Model          string         `json:"model"`
+	ApprovalPolicy ApprovalPolicy `json:"approvalPolicy,omitempty"`
+	AllowedTools   []string       `json:"allowedTools,omitempty"`
 }
 
 // ---------- 微信扫码登录 ----------
@@ -752,7 +754,8 @@ type SessionStartParams struct {
 	 */
 	EnableEmail bool `json:"enableEmail,omitempty"`
 	/** 是否挂上定时任务工具（建、列、删）。只给用户自己的会话。 */
-	EnableSchedule bool `json:"enableSchedule,omitempty"`
+	EnableSchedule  bool `json:"enableSchedule,omitempty"`
+	EnableAppConfig bool `json:"enableAppConfig,omitempty"`
 	/** 会话一开始的标题。空的话由第一条消息生成；定时任务用它写上任务名。 */
 	Title string `json:"title,omitempty"`
 	/** 界面语言（en / zh-CN）。决定模型默认用什么语言回复；用户用别的语言提问时跟着用户。 */
@@ -799,6 +802,7 @@ type SessionResumeParams struct {
 // 给了就整份生效（空 map = 一个 MCP server 都不挂），不做「空的就跳过」——
 // 那样用户删掉最后一个 server 之后反而删不掉。
 type SessionRefresh struct {
+	EnabledBuiltins   []string                   `json:"enabledBuiltins,omitempty"`
 	MCPServers        map[string]MCPServerConfig `json:"mcpServers"`
 	SkillDirs         []string                   `json:"skillDirs"`
 	MemoryFile        string                     `json:"memoryFile"`
@@ -806,6 +810,7 @@ type SessionRefresh struct {
 	EnableBrowser     bool                       `json:"enableBrowser,omitempty"`
 	EnableEmail       bool                       `json:"enableEmail,omitempty"`
 	EnableSchedule    bool                       `json:"enableSchedule,omitempty"`
+	EnableAppConfig   bool                       `json:"enableAppConfig,omitempty"`
 	Locale            string                     `json:"locale,omitempty"`
 	DisableSandbox    bool                       `json:"disableSandbox"`
 	CodeMode          bool                       `json:"codeMode"`
@@ -1129,4 +1134,17 @@ type SearchSource struct {
 	Title   string `json:"title"`
 	URL     string `json:"url"`
 	Snippet string `json:"snippet"`
+}
+
+// AppConfigRequest contains public proposals only; credentials are entered in the host UI.
+type AppConfigRequest struct {
+	SessionID string         `json:"sessionId"`
+	Action    string         `json:"action"`
+	Category  string         `json:"category"`
+	Operation string         `json:"operation,omitempty"`
+	TargetID  string         `json:"targetId,omitempty"`
+	Values    map[string]any `json:"values,omitempty"`
+}
+type AppConfigResult struct {
+	Text string `json:"text"`
 }

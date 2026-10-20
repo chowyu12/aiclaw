@@ -1,3 +1,4 @@
+import type { ConfigurationCard, ConfigurationReply, ConfigurationOutcome } from "../shared/app-config";
 import { reactive, readonly } from "vue";
 import type { FileChange, PendingSubmission, SessionWork } from "@aiclaw/agent-client";
 import { fileLanguage, type TextFilePreview } from "../shared/file-preview";
@@ -93,6 +94,8 @@ const state = reactive({
   schedules: [] as ScheduledTaskView[],
   /** 模型提的、还没回答的问题（ask_user）。按会话显示在对话里。 */
   questions: [] as QuestionPayload[],
+  configurations: [] as ConfigurationCard[],
+  configurationNotice: null as {sessionId: string; text: string} | null,
   config: null as AppConfigView | null,
   profiles: [] as { id: string; label: string; description: string }[],
   sessions: [] as SessionSummaryView[],
@@ -285,6 +288,12 @@ export const actions = {
       const approval = payload as ApprovalPayload;
       if (!state.approvals.some((item) => item.id === approval.id)) state.approvals.push(approval);
     });
+    let configurationRevision = 0;
+    window.aiclaw.on.configuration((payload) => { configurationRevision++; state.configurations = payload as ConfigurationCard[]; });
+    const initialConfigurationRevision = configurationRevision;
+    void window.aiclaw.configuration.pending().then(cards => {
+      if (configurationRevision === initialConfigurationRevision) state.configurations = cards as ConfigurationCard[];
+    }).catch(error => actions.showError(describeError(error)));
     window.aiclaw.on.question((payload) => {
       const question = payload as QuestionPayload;
       if (!state.questions.some((item) => item.id === question.id)) state.questions.push(question);
@@ -311,6 +320,7 @@ export const actions = {
       state.runtime = payload as RuntimeStatus;
       // 运行时一停，内存里跑着的轮次全没了；不清的话「正在执行」会一直亮着。
       if (state.runtime.state !== "ready") {
+        state.configurations = [];
         for (const record of Object.values(state.live)) record.busy = false;
       }
       if (state.runtime.state === "failed") {
@@ -986,7 +996,7 @@ export const actions = {
 
   /**
    * 放行一个外部会话。这是入站消息的同意环节——放行前那边发来的消息只被记下。
-   * 模型与放开的工具在这里选，而不是沿用桌面会话的：发消息的人不是本机用户。
+   * 模型与审批模式按外部会话选择，不继承桌面全局档位。
    */
   async authorizeBinding(input: {
     pluginUuid: string;
@@ -995,7 +1005,7 @@ export const actions = {
     externalKey: string;
     providerId: number;
     model: string;
-    allowedTools: string[];
+    approvalPolicy: "never" | "bypass";
   }): Promise<void> {
     try {
       await window.aiclaw.channels.authorize(plain(input));
@@ -1315,6 +1325,20 @@ export const actions = {
       }
       await actions.refreshQueue(id);
     } catch (error) { state.error = describeError(error); }
+  },
+
+  dismissConfigurationNotice(): void { state.configurationNotice = null; },
+
+  async respondConfiguration(reply: ConfigurationReply): Promise<ConfigurationOutcome> {
+    const sessionId = state.configurations.find(card => card.id === reply.id)?.sessionId ?? state.sessionId;
+    const result = await window.aiclaw.configuration.respond(plain(reply)) as ConfigurationOutcome;
+    state.configurationNotice = {sessionId, text: result.text};
+    if (!reply.cancel) {
+      await Promise.all([actions.loadSearchEngines(), actions.loadPlugins(), actions.loadSchedules()]);
+      state.mcpServers = await window.aiclaw.mcp.read();
+      await actions.remountCurrentSession();
+    }
+    return result;
   },
 
   /** 回答（或跳过）模型提的问题。 */

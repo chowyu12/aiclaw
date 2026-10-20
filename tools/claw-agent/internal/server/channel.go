@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -19,8 +20,8 @@ import (
 // channelGateway 把通道（微信、企业微信）收到的消息变成一轮对话。
 //
 // 这是入站消息变成一轮的**唯一**入口，它守两条规则：没见过的外部会话只记下来
-// 等用户放行，不服务；放行了的跑在一个受限会话里——只读工具加用户逐个放开的，
-// 审批档位是「无人值守」（要确认的操作直接失败），因为发消息的人不是本机用户。
+// 等用户放行，不服务；放行后使用该外部会话保存的审批模式，默认无人值守，
+// 只有桌面用户明确选择的会话才使用全部放行。
 //
 // 通道插件是按旧版的事件模型（internal/protocol.Event）写的，这里把内核的
 // 通知翻成那几种事件，插件代码一行不用改。
@@ -102,11 +103,23 @@ func (g *channelGateway) Submit(ctx context.Context, pluginUUID string, message 
 // 外部会话多次来消息接的是同一段上下文。模型来自放行时的选择，不跟桌面默认值走。
 func (g *channelGateway) sessionFor(ctx context.Context, binding *model.ChannelBinding) (*agent.Session, error) {
 	s := g.server
+	s.sessionTitleMu.Lock()
+	defer s.sessionTitleMu.Unlock()
 	if id := strings.TrimSpace(binding.ThreadUUID); id != "" {
-		if existing := s.session(id); existing != nil {
-			return existing, nil
+		refresh, err := s.channelSessionRefresh(ctx, id, nil)
+		if err != nil {
+			return nil, err
 		}
-		loaded, err := agent.Load(ctx, s.db, id, s.keyFor, nil)
+		if existing := s.session(id); existing != nil {
+			if existing.Busy() || existing.MountsMatch(*refresh) {
+				return existing, nil
+			}
+			if err := existing.Save(ctx, s.db); err != nil {
+				return nil, err
+			}
+			s.dropSession(id)
+		}
+		loaded, err := agent.Load(ctx, s.db, id, s.keyFor, refresh)
 		if err == nil {
 			s.guard(loaded)
 			s.sessMu.Lock()
@@ -117,17 +130,16 @@ func (g *channelGateway) sessionFor(ctx context.Context, binding *model.ChannelB
 		// 旧会话丢了（用户删了它）就重建一个，别让这个外部会话从此聊不了。
 		s.options.Logf("通道会话 %s 恢复失败，重建：%v", id, err)
 	}
-	var allowed []string
-	if len(binding.AllowedTools) > 0 {
-		_ = json.Unmarshal(binding.AllowedTools, &allowed)
+	servers, err := s.channelSearchServers(ctx)
+	if err != nil {
+		return nil, err
 	}
 	id := channelSessionPrefix + fmt.Sprint(time.Now().UnixNano())
 	session, err := agent.New(ctx, id, protocol.SessionStartParams{
 		Model:          protocol.ModelConfig{ProviderID: binding.ProviderID, Model: binding.ModelName},
-		ApprovalPolicy: protocol.ApprovalNever,
-		// 只读工具是底线；写与执行按会话逐个放开。
-		EnabledBuiltins: append(agent.ReadOnlyBuiltins(), allowed...),
-		ProtectedPaths:  s.options.ProtectedPaths,
+		ApprovalPolicy: channelApprovalPolicy(binding),
+		MCPServers:     servers,
+		ProtectedPaths: s.options.ProtectedPaths,
 	}, s.keyFor)
 	if err != nil {
 		return nil, err
@@ -231,7 +243,7 @@ func (e *channelEmitter) emit(event legacy.Event) {
 	}
 }
 
-// RequestApproval 不会被调到：通道会话是「无人值守」档位，要确认的操作直接失败。
+// RequestApproval 通道不弹审批：无人值守直接拒绝，全部放行由策略在调用前放过。
 // 万一调到了也按拒绝处理——另一头没有人能点「允许」。
 func (e *channelEmitter) RequestApproval(context.Context, protocol.ApprovalRequestParams) (protocol.ApprovalResponse, error) {
 	return protocol.ApprovalResponse{}, i18n.E("通道会话无人值守，需要确认的操作不执行")
@@ -257,4 +269,67 @@ func (e *channelEmitter) RequestSchedule(context.Context, protocol.ScheduleReque
 // RequestBrowser 同理：浏览器窗口在桌面上，外部用户不该驾驭它。
 func (e *channelEmitter) RequestBrowser(context.Context, protocol.BrowserRequestParams) (protocol.BrowserResult, error) {
 	return protocol.BrowserResult{}, i18n.E("通道会话不能操作浏览器")
+}
+
+// channelApprovalPolicy fails closed for legacy, invalid or revoked authorizations.
+func channelApprovalPolicy(binding *model.ChannelBinding) protocol.ApprovalPolicy {
+	if binding != nil && binding.Allowed && binding.ApprovalPolicy == string(protocol.ApprovalBypass) {
+		return protocol.ApprovalBypass
+	}
+	return protocol.ApprovalNever
+}
+
+// Only our own read-only search MCP is shared with external conversations.
+func (s *Server) channelSearchServers(ctx context.Context) (map[string]protocol.MCPServerConfig, error) {
+	servers := map[string]protocol.MCPServerConfig{}
+	if s.search == nil {
+		return servers, nil
+	}
+	enabled, err := s.search.AnyEnabled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if enabled {
+		command, err := os.Executable()
+		if err != nil {
+			return nil, err
+		}
+		servers["web_search"] = protocol.MCPServerConfig{Command: command, Args: []string{"mcp-search", "--app-db=" + s.options.AppDB}, Trusted: true}
+	}
+	return servers, nil
+}
+
+func (s *Server) channelSessionRefresh(ctx context.Context, id string, proposed *protocol.SessionRefresh) (*protocol.SessionRefresh, error) {
+	refresh := proposed
+	if refresh == nil {
+		refresh = &protocol.SessionRefresh{}
+		if current := s.session(id); current != nil {
+			data, err := json.Marshal(current.Config())
+			if err != nil {
+				return nil, err
+			}
+			if err := json.Unmarshal(data, refresh); err != nil {
+				return nil, err
+			}
+		} else if record, err := s.db.Load(ctx, id); err == nil {
+			if err := json.Unmarshal(record.Config, refresh); err != nil {
+				return nil, err
+			}
+		}
+	}
+	var binding *model.ChannelBinding
+	if s.appDB != nil {
+		var err error
+		binding, err = s.appDB.GetChannelBindingByThread(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	pinChannelPolicy(id, refresh, channelApprovalPolicy(binding))
+	servers, err := s.channelSearchServers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	refresh.MCPServers = servers
+	return refresh, nil
 }

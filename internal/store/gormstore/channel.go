@@ -34,7 +34,7 @@ func (s *GormStore) SaveChannelBinding(ctx context.Context, item *model.ChannelB
 		Columns: []clause.Column{{Name: "plugin_uuid"}, {Name: "channel_id"}, {Name: "connection_id"}, {Name: "external_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"display_name", "thread_uuid", "provider_id", "model_name",
-			"allowed", "allowed_tools", "last_message", "updated_at",
+			"allowed", "allowed_tools", "approval_policy", "last_message", "updated_at",
 		}),
 	}).Create(item).Error
 }
@@ -47,4 +47,14 @@ func (s *GormStore) DeleteConnectionBindings(ctx context.Context, pluginUUID, co
 
 func (s *GormStore) DeleteChannelBindings(ctx context.Context, pluginUUID string) error {
 	return s.db.WithContext(ctx).Where("plugin_uuid = ?", pluginUUID).Delete(&model.ChannelBinding{}).Error
+}
+
+// GetChannelBindingByThread finds the persisted authorization for a local channel session.
+func (s *GormStore) GetChannelBindingByThread(ctx context.Context, threadID string) (*model.ChannelBinding, error) {
+	var item model.ChannelBinding
+	err := s.db.WithContext(ctx).Where("thread_uuid = ?", threadID).First(&item).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &item, err
 }

@@ -1,5 +1,13 @@
 /** 英文词典：plugins 这一组界面（中文原文 → 英文）。 */
 export const plugins: Record<string, string> = {
+  "更新后从下一条消息生效。": "Changes apply from the next message.",
+  "开启全部放行后，此外部会话可直接写文件、执行命令，无需逐次确认。确认仅向你信任的会话开放这些能力？": "Full access lets this external conversation write files and run commands without individual confirmation. Grant these capabilities only to a conversation you trust. Continue?",
+  "审批模式": "Approval mode",
+  "无人值守（默认）": "Unattended (default)",
+  "此会话可直接写文件、执行命令；危险命令与凭据保护仍生效。": "This conversation can write files and run commands directly. Dangerous-command and credential protections remain active.",
+  "不弹确认；需要确认的操作不执行。已配置的内置搜索可直接使用。": "No prompts: operations requiring approval are refused. Configured built-in read-only search is available directly.",
+  "触发回答；你放行之后它才能用。放行时选择模型与审批模式，默认无人值守；全部放行仅对当前外部会话生效。": "trigger an answer until you authorize it. Choose a model and approval mode; unattended is the default, and full access applies only to this external conversation.",
+
   // ---------- 插件页：权限与可放开的工具 ----------
   "操作屏幕（截屏、鼠标、键盘）": "Control the screen (screenshots, mouse, keyboard)",
   "读文件": "Read files",

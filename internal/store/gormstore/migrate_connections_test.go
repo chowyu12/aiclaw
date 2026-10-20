@@ -74,7 +74,7 @@ func TestUpgradeMovesSingleCredentialSetIntoFirstConnection(t *testing.T) {
 	if items, _ := store.ListPluginConfig(ctx, wecom, first); len(items) != 1 || items[0].Value != "bot-1" {
 		t.Errorf("the old config should now belong to the first connection: %+v", items)
 	}
-	if binding, _ := store.GetChannelBinding(ctx, wecom, "wecom", first, "zhangsan"); binding == nil || binding.ThreadUUID != "c_1" || !binding.Allowed {
+	if binding, _ := store.GetChannelBinding(ctx, wecom, "wecom", first, "zhangsan"); binding == nil || binding.ThreadUUID != "c_1" || !binding.Allowed || binding.ApprovalPolicy != "never" {
 		t.Errorf("the old binding (and its session) should carry over to the first connection: %+v", binding)
 	}
 	// 不带渠道的插件的配置本来就是插件级的，不动。

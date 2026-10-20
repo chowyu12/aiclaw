@@ -77,9 +77,10 @@ func (s *Session) installCodeMode() int {
 		Schema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
+				"title": {"type": "string", "minLength": 1, "description": "A short action title in the user's language describing what this step will do, e.g. check the current time or search for GDP data. Do not use code, variable declarations, or generic labels such as call run_command as the title."},
 				"code": {"type": "string", "description": "The JavaScript to run. Top-level await and return are allowed."}
 			},
-			"required": ["code"],
+			"required": ["title", "code"],
 			"additionalProperties": false
 		}`),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {

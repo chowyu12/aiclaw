@@ -75,6 +75,7 @@ func Description(tools []Tool) string {
 	var builder strings.Builder
 	builder.WriteString(`Run a snippet of JavaScript that calls tools and combines their results.
 
+- Every exec call must include both title and code. The title is a short action in the user's language, describing the goal (e.g. check the current time or search for GDP data), not a tool name or code. Example arguments: {"title":"确认当前时间","code":"text(await tools.run_command({command: 'date', reason: '确认当前时间'}));"}.
 - The code runs in an isolated JS environment: no require, no file system, no network, no console,
   **and no timers such as setTimeout** (to wait, just await the tool; don't build your own polling).
   Only the tools and helpers listed below are available. To read or write files or run commands, use the corresponding tools.

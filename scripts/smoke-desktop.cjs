@@ -57,6 +57,7 @@ app.whenReady().then(async () => {
   // 用假数据应答渲染层启动时会问的那几个通道。不接真实主进程是刻意的：
   // 这里要验的是"桥接通了、界面起得来"，接上真实 ConfigStore 会连带碰用户的
   // 本机配置和钥匙串。但通道名取自真实的 IPC 常量，改名了这里会一起报错。
+  ipcMain.handle(IPC.configurationPending, () => []);
   ipcMain.handle(IPC.configRead, () => ({
     providerId: 0,
     model: "",

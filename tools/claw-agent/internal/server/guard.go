@@ -43,19 +43,22 @@ func (s *Server) guard(session *agent.Session) {
 	}
 }
 
-// pinChannelPolicy 让通道会话的审批档位不随宿主的 refresh 变。
-//
-// 通道会话（企业微信、微信）是替外部用户跑的，建出来就是「无人值守」：要确认的
-// 操作直接失败。但桌面端恢复任何会话时都会带一份 refresh，里面的 approvalPolicy
-// 是桌面上的全局档位——用户在侧边栏点开一个通道会话看一眼，这个会话就换成了
-// 桌面档位，之后外部用户发来的消息也按那个档位执行。**实际发生过。** 谁发的消息
-// 决定档位，而不是谁在看；所以通道会话的档位在这里钉回去。
-func pinChannelPolicy(sessionID string, refresh *protocol.SessionRefresh) {
+// pinChannelPolicy uses this external conversation's saved mode, never the desktop global mode.
+func pinChannelPolicy(sessionID string, refresh *protocol.SessionRefresh, policy protocol.ApprovalPolicy) {
 	if refresh == nil || !strings.HasPrefix(sessionID, channelSessionPrefix) {
 		return
 	}
 	refresh.ApprovalPolicy = protocol.ApprovalNever
-	// 邮箱同理：对面是外部的人，不能让他借助手去翻、去发用户的信。
+	if policy == protocol.ApprovalBypass {
+		refresh.ApprovalPolicy = protocol.ApprovalBypass
+	}
+	refresh.EnabledBuiltins = []string{}
+	// A mode switch does not grant access to the owner's mailbox, configuration or background automation.
 	refresh.EnableEmail = false
 	refresh.EnableSchedule = false
+	refresh.EnableAppConfig = false
+	refresh.EnableBrowser = false
+	refresh.EnableComputerUse = false
+	refresh.SkillDirs = nil
+	refresh.MemoryFile = ""
 }

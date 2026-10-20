@@ -181,6 +181,7 @@ type Session struct {
 // refreshOf 取出配置里「跟着宿主配置走」的那几项。
 func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 	return protocol.SessionRefresh{
+		EnabledBuiltins:   config.EnabledBuiltins,
 		MCPServers:        config.MCPServers,
 		SkillDirs:         config.SkillDirs,
 		MemoryFile:        config.MemoryFile,
@@ -188,6 +189,7 @@ func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 		EnableBrowser:     config.EnableBrowser,
 		EnableEmail:       config.EnableEmail,
 		EnableSchedule:    config.EnableSchedule,
+		EnableAppConfig:   config.EnableAppConfig,
 		Locale:            config.Locale,
 		DisableSandbox:    config.DisableSandbox,
 		CodeMode:          config.CodeMode,
@@ -282,6 +284,9 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 		return nil, err
 	}
 	if err := session.registerEmailTools(ctx); err != nil {
+		return nil, err
+	}
+	if err := session.registerAppConfigTools(); err != nil {
 		return nil, err
 	}
 	if err := session.registerScheduleTools(); err != nil {
@@ -613,25 +618,6 @@ func skillToolSchema(list []skills.Skill) json.RawMessage {
 	return encoded
 }
 
-// ReadOnlyBuiltins 是不改任何东西的那几个内置工具名。
-//
-// 通道（微信、企业微信）来的消息不是本机用户说的，默认只给这些；
-// 要放开写与执行由用户按会话逐个授权。列表从注册表算出来而不是写死，
-// 免得新加一个只读工具时这里漏了。
-func ReadOnlyBuiltins() []string {
-	registry := tools.NewRegistry()
-	if err := registerBuiltins(registry, nil); err != nil {
-		return nil
-	}
-	var names []string
-	for _, tool := range registry.List() {
-		if tool.Effect == tools.EffectRead {
-			names = append(names, tool.Name)
-		}
-	}
-	return names
-}
-
 func registerBuiltins(registry *tools.Registry, enabled []string) error {
 	if err := tools.RegisterFileTools(registry); err != nil {
 		return err
@@ -885,8 +871,13 @@ func buildSystemPrompt(
 	// 而界面是英文的用户多半用英文提问、也想看英文。
 	builder.WriteString(replyLanguage(config.Locale))
 	builder.WriteString("Treat truncated output and deliberate head/tail/slice previews as partial evidence. Before claiming data is absent, inspect the relevant retained pages or source fields and follow API pagination. Use read_tool_output for output_id references; read_file supports continuation. If the missing portion cannot be retrieved, state that the available evidence is incomplete. Never rerun a side-effecting command merely to recover its output.\n")
+	if config.EnableAppConfig && config.ParentID == "" {
+		builder.WriteString("When the user explicitly asks to configure this application (email, search engines, MCP, plugins or scheduled tasks), use app_config_list then app_configure. Credentials are entered only in the desktop configuration card, never in chat, tool arguments, shell commands or files. Do not edit application config files directly. A card is a proposal; only its host-confirmed outcome establishes success.\n")
+	}
+
 	// 说清楚「基准在哪、什么会被问」。模型不知道这两件事时，
 	// 要么不敢碰工作区外面的文件，要么写一堆会被拦下的路径。
+
 	if workspace := strings.TrimSpace(config.Workdir); workspace != "" {
 		fmt.Fprintf(&builder,
 			"Session workspace: %s. Relative paths resolve against it. **Reading is not limited to the workspace**: "+
@@ -1156,7 +1147,14 @@ func (s *Session) MCPStatus() map[string]string { return s.mcpStatus }
 // 不一样就该卸掉重挂——内核会把会话留在内存里，而用户可能在这期间加了
 // 一个 MCP server 或者新加了可信 server。
 func (s *Session) MountsMatch(want protocol.SessionRefresh) bool {
-	return reflect.DeepEqual(s.applied, want)
+	applied := s.applied
+	if want.EnabledBuiltins == nil {
+		want.EnabledBuiltins = applied.EnabledBuiltins
+	}
+	if len(want.EnabledBuiltins) == 0 && len(applied.EnabledBuiltins) == 0 {
+		want.EnabledBuiltins, applied.EnabledBuiltins = nil, nil
+	}
+	return reflect.DeepEqual(applied, want)
 }
 
 // Grants 返回本次会话里批准过的可写目录。
@@ -1299,6 +1297,9 @@ func Load(
 	// 工作目录与模型不在这里面：换工作目录会让历史里的文件路径对不上；
 	// 模型是会话自己的选择（端点由宿主用 session/configure 另行对齐）。
 	if refresh != nil {
+		if refresh.EnabledBuiltins != nil {
+			config.EnabledBuiltins = refresh.EnabledBuiltins
+		}
 		config.MCPServers = refresh.MCPServers
 		config.SkillDirs = refresh.SkillDirs
 		config.MemoryFile = refresh.MemoryFile
@@ -1306,6 +1307,7 @@ func Load(
 		config.EnableBrowser = refresh.EnableBrowser
 		config.EnableEmail = refresh.EnableEmail
 		config.EnableSchedule = refresh.EnableSchedule
+		config.EnableAppConfig = refresh.EnableAppConfig
 		config.Locale = refresh.Locale
 		config.DisableSandbox = refresh.DisableSandbox
 		config.CodeMode = refresh.CodeMode

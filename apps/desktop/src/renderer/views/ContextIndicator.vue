@@ -6,11 +6,12 @@ import { t } from "../i18n";
 const status=ref<ContextStatus|null>(null),opened=ref(false);
 let generation=0,timer:ReturnType<typeof setTimeout>|undefined;
 async function load():Promise<void>{
- const id=store.sessionId,ticket=++generation;if(!id){status.value=null;return;}
+ // 会话 ID 先切换，恢复信息稍后才到；所有刷新入口都等当前会话恢复成功。
+ const id=store.sessionId,ticket=++generation;if(!id||store.sessionInfo?.sessionId!==id){status.value=null;return;}
  try{const value=await window.aiclaw.session.context(id) as ContextStatus;if(ticket===generation&&id===store.sessionId)status.value=value;}
  catch{if(ticket===generation)status.value=null;}
 }
-watch(()=>[store.sessionId,store.sessionInfo],()=>{status.value=null;opened.value=false;void load();},{immediate:true});
+watch(()=>[store.sessionId,store.sessionInfo],()=>{clearTimeout(timer);status.value=null;opened.value=false;void load();},{immediate:true});
 const unsubscribe=window.aiclaw.on.agentEvent((raw:unknown)=>{
  const event=raw as {method?:string;params?:{sessionId?:string}};
  if(event.params?.sessionId===store.sessionId&&["item/completed","turn/completed"].includes(event.method??"")){clearTimeout(timer);timer=setTimeout(()=>void load(),200);}

@@ -511,7 +511,10 @@ func (s *Service) Bindings(ctx context.Context) ([]protocol.ChannelBindingView, 
 			ConnectionID: item.ConnectionID, ConnectionName: names[item.ConnectionID],
 			DisplayName: item.DisplayName, SessionID: item.ThreadUUID,
 			ProviderID: item.ProviderID, Model: item.ModelName, Allowed: item.Allowed,
-			AllowedTools: []string{},
+			AllowedTools: []string{}, ApprovalPolicy: protocol.ApprovalNever,
+		}
+		if item.ApprovalPolicy == string(protocol.ApprovalBypass) {
+			view.ApprovalPolicy = protocol.ApprovalBypass
 		}
 		if len(item.AllowedTools) > 0 {
 			_ = json.Unmarshal(item.AllowedTools, &view.AllowedTools)
@@ -527,7 +530,7 @@ func (s *Service) Bindings(ctx context.Context) ([]protocol.ChannelBindingView, 
 // Authorize 放行一个外部会话。
 //
 // 这是入站消息的同意环节：在此之前那边发来的消息只被记下、不被服务。
-// 模型与放开的工具在这里选，而不是沿用桌面会话的——发消息的人不是本机用户。
+// 模型与审批模式按外部会话选择，不继承桌面全局档位。
 func (s *Service) Authorize(ctx context.Context, params protocol.ChannelAuthorizeParams) error {
 	binding, err := s.binding(ctx, params.ChannelBindingKey)
 	if err != nil {
@@ -536,12 +539,15 @@ func (s *Service) Authorize(ctx context.Context, params protocol.ChannelAuthoriz
 	if params.ProviderID == 0 || strings.TrimSpace(params.Model) == "" {
 		return i18n.E("放行前要先给这个会话选模型")
 	}
-	tools, err := json.Marshal(params.AllowedTools)
-	if err != nil {
-		return err
+	policy := params.ApprovalPolicy
+	if policy == "" {
+		policy = protocol.ApprovalNever
+	}
+	if policy != protocol.ApprovalNever && policy != protocol.ApprovalBypass {
+		return fmt.Errorf("unsupported channel approval policy: %s", policy)
 	}
 	binding.Allowed, binding.ProviderID, binding.ModelName = true, params.ProviderID, strings.TrimSpace(params.Model)
-	binding.AllowedTools = model.JSON(tools)
+	binding.ApprovalPolicy = string(policy)
 	return s.db.SaveChannelBinding(ctx, binding)
 }
 

@@ -13,6 +13,7 @@ import {
   ClawAgentClient,
   type AgentNotification,
   type PendingUserInput,
+  type PendingAppConfigAction,
   type PendingScheduleAction,
   type ChannelConnectionView,
   type UsageSummary,
@@ -116,6 +117,7 @@ export interface SessionInfo {
 }
 
 export interface SessionManagerEvents {
+  appConfig: (action: PendingAppConfigAction) => void;
   /** 透传给渲染层的 agent 事件。 */
   event: (method: string, params: unknown) => void;
   approval: (request: PendingApproval) => void;
@@ -212,6 +214,7 @@ export class SessionManager extends EventEmitter {
     client.on("notification", (n: AgentNotification) => this.emit("event", n.method, n.params));
     client.on("approval", (request) => this.emit("approval", request));
     client.on("userInput", (question) => this.emit("userInput", question));
+    client.on("appConfig", (action) => this.emit("appConfig", action));
     // 模型要建、列、删定时任务：调度器在主进程，交给它。
     client.on("schedule", (action) => this.emit("schedule", action));
     // 屏幕操作在宿主这边做：截屏要走应用自己的屏幕录制授权，输入要按平台
@@ -407,10 +410,11 @@ export class SessionManager extends EventEmitter {
       const summaries = await client.sessionList();
       const source = summaries.find(item => item.id === task.sessionId && !item.parentId && !item.archivedAt);
       if (!source) throw new Error(tr("原会话不存在或已归档"));
-      await client.sessionResume(task.sessionId, await this.buildRefresh());
+      await client.sessionResume(task.sessionId, {...await this.buildRefresh(), enableAppConfig: false});
       sessionId = task.sessionId;
     } else {
       const params = await this.buildParams(this.store.readConfig(), task.workspace);
+      params.enableAppConfig = false;
       params.title = `⏰ ${task.name}`;
       if (params.workdir) mkdirSync(params.workdir, {recursive: true});
       sessionId = (await client.sessionStart(params)).sessionId;
@@ -424,6 +428,7 @@ export class SessionManager extends EventEmitter {
     await this.start();
     const client = this.requireClient();
     const params = await this.buildParams(this.store.readConfig(), input.workspace);
+    params.enableAppConfig = false;
     params.title = input.title;
     if (params.workdir) mkdirSync(params.workdir, { recursive: true });
     const result = await client.sessionStart(params);
@@ -598,6 +603,7 @@ export class SessionManager extends EventEmitter {
       enableComputerUse: contributions.computerUse,
       enableEmail: contributions.email === true,
       enableSchedule: true,
+      enableAppConfig: true,
       enableBrowser: config.browser === true,
       roles: toRoles(config),
       modelSeesImages: await this.modelSeesImages(config),
@@ -696,6 +702,7 @@ export class SessionManager extends EventEmitter {
       enableComputerUse: contributions.computerUse,
       enableEmail: contributions.email === true,
       enableSchedule: true,
+      enableAppConfig: true,
       enableBrowser: config.browser === true,
       disableSandbox: config.sandboxCommands === false,
       codeMode: config.codeMode === true,

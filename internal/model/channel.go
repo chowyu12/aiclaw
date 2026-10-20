@@ -22,9 +22,10 @@ type ChannelBinding struct {
 	ProviderID  int64  `json:"provider_id"`
 	ModelName   string `json:"model_name" gorm:"size:200"`
 	Allowed     bool   `json:"allowed" gorm:"not null"`
-	// AllowedTools are tool names this binding may use beyond the read-only
-	// default set. Inbound messages are untrusted, so acting tools are opt-in
-	// per binding rather than inherited from the desktop session.
+	// ApprovalPolicy is chosen per external conversation; legacy bindings default to never.
+	ApprovalPolicy string `json:"approval_policy" gorm:"size:20;not null;default:never"`
+	// AllowedTools are legacy tool names this binding may use beyond the read-only
+	// default set. Retained for compatibility; approval mode now controls execution.
 	AllowedTools JSON      `json:"allowed_tools,omitzero" gorm:"type:text"`
 	LastMessage  time.Time `json:"last_message,omitzero"`
 	CreatedAt    time.Time `json:"created_at"`

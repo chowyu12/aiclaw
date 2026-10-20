@@ -36,6 +36,7 @@ import StepsBlock from "./StepsBlock.vue";
 import GeneratedImages from "./GeneratedImages.vue";
 import GeneratedFiles from "./GeneratedFiles.vue";
 import SearchSources from "./SearchSources.vue";
+import ConfigurationCard from "./ConfigurationCard.vue";
 import QuestionCard from "./QuestionCard.vue";
 
 defineProps<{ configured: boolean }>();
@@ -879,6 +880,10 @@ const forking = ref(false);
 
           <!-- 模型在等你回答的问题（ask_user）。在输入框上方而不是弹窗：上面模型做到
                哪一步还看得见；卡片有自己的输入框，不动你正在写的草稿。 -->
+          <div v-if="store.configurationNotice?.sessionId === store.sessionId" class="configuration-notice" role="status">
+            <span>{{ store.configurationNotice.text }}</span><button :aria-label="t('关闭')" @click="actions.dismissConfigurationNotice()">×</button>
+          </div>
+          <ConfigurationCard v-for="card in store.configurations.filter(item => item.sessionId === store.sessionId)" :key="card.id" :card="card" />
           <QuestionCard
             v-for="question in currentQuestions"
             :key="question.id"
@@ -1145,6 +1150,10 @@ const forking = ref(false);
 </template>
 
 <style scoped>
+.configuration-notice { display:flex; align-items:flex-start; gap:12px; margin-bottom:10px; padding:10px 14px; border:1px solid var(--rule); border-radius:var(--r-md); background:var(--paper,var(--bg)); color:var(--muted); font-size:12px; line-height:1.6; }
+.configuration-notice span { flex:1; }
+.configuration-notice button { padding:0 4px; }
+
 .input-queue { max-width: var(--content-width); margin: 0 auto 8px; padding: 10px 12px; max-height: 180px; overflow: auto; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); font-size: 12px; }
 .queue-head { display: flex; flex-wrap: wrap; gap: 6px; color: var(--ink-2); }
 .queue-head span { margin-left: auto; color: var(--muted); }

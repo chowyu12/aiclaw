@@ -32,17 +32,6 @@ const PERMISSION_LABELS: Record<string, () => string> = {
   "shell.exec": () => t("执行命令"),
 };
 
-/** 外部会话可以额外放开的内置工具。只读的那些默认就有，不用选。 */
-const ACTING_TOOLS = [
-  { name: "write_file", label: () => t("写文件") },
-  { name: "edit_file", label: () => t("改文件") },
-  { name: "write_docx", label: () => t("写 Word") },
-  { name: "edit_docx", label: () => t("改 Word") },
-  { name: "write_xlsx", label: () => t("写 Excel") },
-  { name: "write_pptx", label: () => t("写 PPT") },
-  { name: "run_command", label: () => t("执行命令") },
-];
-
 /**
  * 内置插件的名字、说明与配置项说明来自内核里的 plugin.json，是中文写的。
  * 这几条在词典里有英文，就按当前语言换掉；清单改了、词典没跟上时原样显示中文。
@@ -58,7 +47,7 @@ const saving = ref(false);
 /** 配置项的输入草稿，按「插件/键」存。存完清空，不让秘密留在 DOM 里。 */
 const drafts = reactive<Record<string, string>>({});
 /** 授权表单的草稿，按外部会话的键存。 */
-const authDrafts = reactive<Record<string, { choice: string; tools: string[] }>>({});
+const authDrafts = reactive<Record<string, { choice: string; policy: "never" | "bypass" }>>({});
 
 // 微信扫码登录。二维码从中继来，几十秒后过期；确认之后凭据由内核写进配置。
 // connectionId 空着是「添加一个微信号」，给了是给那个连接重新登录。
@@ -342,14 +331,9 @@ function authDraft(binding: BindingRow) {
   const key = bindingKey(binding);
   if (!authDrafts[key]) {
     const current = binding.providerId && binding.model ? `${binding.providerId}/${binding.model}` : "";
-    authDrafts[key] = { choice: current, tools: [...binding.allowedTools] };
+    authDrafts[key] = { choice: current, policy: binding.approvalPolicy === "bypass" ? "bypass" : "never" };
   }
   return authDrafts[key];
-}
-
-function toggleTool(binding: BindingRow, name: string, on: boolean): void {
-  const draft = authDraft(binding);
-  draft.tools = on ? [...new Set([...draft.tools, name])] : draft.tools.filter((t) => t !== name);
 }
 
 async function authorize(binding: BindingRow): Promise<void> {
@@ -360,6 +344,7 @@ async function authorize(binding: BindingRow): Promise<void> {
     actions.showError(t("放行前先给这个会话选一个模型。"));
     return;
   }
+  if (draft.policy === "bypass" && (!binding.allowed || binding.approvalPolicy !== "bypass") && !confirm(t("开启全部放行后，此外部会话可直接写文件、执行命令，无需逐次确认。确认仅向你信任的会话开放这些能力？"))) return;
   await run(() =>
     actions.authorizeBinding({
       pluginUuid: binding.pluginUuid,
@@ -368,7 +353,7 @@ async function authorize(binding: BindingRow): Promise<void> {
       externalKey: binding.externalKey,
       providerId: Number(providerId),
       model,
-      allowedTools: draft.tools,
+      approvalPolicy: draft.policy,
     }),
   );
 }
@@ -675,14 +660,12 @@ async function pollWeChat(): Promise<void> {
                         {{ c.model }} · {{ c.providerName }}
                       </option>
                     </select>
-                    <label v-for="tool in ACTING_TOOLS" :key="tool.name" class="tool">
-                      <input
-                        type="checkbox"
-                        :checked="authDraft(binding).tools.includes(tool.name)"
-                        @change="toggleTool(binding, tool.name, ($event.target as HTMLInputElement).checked)"
-                      />
-                      {{ tool.label() }}
-                    </label>
+                    <select v-model="authDraft(binding).policy" class="approval-mode" :aria-label="t('审批模式')">
+                      <option value="never">{{ t("无人值守（默认）") }}</option>
+                      <option value="bypass">{{ t("全部放行") }}</option>
+                    </select>
+                    <p class="policy-hint hint">{{ authDraft(binding).policy === "bypass" ? t("此会话可直接写文件、执行命令；危险命令与凭据保护仍生效。") : t("不弹确认；需要确认的操作不执行。已配置的内置搜索可直接使用。") }}</p>
+                    <span class="hint">{{ t("更新后从下一条消息生效。") }}</span>
                     <button class="primary small" @click="authorize(binding)">
                       {{ binding.allowed ? t("更新") : t("放行") }}
                     </button>
@@ -692,7 +675,7 @@ async function pollWeChat(): Promise<void> {
               </div>
             </div>
             <p class="hint">
-              {{ t("外部会话（群或单聊）第一次发消息只会被记下，") }}<strong>{{ t("不会") }}</strong>{{ t("触发回答；你放行之后它才能用。放行时选模型、选它能动的工具——默认只有只读工具，因为发消息的人不是你。") }}
+              {{ t("外部会话（群或单聊）第一次发消息只会被记下，") }}<strong>{{ t("不会") }}</strong>{{ t("触发回答；你放行之后它才能用。放行时选择模型与审批模式，默认无人值守；全部放行仅对当前外部会话生效。") }}
             </p>
           </div>
         </template>
@@ -1085,18 +1068,9 @@ button.small {
   min-width: 200px;
 }
 
-.tool {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--ink-2);
-  white-space: nowrap;
-}
+.binding-form .policy-hint { flex-basis:100%; margin:0; }
+.binding-form .approval-mode { min-width:160px; }
 
-.tool input {
-  width: auto;
-}
 
 .note {
   margin: 0;

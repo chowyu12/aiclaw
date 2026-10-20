@@ -97,6 +97,7 @@ export interface SessionStartParams {
   enableEmail?: boolean;
   /** 挂上定时任务工具。只给用户自己的会话。 */
   enableSchedule?: boolean;
+  enableAppConfig?: boolean;
   /** 会话一开始的标题；空的话由第一条消息生成。 */
   title?: string;
   /** 界面语言（en / zh-CN），决定模型默认用什么语言回复。 */
@@ -125,6 +126,7 @@ export interface SessionStartParams {
  * 给了就整份生效（空对象 = 一个 MCP server 都不挂），不做「空的就跳过」。
  */
 export interface SessionRefresh {
+  enabledBuiltins?: string[];
   mcpServers: Record<string, MCPServerConfig>;
   skillDirs: string[];
   memoryFile: string;
@@ -134,6 +136,7 @@ export interface SessionRefresh {
   /** 挂上邮件工具（邮件插件启用时）。 */
   enableEmail?: boolean;
   enableSchedule?: boolean;
+  enableAppConfig?: boolean;
   locale?: string;
   disableSandbox: boolean;
   codeMode: boolean;
@@ -347,6 +350,7 @@ export interface ChannelBindingView {
   providerId?: number;
   model?: string;
   allowed: boolean;
+  approvalPolicy?: "never" | "bypass";
   allowedTools: string[];
   lastMessage?: string;
 }
@@ -361,6 +365,7 @@ export interface ChannelBindingKey {
 export interface ChannelAuthorizeParams extends ChannelBindingKey {
   providerId: number;
   model: string;
+  approvalPolicy?: "never" | "bypass";
   allowedTools?: string[];
 }
 
@@ -752,3 +757,14 @@ export interface MCPOAuthStatus { state: "connected" | "expired" | "needs_login"
 export interface SearchSource { title: string; url: string; snippet: string; }
 
 export interface ContextStatus { model: string; window: number; estimatedTokens: number; lastInputTokens: number; hasImages: boolean; compactions: number; records: {at:number;before:number;after:number}[]; }
+
+/** Application configuration is a desktop-only host capability. Values never carry credentials. */
+export interface AppConfigRequest {
+  sessionId: string;
+  action: "list" | "configure";
+  category: "email" | "search" | "mcp" | "plugin" | "schedule";
+  operation?: string;
+  targetId?: string;
+  values?: Record<string, unknown>;
+}
+export interface AppConfigResult { text: string; }

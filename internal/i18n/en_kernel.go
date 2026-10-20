@@ -103,6 +103,16 @@ func init() {
 		"json 解析失败": "invalid JSON",
 
 		// 步骤摘要
+		"执行命令":                      "Run command",
+		"联网搜索":                      "Search the web",
+		"读取文件":                      "Read file",
+		"写入文件":                      "Write file",
+		"修改文件":                      "Edit file",
+		"列出目录":                      "List directory",
+		"搜索文件":                      "Search files",
+		"{action}：{detail}":         "{action}: {detail}",
+		"运行代码脚本":                    "Run a code script",
+		"调用 {tools}":                "Call {tools}",
 		"提问：{question}":             "Question: {question}",
 		"开子 agent {name}：{message}": "Start sub-agent {name}: {message}",
 		"→ {target}：{message}":      "→ {target}: {message}",
