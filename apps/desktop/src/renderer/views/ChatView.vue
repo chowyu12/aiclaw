@@ -35,6 +35,7 @@ import type { SessionSummaryView, SkillView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
 import GeneratedImages from "./GeneratedImages.vue";
 import GeneratedFiles from "./GeneratedFiles.vue";
+import FileReferences from "./FileReferences.vue";
 import SearchSources from "./SearchSources.vue";
 import ConfigurationCard from "./ConfigurationCard.vue";
 import QuestionCard from "./QuestionCard.vue";
@@ -382,28 +383,6 @@ const workspaceTitle = computed(() =>
     ? t("会话工作区：{path}", { path: store.sessionInfo.workspace })
     : t("这个会话没有设置工作区，点一下可以指定"),
 );
-
-/**
- * 对话正文里点到文件名时打开它。
- *
- * 只认我们自己标出来的 `.file-ref`——模型即使伪造一个同名 class 也拿不到
- * 额外能力，真正的校验在主进程（路径按工作区解析、可执行的只在访达里显示、
- * 凭据目录拒绝）。
- */
-function onProseClick(event: MouseEvent): void {
-  const target = (event.target as HTMLElement | null)?.closest?.(".file-ref");
-  if (!target) return;
-  event.preventDefault();
-  void actions.openFile(target.getAttribute("data-file-path") ?? target.textContent ?? "");
-}
-
-function onProseKey(event: KeyboardEvent): void {
-  if (event.key !== " " && event.key !== "Enter") return;
-  const target = (event.target as HTMLElement | null)?.closest?.(".file-ref");
-  if (!target) return;
-  event.preventDefault();
-  void actions.openFile(target.getAttribute("data-file-path") ?? target.textContent ?? "");
-}
 
 async function chooseWorkspace(): Promise<void> {
   workspaceOpen.value = false;
@@ -807,7 +786,7 @@ const forking = ref(false);
             <div v-for="message in turn.messages" :key="message.id" class="msg agent">
               <!-- 文件名点了直接打开。用事件委托而不是给每个 code 绑监听：
                    这段 HTML 是 v-html 塞进来的，Vue 的事件绑定管不到它。 -->
-              <div class="prose" @click="onProseClick" @keydown="onProseKey" v-html="renderMarkdown(message.text)" />
+              <FileReferences class="prose" :html="renderMarkdown(message.text)" />
               <span v-if="message.streaming" class="caret">▌</span>
             </div>
             <GeneratedImages
@@ -1440,7 +1419,7 @@ const forking = ref(false);
   color: var(--muted);
 }
 
-.prose :deep(a:not(.file-card)) {
+.prose :deep(a:not(.file-ref):not(.file-open-trigger)) {
   color: var(--accent);
   text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent);
   text-underline-offset: 2px;

@@ -1,24 +1,20 @@
 <script setup lang="ts">
-import { actions } from "../store";
 import { t } from "../i18n";
-import { filename, fileType } from "../file-card";
+import { fileCard } from "../file-card";
+import FileReferences from "./FileReferences.vue";
 
 defineProps<{ paths: string[] }>();
 </script>
 
 <template>
   <section class="generated-files" :aria-label="t('生成文件')">
-    <div class="artifact-cards">
-      <button v-for="path in paths" :key="path" class="file-card" :title="path"
-        :aria-label="t('打开文件 {name}', { name: filename(path) })" @click="actions.openFile(path)">
-        <span class="file-type" :data-type="fileType(path)" aria-hidden="true">{{ fileType(path) }}</span>
-        <span class="file-name">{{ filename(path) }}</span>
-      </button>
-    </div>
+    <FileReferences class="artifact-cards" :html="paths.map(fileCard).join('')" />
   </section>
 </template>
 
 <style scoped>
 .generated-files { max-width: var(--content-width); margin: 16px auto; padding: 0 28px; }
-.artifact-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 8px; }
+.artifact-cards { border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; }
+.artifact-cards :deep(.file-card) { margin: 0; border: 0; border-radius: 0; }
+.artifact-cards :deep(.file-card + .file-card) { border-top: 1px solid var(--rule); }
 </style>

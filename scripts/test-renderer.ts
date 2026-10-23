@@ -471,7 +471,7 @@ test("文件名渲染成可点的", () => {
     assert.ok(looksLikePath(text), `${text} 应当被认成路径`);
   }
   const html = renderMarkdown("文档已生成：`报表.md`（工作区根目录）");
-  assert.match(html, /class="file-ref file-card"/);
+  assert.match(html, /class="file-card"/);
   assert.match(html, /报表\.md/);
 });
 
@@ -482,9 +482,23 @@ test("回复里的文件路径显示文件卡片，保留打开路径但不显�
   assert.equal(card.getAttribute("data-file-path"), path);
   assert.equal(card.querySelector(".file-name")?.textContent, "行业分析 2025.md");
   assert.doesNotMatch(card.textContent!, /Users|reports/);
-  assert.equal(card.getAttribute("role"), "button");
+  assert.equal(card.querySelector(".file-ref")?.getAttribute("role"), "button");
+  assert.equal(card.querySelector(".file-format")?.textContent, "Markdown");
+  assert.equal(card.querySelector(".file-open-trigger")?.textContent, "打开方式⌄");
+  assert.equal(card.querySelector(".file-open-trigger")?.getAttribute("aria-haspopup"), "menu");
   const link = new JSDOM(renderMarkdown("[打开报告](reports/report.docx)"));
   assert.equal(link.window.document.querySelector(".file-card")?.getAttribute("data-file-path"), "reports/report.docx");
+  assert.equal(link.window.document.querySelector(".file-format")?.textContent, "Word");
+});
+
+test("生成文件卡片将文件名和路径作为数据转义，不允许注入额外控件", async () => {
+  const { fileCard } = await import("../apps/desktop/src/renderer/file-card.ts");
+  const path = 'reports/<img src=x onerror=alert(1)>".docx';
+  const dom = new JSDOM(fileCard(path));
+  assert.equal(dom.window.document.querySelector(".file-card")?.getAttribute("data-file-path"), path);
+  assert.equal(dom.window.document.querySelector(".file-name")?.textContent, path.slice(8));
+  assert.equal(dom.window.document.querySelector("img,script,button"), null);
+  assert.equal(dom.window.document.querySelectorAll("a").length, 2);
 });
 
 test("含斜杠的字段列表、日期和仓库名保留行内代码与完整文本", () => {
@@ -533,7 +547,7 @@ test("带空格的文件名仍然认，但必须有扩展名收尾", () => {
 test("file-ref 这个类名活过净化，而 onclick 之类活不过", () => {
   // 类名要留住，不然样式和点击委托都失效。
   const html = renderMarkdown("`a.md`");
-  assert.match(html, /class="file-ref file-card"/);
+  assert.match(html, /class="file-ref"/);
   // 模型自己写一个同名 class 也只是个 class——真正的校验在主进程。
   const forged = renderMarkdown('<code class="file-ref" onclick="alert(1)">x.md</code>');
   assert.doesNotMatch(forged, /onclick/);

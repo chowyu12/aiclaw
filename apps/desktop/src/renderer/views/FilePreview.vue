@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store, type FilePreviewState } from "../store";
-import { previewReference } from "../../shared/file-preview";
+import FileReferences from "./FileReferences.vue";
 import { filename, fileType } from "../file-card";
 import { highlightCode } from "../code-highlight";
 import { renderPreviewMarkdown } from "../markdown";
@@ -25,6 +25,7 @@ function highlightFind(): void {
   const parts: {node:Text;start:number;end:number}[]=[];let text="", block:Element|null=null;
   while (walker.nextNode()) {
     const node=walker.currentNode as Text;
+    if (node.parentElement?.closest("[popover]")) continue;
     if (mode.value !== "rendered" && !node.parentElement?.closest("code")) continue;
     const nextBlock=node.parentElement?.closest("code,p,li,h1,h2,h3,h4,h5,h6,td,th,blockquote")??null;
     if(block!==nextBlock && text)text+="\n";
@@ -126,10 +127,6 @@ async function copy(): Promise<void> {
   try { await navigator.clipboard.writeText(content.value); copied.value = true; }
   catch { actions.showError(t("复制失败")); }
 }
-function openReference(event: MouseEvent): void {
-  const target = (event.target as HTMLElement)?.closest(".file-ref");
-  if (target) { event.preventDefault(); void actions.openFile(previewReference(props.preview.path, target.getAttribute("data-file-path") ?? "")); }
-}
 onMounted(async () => { window.addEventListener("keydown",onFindKey);await nextTick(); closeButton.value?.focus(); });
 onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();previousFocus?.focus(); });
 </script>
@@ -199,7 +196,7 @@ onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();
         </div>
         <p v-if="diff.length > 3000" class="preview-note">{{ t('差异超过显示范围，仅预览前 3000 行。') }}</p>
       </div>
-      <div v-else-if="mode === 'rendered'" ref="body" class="preview-body markdown-preview prose" @scroll="saveReading(true)" @click="openReference" v-html="markup" />
+      <div v-else-if="mode === 'rendered'" ref="body" class="preview-body markdown-preview prose" @scroll="saveReading(true)"><FileReferences :html="markup" :base-path="preview.path" /></div>
       <div v-else ref="body" class="preview-body source-code" @scroll="saveReading(true)"><pre class="line-numbers" aria-hidden="true"><span v-for="(_,index) in visibleLines.slice(0,3000)" :key="index" :class="{current:index+1===activeLine}">{{ index+1 }}</span></pre><pre><code v-html="code" /></pre></div>
       <p v-if="mode !== 'diff' && truncated" class="preview-note">{{ t('内容超过显示范围，仅预览前 3000 行或 512 KB。') }}</p>
     </template>

@@ -64,7 +64,7 @@ app.whenReady().then(async()=>{
  const js=code=>win.webContents.executeJavaScript(code);
  const wait=async code=>{for(let i=0;i<60;i++){if(await js(code))return true;await new Promise(r=>setTimeout(r,50));}return false;};
  const click=async text=>{
-  const find=`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)})`;
+  const find=`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===${JSON.stringify(text)}&&b.getClientRects().length>0)`;
   if(!(await wait(`(()=>{const b=${find};return !!b&&!b.disabled&&b.getClientRects().length>0})()`)))throw Error('button unavailable: '+text);
   await js(`(${find}).click()`);
  };
@@ -154,7 +154,18 @@ app.whenReady().then(async()=>{
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-answer-actions.png',(await win.webContents.capturePage()).toPNG());
  check('only unmentioned files remain below the answer without summary heading',await js("!document.querySelector('.generated-files h3') && document.querySelectorAll('.generated-files .file-card').length===2 && document.querySelectorAll('.prose .file-card').length===2"));
- check('document cards show filenames and types without reading file contents',await js("[...document.querySelectorAll('.file-card')].some(b=>b.textContent.includes('DOCX')&&b.textContent.includes('2026 AI 行业趋势.docx'))")&&!mediaReads.some(p=>p.endsWith('.docx')));
+ check('document cards show filenames and types without reading file contents',await js("[...document.querySelectorAll('.file-card')].some(b=>b.querySelector('.file-format').textContent==='Word'&&b.textContent.includes('2026 AI 行业趋势.docx'))")&&!mediaReads.some(p=>p.endsWith('.docx')));
+ await js("[...document.querySelectorAll('.file-card')].find(b=>b.textContent.includes('2026 AI 行业趋势.docx')).querySelector('.file-open-trigger').click()");
+ check('Word open-with menu offers the system app without starting a preview',await wait("document.querySelector('.file-open-menu:popover-open')?.querySelectorAll('button').length===1")&&openedFiles.length===0&&previewReads.length===0);
+ await js("document.querySelector('.file-open-menu:popover-open button').click()");
+ check('open-with uses the exact document path and dismisses',openedFiles.pop()==='generated/2026 AI 行业趋势.docx'&&await js("!document.querySelector('.file-open-menu:popover-open')"));
+ await js("document.querySelector('.prose .file-open-trigger').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))");
+ check('text open-with menu supports keyboard selection and preview',await wait("document.querySelector('.file-open-menu:popover-open')?.querySelectorAll('button').length===2")&&await js("document.activeElement.textContent==='在 AIClaw 中预览'"));
+ await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+ check('Escape closes file menu and returns focus without opening the file',await js("!document.querySelector('.file-open-menu:popover-open')&&document.activeElement.classList.contains('file-open-trigger')")&&previewReads.length===0);
+ check('file rows keep the name and type together and opening controls on the right',await js("[...document.querySelectorAll('.file-card')].every(card=>{const name=card.querySelector('.file-info').getBoundingClientRect(),open=card.querySelector('.file-open-trigger').getBoundingClientRect();return name.right<=open.left&&card.scrollWidth<=card.clientWidth})"));
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-document-cards.png',(await win.webContents.capturePage()).toPNG());
  await js("[...document.querySelectorAll('.file-card')].find(b=>b.textContent.includes('2026 AI 行业趋势.docx')).click()");
  check('document card opens exact path through preload',openedFiles.pop()==='generated/2026 AI 行业趋势.docx');
  check('inline file cards hide directories while retaining exact paths',await js("document.querySelector('.prose .file-card').getAttribute('data-file-path')==='/tmp/smoke/generated/2026 AI 行业趋势.md' && !document.querySelector('.prose').textContent.includes('/tmp/smoke/')"));
@@ -522,6 +533,16 @@ app.whenReady().then(async()=>{
  check('automatic manual and event-driven context reads wait for session restoration',beforeRestoreContextReads.length===0);
  resumeGate.pending=false;finishResume();
  check('context automatically loads after delayed restoration completes',await wait("document.querySelector('.context-trigger')?.title.includes('13%')")&&contextReads.at(-1)==='s');
+ const documentEvent=(method,item)=>win.webContents.send(IPC.onAgentEvent,{method,params:{sessionId:'s',turnId:'document-rows',item}});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'document-rows'}});
+ documentEvent('item/completed',{id:'document-request',kind:'userMessage',text:'生成语法练习题目册和配套答案册'});
+ documentEvent('item/completed',{id:'document-output',kind:'toolCall',toolName:'write_file',artifacts:['generated/三年级英语语法进阶练习_题目册_第5至8章.docx','generated/三年级英语语法进阶练习_答案册_第5至8章.docx']});
+ documentEvent('item/completed',{id:'document-answer',kind:'agentMessage',text:'已生成练习题目册和配套答案册。'});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'document-rows'}});
+ check('multiple Word documents share one bordered list with individual open controls',await wait("(()=>{const list=[...document.querySelectorAll('.generated-files')].at(-1);return list?.querySelectorAll('.file-card').length===2&&[...list.querySelectorAll('.file-format')].every(e=>e.textContent==='Word')&&list.querySelectorAll('.file-open-trigger').length===2})()"));
+ await js("[...document.querySelectorAll('.generated-files')].at(-1).scrollIntoView({block:'center'})");
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-document-cards.png',(await win.webContents.capturePage()).toPNG());
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);

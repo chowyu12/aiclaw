@@ -1,8 +1,7 @@
 import createDOMPurify from "dompurify";
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
-import { tr } from "../shared/i18n.js";
-import { filename, fileType } from "./file-card.js";
+import { fileCard } from "./file-card.js";
 
 /**
  * 把模型输出渲染成 HTML。Markdown 与内联 HTML 都渲染。
@@ -170,13 +169,6 @@ md.renderer.rules.fence = (tokens, index) => {
  * 可执行的那几类不给直接打开。所以这里认错了最多是点下去提示「找不到」，
  * 而模型伪造一个 `class="file-ref"` 也拿不到任何额外能力。
  */
-function fileCard(path: string): string {
-  const escape = md.utils.escapeHtml;
-  const name = filename(path);
-  const kind = fileType(path);
-  return `<a href="#local-file" class="file-ref file-card" data-file-path="${escape(path)}" role="button" aria-label="${escape(tr("打开文件 {name}", { name }))}"><span class="file-type" data-type="${escape(kind)}" aria-hidden="true">${escape(kind)}</span><span class="file-name">${escape(name)}</span></a>`;
-}
-
 md.renderer.rules.code_inline = (tokens, index, _options, env) => {
   const text = tokens[index]!.content;
   if (!looksLikePath(text)) return `<code>${md.utils.escapeHtml(text)}</code>`;
