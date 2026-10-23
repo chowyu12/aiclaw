@@ -47,7 +47,7 @@ import {
 } from "@aiclaw/agent-client";
 import type { AppConfig, ConfigStore, McpServer } from "./config.js";
 import { ComputerController } from "./computer.js";
-import { AgentBrowser } from "./browser.js";
+import { TurnBrowsers } from "./browser.js";
 import { ExtensionBridge } from "./browser-bridge.js";
 import { browserName } from "./browser-cdp.js";
 import type { BrowserBridgeView } from "../shared/types.js";
@@ -147,7 +147,7 @@ export class SessionManager extends EventEmitter {
   private readonly computer = new ComputerController();
   /** 与用户浏览器里「AIClaw 浏览器助手」扩展的连接。只在选了「用我的浏览器」时监听。 */
   private readonly bridge: ExtensionBridge;
-  private readonly browser: AgentBrowser;
+  private readonly browser: TurnBrowsers;
   private readonly agentBin: string;
   /** 最近一段 stderr，失败时拼进错误信息，省得用户去翻日志。 */
   private lastStderr = "";
@@ -163,7 +163,7 @@ export class SessionManager extends EventEmitter {
     this.bridge = new ExtensionBridge(() => this.store.readConfig().browserPairToken);
     this.bridge.on("status", () => this.emit("browserBridge", this.browserBridge()));
     this.bridge.on("log", (line: string) => this.emit("log", "app", `${line}\n`));
-    this.browser = new AgentBrowser(() => this.store.readConfig().browserBackend, this.bridge);
+    this.browser = new TurnBrowsers(() => this.store.readConfig().browserBackend, this.bridge);
     this.agentBin = resolveBin("CLAW_AGENT_BIN", "claw-agent");
   }
 
@@ -205,7 +205,13 @@ export class SessionManager extends EventEmitter {
       env: { ...process.env, PATH: this.path, AICLAW_LOCALE: this.store.readConfig().language },
     });
 
-    client.on("notification", (n: AgentNotification) => this.emit("event", n.method, n.params));
+    client.on("notification", (n: AgentNotification) => {
+      if (n.method === "turn/started") this.browser.start(n.params.sessionId, n.params.turnId);
+      if (n.method === "turn/completed") {
+        void this.browser.finish(n.params.sessionId, n.params.turnId).catch(error => this.emit("log", "app", `Browser cleanup: ${String(error)}\n`));
+      }
+      this.emit("event", n.method, n.params);
+    });
     client.on("approval", (request) => this.emit("approval", request));
     client.on("userInput", (question) => this.emit("userInput", question));
     client.on("appConfig", (action) => this.emit("appConfig", action));
@@ -238,6 +244,7 @@ export class SessionManager extends EventEmitter {
     });
     client.on("exit", (code) => {
       this.client = null;
+      void this.browser.close().catch(error => this.emit("log", "app", `Browser cleanup: ${String(error)}\n`));
       this.emit("status", code === 0 ? "stopped" : "failed", this.lastStderr);
     });
 
@@ -355,7 +362,11 @@ export class SessionManager extends EventEmitter {
   async stop(): Promise<void> {
     const client = this.client;
     this.client = null;
-    await client?.stop();
+    try {
+      await client?.stop();
+    } finally {
+      await this.browser.close();
+    }
   }
 
   /**

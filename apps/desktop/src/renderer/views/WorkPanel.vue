@@ -8,8 +8,8 @@ import { describeError } from "../errors";
 const sessionApi = window.aiclaw.session;
 const work = ref<SessionWork | null>(null);
 const changes = ref<FileChange[]>([]);
-const saving = ref(false), error = ref(""), creating = ref(false);
-const objective = ref(""), acceptance = ref(""), plan = ref(""), evidence = ref("");
+const saving = ref(false), error = ref("");
+const evidence = ref("");
 const tokenBudget = ref(0), minutes = ref(0);
 const statusLabels = computed(() => ({active:t("进行中"),paused:t("已暂停"),blocked:t("等待处理"),complete:t("已完成"),budget_exhausted:t("预算已用尽")}));
 const recoveryPending = computed(() => work.value?.pending.filter(item => item.state !== 'queued' || item.payload.mode !== 'queue') ?? []);
@@ -24,7 +24,7 @@ async function refresh() {
   } catch(e) { if(ticket===generation) error.value=describeError(e); }
 }
 watch(() => [store.sessionId,store.sessionInfo?.sessionId,store.busy],()=>{void refresh();},{immediate:true});
-watch(() => store.sessionId,()=>{error.value="";creating.value=false;});
+watch(() => store.sessionId,()=>{error.value="";});
 const unsubscribe=window.aiclaw.on.agentEvent((raw:unknown)=>{
  const event=raw as {method?:string;params?:{sessionId?:string;goal?:Goal;item?:{toolName?:string}}};
  if(event.params?.sessionId===store.sessionId && event.method==="session/workUpdated" && event.params.goal && work.value){work.value.goal=event.params.goal;return;}
@@ -36,11 +36,6 @@ async function perform(fn:(id:string)=>Promise<unknown>) {
  const id=store.sessionId;saving.value=true;error.value="";
  try {await fn(id);await refresh();}catch(e){error.value=describeError(e);}finally{saving.value=false;}
 }
-async function create(){await perform(async id=>{
- await sessionApi.setGoal(id,{objective:objective.value,acceptance:acceptance.value,steps:plan.value.split("\n").map(text=>text.trim()).filter(Boolean).map(text=>({text,status:"pending"})),tokenBudget:tokenBudget.value,timeBudgetMs:minutes.value*60000});
- creating.value=false;
- if(store.sessionId!==id || !(await actions.send(t("请开始执行已设定的目标，按验收条件验证结果并更新计划。")))) await sessionApi.updateGoal(id,{status:"paused"});
-});}
 function update(update:GoalUpdate){return perform(id=>sessionApi.updateGoal(id,update));}
 async function resume(){await perform(async id=>{
  await sessionApi.updateGoal(id,{status:"active"});
@@ -50,26 +45,12 @@ function stepStatus(index:number,event:Event){
  const steps=work.value?.goal?.steps.map(s=>({...s}));if(!steps)return;
  steps[index]!.status=(event.target as HTMLSelectElement).value as PlanStep["status"];void update({steps});
 }
-async function fork(){await perform(async id=>{const next=await sessionApi.fork(id);await actions.refreshSessions();await actions.openSession(next.sessionId);});}
 function editBudget(){tokenBudget.value=work.value?.goal?.tokenBudget??0;minutes.value=(work.value?.goal?.timeBudgetMs??0)/60000;}
 </script>
 <template>
-<section v-if="store.sessionId" class="work-panel">
- <div class="work-toolbar">
-  <button @click="creating=!creating" :disabled="saving||store.busy||!work||!!work?.goal&&work.goal.status!=='complete'">{{t("设置目标")}}</button>
-  <button @click="fork" :disabled="saving||store.busy">{{t("分叉会话")}}</button>
-  <button @click="refresh" :disabled="saving">{{t("刷新状态")}}</button>
-  <button v-if="work?.forkSourceId" @click="actions.openSession(work.forkSourceId)">{{t("查看来源会话")}}</button>
- </div>
+<section v-if="store.sessionId && (work?.goal || recoveryPending.length || changes.length || work?.forkSourceId || error)" class="work-panel">
+ <button v-if="work?.forkSourceId" @click="actions.openSession(work.forkSourceId)">{{t("查看来源会话")}}</button>
  <p v-if="error" role="alert">{{error}}</p>
- <form v-if="creating" @submit.prevent="create" class="goal-form">
-  <label>{{t("目标")}}<textarea v-model="objective" required /></label>
-  <label>{{t("验收条件")}}<textarea v-model="acceptance" required /></label>
-  <label>{{t("计划步骤（每行一步）")}}<textarea v-model="plan" /></label>
-  <label>{{t("Token 预算（0 为不限）")}}<input type="number" min="0" step="1" v-model.number="tokenBudget" /></label>
-  <label>{{t("执行时间预算（分钟，0 为不限）")}}<input type="number" min="0" step="1" v-model.number="minutes" /></label>
-  <button type="submit" :disabled="saving">{{t("创建并开始")}}</button>
- </form>
  <details v-if="work?.goal" open>
   <summary>{{t("目标")}} · {{statusLabels[work.goal.status]}} · {{work.goal.objective}}</summary>
   <p>{{work.goal.acceptance}}</p>
@@ -114,9 +95,8 @@ function editBudget(){tokenBudget.value=work.value?.goal?.tokenBudget??0;minutes
 
   </article>
  </details>
- <small>{{t("分叉仅复制对话历史，继续共用原工作目录。")}}</small>
 </section>
 </template>
 <style scoped>
-.work-panel{margin:0 auto 18px;max-width:860px;padding:12px;border:1px solid var(--rule);border-radius:10px;font-size:12px}.work-toolbar{display:flex;gap:8px;flex-wrap:wrap}.work-panel details{margin-top:10px}.work-panel summary{cursor:pointer}.work-panel label{display:flex;flex-direction:column;gap:4px;margin:8px 0}.work-panel textarea{min-height:55px;width:100%;box-sizing:border-box}.work-panel input{max-width:200px}.work-panel button{cursor:pointer;padding:5px 10px;border:1px solid var(--rule-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--ink-2);font:inherit}.work-panel button:hover:not(:disabled){background:var(--hover)}.work-panel button:disabled{opacity:.45;cursor:default}.work-panel select{display:inline-block;width:125px;padding:5px;margin-right:8px}.work-panel li{line-height:1.8}.work-panel article{padding:8px 0;border-bottom:1px solid var(--rule)}.work-panel p{white-space:pre-wrap;overflow-wrap:anywhere}.work-panel ol{padding-left:24px}.work-panel li{margin:6px 0}.work-panel small{display:block;margin-top:8px;opacity:.7}
+.work-panel{margin:0 auto 18px;max-width:860px;padding:12px;border:1px solid var(--rule);border-radius:10px;font-size:12px}.work-panel details{margin-top:10px}.work-panel summary{cursor:pointer}.work-panel label{display:flex;flex-direction:column;gap:4px;margin:8px 0}.work-panel textarea{min-height:55px;width:100%;box-sizing:border-box}.work-panel input{max-width:200px}.work-panel button{cursor:pointer;padding:5px 10px;border:1px solid var(--rule-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--ink-2);font:inherit}.work-panel button:hover:not(:disabled){background:var(--hover)}.work-panel button:disabled{opacity:.45;cursor:default}.work-panel select{display:inline-block;width:125px;padding:5px;margin-right:8px}.work-panel li{line-height:1.8}.work-panel article{padding:8px 0;border-bottom:1px solid var(--rule)}.work-panel p{white-space:pre-wrap;overflow-wrap:anywhere}.work-panel ol{padding-left:24px}.work-panel li{margin:6px 0}.work-panel small{display:block;margin-top:8px;opacity:.7}
 </style>

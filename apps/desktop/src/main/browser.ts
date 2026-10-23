@@ -1,4 +1,5 @@
 import { BrowserWindow } from "electron";
+import { randomUUID } from "node:crypto";
 
 import { tr } from "../shared/i18n.js";
 import { notConnected, type ExtensionBridge } from "./browser-bridge.js";
@@ -97,6 +98,49 @@ interface PageDriver {
   screenshot(): Promise<{ base64: string; width: number; height: number }>;
 }
 
+/** Each running turn owns its pages; completion waits for in-flight operations before cleanup. */
+export class TurnBrowsers {
+  private readonly turns = new Map<string, { browser: AgentBrowser; pending: Set<Promise<BrowserResult>> }>();
+
+  constructor(private readonly backend: () => BrowserBackend, private readonly bridge: ExtensionBridge) {}
+
+  private key(sessionId: string, turnId: string): string {
+    return JSON.stringify([sessionId, turnId]);
+  }
+
+  start(sessionId: string, turnId: string): void {
+    this.turns.set(this.key(sessionId, turnId), { browser: new AgentBrowser(this.backend, this.bridge), pending: new Set() });
+  }
+
+  async perform(request: BrowserRequest & { sessionId: string; turnId: string }): Promise<BrowserResult> {
+    const turn = this.turns.get(this.key(request.sessionId, request.turnId));
+    if (!turn) throw new Error("Browser operation belongs to an inactive turn");
+    const pending = turn.browser.perform(request);
+    turn.pending.add(pending);
+    try {
+      return await pending;
+    } finally {
+      turn.pending.delete(pending);
+    }
+  }
+
+  async finish(sessionId: string, turnId: string): Promise<void> {
+    const key = this.key(sessionId, turnId);
+    const turn = this.turns.get(key);
+    if (!turn) return;
+    this.turns.delete(key);
+    await Promise.allSettled(turn.pending);
+    await turn.browser.close();
+  }
+
+  async close(): Promise<void> {
+    const keys = [...this.turns.keys()].map(key => JSON.parse(key) as [string, string]);
+    const results = await Promise.allSettled(keys.map(([sessionId, turnId]) => this.finish(sessionId, turnId)));
+    const failed = results.find(result => result.status === "rejected");
+    if (failed?.status === "rejected") throw failed.reason;
+  }
+}
+
 export class AgentBrowser {
   private readonly window = new WindowDriver();
   private readonly tab: ExtensionDriver;
@@ -147,10 +191,10 @@ export class AgentBrowser {
     }
   }
 
-  /** 关掉窗口、断开调试。应用退出或运行时停止时调。 */
-  close(): void {
+  /** Close owned pages and release user tabs when the turn ends. */
+  async close(): Promise<void> {
     this.window.close();
-    this.tab.release();
+    await this.tab.release();
   }
 
   /** 必须已经有页面才允许的操作。 */
@@ -454,6 +498,9 @@ class WindowDriver implements PageDriver {
  */
 class ExtensionDriver implements PageDriver {
   private tabId: number | null = null;
+  private readonly usedTabs = new Set<number>();
+  private readonly owner = randomUUID();
+  private created = false;
   private readonly bridge: ExtensionBridge | undefined;
 
   constructor(bridge?: ExtensionBridge) {
@@ -469,10 +516,17 @@ class ExtensionDriver implements PageDriver {
     return this.tabId;
   }
 
-  /** 断开调试（让浏览器顶部的「正在调试」提示条消失），但不关标签页。 */
-  release(): void {
-    const tabId = this.tabId;
-    if (tabId !== null && this.bridge?.connected) void this.bridge.request("detach", { tabId }).catch(() => undefined);
+  /** Only close pages created by this driver; selected user tabs are detached, never closed. */
+  async release(): Promise<void> {
+    this.tabId = null;
+    const bridge = this.bridge;
+    if (!bridge) return;
+    try {
+      await Promise.all([...this.usedTabs].map(tabId => bridge.request("detach", { tabId })));
+    } finally {
+      this.usedTabs.clear();
+      if (this.created) await bridge.request("tabs.cleanup", { owner: this.owner });
+    }
   }
 
   async list(): Promise<TabInfo[]> {
@@ -485,6 +539,7 @@ class ExtensionDriver implements PageDriver {
       throw new Error(tr("没有编号为 {tabId} 的网页标签页，先 browser_tabs 看一眼。", { tabId }));
     }
     this.tabId = tabId;
+    this.usedTabs.add(tabId);
   }
 
   async hasPage(): Promise<boolean> {
@@ -517,8 +572,10 @@ class ExtensionDriver implements PageDriver {
         this.tabId = null;
       }
     }
-    const tab = await bridge.request<TabInfo>("tabs.create", { url });
+    this.created = true;
+    const tab = await bridge.request<TabInfo>("tabs.create", { url, owner: this.owner });
     this.tabId = tab.tabId;
+    this.usedTabs.add(tab.tabId);
   }
 
   private async cdp<T>(method: string, params: Record<string, unknown> = {}, timeoutMs?: number): Promise<T> {

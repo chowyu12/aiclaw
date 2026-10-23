@@ -192,7 +192,7 @@ app.whenReady().then(async () => {
   try {
     const modulePath = path.join(DESKTOP, "dist", "main", "browser.js");
     const { pathToFileURL } = require("url");
-    const { AgentBrowser } = await import(pathToFileURL(modulePath).href);
+    const { AgentBrowser, TurnBrowsers } = await import(pathToFileURL(modulePath).href);
     const browser = new AgentBrowser();
     const page =
       "data:text/html;charset=utf-8," +
@@ -234,7 +234,60 @@ app.whenReady().then(async () => {
       refused = String(error && error.message ? error.message : error);
     }
     check("浏览器：拒绝 file: 网址", /只能打开 http/.test(refused), refused.slice(0, 60) || "没拒绝");
-    browser.close();
+    await browser.close();
+
+    // Exercise real turn/driver lifecycle with an isolated bridge, never the user's browser.
+    const calls = [];
+    let nextTab = 100;
+    let unblock;
+    const gate = new Promise(resolve => { unblock = resolve; });
+    const bridge = { async request(op, args) {
+      calls.push({ op, ...args });
+      if (op === "tabs.create") {
+        if (args.url.endsWith("/slow")) await gate;
+        if (args.url.endsWith("/fail")) throw new Error("fixture navigation failure");
+        return { tabId: nextTab++ };
+      }
+      if (op === "tabs.list") return [7, 8].map(tabId => ({ tabId, title: "User page", url: "https://example.test", active: true }));
+      if (op === "cdp") return { result: { value: { title: "Fixture", url: "https://example.test", elements: [], text: "", total: 0 } } };
+      return {};
+    } };
+    const turns = new TurnBrowsers(() => "extension", bridge);
+    const request = (turnId, action, extra = {}) => turns.perform({ sessionId: "test", turnId, action, ...extra });
+    turns.start("test", "a");
+    turns.start("test", "b");
+    await Promise.all([request("a", "navigate", { url: "https://example.test/a" }), request("b", "navigate", { url: "https://example.test/b" })]);
+    const owners = calls.filter(c => c.op === "tabs.create").map(c => c.owner);
+    await request("a", "use_tab", { tabId: 7 });
+    await request("a", "use_tab", { tabId: 8 });
+    await turns.finish("test", "a");
+    check("浏览器：结束一轮只清理本轮创建的标签，用户页只断开调试", owners[0] !== owners[1] && [7, 8].every(id => calls.some(c => c.op === "detach" && c.tabId === id)) && calls.filter(c => c.op === "tabs.cleanup").length === 1 && calls.find(c => c.op === "tabs.cleanup").owner === owners[0]);
+    check("浏览器：另一轮仍能操作自己的页面", /Fixture/.test((await request("b", "snapshot")).text));
+    let inactive = false;
+    try { await request("a", "navigate", { url: "https://example.test/late" }); } catch { inactive = true; }
+    check("浏览器：已结束的轮次不能再打开页面", inactive);
+    turns.start("test", "slow");
+    const pending = request("slow", "navigate", { url: "https://example.test/slow" });
+    const finishing = turns.finish("test", "slow");
+    check("浏览器：中断时等待尚未返回的新建页面再清理", calls.filter(c => c.op === "tabs.cleanup").length === 1);
+    unblock();
+    await pending;
+    await finishing;
+    check("浏览器：未完成的打开操作返回后仍会清理", calls.filter(c => c.op === "tabs.cleanup").length === 2);
+    turns.start("test", "failed");
+    try { await request("failed", "navigate", { url: "https://example.test/fail" }); } catch {}
+    await turns.finish("test", "failed");
+    check("浏览器：新建页面报错后仍按归属清理", calls.filter(c => c.op === "tabs.cleanup").length === 3);
+    await turns.close();
+    check("浏览器：内核停止时清理其余轮次", calls.filter(c => c.op === "tabs.cleanup").length === 4);
+
+    const windowsBefore = new Set(BrowserWindow.getAllWindows());
+    const builtin = new TurnBrowsers(() => "builtin", bridge);
+    builtin.start("test", "builtin");
+    await builtin.perform({ sessionId: "test", turnId: "builtin", action: "navigate", url: page });
+    const ownedWindow = BrowserWindow.getAllWindows().find(w => !windowsBefore.has(w));
+    await builtin.finish("test", "builtin");
+    check("浏览器：自带窗口在轮次结束关闭，其他窗口保留", ownedWindow?.isDestroyed() && [...windowsBefore].every(w => !w.isDestroyed()));
   } catch (error) {
     check("浏览器工具", false, String(error && error.stack ? error.stack : error).slice(0, 300));
   }

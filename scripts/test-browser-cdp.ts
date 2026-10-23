@@ -1,5 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { readFileSync } from "node:fs";
+import { runInNewContext } from "node:vm";
 
 import { browserName, cdpKey, pngSize } from "../apps/desktop/src/main/browser-cdp.ts";
 import { UNTRUSTED_CLOSE, UNTRUSTED_OPEN, formatTabs } from "../apps/desktop/src/main/browser-snapshot.ts";
@@ -45,4 +47,72 @@ test("标签页列表：标题是网页写的，包进不可信边界；标出�
 test("从 UA 认浏览器", () => {
   assert.equal(browserName("Mozilla/5.0 ... Chrome/140.0 Safari/537.36 Edg/140.0"), "Microsoft Edge");
   assert.equal(browserName("Mozilla/5.0 ... Chrome/140.0 Safari/537.36"), "Chrome");
+});
+
+test("扩展只清理创建时记录的本轮标签，跨 worker 重启也不按分组误关用户页", async () => {
+  const stored: Record<string, unknown> = {};
+  const tabs = new Map<number, Record<string, unknown>>([[7, { id: 7, windowId: 1, groupId: 42, url: "https://user.example" }]]);
+  const removed: number[] = [];
+  const noop = () => {};
+  const event = { addListener: noop, removeListener: noop };
+  let nextId = 100;
+  const chrome = {
+    storage: {
+      session: {
+        get: async () => ({ ...stored }),
+        set: async (value: Record<string, unknown>) => { Object.assign(stored, value); },
+        remove: async (key: string) => { delete stored[key]; },
+      },
+      local: { get: async () => ({ pairDeclinedAt: Date.now() }) },
+      onChanged: event,
+    },
+    action: { setBadgeText: noop, setBadgeBackgroundColor: noop },
+    alarms: { create: noop, onAlarm: event },
+    runtime: { onStartup: event, onInstalled: event, onMessage: event },
+    windows: { getAll: async () => [{ id: 1, focused: true }] },
+    tabs: {
+      create: async (args: Record<string, unknown>) => {
+        const tab = { ...args, id: nextId++, windowId: 1, groupId: 42 };
+        tabs.set(tab.id, tab);
+        return tab;
+      },
+      get: async (id: number) => { if (!tabs.has(id)) throw new Error("No tab"); return tabs.get(id); },
+      query: async ({ windowId }: { windowId: number }) => [...tabs.values()].filter(tab => tab.windowId === windowId),
+      remove: async (id: number) => { removed.push(id); tabs.delete(id); },
+      group: async () => 42,
+      onUpdated: event,
+      onRemoved: event,
+    },
+    tabGroups: { update: async () => {} },
+    debugger: { onDetach: event },
+  };
+  function worker() {
+    const context = { chrome, setInterval: () => 0, setTimeout: (fn: () => void) => setTimeout(fn, 0), clearTimeout };
+    runInNewContext(readFileSync(new URL("../apps/browser-extension/background.js", import.meta.url), "utf8"), context);
+    return (op: string, args: Record<string, unknown>) => runInNewContext(`handle(${JSON.stringify(op)}, ${JSON.stringify(args)})`, context) as Promise<{ tabId: number }>;
+  }
+  const first = worker();
+  const a = await first("tabs.create", { url: "https://example.test/a", owner: "turn-a" });
+  const b = await first("tabs.create", { url: "https://example.test/b", owner: "turn-b" });
+  const restarted = worker();
+  await restarted("tabs.cleanup", { owner: "turn-a" });
+  assert.deepEqual(removed, [a.tabId]);
+  assert.ok(tabs.has(7), "user tab in the same group survives");
+  assert.ok(tabs.has(b.tabId), "concurrent turn survives");
+  assert.equal(stored[`agentTab:${a.tabId}`], undefined);
+  assert.equal(stored[`agentTab:${b.tabId}`], "turn-b");
+  await restarted("tabs.cleanup", { owner: "turn-a" });
+  assert.deepEqual(removed, [a.tabId], "cleanup is idempotent");
+  tabs.delete(b.tabId);
+  await restarted("tabs.cleanup", { owner: "turn-b" });
+  assert.equal(stored[`agentTab:${b.tabId}`], undefined, "manually closed tabs are harmless");
+  const last = await restarted("tabs.create", { url: "https://example.test/last", owner: "turn-last" });
+  const concurrent = await restarted("tabs.create", { url: "https://example.test/concurrent", owner: "turn-concurrent" });
+  tabs.delete(7);
+  await Promise.all([restarted("tabs.cleanup", { owner: "turn-last" }), restarted("tabs.cleanup", { owner: "turn-concurrent" })]);
+  assert.ok(!tabs.has(last.tabId));
+  assert.ok(!tabs.has(concurrent.tabId));
+  assert.equal([...tabs.values()].filter(tab => tab.windowId === 1).length, 1, "keep a blank tab so the browser window stays open");
+  assert.equal([...tabs.values()][0].url, "about:blank");
+  await assert.rejects(restarted("tabs.cleanup", {}), /Missing browser tab owner/);
 });

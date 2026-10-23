@@ -42,6 +42,8 @@ const attached = new Map();
 /** 用户手动取消调试的时间：tabId -> 时间戳。 */
 const canceled = new Map();
 let groupId = null;
+// Serialize cleanup so concurrent turns cannot both remove the window's last two tabs.
+let cleanupQueue = Promise.resolve();
 /** 用户在配对页上点了「拒绝」之后，多久之内不再自己弹配对页（弹窗里点「重新配对」可以提前）。 */
 const PAIR_DECLINE_COOLDOWN_MS = 10 * 60_000;
 
@@ -329,7 +331,12 @@ async function handle(op, args) {
     case "tabs.list":
       return listTabs();
     case "tabs.create":
-      return createTab(args.url);
+      return createTab(args.url, args.owner);
+    case "tabs.cleanup": {
+      const cleanup = cleanupQueue.then(() => cleanupTabs(args.owner));
+      cleanupQueue = cleanup.catch(() => {});
+      return cleanup;
+    }
     case "tabs.navigate":
       return navigateTab(args.tabId, args.url);
     case "tabs.back":
@@ -375,12 +382,14 @@ function assertWebURL(url) {
 }
 
 /** 在你最近用的那个窗口里开一个**不切过去**的标签页，归进「AIClaw」标签组。 */
-async function createTab(url) {
+async function createTab(url, owner) {
   const target = assertWebURL(url);
   const windows = await chrome.windows.getAll({ windowTypes: ["normal"] });
   const focused = windows.find((w) => w.focused) ?? windows[0];
   const loaded = waitLoaded(null);
   const tab = await chrome.tabs.create({ url: target, active: false, windowId: focused?.id });
+  // session storage survives MV3 worker suspension, but is discarded on browser restart.
+  if (typeof owner === "string" && owner) await chrome.storage.session.set({ [`agentTab:${tab.id}`]: owner });
   loaded.bind(tab.id);
   try {
     if (groupId !== null) {
@@ -399,6 +408,29 @@ async function createTab(url) {
   }
   await loaded.done;
   return getTab(tab.id);
+}
+
+/** Group membership is visual only; never use it as evidence that a tab is ours. */
+async function cleanupTabs(owner) {
+  if (typeof owner !== "string" || !owner) throw new Error("Missing browser tab owner");
+  const stored = await chrome.storage.session.get(null);
+  for (const [key, value] of Object.entries(stored)) {
+    if (!key.startsWith("agentTab:") || value !== owner) continue;
+    const tabId = Number(key.slice("agentTab:".length));
+    let tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch {
+      await chrome.storage.session.remove(key);
+      continue;
+    }
+    // Chromium closes the window with its last tab. Preserve the browser window itself.
+    const siblings = await chrome.tabs.query({ windowId: tab.windowId });
+    if (siblings.length === 1) await chrome.tabs.create({ url: "about:blank", active: false, windowId: tab.windowId });
+    await chrome.tabs.remove(tabId);
+    await chrome.storage.session.remove(key);
+  }
+  return {};
 }
 
 async function navigateTab(tabId, url) {
@@ -483,6 +515,7 @@ chrome.debugger.onDetach.addListener((source, reason) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   attached.delete(tabId);
   canceled.delete(tabId);
+  void chrome.storage.session.remove(`agentTab:${tabId}`);
 });
 
 // 空闲一段时间就断开调试，让「正在调试」提示条消失；下次用到时再接上。
