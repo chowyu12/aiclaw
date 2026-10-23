@@ -16,7 +16,7 @@ test("默认没选模型服务", () => {
   assert.equal(DEFAULT_CONFIG.model, "");
 });
 
-test("桌面只保留 AI 判断、严格和全部放行；旧无人值守不自动提权", () => {
+test("桌面只保留默认、严格和全部放行；旧无人值守迁回默认", () => {
   assert.equal(DEFAULT_CONFIG.profile, "auto");
   for (const profile of ["on-write", "never", "unknown", undefined, null]) {
     assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, profile } as never).profile, "auto");

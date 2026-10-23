@@ -204,8 +204,7 @@ func (e *Env) ResolveRead(raw string) (string, error) {
 
 // ResolveWrite 解析一个用来写的路径，并报告它在不在工作区内。
 //
-// 不在工作区内**不代表不能写**，代表要先问一句——判断留给调用方，
-// 因为「问」这件事要走审批通道，而它在 Env 上。
+// 不在工作区内**不代表不能写**，是否审批由调用方按当前策略判断。
 func (e *Env) ResolveWrite(raw string) (path string, inside bool, err error) {
 	path, err = e.resolve(raw)
 	if err != nil {
@@ -225,7 +224,7 @@ func (e *Env) ResolveWrite(raw string) (path string, inside bool, err error) {
 	}
 	workspace := strings.TrimSpace(e.Workspace)
 	if workspace == "" {
-		// 没设工作区就没有「里面」，一律按外面处理——写之前问一句。
+		// 没设工作区就没有「里面」，一律按外面分类，审批由策略决定。
 		return path, false, nil
 	}
 	return path, within(realpath(filepath.Clean(workspace)), path), nil

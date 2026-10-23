@@ -403,7 +403,7 @@ func writeDocxTool() Tool {
 		Description: "Create a Word document (.docx) from Markdown-style text; an existing file with the same name is overwritten. Supports: # to ###### headings, " +
 			"plain paragraphs (one per line), bullets starting with - or *, numbered lists starting with 1. (indent two spaces for the next level), **bold**, *italic*, `code`, " +
 			"``` code blocks, > quotes, tables in | a | b | form (the first row is the header when the second row is a |---| separator), and a line containing only --- for a page break. " +
-			"Writing outside the workspace asks the user for confirmation first.",
+			"File-write approval follows the session's approval mode.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
 			"path":    map[string]any{"type": "string", "description": "Output path with a .docx extension. Relative paths resolve against the workspace"},
@@ -920,7 +920,7 @@ func editDocxTool() Tool {
 		Name: "edit_docx",
 		Description: "Replace an exact piece of text in an existing Word document (.docx) with new text, leaving all other content and formatting untouched. " +
 			"old_text must appear exactly once in the body and cannot span paragraphs; text that Word split into several formatting runs still matches, and the replacement takes the formatting at the start of the match. " +
-			"Line breaks in new_text become line breaks within the paragraph. Read the original with read_office first. Writing outside the workspace asks the user for confirmation first.",
+			"Line breaks in new_text become line breaks within the paragraph. Read the original with read_office first. File-write approval follows the session's approval mode.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
 			"path":     map[string]any{"type": "string", "description": "Path to the .docx file. Relative paths resolve against the workspace"},

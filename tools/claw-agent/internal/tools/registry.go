@@ -124,6 +124,8 @@ func (e *Env) needsApproval(effect Effect) bool {
 		return false
 	case protocol.ApprovalAlways:
 		return effect != EffectRead
+	case protocol.ApprovalAuto:
+		return effect == EffectExec || effect == EffectExternal
 	default: // on-write / never
 		return effect == EffectExec || effect == EffectExternal || effect == EffectWriteOutside
 	}
@@ -175,7 +177,10 @@ func (e *Env) authorize(ctx context.Context, effect Effect, kind protocol.Approv
 		Reason:    reason,
 		ScopePath: scopePath,
 	}
-	if e.Policy == protocol.ApprovalAuto && e.Review != nil {
+	// Known risky commands already require a human: do not pay for an AI review
+	// that can only ask again. Absence of a rule match still requires review.
+	manualCommand := kind == protocol.ApprovalExec && riskyReason(detail) != ""
+	if e.Policy == protocol.ApprovalAuto && e.Review != nil && !manualCommand {
 		allowed, err := e.Review(ctx, request)
 		if ctx.Err() != nil {
 			return false, ctx.Err()
@@ -183,6 +188,9 @@ func (e *Env) authorize(ctx context.Context, effect Effect, kind protocol.Approv
 		if err == nil && allowed {
 			return false, nil
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
 	}
 	if e.Approve == nil {
 		return false, i18n.E("{title} 需要确认，但当前没有可用的审批通道", "title", title)

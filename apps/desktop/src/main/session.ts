@@ -72,8 +72,8 @@ export function profileSpecs(): ProfileSpec[] {
   return [
     {
       id: "auto",
-      label: tr("AI 判断"),
-      description: tr("默认档位。AI 独立检查命令、外部工具和工作区外写入，低风险且符合用户意图时自动执行；其余或检查失败时请你确认。每次检查会调用当前会话模型。"),
+      label: tr("默认"),
+      description: tr("AI 独立检查命令和外部工具，低风险且符合用户意图时自动执行；其余或检查失败时请你确认。文件工具读写工作区内外文件不审批，凭据路径保护仍生效。每次检查会调用当前会话模型。"),
       availableForScheduled: false,
     },
     {

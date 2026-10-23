@@ -353,7 +353,7 @@ func writePptxTool() Tool {
 		Name: "write_pptx",
 		Description: "Create a PowerPoint presentation (.pptx, 16:9); an existing file with the same name is overwritten. Give each slide a title, a bullet list and optional speaker notes; " +
 			"layout=title is a cover slide (large title + subtitle, with bullets as subtitle lines); the default is \"title + bullets\". " +
-			"Indent a bullet with two spaces for the next level. Writing outside the workspace asks the user for confirmation first.",
+			"Indent a bullet with two spaces for the next level. File-write approval follows the session's approval mode.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
 			"path":  map[string]any{"type": "string", "description": "Output path with a .pptx extension. Relative paths resolve against the workspace"},

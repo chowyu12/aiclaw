@@ -30,7 +30,7 @@ func scopeOf(inside bool, path string) string {
 	return filepath.Dir(path)
 }
 
-// writeEffect 选一档副作用：工作区里面的写不问，外面的问一句。
+// writeEffect distinguishes inside/outside writes; the approval policy decides whether to ask.
 func writeEffect(inside bool) Effect {
 	if inside {
 		return EffectWrite
@@ -132,7 +132,7 @@ func readTool() Tool {
 func writeTool() Tool {
 	return Tool{
 		Name:        "write_file",
-		Description: "Write content to a file, overwriting what is there. Parent directories are created automatically. Writing outside the workspace asks the user for confirmation first.",
+		Description: "Write content to a file, overwriting what is there. Parent directories are created automatically. File-write approval follows the session's approval mode.",
 		Effect:      EffectWrite,
 		Schema: schema(map[string]any{
 			"path":    map[string]any{"type": "string", "description": "File path. Relative paths resolve against the workspace"},

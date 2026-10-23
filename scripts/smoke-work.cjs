@@ -12,7 +12,7 @@ app.whenReady().then(async()=>{
  const config={providerId:1,model:'test',reasoningEffort:'medium',contextWindow:0,workdir:'/tmp/smoke',profile:'auto',language:'zh-CN'};
  const {profileSpecs}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/session.js')).href);
  const profiles=profileSpecs();
- check('desktop offers exactly AI review strict and allow-all policies',profiles.map(p=>p.id).join('|')==='auto|always|bypass'&&profiles[0].label.includes('AI'));
+ check('desktop offers exactly default strict and allow-all policies',profiles.map(p=>p.id).join('|')==='auto|always|bypass'&&profiles[0].label==='默认');
  let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',sessionWorkspace='/tmp/smoke',renameFails=false;const renameCalls=[];
  let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[];
  let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
@@ -90,7 +90,7 @@ app.whenReady().then(async()=>{
  await js("(()=>{const input=document.querySelector('.search input');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
  await wait("document.querySelectorAll('.bucket').length===3 && !!document.querySelector('.composer .chip')");
  await js("document.querySelector('.composer .chip[data-policy]').click()");
- check('approval menu renders three policies with AI review selected by default',await wait("document.querySelectorAll('.menu .menu-item').length===3")&&await js("document.querySelector('.menu .picked .menu-name').textContent.includes('AI')&&!document.querySelector('.menu').textContent.includes('无人值守')"));
+ check('approval menu renders three policies with Default selected',await wait("document.querySelectorAll('.menu .menu-item').length===3")&&await js("document.querySelector('.menu .picked .menu-name').textContent.trim()==='默认'&&!document.querySelector('.menu').textContent.includes('无人值守')&&!document.querySelector('.menu').textContent.includes('AI 判断')"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-approval-profiles.png',(await win.webContents.capturePage()).toPNG());
  await js("document.querySelector('.composer .chip[data-policy]').click()");
@@ -520,6 +520,12 @@ app.whenReady().then(async()=>{
  stepEvent('item/completed',{...operation,toolResult:'2026-10-20',startedAt:Date.now(),durationMs:1440});
  stepEvent('item/completed',{id:'operation-search',kind:'toolCall',toolName:'exec',summary:'联网检索2026年前三季度GDP数据',seq:3,toolArgs:'{}',toolResult:'查询完成'});
  check('completed step keeps expandable script and result with timing',await wait("[...document.querySelectorAll('.steps-body .name')].some(e=>e.textContent==='exec · 联网检索2026年前三季度GDP数据')")&&await js("(()=>{const row=[...document.querySelectorAll('.step')].find(e=>e.querySelector('.name')?.textContent==='exec · 确认当前时间');row.open=true;return row.querySelector('.step-detail').textContent.includes('const setup')&&row.querySelector('.step-detail').textContent.includes('2026-10-20')&&row.querySelector('.pill').textContent.trim()==='1.44 s'})()"));
+ stepEvent('item/started',{id:'fast-review',kind:'notice',text:'AI 检查中',startedAt:Date.now()});
+ check('AI review appears while running',await wait("[...document.querySelectorAll('.step[data-state=running] .name')].some(e=>e.textContent==='AI 检查中')"));
+ stepEvent('item/completed',{id:'fast-review',kind:'notice',text:'AI 检查：需要人工确认',startedAt:Date.now(),durationMs:1250});
+ stepEvent('item/started',{id:'human-wait',kind:'notice',text:'等待人工确认',startedAt:Date.now()});
+ stepEvent('item/completed',{id:'human-wait',kind:'notice',text:'人工确认等待结束',startedAt:Date.now(),durationMs:12340});
+ check('review and human confirmation show distinct durations without duplicate notices',await wait("(()=>{const rows=[...document.querySelectorAll('.step')];const review=rows.filter(r=>r.querySelector('.name')?.textContent==='AI 检查：需要人工确认');const wait=rows.filter(r=>r.querySelector('.name')?.textContent==='人工确认等待结束');return review.length===1&&wait.length===1&&review[0].querySelector('.pill').textContent.trim()==='1.25 s'&&wait[0].querySelector('.pill').textContent.trim()==='12.34 s'&&!rows.some(r=>r.querySelector('.name')?.textContent==='AI 检查中')})()"));
  await js("[...document.querySelectorAll('.step')].forEach(e=>e.open=false);document.querySelector('.steps-body:last-child')?.scrollIntoView({block:'center'})");
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-operation-titles.png',(await win.webContents.capturePage()).toPNG());

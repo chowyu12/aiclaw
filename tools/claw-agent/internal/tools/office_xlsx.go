@@ -329,7 +329,7 @@ func writeXlsxTool() Tool {
 		Name: "write_xlsx",
 		Description: "Write an Excel file (.xlsx). Creates the file if it doesn't exist; if it does, only the sheets listed in sheets are changed and all other sheets are kept as they are. " +
 			"By default a sheet with the same name is cleared before writing (mode=replace); mode=update only overwrites the cells written. " +
-			"Write formulas as strings starting with =; Excel recalculates them when the file is opened. Writing outside the workspace asks the user for confirmation first.",
+			"Write formulas as strings starting with =; Excel recalculates them when the file is opened. File-write approval follows the session's approval mode.",
 		Effect: EffectWrite,
 		Schema: schema(map[string]any{
 			"path": map[string]any{"type": "string", "description": "Output path with an .xlsx or .xlsm extension. Relative paths resolve against the workspace"},

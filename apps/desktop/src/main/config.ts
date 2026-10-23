@@ -48,7 +48,7 @@ export interface AppConfig {
    */
   contextWindow: number;
   /**
-   * 桌面审批策略：auto AI 判断（默认），always 严格，bypass 全部放行。
+   * 桌面审批策略：auto 默认，always 严格，bypass 全部放行。
    * 旧 on-write / never 配置由 normalizeConfig 迁入 auto。
    */
   profile: "auto" | "always" | "bypass";

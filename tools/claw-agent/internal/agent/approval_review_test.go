@@ -3,14 +3,20 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
 
 func TestAutoApprovalReviewExecutesOnlyAfterAllowOrHumanApproval(t *testing.T) {
@@ -25,14 +31,15 @@ func TestAutoApprovalReviewExecutesOnlyAfterAllowOrHumanApproval(t *testing.T) {
 		{"failed", `!503 unavailable`, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "output.txt")
-			args, _ := json.Marshal(map[string]string{"path": path, "content": "result"})
+			model := &fakeModel{}
+			s := newTestSession(t, model, protocol.ApprovalAuto)
+			path := filepath.Join(s.config.Workdir, "output.txt")
+			args, _ := json.Marshal(map[string]string{"command": fmt.Sprintf("echo result > %q", path)})
 			reply := tc.reply
 			if !strings.HasPrefix(reply, "!") {
 				reply = sseText(reply)
 			}
-			model := &fakeModel{script: []string{sseToolCall("write", "write_file", string(args)), reply, sseText("done")}}
-			s := newTestSession(t, model, protocol.ApprovalAuto)
+			model.script = []string{sseToolCall("write", "run_command", string(args)), reply, sseText("done")}
 			emitter := &recordingEmitter{approve: tc.human}
 			s.RunTurn(context.Background(), "auto", "Write the requested result to the temporary output file", nil, nil, emitter)
 			_, err := os.Stat(path)
@@ -53,7 +60,42 @@ func TestAutoApprovalReviewExecutesOnlyAfterAllowOrHumanApproval(t *testing.T) {
 			if len(request["messages"].([]any)) != 2 {
 				t.Fatal("reviewer inherited execution history")
 			}
+			if request["max_tokens"] != float64(128) {
+				t.Fatal("review did not use a bounded short response", request["max_tokens"])
+			}
+			if !emitter.find(protocol.NotifyItemCompleted, "approval_review") || (asked && !emitter.find(protocol.NotifyItemCompleted, "approval_wait")) {
+				t.Fatal("missing separate review and confirmation timing")
+			}
 		})
+	}
+}
+
+func TestAutoReviewTimeoutFallsBackOnceWithoutExecuting(t *testing.T) {
+	s := newTestSession(t, &fakeModel{}, protocol.ApprovalAuto)
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		calls.Add(1)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	var err error
+	s.llm, err = llm.New(server.URL, "fixture", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.appendMessage(llm.Message{ID: "user", Role: llm.RoleUser, Content: "Check the current time"})
+	emitter := &recordingEmitter{}
+	env := s.turnEnv("timeout", emitter)
+	started := time.Now()
+	err = env.RequestApproval(context.Background(), tools.EffectExec, protocol.ApprovalExec, "command", "date", "")
+	elapsed := time.Since(started)
+	if err == nil || calls.Load() != 1 || len(emitter.approvals) != 1 || elapsed > approvalReviewTimeout+2*time.Second || elapsed < approvalReviewTimeout {
+		t.Fatalf("timeout must fall back without retrying or approving: %v, calls=%d approvals=%d elapsed=%v", err, calls.Load(), len(emitter.approvals), elapsed)
+	}
+	if !emitter.find(protocol.NotifyItemCompleted, "AI 检查超时") {
+		t.Fatal("timeout not distinguished from a rejected review")
 	}
 }
 

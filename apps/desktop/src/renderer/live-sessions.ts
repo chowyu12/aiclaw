@@ -236,6 +236,9 @@ export function applyAgentEvent(
             stepStats(item),
           );
           return applied;
+        case "notice":
+          pushStep(record, id, "notice", typeof item.text === "string" ? item.text : "", "running", "", stepStats(item));
+          return applied;
         default:
           return applied;
       }
@@ -324,7 +327,12 @@ export function applyAgentEvent(
         case "notice": {
           // 内核说的话：历史被压缩了、模型调用在重试。既不是模型输出也不是
           // 错误——压缩会悄悄丢掉一段历史，不说一声用户会以为模型失忆了。
-          pushStep(record, id, "notice", typeof item.text === "string" ? item.text : "", "done");
+          const entry = findEntry(record, id);
+          if (entry?.kind === "step") {
+            Object.assign(entry, { title: typeof item.text === "string" ? item.text : "", state: "done" }, stepStats(item));
+          } else {
+            pushStep(record, id, "notice", typeof item.text === "string" ? item.text : "", "done", "", stepStats(item));
+          }
           return applied;
         }
         default:
@@ -443,6 +451,7 @@ export function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
           title: item.text ?? "",
           detail: "",
           state: "done",
+          ...stepStats(item as unknown as Record<string, unknown>),
         });
         break;
       default:

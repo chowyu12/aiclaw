@@ -881,7 +881,7 @@ func buildSystemPrompt(
 	if workspace := strings.TrimSpace(config.Workdir); workspace != "" {
 		fmt.Fprintf(&builder,
 			"Session workspace: %s. Relative paths resolve against it. **Reading is not limited to the workspace**: "+
-				"you can read paths outside it too (except directories that hold credentials); writing outside the workspace asks the user for confirmation first.\n",
+				"you can read paths outside it too (except directories that hold credentials); file-write approval follows the session's approval mode.\n",
 			workspace,
 		)
 	} else {
@@ -890,7 +890,7 @@ func buildSystemPrompt(
 		// 不存在的目录里执行，报错还指向别处。
 		fmt.Fprintf(&builder,
 			"This chat **has no workspace set**; relative paths resolve against the user's home directory (%s). "+
-				"Reading is unrestricted (except directories that hold credentials); every write asks the user for confirmation first.\n",
+				"Reading is unrestricted (except directories that hold credentials); file-write approval follows the session's approval mode.\n",
 			userHome(),
 		)
 		if !config.DisableSandbox && tools.SandboxAvailable() {
@@ -898,8 +898,8 @@ func buildSystemPrompt(
 			// 否则模型会一遍遍重试同一个 mkdir（实测就是这样）。
 			builder.WriteString(
 				"Note: without a workspace, **commands cannot create files in the home directory** (the sandbox only opens " +
-					"the temp directory and toolchain caches). When you need to create something, first ask the user to pick a " +
-					"workspace at the top of the chat; don't work around it by using the temp directory.\n",
+					"the temp directory and toolchain caches). When a command needs to create files, first ask the user to pick a " +
+					"workspace at the top of the chat; don't work around it by using the temp directory. File tools follow the session's approval mode.\n",
 			)
 		}
 	}
@@ -917,7 +917,7 @@ func buildSystemPrompt(
 	}
 	switch config.ApprovalPolicy {
 	case protocol.ApprovalAuto:
-		builder.WriteString("AI approval review is enabled: commands, external tools and writes outside the workspace receive an independent risk/intent review. Low-risk operations may proceed; uncertain or higher-risk operations require human confirmation. A review is not a grant for future operations.\n")
+		builder.WriteString("Default approval mode: commands and external tools receive an independent risk/intent review. Low-risk operations may proceed; uncertain or higher-risk operations require human confirmation. File tools may read and write inside or outside the workspace without approval; protected credential paths remain blocked. A review is not a grant for future operations.\n")
 	case protocol.ApprovalNever:
 		builder.WriteString("Running unattended: nobody will answer confirmation requests, so any action that needs confirmation will fail.\n")
 	case protocol.ApprovalBypass:

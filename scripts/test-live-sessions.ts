@@ -27,6 +27,18 @@ function fresh(): Record<string, LiveSession> {
   return reactive({}) as Record<string, LiveSession>;
 }
 
+test("AI 检查与人工确认分别更新同一条计时步骤，不重复追加", () => {
+  const live = fresh();
+  for (const [id, title, durationMs] of [["review", "AI 检查", 8000], ["wait", "人工确认", 12000]] as const) {
+    applyAgentEvent(live, event("item/started", "A", { item: { id, kind: "notice", text: title, startedAt: 1000 } }), "A");
+    const running = live.A!.timeline.at(-1)!;
+    assert.ok(running.kind === "step" && running.state === "running" && running.startedAt === 1000);
+    applyAgentEvent(live, event("item/completed", "A", { item: { id, kind: "notice", text: title + "结束", startedAt: 1000, durationMs } }), "A");
+    assert.ok(running.kind === "step" && running.state === "done" && running.durationMs === durationMs && running.title === title + "结束");
+  }
+  assert.equal(live.A!.timeline.length, 2);
+});
+
 test("后台会话的事件不会写进正在看的会话", () => {
   const live = fresh();
   live.A = newLive();

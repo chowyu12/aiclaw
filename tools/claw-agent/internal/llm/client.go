@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -103,6 +104,8 @@ type Request struct {
 	Temperature     *float64
 	MaxTokens       int
 	ReasoningEffort string
+	// DisableThinking requests a quick response on endpoints with known non-thinking controls.
+	DisableThinking bool
 }
 
 type Usage struct {
@@ -209,6 +212,29 @@ type wireRequest struct {
 	Temperature     *float64      `json:"temperature,omitempty"`
 	MaxTokens       int           `json:"max_tokens,omitempty"`
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	EnableThinking  *bool         `json:"enable_thinking,omitempty"`
+	Thinking        *thinkingMode `json:"thinking,omitempty"`
+}
+
+type thinkingMode struct {
+	Type string `json:"type"`
+}
+
+// Use provider controls only for known compatible endpoints/models. Unknown gateways
+// keep their existing wire format and remain bounded by the caller's deadline.
+func (c *Client) disableThinking(wire *wireRequest) {
+	model := strings.ToLower(wire.Model)
+	if strings.Contains(model, "thinking") || model == "deepseek-r1" || model == "deepseek-reasoner" {
+		return
+	}
+	if c.dialect == dialectDashScope && (strings.HasPrefix(model, "qwen3") || strings.HasPrefix(model, "deepseek-v3.1") || strings.HasPrefix(model, "deepseek-v3.2") || strings.HasPrefix(model, "deepseek-v4")) {
+		disabled := false
+		wire.EnableThinking = &disabled
+		wire.ReasoningEffort = ""
+	} else if parsed, err := url.Parse(c.baseURL); err == nil && strings.EqualFold(parsed.Hostname(), "api.deepseek.com") && (model == "deepseek-chat" || strings.HasPrefix(model, "deepseek-v4") || strings.HasPrefix(model, "deepseek-v3.2")) {
+		wire.Thinking = &thinkingMode{Type: "disabled"}
+		wire.ReasoningEffort = ""
+	}
 }
 
 type streamOpts struct {
@@ -303,7 +329,11 @@ func (c *Client) Stream(
 	req Request,
 	onDelta func(Delta),
 ) (Response, error) {
-	payload, err := json.Marshal(buildWireRequest(req))
+	wire := buildWireRequest(req)
+	if req.DisableThinking {
+		c.disableThinking(&wire)
+	}
+	payload, err := json.Marshal(wire)
 	if err != nil {
 		return Response{}, fmt.Errorf("%s: %w", i18n.D("编码请求失败"), err)
 	}

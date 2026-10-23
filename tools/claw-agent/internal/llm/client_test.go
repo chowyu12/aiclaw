@@ -13,6 +13,68 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
+func TestDisableThinkingOnlyUsesKnownProviderControls(t *testing.T) {
+	for _, tc := range []struct {
+		url, model, field string
+	}{
+		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "deepseek-v4.1-flash", "enable_thinking"},
+		{"https://llm-test.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "qwen3.6-plus", "enable_thinking"},
+		{"https://api.deepseek.com/v1", "deepseek-v4-flash", "thinking"},
+		{"https://api.deepseek.com/v1", "deepseek-reasoner", ""},
+		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3-235b-a22b-thinking-2507", ""},
+		{"https://api.openai.com/v1", "test", ""},
+		{"https://dashscope.aliyuncs.com.evil.example/v1", "deepseek-v4.1-flash", ""},
+	} {
+		t.Run(tc.url+"/"+tc.model, func(t *testing.T) {
+			client, err := New(tc.url, "fixture", time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wire := buildWireRequest(Request{Model: tc.model, ReasoningEffort: "high"})
+			client.disableThinking(&wire)
+			body, _ := json.Marshal(wire)
+			var fields map[string]any
+			_ = json.Unmarshal(body, &fields)
+			if tc.field == "enable_thinking" && fields[tc.field] != false {
+				t.Fatal(string(body))
+			}
+			if tc.field == "thinking" && fields[tc.field].(map[string]any)["type"] != "disabled" {
+				t.Fatal(string(body))
+			}
+			if tc.field == "" && (fields["enable_thinking"] != nil || fields["thinking"] != nil || fields["reasoning_effort"] != "high") {
+				t.Fatal("unknown or thinking-only model was changed", string(body))
+			}
+			if tc.field != "" && fields["reasoning_effort"] != nil {
+				t.Fatal("conflicting reasoning effort", string(body))
+			}
+		})
+	}
+}
+
+func TestThinkingControlIsLimitedToExplicitFastRequests(t *testing.T) {
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		requests = append(requests, body)
+		_, _ = w.Write([]byte(sse(`{"choices":[{"delta":{"content":"ok"}}]}`)))
+	}))
+	defer server.Close()
+	client, err := New(server.URL, "fixture", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.dialect = dialectDashScope
+	for _, fast := range []bool{true, false} {
+		if _, err := client.Stream(context.Background(), Request{Model: "deepseek-v4.1-flash", DisableThinking: fast}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if requests[0]["enable_thinking"] != false || requests[1]["enable_thinking"] != nil {
+		t.Fatal("fast control leaked into ordinary conversation", requests)
+	}
+}
+
 func TestStreamRequiresCompletionAndKeepsPartialEvidence(t *testing.T) {
 	for _, tc := range []struct {
 		name, ending string

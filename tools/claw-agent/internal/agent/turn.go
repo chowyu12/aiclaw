@@ -341,6 +341,7 @@ func (s *Session) turnEnv(turnID string, emitter Emitter) *tools.Env {
 	}
 	if env.Policy == protocol.ApprovalAuto {
 		env.Review = s.approvalReviewer(turnID, emitter, s.llm, s.config.Model)
+		env.Approve = s.approvalWaiter(turnID, emitter)
 	}
 	return env
 }
