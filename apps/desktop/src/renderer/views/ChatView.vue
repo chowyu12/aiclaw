@@ -491,7 +491,7 @@ async function pickModel(choice: { providerId: number; model: string; context: n
 
 async function pickPolicy(id: string): Promise<void> {
   policyOpen.value = false;
-  await actions.saveConfig({ profile: id as "on-write" | "always" | "never" | "bypass" });
+  await actions.saveConfig({ profile: id as "auto" | "always" | "bypass" });
 }
 
 // ---------- 复制 ----------
@@ -1726,8 +1726,8 @@ const forking = ref(false);
   font-weight: 700;
 }
 
-/* 越危险的档位越显眼：无人值守不弹任何确认，用户必须一眼看见自己开着它。 */
-.chip[data-policy="on-write"] {
+/* 全部放行不弹操作确认，用户必须一眼看见自己开着它。 */
+.chip[data-policy="auto"] {
   color: var(--muted);
 }
 
@@ -1735,7 +1735,6 @@ const forking = ref(false);
   color: var(--accent);
 }
 
-.chip[data-policy="never"],
 .chip[data-policy="bypass"] {
   color: var(--danger);
 }

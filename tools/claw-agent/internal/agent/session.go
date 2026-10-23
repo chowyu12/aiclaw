@@ -916,6 +916,8 @@ func buildSystemPrompt(
 		)
 	}
 	switch config.ApprovalPolicy {
+	case protocol.ApprovalAuto:
+		builder.WriteString("AI approval review is enabled: commands, external tools and writes outside the workspace receive an independent risk/intent review. Low-risk operations may proceed; uncertain or higher-risk operations require human confirmation. A review is not a grant for future operations.\n")
 	case protocol.ApprovalNever:
 		builder.WriteString("Running unattended: nobody will answer confirmation requests, so any action that needs confirmation will fail.\n")
 	case protocol.ApprovalBypass:

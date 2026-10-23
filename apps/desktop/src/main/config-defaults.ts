@@ -24,7 +24,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   roles: NO_ROLES,
   reasoningEffort: "medium",
   contextWindow: 0,
-  profile: "on-write",
+  profile: "auto",
   retentionDays: 30,
   sandboxCommands: true,
   codeMode: false,
@@ -62,6 +62,8 @@ export function normalizeConfig(config: AppConfig): AppConfig {
   const providerId = Number(config.providerId);
   return {
     ...config,
+    // Never elevate an older unattended configuration to full access automatically.
+    profile: config.profile === "always" || config.profile === "bypass" ? config.profile : "auto",
     // 语言是后加的：旧配置里没有，按默认（英文）；只认两种取值。
     language: config.language === "zh-CN" ? "zh-CN" : "en",
     // 角色是后加的：旧 config.json 里根本没有这一项，缺了要补全四个角色，

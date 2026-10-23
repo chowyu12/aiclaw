@@ -23,8 +23,11 @@ under a custom license with use restrictions.
 
 - **Chat and act.** The model reads and writes files, runs commands and calls MCP tools on your
   machine.
-  - It asks before running commands or calling external tools. Stricter and unattended
-    approval modes are available, and dangerous commands are refused outright.
+  - Desktop approval has three modes: AI review (default), Strict, and Allow all. AI review
+    makes a separate request to the current model for commands, external tools and writes
+    outside the workspace. Clearly low-risk operations proceed; uncertain reviews and failures
+    fall back to human confirmation. Reviews add model usage and latency. Hard guards remain.
+    Older desktop unattended/default settings migrate to AI review; existing channel authorizations are unchanged.
   - Context is compacted before it fills up.
   - The microphone button in the composer does voice input: speech is transcribed into the box
     so you can review it before sending.

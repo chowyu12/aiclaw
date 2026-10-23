@@ -102,6 +102,9 @@ func init() {
 		"没有名为 {name} 的工具；可用工具：{tools}": "No tool named {name}. Available tools: {tools}",
 		"json 解析失败": "invalid JSON",
 
+		"AI 检查未完成，转为人工确认": "AI review unavailable; requesting confirmation",
+		"AI 检查：需要人工确认":    "AI review: confirmation required",
+		"AI 检查：低风险操作自动放行": "AI review: low-risk operation allowed",
 		// 步骤摘要
 		"执行命令":                      "Run command",
 		"联网搜索":                      "Search the web",

@@ -212,14 +212,13 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (result stri
 		return "", i18n.E("执行目录不存在：{dir}", "dir", cwd)
 	}
 
-	// 只有看着危险的才问。理由：每条命令都弹框会把用户训练成闭眼点「允许」，
-	// 而那比少问一次更危险。严格档位（always）仍然逐条问——需要那种约束的
-	// 场景把档位调上去就行。
+	// auto independently reviews every command, including those static rules miss.
+	// Legacy on-write keeps its rule-based behavior; always asks for every command.
 	//
 	// detail 带完整命令与目录，不截断：用户要判断的就是这一行。
 	effect := EffectExec
 	reason := args.Reason
-	if risk := riskyReason(command); risk == "" && env.Policy != protocol.ApprovalAlways {
+	if risk := riskyReason(command); risk == "" && env.Policy != protocol.ApprovalAlways && env.Policy != protocol.ApprovalAuto {
 		effect = EffectRead
 	} else if risk != "" {
 		if reason == "" {
@@ -228,10 +227,11 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (result stri
 			reason = i18n.D("{reason}（{risk}）", "reason", reason, "risk", risk)
 		}
 	}
-	if err := env.RequestApproval(
+	manual, err := env.authorize(
 		ctx, effect, protocol.ApprovalExec,
-		i18n.D("执行命令"), command+"\n"+i18n.D("（在 {dir} 下执行）", "dir", cwd), reason,
-	); err != nil {
+		i18n.D("执行命令"), command+"\n"+i18n.D("（在 {dir} 下执行）", "dir", cwd), reason, "",
+	)
+	if err != nil {
 		return "", err
 	}
 
@@ -260,7 +260,7 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (result stri
 
 	// 用户点过「允许」的不进沙箱：那正是审批的含义——他看着这条命令批准了它，
 	// 再拦一道只会让「我明明同意了它却失败」。没问过的那些才套沙箱。
-	sandboxed := effect == EffectRead && env.Sandbox && SandboxAvailable()
+	sandboxed := (effect == EffectRead || (env.Policy == protocol.ApprovalAuto && !manual)) && env.Sandbox && SandboxAvailable()
 	cmd := shellCommand(execCtx, command)
 	if sandboxed {
 		cmd = sandboxedShellCommand(execCtx, command, env)

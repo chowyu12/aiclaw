@@ -9,7 +9,10 @@ let win;
 const checks=[];
 function check(name,ok){checks.push({name,ok});console.log(`${ok?'ok':'FAIL'} ${name}`);}
 app.whenReady().then(async()=>{
- const config={providerId:1,model:'test',reasoningEffort:'medium',contextWindow:0,workdir:'/tmp/smoke',profile:'on-write',language:'zh-CN'};
+ const config={providerId:1,model:'test',reasoningEffort:'medium',contextWindow:0,workdir:'/tmp/smoke',profile:'auto',language:'zh-CN'};
+ const {profileSpecs}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/session.js')).href);
+ const profiles=profileSpecs();
+ check('desktop offers exactly AI review strict and allow-all policies',profiles.map(p=>p.id).join('|')==='auto|always|bypass'&&profiles[0].label.includes('AI'));
  let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',sessionWorkspace='/tmp/smoke',renameFails=false;const renameCalls=[];
  let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[];
  let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
@@ -40,7 +43,7 @@ app.whenReady().then(async()=>{
  handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}if(input.path.endsWith('.sql'))return {path:input.path,language:'sql',content:'SELECT id FROM users WHERE active = 9;'};return {path:input.path,language:'markdown',content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">\n\n'+Array.from({length:140},(_,index)=>'Paragraph '+index+'\n\n').join('')+'wide'.repeat(150)};});
  handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
  handle('configRead',()=>config);handle('configWrite',(_e,p)=>Object.assign(config,p));handle('runtimeStart',()=>undefined);
- handle('appVersion',()=> 'work-smoke');handle('profileList',()=>[{id:'on-write',label:'默认'}]);
+ handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
  handle('groupRead',()=>groups);handle('groupCollapse',(_e,input)=>{groups.collapsed[input.groupId]=input.collapsed;groups.seenAt[input.groupId]=Date.now();return groups;});handle('sessionSearch',()=>list().filter(s=>!s.parentId));handle('mcpRead',()=>mcpServers);handle('skillList',()=>{if(skillListFails)throw Error('skill list unavailable');return skillCatalog;});
  handle('providerList',()=>[{id:1,name:'fixture',type:'openai-compatible',enabled:true,apiKeySet:true,models:['test','test2']}]);
  handle('sessionRename',(_e,input)=>{renameCalls.push(input);if(renameFails)throw Error('rename failure');sessionTitle=input.title;return {sessionId:input.sessionId,title:sessionTitle};});
@@ -86,6 +89,11 @@ app.whenReady().then(async()=>{
  check('global search labels workspaces and includes general and channel chats',await wait("document.querySelectorAll('.workspace-label').length===5")&&await js("[...document.querySelectorAll('.workspace-label')].some(b=>b.textContent.includes('/other/')) && document.querySelector('.sidebar .list').textContent.includes('Channel chat')"));
  await js("(()=>{const input=document.querySelector('.search input');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
  await wait("document.querySelectorAll('.bucket').length===3 && !!document.querySelector('.composer .chip')");
+ await js("document.querySelector('.composer .chip[data-policy]').click()");
+ check('approval menu renders three policies with AI review selected by default',await wait("document.querySelectorAll('.menu .menu-item').length===3")&&await js("document.querySelector('.menu .picked .menu-name').textContent.includes('AI')&&!document.querySelector('.menu').textContent.includes('无人值守')"));
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-approval-profiles.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.querySelector('.composer .chip[data-policy]').click()");
  await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('smoke')).click()");
  await click('清除（回到未设置）');
  check('clearing workspace immediately moves the chat to general chats',await wait("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count').textContent==='2' && document.querySelector('[data-bucket-id=\"__ungrouped__\"] .count').textContent==='2'"));

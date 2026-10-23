@@ -81,6 +81,8 @@ type Env struct {
 	Policy protocol.ApprovalPolicy
 	// Approve 向宿主要一次审批。
 	Approve ApprovalFunc
+	// Review independently assesses one operation in auto mode. Missing/failed reviews ask the user.
+	Review func(context.Context, protocol.ApprovalRequestParams) (bool, error)
 	// SessionID / TurnID 只用于填审批请求，方便宿主定位。
 	SessionID string
 	TurnID    string
@@ -151,16 +153,19 @@ func (e *Env) requestApprovalScoped(
 	kind protocol.ApprovalKind,
 	title, detail, reason, scopePath string,
 ) error {
+	_, err := e.authorize(ctx, effect, kind, title, detail, reason, scopePath)
+	return err
+}
+
+// authorize reports whether a human explicitly approved this operation, for command sandboxing.
+func (e *Env) authorize(ctx context.Context, effect Effect, kind protocol.ApprovalKind, title, detail, reason, scopePath string) (bool, error) {
 	if !e.needsApproval(effect) {
-		return nil
+		return false, nil
 	}
 	if e.Policy == protocol.ApprovalNever {
-		return i18n.E("{title} 需要确认，而当前是无人值守模式，不执行", "title", title)
+		return false, i18n.E("{title} 需要确认，而当前是无人值守模式，不执行", "title", title)
 	}
-	if e.Approve == nil {
-		return i18n.E("{title} 需要确认，但当前没有可用的审批通道", "title", title)
-	}
-	response, err := e.Approve(ctx, protocol.ApprovalRequestParams{
+	request := protocol.ApprovalRequestParams{
 		SessionID: e.SessionID,
 		TurnID:    e.TurnID,
 		Kind:      kind,
@@ -169,9 +174,22 @@ func (e *Env) requestApprovalScoped(
 		Cwd:       e.Base(),
 		Reason:    reason,
 		ScopePath: scopePath,
-	})
+	}
+	if e.Policy == protocol.ApprovalAuto && e.Review != nil {
+		allowed, err := e.Review(ctx, request)
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		if err == nil && allowed {
+			return false, nil
+		}
+	}
+	if e.Approve == nil {
+		return false, i18n.E("{title} 需要确认，但当前没有可用的审批通道", "title", title)
+	}
+	response, err := e.Approve(ctx, request)
 	if err != nil {
-		return fmt.Errorf("%s: %w", i18n.D("请求确认失败"), err)
+		return false, fmt.Errorf("%s: %w", i18n.D("请求确认失败"), err)
 	}
 	if response.Approved && response.Scope == protocol.ApprovalScopeSession &&
 		scopePath != "" && e.Grant != nil {
@@ -179,9 +197,9 @@ func (e *Env) requestApprovalScoped(
 	}
 	approved := response.Approved
 	if !approved {
-		return i18n.E("用户拒绝了这次操作")
+		return false, i18n.E("用户拒绝了这次操作")
 	}
-	return nil
+	return true, nil
 }
 
 // Handler 执行一次工具调用。

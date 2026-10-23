@@ -666,6 +666,8 @@ type MCPServerConfig struct {
 type ApprovalPolicy string
 
 const (
+	// ApprovalAuto independently reviews approval-sensitive operations before asking the user.
+	ApprovalAuto ApprovalPolicy = "auto"
 	// ApprovalOnWrite 对执行命令与工作目录外的写入弹确认。默认。
 	ApprovalOnWrite ApprovalPolicy = "on-write"
 	// ApprovalAlways 对所有有副作用的工具都弹确认。

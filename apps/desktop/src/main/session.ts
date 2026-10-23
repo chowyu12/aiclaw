@@ -71,9 +71,9 @@ export interface ProfileSpec {
 export function profileSpecs(): ProfileSpec[] {
   return [
     {
-      id: "on-write",
-      label: tr("默认"),
-      description: tr("执行命令和调用外部工具前请你确认；读文件、写工作目录内的文件不问。"),
+      id: "auto",
+      label: tr("AI 判断"),
+      description: tr("默认档位。AI 独立检查命令、外部工具和工作区外写入，低风险且符合用户意图时自动执行；其余或检查失败时请你确认。每次检查会调用当前会话模型。"),
       availableForScheduled: false,
     },
     {
@@ -81,12 +81,6 @@ export function profileSpecs(): ProfileSpec[] {
       label: tr("严格"),
       description: tr("所有有副作用的操作（含写文件）都先请你确认。"),
       availableForScheduled: false,
-    },
-    {
-      id: "never",
-      label: tr("无人值守"),
-      description: tr("不弹确认；需要确认的操作直接失败。给定时任务与外部通道用，别在交互会话里选。"),
-      availableForScheduled: true,
     },
     {
       id: "bypass",

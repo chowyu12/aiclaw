@@ -325,7 +325,7 @@ func (s *Session) drainPending(ctx context.Context, turnID string, emitter Emitt
 func (s *Session) turnEnv(turnID string, emitter Emitter) *tools.Env {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return &tools.Env{
+	env := &tools.Env{
 		Workspace:      s.config.Workdir,
 		Home:           userHome(),
 		ProtectedPaths: append([]string(nil), s.config.ProtectedPaths...),
@@ -339,6 +339,10 @@ func (s *Session) turnEnv(turnID string, emitter Emitter) *tools.Env {
 		SessionID:      s.ID,
 		TurnID:         turnID,
 	}
+	if env.Policy == protocol.ApprovalAuto {
+		env.Review = s.approvalReviewer(turnID, emitter, s.llm, s.config.Model)
+	}
+	return env
 }
 
 func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (protocol.Usage, error) {

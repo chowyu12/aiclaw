@@ -16,6 +16,16 @@ test("默认没选模型服务", () => {
   assert.equal(DEFAULT_CONFIG.model, "");
 });
 
+test("桌面只保留 AI 判断、严格和全部放行；旧无人值守不自动提权", () => {
+  assert.equal(DEFAULT_CONFIG.profile, "auto");
+  for (const profile of ["on-write", "never", "unknown", undefined, null]) {
+    assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, profile } as never).profile, "auto");
+  }
+  for (const profile of ["auto", "always", "bypass"] as const) {
+    assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, profile }).profile, profile);
+  }
+});
+
 test("旧配置里没有 providerId 时算 0，不是 NaN", () => {
   const stored = { ...DEFAULT_CONFIG } as Record<string, unknown>;
   delete stored.providerId;
