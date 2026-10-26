@@ -52,7 +52,8 @@ type ApprovalFunc func(
 
 // Env 是工具执行时的环境。
 type Env struct {
-	SaveOutput OutputSaver
+	SaveOutput   OutputSaver
+	SecretValues []string
 	// Optional observation hooks receive successful known skill loads/file reads.
 	SkillLoaded func(context.Context, string)
 	FileRead    func(context.Context, string)
@@ -234,6 +235,7 @@ type Tool struct {
 func (t Tool) ParallelSafe() bool { return t.Effect == EffectRead }
 
 type Registry struct {
+	mu    sync.RWMutex
 	order []string
 	tools map[string]Tool
 }
@@ -243,6 +245,8 @@ func NewRegistry() *Registry {
 }
 
 func (r *Registry) Register(tool Tool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if tool.Name == "" {
 		return i18n.E("工具名为空")
 	}
@@ -257,11 +261,15 @@ func (r *Registry) Register(tool Tool) error {
 }
 
 func (r *Registry) Get(name string) (Tool, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	tool, ok := r.tools[name]
 	return tool, ok
 }
 
 func (r *Registry) List() []Tool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	list := make([]Tool, 0, len(r.order))
 	for _, name := range r.order {
 		list = append(list, r.tools[name])
@@ -270,12 +278,14 @@ func (r *Registry) List() []Tool {
 }
 
 func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	names := append([]string(nil), r.order...)
 	sort.Strings(names)
 	return names
 }
 
-func (r *Registry) Len() int { return len(r.order) }
+func (r *Registry) Len() int { r.mu.RLock(); defer r.mu.RUnlock(); return len(r.order) }
 
 func within(root, target string) bool {
 	if target == root {
@@ -343,4 +353,19 @@ func schema(properties map[string]any, required ...string) json.RawMessage {
 		panic(fmt.Sprintf("构造工具 schema 失败：%v", err))
 	}
 	return encoded
+}
+
+// Replace atomically publishes a fully validated catalog. Previously obtained
+// Tool values remain valid for calls which were already admitted.
+func (r *Registry) Replace(list []Tool) error {
+	next := NewRegistry()
+	for _, tool := range list {
+		if err := next.Register(tool); err != nil {
+			return err
+		}
+	}
+	r.mu.Lock()
+	r.order, r.tools = next.order, next.tools
+	r.mu.Unlock()
+	return nil
 }

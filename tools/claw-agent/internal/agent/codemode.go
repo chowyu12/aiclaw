@@ -31,6 +31,12 @@ Env，该弹的框照弹——只是现在它们发生在一段脚本执行的�
 // 返回替换掉的工具数量，给挂载状态显示用。
 func (s *Session) installCodeMode() int {
 	existing := s.registry.List()
+	if s.codeModeBase != nil {
+		existing = s.codeModeBase.List()
+	} else {
+		s.codeModeBase = tools.NewRegistry()
+		_ = s.codeModeBase.Replace(existing)
+	}
 	if len(existing) == 0 {
 		return 0
 	}
@@ -102,7 +108,14 @@ func (s *Session) installCodeMode() int {
 		return 0
 	}
 
-	*s.registry = *replacement
+	if len(s.folded) > 0 {
+		for _, tool := range s.registry.List() {
+			if tool.Name != "exec" {
+				_ = replacement.Register(tool)
+			}
+		}
+	}
+	_ = s.registry.Replace(replacement.List())
 	s.folded = make([]string, 0, len(existing))
 	for _, tool := range existing {
 		s.folded = append(s.folded, tool.Name)

@@ -10,7 +10,7 @@ const checks=[];
 function check(name,ok){checks.push({name,ok});console.log(`${ok?'ok':'FAIL'} ${name}`);}
 app.whenReady().then(async()=>{
  const config={providerId:1,model:'test',reasoningEffort:'medium',contextWindow:0,workdir:'/tmp/smoke',profile:'auto',language:'zh-CN'};
- const {profileSpecs}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/session.js')).href);
+ const {profileSpecs,SessionManager}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/session.js')).href);
  const profiles=profileSpecs();
  check('desktop offers exactly default strict and allow-all policies',profiles.map(p=>p.id).join('|')==='auto|always|bypass'&&profiles[0].label==='默认');
  let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',sessionWorkspace='/tmp/smoke',renameFails=false;const renameCalls=[];
@@ -42,7 +42,8 @@ app.whenReady().then(async()=>{
  let previewWindowWidth=null;handle('filePreviewLayout',(_e,open)=>{if(open&&previewWindowWidth===null){previewWindowWidth=win.getBounds().width;win.setSize(previewWindowWidth+640,win.getBounds().height);}else if(!open&&previewWindowWidth!==null){win.setSize(previewWindowWidth,win.getBounds().height);previewWindowWidth=null;}});
  handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}if(input.path.endsWith('.sql'))return {path:input.path,language:'sql',content:'SELECT id FROM users WHERE active = 9;'};return {path:input.path,language:'markdown',content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">\n\n'+Array.from({length:140},(_,index)=>'Paragraph '+index+'\n\n').join('')+'wide'.repeat(150)};});
  handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
- handle('configRead',()=>config);handle('configWrite',(_e,p)=>Object.assign(config,p));handle('runtimeStart',()=>undefined);
+ let configGate=null, configWriteFails=false;
+ handle('configRead',()=>config);handle('configWrite',async(_e,p)=>{if(configWriteFails)throw Error('config write failed');if(p.profile&&configGate)await configGate;return Object.assign(config,p);});handle('runtimeStart',()=>undefined);
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
  handle('groupRead',()=>groups);handle('groupCollapse',(_e,input)=>{groups.collapsed[input.groupId]=input.collapsed;groups.seenAt[input.groupId]=Date.now();return groups;});handle('sessionSearch',()=>list().filter(s=>!s.parentId));handle('mcpRead',()=>mcpServers);handle('skillList',()=>{if(skillListFails)throw Error('skill list unavailable');return skillCatalog;});
  handle('providerList',()=>[{id:1,name:'fixture',type:'openai-compatible',enabled:true,apiKeySet:true,models:['test','test2']}]);
@@ -106,12 +107,17 @@ app.whenReady().then(async()=>{
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
 
 
+ const policyCalls=[];
+ const manager=Object.create(SessionManager.prototype);manager.desktopSessions=new Set(['desktop-one','desktop-two']);
+ manager.client={running:true,sessionConfigure:async(id,_model,_workspace,policy)=>{policyCalls.push([id,policy]);if(id==='desktop-two'&&policy==='always')throw Error('policy checkpoint failed');}};
+ let policyFailed=false;try{await manager.syncDesktopPolicy('always','auto');}catch{policyFailed=true;}
+ check('desktop policy synchronization waits for acknowledgement and rolls back earlier sessions',policyFailed&&JSON.stringify(policyCalls)===JSON.stringify([['desktop-one','always'],['desktop-two','always'],['desktop-one','auto']]));
  const draft=async(text,caret=text.length)=>js(`(()=>{const input=document.querySelector('.composer textarea');input.focus();input.value=${JSON.stringify(text)};input.setSelectionRange(${caret},${caret});input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
  const draftKey=async(key,extra={})=>js(`document.querySelector('.composer textarea').dispatchEvent(new KeyboardEvent('keydown',{key:${JSON.stringify(key)},bubbles:true,cancelable:true,...${JSON.stringify(extra)}}))`);
  await wait("!!document.querySelector('.composer textarea')");await draft('/');
  check('leading slash lists only enabled and mounted skills with escaped descriptions',await wait("document.querySelectorAll('.skill-option').length===2")&&await js("document.querySelector('.skill-description').textContent.includes('<b>plain</b>') && !document.querySelector('.skill-description b')"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");writeFileSync('/tmp/aiclaw-skill-picker.png',(await win.webContents.capturePage()).toPNG());
- await draftKey('ArrowUp');await draftKey('Enter',{isComposing:true});
+ await draftKey('ArrowDown');await draftKey('Enter',{isComposing:true});
  check('IME confirmation does not choose a skill or send a message',await js("document.querySelector('.composer textarea').value==='/' && !!document.querySelector('.skill-menu')")&&sends.length===0);
  await draftKey('Enter');
  check('keyboard selection inserts explicit skill mention without sending',await wait("document.querySelector('.composer textarea').value==='$beta ' && !document.querySelector('.skill-menu')")&&sends.length===0);
@@ -124,6 +130,33 @@ app.whenReady().then(async()=>{
  skillListFails=true;await draft('/');
  check('skill lookup failure is visible and does not send a slash',await wait("document.querySelector('.skill-menu [role=alert]')?.textContent.includes('skill list unavailable')")&&sends.length===0);await draftKey('Escape');skillListFails=false;
  await draft('/tmp/file');check('paths do not open the skill picker',await wait("!document.querySelector('.skill-menu')"));
+ let finishPolicy;configGate=new Promise(resolve=>{finishPolicy=resolve;});
+ await js("document.querySelector('.composer .chip[data-policy]').click()");await wait("document.querySelectorAll('.composer .menu-item').length===3");await js("document.querySelectorAll('.composer .menu-item')[1].click()");
+ check('permission selection remains old and composer submission is held until acknowledgement',await wait("document.querySelector('.composer .chip[data-policy]').disabled")&&await js("document.querySelector('.composer .chip[data-policy]').dataset.policy==='auto'"));
+ await draft('hold during policy change');await draftKey('Enter');
+ check('pending policy change cannot dispatch a new message',sends.length===0);
+ finishPolicy();configGate=null;
+ check('permission label updates only after acknowledgement',await wait("document.querySelector('.composer .chip[data-policy]').dataset.policy==='always'&&!document.querySelector('.composer .chip[data-policy]').disabled"));
+ configWriteFails=true;
+ await js("document.querySelector('.composer .chip[data-policy]').click()");await wait("document.querySelectorAll('.composer .menu-item').length===3");await js("document.querySelectorAll('.composer .menu-item')[2].click()");
+ check('failed permission update retains the acknowledged label',await wait("!document.querySelector('.composer .chip[data-policy]').disabled")&&await js("document.querySelector('.composer .chip[data-policy]').dataset.policy==='always'"));
+ configWriteFails=false;await click('知道了');
+ await draft('/presets');await draftKey('Enter');
+ check('presets manager opens from slash without sending or losing the composer',await wait("!!document.querySelector('.preset-dialog[open]')")&&sends.length===0&&await js("document.querySelector('.composer textarea').value==='/presets'"));
+ await js("(()=>{const title=document.querySelector('.preset-dialog input'),body=document.querySelector('.preset-dialog textarea');title.value='Review fixture';title.dispatchEvent(new Event('input',{bubbles:true}));body.value='Review this code carefully';body.dispatchEvent(new Event('input',{bubbles:true}));})()");
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");writeFileSync('/tmp/aiclaw-prompt-presets.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.querySelector('.preset-dialog form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))");
+ check('preset saves through configuration and closes after acknowledgement',await wait("!document.querySelector('.preset-dialog')")&&config.presets?.[0]?.text==='Review this code carefully');
+ await draft('/preset1 keep draft',8);await draftKey('Enter');
+ check('preset insertion preserves trailing draft and never sends automatically',await wait("document.querySelector('.composer textarea').value==='Review this code carefully keep draft'")&&sends.length===0);
+ await draft('/presets');await draftKey('Enter');await wait("!!document.querySelector('.preset-dialog[open]')");
+ await js("document.querySelector('.preset-dialog').dispatchEvent(new Event('cancel',{cancelable:true}))");
+ check('preset dismissal preserves composer draft',await wait("!document.querySelector('.preset-dialog')")&&await js("document.querySelector('.composer textarea').value==='/presets'"));
+ win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'s',tools:['read_file','remote__new'],mcpStatus:{remote:'已挂载 1 个工具'},foldedTools:[]}});
+ check('MCP catalog notification updates the active tools indicator',await wait("[...document.querySelectorAll('.composer .chip')].some(b=>b.textContent.includes('工具 2'))"));
+ win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'other-workspace',tools:[],mcpStatus:{},foldedTools:[]}});
+ check('background MCP catalog notification cannot replace the current session tools',await js("[...document.querySelectorAll('.composer .chip')].some(b=>b.textContent.includes('工具 2'))"));
+ win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'s',tools:[],mcpStatus:{},foldedTools:[]}});
  await draft('@');check('session mentions still open their own picker',await wait("!!document.querySelector('.mention-menu:not(.skill-menu)') && !document.querySelector('.skill-menu')"));await draftKey('Escape');await draft('');
  check('work panel rendered',await wait("!!document.querySelector('.work-panel') && [...document.querySelectorAll('.work-panel article')].some(a=>a.textContent.includes('uncertain input'))"));
  check('uncertain input has no replay action',await js("[...document.querySelectorAll('.work-panel article')].find(a=>a.textContent.includes('uncertain input')).querySelectorAll('button').length===1"));

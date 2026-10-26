@@ -529,6 +529,7 @@ export interface BrowserResult {
 }
 
 export interface SessionConfigureParams {
+  approvalPolicy?: ApprovalPolicy;
   sessionId: string;
   model: ModelConfig;
 }
@@ -630,6 +631,7 @@ export interface ApprovalRequestParams {
 
 /** 服务端通知的判别联合，宿主按 method 分发。 */
 export type AgentNotification =
+ | { method: "session/toolsUpdated"; params: {sessionId: string; tools: string[]; mcpStatus: Record<string,string>; foldedTools: string[]} }
  | { method: "session/workUpdated"; params: {sessionId: string; goal: Goal} }
   | { method: "turn/started"; params: TurnNotification }
   | { method: "turn/completed"; params: TurnNotification }

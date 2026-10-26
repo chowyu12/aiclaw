@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
 )
@@ -29,11 +30,14 @@ import (
 // 端点发消息）。那是另一套握手，半吊子实现出来只会在连不上时给出误导的报错；
 // 遇到只支持旧版的服务端，这里会在握手阶段明确失败。
 type httpTransport struct {
-	accessToken func(context.Context) (string, error)
-	url         string
-	headers     map[string]string
-	client      *http.Client
-	nextID      atomic.Int64
+	onToolsChanged func()
+	watchCancel    context.CancelFunc
+	watchMu        sync.Mutex
+	accessToken    func(context.Context) (string, error)
+	url            string
+	headers        map[string]string
+	client         *http.Client
+	nextID         atomic.Int64
 
 	sessionMu sync.Mutex
 	sessionID string
@@ -57,9 +61,10 @@ func startHTTP(config Config) (*httpTransport, error) {
 		headers[key] = value
 	}
 	return &httpTransport{
-		url:         url,
-		accessToken: config.AccessToken,
-		headers:     headers,
+		url:            url,
+		onToolsChanged: config.onToolsChanged,
+		accessToken:    config.AccessToken,
+		headers:        headers,
 		// 不设 Timeout：单次工具调用可能很长，超时交给 ctx。这里只兜住连接建立。
 		client: &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 	}, nil
@@ -92,6 +97,11 @@ func (t *httpTransport) Close() {
 	if !t.closed.CompareAndSwap(false, true) {
 		return
 	}
+	t.watchMu.Lock()
+	if t.watchCancel != nil {
+		t.watchCancel()
+	}
+	t.watchMu.Unlock()
 	t.client.CloseIdleConnections()
 }
 
@@ -161,7 +171,7 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 
 	contentType := response.Header.Get("Content-Type")
 	if strings.Contains(contentType, "text/event-stream") {
-		return readSSEResponse(response.Body, *wantID)
+		return readSSEResponse(response.Body, *wantID, t.onToolsChanged)
 	}
 
 	var resp rpcResponse
@@ -188,7 +198,7 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 //
 // 中间夹的通知（服务端的进度上报之类）直接跳过：本客户端不处理它们，
 // 但也不能把它们当成答案返回。
-func readSSEResponse(body io.Reader, wantID int64) (rpcResponse, error) {
+func readSSEResponse(body io.Reader, wantID int64, notify ...func()) (rpcResponse, error) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 
@@ -197,6 +207,9 @@ func readSSEResponse(body io.Reader, wantID int64) (rpcResponse, error) {
 		payload := strings.TrimSpace(data.String())
 		data.Reset()
 		if payload == "" {
+			return rpcResponse{}, false
+		}
+		if len(notify) > 0 && toolsChanged([]byte(payload), notify[0]) {
 			return rpcResponse{}, false
 		}
 		var resp rpcResponse
@@ -236,4 +249,58 @@ func (t *httpTransport) setStatus(status string) {
 	t.statusMu.Lock()
 	t.lastStatus = status
 	t.statusMu.Unlock()
+}
+
+// Optional Streamable HTTP notification channel. Servers without GET support
+// retain their in-band POST/SSE notifications.
+func (t *httpTransport) startNotifications() {
+	t.watchMu.Lock()
+	defer t.watchMu.Unlock()
+	if t.closed.Load() {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.watchCancel = cancel
+	go func() {
+		for ctx.Err() == nil {
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.url, nil)
+			if err != nil {
+				return
+			}
+			req.Header.Set("Accept", "text/event-stream")
+			req.Header.Set("MCP-Protocol-Version", protocolVersion)
+			for name, value := range t.headers {
+				req.Header.Set(name, value)
+			}
+			t.sessionMu.Lock()
+			id := t.sessionID
+			t.sessionMu.Unlock()
+			if id != "" {
+				req.Header.Set("Mcp-Session-Id", id)
+			}
+			if t.accessToken != nil {
+				token, e := t.accessToken(ctx)
+				if e != nil {
+					return
+				}
+				req.Header.Set("Authorization", "Bearer "+token)
+			}
+			response, e := t.client.Do(req)
+			if e == nil {
+				if response.StatusCode == http.StatusMethodNotAllowed || response.StatusCode == http.StatusNotFound {
+					response.Body.Close()
+					return
+				}
+				if response.StatusCode == http.StatusOK && strings.Contains(response.Header.Get("Content-Type"), "text/event-stream") {
+					_, _ = readSSEResponse(response.Body, -1, t.onToolsChanged)
+				}
+				response.Body.Close()
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}()
 }

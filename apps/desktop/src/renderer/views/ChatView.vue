@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import WorkPanel from "./WorkPanel.vue";
+import PromptPresets from "./PromptPresets.vue";
+import { applyPreset, presetCandidates } from "../../shared/presets";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
@@ -208,6 +210,28 @@ let skillRequest = 0;
 const skillList = computed(() => skillCandidates(slash.value?.query ?? "", skillCatalog.value)
   .filter(skill => !store.sessionInfo?.skills || store.sessionInfo.skills.includes(skill.name)));
 
+const presetsOpen = ref(false), presetDraft = ref("");
+const slashList = computed(() => [
+  ...skillList.value.map(skill => ({kind:"skill" as const, id:skill.id, name:skill.name, description:skill.description, skill})),
+  ...presetCandidates(slash.value?.query ?? "", store.config?.presets ?? []).map(preset => ({kind:"preset" as const, id:`preset-${preset.slot}`, name:`/preset${preset.slot} · ${preset.title}`, description:preset.text, preset})),
+  ...(!slash.value?.query || "presets".includes(slash.value.query.toLowerCase()) ? [{kind:"manage" as const,id:"presets",name:"/presets",description:t("管理常用提示词")}] : []),
+]);
+function pickSuggestion(index: number): void {
+  const choice = slashList.value[index];
+  if (!choice) return;
+  if (choice.kind === "skill") {pickSkill(choice.skill);return;}
+  const element = input.value;
+  if (!element || !slash.value) return;
+  const caret = element.selectionStart ?? draft.value.length;
+  if (choice.kind === "manage") {
+    presetDraft.value = draft.value.slice(0,slash.value.start) + draft.value.slice(caret);
+    presetsOpen.value = true; closeSuggestions(); return;
+  }
+  const next = applyPreset(draft.value,slash.value.start,caret,choice.preset);
+  draft.value = next.text;closeSuggestions();
+  void nextTick(() => {element.focus();element.setSelectionRange(next.caret,next.caret);});
+}
+
 async function loadSkillCatalog(): Promise<void> {
   const ticket = ++skillRequest;
   skillsLoading.value = true; skillsError.value = ""; skillCatalog.value = [];
@@ -245,17 +269,17 @@ function onSkillKey(event: KeyboardEvent): boolean {
   if (event.key === "Escape") { event.preventDefault(); closeSuggestions(); return true; }
   if (!["ArrowDown", "ArrowUp", "Enter", "Tab"].includes(event.key)) return false;
   event.preventDefault();
-  if (skillList.value.length) {
-    if (event.key === "Enter" || event.key === "Tab") pickSkill(skillList.value[skillIndex.value] ?? skillList.value[0]!);
+  if (slashList.value.length) {
+    if (event.key === "Enter" || event.key === "Tab") pickSuggestion(skillIndex.value < slashList.value.length ? skillIndex.value : 0);
     else {
-      skillIndex.value = (skillIndex.value + (event.key === "ArrowDown" ? 1 : skillList.value.length-1)) % skillList.value.length;
+      skillIndex.value = (skillIndex.value + (event.key === "ArrowDown" ? 1 : slashList.value.length-1)) % slashList.value.length;
       void nextTick(() => skillMenu.value?.querySelector('[aria-selected="true"]')?.scrollIntoView({block:"nearest"}));
     }
   }
   return true;
 }
 
-watch(() => store.sessionId, closeSuggestions);
+watch(() => store.sessionId, () => {closeSuggestions();presetsOpen.value=false;});
 onUnmounted(() => { skillRequest++; clearTimeout(mentionSearch); });
 const mention = ref<{ start: number; query: string } | null>(null);
 const mentionIndex = ref(0);
@@ -491,7 +515,8 @@ async function pickModel(choice: { providerId: number; model: string; context: n
 
 async function pickPolicy(id: string): Promise<void> {
   policyOpen.value = false;
-  await actions.saveConfig({ profile: id as "auto" | "always" | "bypass" });
+  try { await actions.saveConfig({ profile: id as "auto" | "always" | "bypass" }); }
+  catch (error) { actions.showError(describeError(error)); }
 }
 
 // ---------- 复制 ----------
@@ -671,6 +696,7 @@ const forking = ref(false);
 </script>
 
 <template>
+  <PromptPresets v-if="presetsOpen" :draft="presetDraft" @close="presetsOpen=false; input?.focus()" />
   <div class="chat">
     <div v-if="!configured" class="gate">
       <h2>{{ t("先完成配置") }}</h2>
@@ -903,13 +929,13 @@ const forking = ref(false);
             </p>
 
             <div v-if="slash" id="composer-skills" ref="skillMenu" class="mention-menu skill-menu" role="listbox" :aria-label="t('选择技能')">
-              <div class="mention-head">{{ t('选择技能 · ↑↓ 选择，Enter / Tab 插入，Esc 关闭') }}</div>
+              <div class="mention-head">{{ t('技能与常用提示词 · ↑↓ 选择，Enter / Tab 插入，Esc 关闭') }}</div>
               <p v-if="skillsLoading" class="mention-head" role="status">{{ t('正在读取技能…') }}</p>
               <p v-else-if="skillsError" class="attach-error" role="alert">{{ skillsError }}</p>
-              <p v-else-if="!skillList.length" class="mention-head" role="status">{{ t('没有匹配的已启用技能') }}</p>
-              <button v-for="(skill,index) in skillList" :id="`composer-skill-${index}`" :key="skill.id" class="mention-option skill-option" :class="{on:index===skillIndex}" role="option" :aria-selected="index===skillIndex" tabindex="-1" @mousedown.prevent @click="pickSkill(skill)" @mouseenter="skillIndex=index">
-                <span class="mention-title">{{ skill.name }}</span>
-                <span v-if="skill.description" class="skill-description">{{ skill.description }}</span>
+              <p v-else-if="!slashList.length" class="mention-head" role="status">{{ t('没有匹配的已启用技能') }}</p>
+              <button v-for="(choice,index) in slashList" :id="`composer-skill-${index}`" :key="choice.id" class="mention-option" :class="{on:index===skillIndex,'skill-option':choice.kind==='skill','preset-option':choice.kind!=='skill'}" role="option" :aria-selected="index===skillIndex" tabindex="-1" @mousedown.prevent @click="pickSuggestion(index)" @mouseenter="skillIndex=index">
+                <span class="mention-title">{{ choice.name }}</span>
+                <span v-if="choice.description" class="skill-description">{{ choice.description }}</span>
               </button>
             </div>
             <!-- @ 引用会话的候选列表：浮在输入框上面。 -->
@@ -939,7 +965,7 @@ const forking = ref(false);
               @blur="closeSuggestions"
               aria-autocomplete="list"
               :aria-controls="slash ? 'composer-skills' : undefined"
-              :aria-activedescendant="slash && skillList[skillIndex] ? `composer-skill-${skillIndex}` : undefined"
+              :aria-activedescendant="slash && slashList[skillIndex] ? `composer-skill-${skillIndex}` : undefined"
               @paste="onPaste"
               :placeholder="
                 store.busy
@@ -1021,11 +1047,12 @@ const forking = ref(false);
                   </p>
                 </div>
 
-                <button class="chip" :data-policy="store.config?.profile" @click="policyOpen = !policyOpen">
+                <button class="chip" :disabled="store.policyChanging" :data-policy="store.config?.profile" @click="policyOpen = !policyOpen">
                   <span class="chip-icon">!</span>
                   {{ policy?.label ?? t("审批") }}
                 </button>
                 <div v-if="policyOpen" class="menu" @click.stop>
+                  <p class="menu-note">{{ t("切换对后续轮次生效；当前执行保持原策略。") }}</p>
                   <button
                     v-for="profile in store.profiles"
                     :key="profile.id"

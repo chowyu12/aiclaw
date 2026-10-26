@@ -134,6 +134,7 @@ const state = reactive({
    * 跑着时不能卸会话（那一轮的事件会没有出口），轮次结束时补上这一次。
    */
   remountPending: false,
+  policyChanging: false,
   /** 正在恢复中的会话 id；界面据此显示「载入中」而不是一片空白。 */
   loadingSession: "",
   updating: false,
@@ -245,6 +246,10 @@ export const actions = {
 
     window.aiclaw.on.agentEvent((payload) => {
       const event = payload as AgentEventPayload;
+      if (event.method === "session/toolsUpdated") {
+        const updated = event.params as {sessionId:string;tools:string[];mcpStatus:Record<string,string>;foldedTools:string[]};
+        if (updated.sessionId === state.sessionId && state.sessionInfo) state.sessionInfo = {...state.sessionInfo,tools:updated.tools,mcpStatus:updated.mcpStatus,foldedTools:updated.foldedTools};
+      }
       const queued = event.params as { sessionId?: string; pending?: PendingSubmission[]; queuedRequestIds?: string[] };
       if (event.method === "session/queueUpdated" && queued.sessionId) {
         queueRevisions.set(queued.sessionId, (queueRevisions.get(queued.sessionId) ?? 0) + 1);
@@ -349,7 +354,10 @@ export const actions = {
     // 读出来再改的，而 store 是 readonly() 包过的——那些值是 Proxy，
     // 结构化克隆克隆不了，IPC 会直接抛。带原始值的 patch 一直没事，
     // 所以这个坑到有嵌套对象的配置项时才露出来。
-    state.config = (await window.aiclaw.config.write(plain(patch))) as AppConfigView;
+    if ("profile" in patch && state.policyChanging) throw new Error(t("权限正在更新，请稍后再试"));
+    if ("profile" in patch) state.policyChanging = true;
+    try { state.config = (await window.aiclaw.config.write(plain(patch))) as AppConfigView; }
+    finally { if ("profile" in patch) state.policyChanging = false; }
     setLocale(normalizeLocale(state.config.language));
     // 审批档位的名称与说明是主进程按语言给的，换了语言重新取一次。
     if ("language" in patch) state.profiles = (await window.aiclaw.profiles.list()) as typeof state.profiles;
@@ -1249,6 +1257,7 @@ export const actions = {
     audio: { name: string; data: string }[] = [],
     references: { id: string; title: string }[] = [],
   ): Promise<boolean> {
+    if (state.policyChanging) return false;
     if (!text.trim() && images.length === 0 && audio.length === 0) return false;
     // 没有会话就先开一个。删掉当前会话之后运行时仍然是 ready，输入框还能打字，
     // 早先这里直接 return——发出去石沉大海，用户看不出发生了什么。

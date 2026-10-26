@@ -1,3 +1,4 @@
+import { normalizePresets } from "../shared/presets.js";
 import type { AppConfig, RoleConfig, RoleModelConfig } from "./config.js";
 
 /** 一个角色都没配的样子。 */
@@ -19,6 +20,7 @@ const NO_ROLES: RoleConfig = {
 
 export const DEFAULT_CONFIG: AppConfig = {
   language: "en",
+  presets: [],
   providerId: 0,
   model: "",
   roles: NO_ROLES,
@@ -62,6 +64,7 @@ export function normalizeConfig(config: AppConfig): AppConfig {
   const providerId = Number(config.providerId);
   return {
     ...config,
+    presets: normalizePresets(config.presets),
     // Never elevate an older unattended configuration to full access automatically.
     profile: config.profile === "always" || config.profile === "bypass" ? config.profile : "auto",
     // 语言是后加的：旧配置里没有，按默认（英文）；只认两种取值。

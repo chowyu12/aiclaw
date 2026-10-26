@@ -18,15 +18,16 @@ import (
 )
 
 type stdioTransport struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	writeMu sync.Mutex
-	nextID  int64
-	pending map[int64]chan rpcResponse
-	pendMu  sync.Mutex
-	done    chan struct{}
-	stderr  strings.Builder
-	stderrM sync.Mutex
+	onToolsChanged func()
+	cmd            *exec.Cmd
+	stdin          io.WriteCloser
+	writeMu        sync.Mutex
+	nextID         int64
+	pending        map[int64]chan rpcResponse
+	pendMu         sync.Mutex
+	done           chan struct{}
+	stderr         strings.Builder
+	stderrM        sync.Mutex
 }
 
 func startStdio(config Config) (*stdioTransport, error) {
@@ -55,10 +56,11 @@ func startStdio(config Config) (*stdioTransport, error) {
 	}
 
 	t := &stdioTransport{
-		cmd:     cmd,
-		stdin:   stdin,
-		pending: map[int64]chan rpcResponse{},
-		done:    make(chan struct{}),
+		onToolsChanged: config.onToolsChanged,
+		cmd:            cmd,
+		stdin:          stdin,
+		pending:        map[int64]chan rpcResponse{},
+		done:           make(chan struct{}),
 	}
 	go t.readLoop(stdout)
 	go t.drainStderr(stderr)
@@ -152,6 +154,9 @@ func (t *stdioTransport) readLoop(stdout io.Reader) {
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
+			continue
+		}
+		if toolsChanged(line, t.onToolsChanged) {
 			continue
 		}
 		var resp rpcResponse

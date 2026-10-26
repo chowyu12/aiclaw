@@ -229,7 +229,12 @@ function registerIpc(): void {
   ipcMain.handle(IPC.configRead, () => store.readConfig());
   // 改配置不用重启运行时：模型、审批档位这些都是按会话下发的。
   ipcMain.handle(IPC.configWrite, async (_event, patch: Record<string, unknown>) => {
+    const previous = store.readConfig();
     const result = await store.writeConfig(patch);
+    if ("profile" in patch) {
+      try { await sessions.syncDesktopPolicy(result.profile, previous.profile); }
+      catch (error) { store.writeConfig({profile: previous.profile}); throw error; }
+    }
     // 主进程发的系统通知、对话框也跟着换语言。
     if ("language" in patch) {
       setCurrentLocale(normalizeLocale(result.language));

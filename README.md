@@ -32,6 +32,13 @@ under a custom license with use restrictions.
     Review and confirmation wait times appear separately. Unknown endpoints and thinking-only models keep their existing mode.
     Reviews still add model usage and latency. Hard guards remain.
     Older desktop unattended/default settings migrate to Default; existing channel authorizations are unchanged.
+  - Approval mode changes are acknowledged by the kernel before the menu updates. Loaded desktop
+    chats use the new mode for subsequent turns; an admitted turn keeps its original permissions.
+    Channel authorization stays separate.
+  - File-tool credential guards respect filesystem case aliases. Command previews and retained
+    outputs mask known credential values from sensitive environment variables, the active model key,
+    and credential fields in MCP configuration. This is not a guarantee to detect unknown secrets
+    generated inside a command, encoded values, or files read through unrelated tools.
   - Context is compacted before it fills up.
   - The microphone button in the composer does voice input: speech is transcribed into the box
     so you can review it before sending.
@@ -41,6 +48,13 @@ under a custom license with use restrictions.
   - Results come back automatically for it to integrate.
   - Child chats nest under their parent in the sidebar, collapsed by default.
   - See `docs/design/multi-agent.md`.
+- **Prompt presets.** Type `/presets` in the composer to manage ten local slots. Insert a saved
+  prompt with `/preset1` through `/preset10`, or search its title in the `/` menu. Selection inserts
+  text without sending and preserves trailing draft text. Sending uses the normal queue and permissions.
+- **MCP discovery.** Tool-list change notifications refresh the catalog at the next model step in
+  both direct and Code Mode. Failed refreshes keep the previous catalog and retry with a cooldown.
+  Supports stdio notifications, HTTP response SSE, and the optional Streamable HTTP GET channel
+  when advertised by the server; legacy HTTP+SSE remains unsupported.
 - **Chat references** (modeled on Codex's task mentions). Type `@` in the composer to pick
   another chat; the model reads it with `read_thread` before answering. See
   `docs/design/thread-references.md`.

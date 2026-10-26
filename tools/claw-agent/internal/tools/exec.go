@@ -272,16 +272,17 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (result stri
 
 	runErr := cmd.Run()
 
+	redact := env.commandRedactor()
 	var builder strings.Builder
 	if stdout.Len() > 0 {
-		builder.WriteString(stdout.String())
+		builder.WriteString(redact(stdout.String(), stdout.Complete))
 	}
 	if stderr.Len() > 0 {
 		if builder.Len() > 0 {
 			builder.WriteString("\n")
 		}
 		builder.WriteString("[stderr]\n")
-		builder.WriteString(stderr.String())
+		builder.WriteString(redact(stderr.String(), stderr.Complete))
 	}
 	output := OutputPreview(ctx, builder.String(), maxExecOutput, stdout.Complete && stderr.Complete && execCtx.Err() == nil && !errors.Is(runErr, exec.ErrWaitDelay), env.SaveOutput)
 

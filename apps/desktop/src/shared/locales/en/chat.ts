@@ -291,4 +291,13 @@ export const chat: Record<string, string> = {
 
   // ---------- 通用 ----------
   "未知错误": "Unknown error",
+  "切换对后续轮次生效；当前执行保持原策略。": "Changes apply to subsequent turns; the running turn keeps its original permissions.",
+  "权限正在更新，请稍后再试": "Permissions are updating. Please try again shortly.",
+  "常用提示词": "Prompt presets",
+  "管理常用提示词": "Manage prompt presets",
+  "提示词": "Prompt",
+  "位置": "Slot",
+  "未设置": "Empty",
+  "保存常用指令，在 / 菜单中插入；发送时沿用正常队列和权限。": "Save reusable instructions and insert them from the / menu. Sending uses the normal queue and permissions.",
+  "技能与常用提示词 · ↑↓ 选择，Enter / Tab 插入，Esc 关闭": "Skills and presets · ↑↓ select, Enter / Tab insert, Esc close",
 };

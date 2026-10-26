@@ -932,15 +932,15 @@ type SessionIDParams struct {
 
 // SessionConfigureParams 改一个已存在会话的模型或工作区。
 //
-// 审批策略不在这里：它变了等于换了整个会话的安全前提，而历史还留着，
-// 与其让它悄悄生效不如另起一个会话。
+// 审批策略变更只影响后续轮次；已运行的轮次保留其执行环境快照。
 //
 // 工作区在这里是因为它**本来就该能中途改**：用户开着会话聊着聊着才想起
 // 「哦这事要在那个仓库里做」，让他为此新开一个会话、把上文再说一遍，
 // 只是把一个纯粹的界面问题变成了他的负担。
 type SessionConfigureParams struct {
-	SessionID string      `json:"sessionId"`
-	Model     ModelConfig `json:"model"`
+	ApprovalPolicy ApprovalPolicy `json:"approvalPolicy,omitempty"`
+	SessionID      string         `json:"sessionId"`
+	Model          ModelConfig    `json:"model"`
 	/** 新的会话工作区。nil 表示不动；指向空串表示清掉（回到「没设置」）。 */
 	Workspace *string `json:"workspace,omitempty"`
 }

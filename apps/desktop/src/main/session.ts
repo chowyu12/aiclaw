@@ -141,6 +141,7 @@ export declare interface SessionManager {
  */
 export class SessionManager extends EventEmitter {
   private client: ClawAgentClient | null = null;
+  private readonly desktopSessions = new Set<string>();
   private readonly store: ConfigStore;
   /** 技能发现归它管——会话启动时问一次「现在有哪些启用的技能」。 */
   private readonly skills: SkillManager;
@@ -244,6 +245,7 @@ export class SessionManager extends EventEmitter {
     });
     client.on("exit", (code) => {
       this.client = null;
+      this.desktopSessions.clear();
       void this.browser.close().catch(error => this.emit("log", "app", `Browser cleanup: ${String(error)}\n`));
       this.emit("status", code === 0 ? "stopped" : "failed", this.lastStderr);
     });
@@ -362,6 +364,7 @@ export class SessionManager extends EventEmitter {
   async stop(): Promise<void> {
     const client = this.client;
     this.client = null;
+    this.desktopSessions.clear();
     try {
       await client?.stop();
     } finally {
@@ -387,6 +390,7 @@ export class SessionManager extends EventEmitter {
     this.workspace = params.workdir ?? "";
     this.skills.setWorkspace(this.workspace);
     const result = await client.sessionStart(params);
+    this.desktopSessions.add(result.sessionId);
     this.mounts = result.mcpStatus ?? {};
     return {
       sessionId: result.sessionId,
@@ -459,6 +463,7 @@ export class SessionManager extends EventEmitter {
   async resumeSession(sessionId: string): Promise<SessionInfo> {
     const client = this.requireClient();
     const result = await client.sessionResume(sessionId, await this.buildRefresh());
+    if (!sessionId.startsWith("c_")) this.desktopSessions.add(sessionId);
     // 端点与 Key 不用在这里对齐：会话记的是 providerId，内核恢复时按 id 到库里
     // 取**当前**的端点与 Key。用户改了端点，旧会话点开就是新地址。
     this.mounts = result.mcpStatus ?? {};
@@ -498,6 +503,20 @@ export class SessionManager extends EventEmitter {
       reasoningEffort: config.reasoningEffort || undefined,
       contextWindow: contextWindow || undefined,
     });
+  }
+
+  async syncDesktopPolicy(policy: ApprovalPolicy, previous: ApprovalPolicy): Promise<void> {
+    if (!this.client?.running) return;
+    const changed: string[] = [];
+    try {
+      for (const id of this.desktopSessions) {
+        await this.client.sessionConfigure(id, {model: "", baseUrl: ""}, undefined, policy);
+        changed.push(id);
+      }
+    } catch (error) {
+      for (const id of changed) await this.client.sessionConfigure(id, {model: "", baseUrl: ""}, undefined, previous);
+      throw error;
+    }
   }
 
   async sendTurn(input: {
@@ -559,8 +578,10 @@ export class SessionManager extends EventEmitter {
     return this.requireClient().sessionRename(sessionId, title);
   }
 
-  archiveSession(sessionId: string, archived: boolean): Promise<string[]> {
-    return this.requireClient().sessionArchive(sessionId, archived);
+  async archiveSession(sessionId: string, archived: boolean): Promise<string[]> {
+    const ids = await this.requireClient().sessionArchive(sessionId, archived);
+    if (archived) ids.forEach(id => this.desktopSessions.delete(id));
+    return ids;
   }
 
   listArchived(): Promise<SessionSummary[]> {
@@ -568,8 +589,10 @@ export class SessionManager extends EventEmitter {
   }
 
   /** 删会话，连同它开出的子 agent。返回删掉的全部 id。 */
-  deleteSession(sessionId: string): Promise<string[]> {
-    return this.requireClient().sessionDelete(sessionId);
+  async deleteSession(sessionId: string): Promise<string[]> {
+    const ids = await this.requireClient().sessionDelete(sessionId);
+    ids.forEach(id => this.desktopSessions.delete(id));
+    return ids;
   }
 
   approve(request: PendingApproval, approved: boolean, scope?: "once" | "session"): void {

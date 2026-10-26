@@ -498,8 +498,9 @@ export class ClawAgentClient extends EventEmitter {
     sessionId: string,
     model: ModelConfig,
     workspace?: string,
+    approvalPolicy?: import("./protocol.js").ApprovalPolicy,
   ): Promise<{ model: ModelConfig }> {
-    return this.transport.request("session/configure", { sessionId, model, workspace });
+    return this.transport.request("session/configure", { sessionId, model, workspace, approvalPolicy });
   }
 
   /**

@@ -87,7 +87,7 @@ func (p *ShellPool) Run(
 	defer session.mu.Unlock()
 	session.lastUsed = time.Now()
 
-	out, err := session.run(ctx, command, timeout, env.SaveOutput)
+	out, err := session.run(ctx, command, timeout, env.SaveOutput, env.commandRedactor())
 	if err != nil {
 		// 会话已经不可用了（shell 退了、超时被杀），别留着让下一次调用再撞一次。
 		p.drop(session.id)
@@ -205,7 +205,7 @@ func startShellSession(env *Env) (*shellSession, error) {
 	}, nil
 }
 
-func (s *shellSession) run(ctx context.Context, command string, timeout time.Duration, save OutputSaver) (string, error) {
+func (s *shellSession) run(ctx context.Context, command string, timeout time.Duration, save OutputSaver, redact func(string, bool) string) (string, error) {
 	// 命令与哨兵之间用 `;` 而不是 `&&`：命令失败了也要打印哨兵，
 	// 否则一条失败的命令会让这次读取一直等到超时。
 	script := fmt.Sprintf("%s\nprintf '\\n%s %%s\\n' \"$?\"\n", command, s.sentinel)
@@ -226,12 +226,12 @@ func (s *shellSession) run(ctx context.Context, command string, timeout time.Dur
 			if marker := strings.Index(line, s.sentinel); marker >= 0 {
 				_, _ = builder.Write([]byte(line[:marker]))
 				code := strings.TrimSpace(line[marker+len(s.sentinel):])
-				done <- result{text: OutputPreview(ctx, builder.String(), maxExecOutput, builder.Complete, save), code: code}
+				done <- result{text: OutputPreview(ctx, redact(builder.String(), builder.Complete), maxExecOutput, builder.Complete, save), code: code}
 				return
 			}
 			_, _ = builder.Write([]byte(line))
 			if err != nil {
-				done <- result{text: OutputPreview(ctx, builder.String(), maxExecOutput, builder.Complete, save), err: err}
+				done <- result{text: OutputPreview(ctx, redact(builder.String(), builder.Complete), maxExecOutput, builder.Complete, save), err: err}
 				return
 			}
 		}

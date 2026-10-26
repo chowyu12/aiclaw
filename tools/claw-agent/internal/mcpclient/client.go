@@ -14,6 +14,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
@@ -54,7 +56,8 @@ func (t ToolDef) ReadOnly() bool {
 }
 
 type Config struct {
-	AccessToken func(context.Context) (string, error)
+	onToolsChanged func()
+	AccessToken    func(context.Context) (string, error)
 	// Transport 为空时按有没有 URL 推断：有 URL 走 HTTP，否则 stdio。
 	Transport TransportKind
 
@@ -84,8 +87,14 @@ type transport interface {
 }
 
 type Client struct {
-	transport transport
-	tools     []ToolDef
+	transport  transport
+	toolsMu    sync.RWMutex
+	tools      []ToolDef
+	version    uint64
+	changed    atomic.Uint64
+	applied    uint64
+	refreshMu  sync.Mutex
+	retryAfter time.Time
 }
 
 type rpcRequest struct {
@@ -122,6 +131,8 @@ func Start(ctx context.Context, config Config) (*Client, error) {
 		}
 	}
 
+	client := &Client{}
+	config.onToolsChanged = func() { client.changed.Add(1) }
 	var (
 		conn transport
 		err  error
@@ -138,38 +149,136 @@ func Start(ctx context.Context, config Config) (*Client, error) {
 		return nil, err
 	}
 
-	client := &Client{transport: conn}
+	client.transport = conn
 
 	startCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if _, err := conn.Call(startCtx, "initialize", map[string]any{
+	initialized, err := conn.Call(startCtx, "initialize", map[string]any{
 		"protocolVersion": protocolVersion,
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "claw-agent", "version": "0.1.0"},
-	}); err != nil {
+	})
+	if err != nil {
 		client.Close()
 		return nil, fmt.Errorf("%s%w%s", i18n.D("MCP 握手失败："), err, conn.Diagnostics())
 	}
 	conn.Notify("notifications/initialized", nil)
 
-	raw, err := conn.Call(startCtx, "tools/list", map[string]any{})
+	generation := client.changed.Load()
+	list, err := client.listTools(startCtx)
 	if err != nil {
 		client.Close()
-		return nil, fmt.Errorf("%s%w%s", i18n.D("拉取工具清单失败："), err, conn.Diagnostics())
+		return nil, fmt.Errorf("%s%w", i18n.D("拉取工具清单失败："), err)
 	}
-	var list struct {
-		Tools []ToolDef `json:"tools"`
+	client.tools, client.version, client.applied = list, 1, generation
+	var capabilities struct {
+		Capabilities struct {
+			Tools struct {
+				ListChanged bool `json:"listChanged"`
+			} `json:"tools"`
+		} `json:"capabilities"`
 	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		client.Close()
-		return nil, fmt.Errorf("%s%w", i18n.D("工具清单格式不对："), err)
+	_ = json.Unmarshal(initialized, &capabilities)
+	if http, ok := conn.(*httpTransport); ok && capabilities.Capabilities.Tools.ListChanged {
+		http.startNotifications()
 	}
-	client.tools = list.Tools
 	return client, nil
 }
 
-func (c *Client) Tools() []ToolDef { return c.tools }
+func (c *Client) Catalog() ([]ToolDef, uint64) {
+	c.toolsMu.RLock()
+	defer c.toolsMu.RUnlock()
+	return append([]ToolDef(nil), c.tools...), c.version
+}
+func (c *Client) Tools() []ToolDef { tools, _ := c.Catalog(); return tools }
+func (c *Client) Version() uint64  { c.toolsMu.RLock(); defer c.toolsMu.RUnlock(); return c.version }
+
+// Refresh only after a notification. Failures keep the last usable catalog and
+// back off; shared connections coalesce concurrent refresh requests.
+func (c *Client) RefreshTools(ctx context.Context) error {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+	if c.changed.Load() == c.applied || time.Now().Before(c.retryAfter) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for attempt := 0; attempt < 3; attempt++ {
+		generation := c.changed.Load()
+		list, err := c.listTools(ctx)
+		if err != nil {
+			c.retryAfter = time.Now().Add(time.Second)
+			return err
+		}
+		if generation != c.changed.Load() {
+			continue
+		}
+		c.toolsMu.Lock()
+		c.tools = list
+		c.version++
+		c.toolsMu.Unlock()
+		c.applied = generation
+		return nil
+	}
+	c.retryAfter = time.Now().Add(time.Second)
+	return fmt.Errorf("MCP tool list changed repeatedly during refresh")
+}
+
+func (c *Client) listTools(ctx context.Context) ([]ToolDef, error) {
+	result := []ToolDef{}
+	cursor := ""
+	seen := map[string]bool{}
+	for page := 0; page < 100; page++ {
+		params := map[string]any{}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		raw, err := c.transport.Call(ctx, "tools/list", params)
+		if err != nil {
+			return nil, err
+		}
+		var list struct {
+			Tools      []ToolDef `json:"tools"`
+			NextCursor string    `json:"nextCursor"`
+		}
+		if err = json.Unmarshal(raw, &list); err != nil {
+			return nil, err
+		}
+		for _, tool := range list.Tools {
+			if tool.Name == "" || seen[tool.Name] {
+				return nil, fmt.Errorf("invalid or duplicate MCP tool name")
+			}
+			seen[tool.Name] = true
+		}
+		result = append(result, list.Tools...)
+		if len(result) > 10000 {
+			return nil, fmt.Errorf("MCP catalog too large")
+		}
+		if list.NextCursor == "" {
+			return result, nil
+		}
+		if list.NextCursor == cursor {
+			return nil, fmt.Errorf("MCP cursor did not advance")
+		}
+		cursor = list.NextCursor
+	}
+	return nil, fmt.Errorf("MCP catalog page limit exceeded")
+}
+
+func toolsChanged(raw []byte, notify func()) bool {
+	var message struct {
+		Method string           `json:"method"`
+		ID     *json.RawMessage `json:"id"`
+	}
+	if json.Unmarshal(raw, &message) != nil || message.ID != nil || message.Method != "notifications/tools/list_changed" {
+		return false
+	}
+	if notify != nil {
+		notify()
+	}
+	return true
+}
 
 // CallTool 执行一次工具调用。
 //

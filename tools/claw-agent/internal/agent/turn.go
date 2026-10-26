@@ -339,6 +339,18 @@ func (s *Session) turnEnv(turnID string, emitter Emitter) *tools.Env {
 		SessionID:      s.ID,
 		TurnID:         turnID,
 	}
+	model := s.config.Model
+	if key, err := s.keyFor(&model); err == nil {
+		env.SecretValues = append(env.SecretValues, key)
+	}
+	for _, server := range s.config.MCPServers {
+		for name, value := range server.Env {
+			env.AddSecret(name, value)
+		}
+		for name, value := range server.Headers {
+			env.AddSecret(name, value)
+		}
+	}
 	if env.Policy == protocol.ApprovalAuto {
 		env.Review = s.approvalReviewer(turnID, emitter, s.llm, s.config.Model)
 		env.Approve = s.approvalWaiter(turnID, emitter)
@@ -350,6 +362,9 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 	var total protocol.Usage
 	// 步骤序号按轮次重置：用户看的是「这一轮做了几步」，不是自会话开始以来的累计。
 	steps := &stepCounter{}
+	s.mu.Lock()
+	s.refreshSystemPromptLocked()
+	s.mu.Unlock()
 	env := s.turnEnv(turnID, emitter)
 	if usage, _ := ctx.Value(skillUsageKey{}).(*skillUsage); usage != nil {
 		env.SkillLoaded = usage.loaded
@@ -547,6 +562,7 @@ func (s *Session) sample(
 ) (llm.Response, error) {
 	compacted := false
 	for attempt := 1; ; attempt++ {
+		s.refreshMCP(ctx, turnID, emitter)
 		response, err := s.callModel(ctx, turnID, emitter, steps, round)
 		total.InputTokens += response.Usage.InputTokens
 		total.OutputTokens += response.Usage.OutputTokens

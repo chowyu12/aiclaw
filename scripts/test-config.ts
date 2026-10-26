@@ -61,3 +61,16 @@ test("老配置里没有沙箱这一项时，算它开着", () => {
 test("明确关掉的要保持关着——不然这个开关等于没有", () => {
   assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, sandboxCommands: false }).sandboxCommands, false);
 });
+
+test("prompt presets migrate safely and preserve bounded explicit slot contents", async () => {
+  const {normalizePresets, presetCandidates, applyPreset} = await import("../apps/desktop/src/shared/presets.ts");
+  assert.deepEqual(normalizePresets(null),[]);
+  assert.deepEqual(normalizeConfig({...DEFAULT_CONFIG,presets:undefined} as never).presets,[]);
+  const list = normalizePresets([{slot:2,title:"Review",text:"Check code\nReport bugs"},{slot:2,title:"duplicate",text:"ignore"},{slot:11,title:"bad",text:"ignore"},{slot:1,title:"SQL",text:"Explain SQL"}]);
+  assert.deepEqual(list.map(p => p.slot),[1,2]);
+  assert.equal(presetCandidates("preset2",list)[0]?.title,"Review");
+  assert.equal(presetCandidates("review",list).length,1);
+  assert.deepEqual(applyPreset("/preset2 keep this draft",0,8,list[1]!),{text:"Check code\nReport bugs keep this draft",caret:22});
+  const long=normalizePresets([{slot:1,title:"a".repeat(100),text:"x".repeat(25000)}])[0]!;
+  assert.equal(long.title.length,80);assert.equal(long.text.length,20000);
+});

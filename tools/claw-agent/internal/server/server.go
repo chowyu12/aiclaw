@@ -353,6 +353,21 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 			s.writeError(f.ID, codeInvalidParams, i18n.D("会话不存在或尚未恢复：{id}", "id", params.SessionID))
 			return
 		}
+		if params.ApprovalPolicy != "" {
+			// Hold queue dispatch through validation and the durable policy checkpoint.
+			s.submissionMu.Lock()
+			defer s.submissionMu.Unlock()
+			if strings.HasPrefix(params.SessionID, channelSessionPrefix) || params.Workspace != nil || params.Model.Model != "" {
+				s.writeError(f.ID, codeInvalidParams, "policy changes require a desktop session and a policy-only request")
+				return
+			}
+			if err := session.ConfigureApproval(ctx, params.ApprovalPolicy); err != nil {
+				s.writeError(f.ID, codeInvalidParams, err.Error())
+				return
+			}
+			s.writeResult(f.ID, map[string]any{"model": session.Model()})
+			return
+		}
 		if params.Workspace != nil {
 			if err := session.SetWorkspace(*params.Workspace); err != nil {
 				s.writeError(f.ID, codeInvalidParams, err.Error())

@@ -110,7 +110,7 @@ func (e *Env) Protected(path string) bool {
 		// 名单里的路径也要解析软链：传进来的 path 是解析过的真实路径，
 		// 两边不在同一个形态上比，前缀判断会静默失效。macOS 上 /var 就是
 		// /private/var 的软链，这条不做的话整份名单在临时目录里全不生效。
-		if within(resolveLoose(filepath.Clean(candidate)), path) {
+		if protectedWithin(resolveLoose(filepath.Clean(candidate)), path) {
 			return true
 		}
 	}
@@ -245,4 +245,40 @@ func resolveLoose(path string) string {
 		return path
 	}
 	return filepath.Join(resolveLoose(parent), base)
+}
+
+// Case aliases must follow the filesystem, not the spelling supplied by a tool.
+// Only probe when a case-folded match could change the verdict; never create files.
+func protectedWithin(root, target string) bool {
+	if within(root, target) {
+		return true
+	}
+	if !within(strings.ToLower(root), strings.ToLower(target)) {
+		return false
+	}
+	existing := root
+	for {
+		info, err := os.Stat(existing)
+		if err == nil {
+			name := filepath.Base(existing)
+			alternate := strings.ToUpper(name)
+			if alternate == name {
+				alternate = strings.ToLower(name)
+			}
+			if alternate != name {
+				other, err := os.Stat(filepath.Join(filepath.Dir(existing), alternate))
+				if err == nil {
+					return os.SameFile(info, other)
+				}
+				return !os.IsNotExist(err) // Fail closed if the alias cannot be checked.
+			}
+		} else if !os.IsNotExist(err) {
+			return true
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return true
+		}
+		existing = parent
+	}
 }

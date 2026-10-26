@@ -93,9 +93,11 @@ type Session struct {
 	UpdatedAt time.Time
 	Title     string
 
-	config   protocol.SessionStartParams
-	messages []llm.Message
-	registry *tools.Registry
+	config       protocol.SessionStartParams
+	messages     []llm.Message
+	registry     *tools.Registry
+	codeModeBase *tools.Registry
+	mcpBindings  map[string]*mcpBinding
 	// mcpKeys 是这个会话从连接池里借走的那些连接。Close 时归还，
 	// 最后一个用完的会话负责真正关掉它——见 mcppool.go。
 	mcpKeys []string
@@ -644,7 +646,7 @@ func registerBuiltins(registry *tools.Registry, enabled []string) error {
 			}
 		}
 	}
-	*registry = *filtered
+	_ = registry.Replace(filtered.List())
 	return nil
 }
 
@@ -737,7 +739,13 @@ func (s *Session) mountMCP(
 	mounted := 0
 	mountedTokens := 0
 	var mountedDefs []mcpclient.ToolDef
-	for _, def := range client.Tools() {
+	target := s.registry
+	if s.codeModeBase != nil {
+		target = s.codeModeBase
+	}
+	var names []string
+	defs, version := client.Catalog()
+	for _, def := range defs {
 		if len(allow) > 0 && !allow[def.Name] {
 			continue
 		}
@@ -746,7 +754,7 @@ func (s *Session) mountMCP(
 		toolName := def.Name
 		mcp := client
 		effect := mcpToolEffect(config.Trusted, def)
-		err := s.registry.Register(tools.Tool{
+		err := target.Register(tools.Tool{
 			Name:        qualified,
 			Description: def.Description,
 			Schema:      def.InputSchema,
@@ -769,12 +777,19 @@ func (s *Session) mountMCP(
 			s.mcpStatus[name] = i18n.D("部分工具重名被跳过：{err}", "err", err)
 			continue
 		}
+		names = append(names, qualified)
 		mounted++
 		mountedDefs = append(mountedDefs, def)
 	}
 	mountedTokens = estimateToolTokens(mountedDefs)
 	s.mcpMounted[name] = mounted
-	s.mcpKeys = append(s.mcpKeys, key)
+	if key != "" {
+		s.mcpKeys = append(s.mcpKeys, key)
+	}
+	if s.mcpBindings == nil {
+		s.mcpBindings = map[string]*mcpBinding{}
+	}
+	s.mcpBindings[name] = &mcpBinding{client: client, config: config, names: names, version: version}
 	if _, failed := s.mcpStatus[name]; !failed {
 		s.mcpStatus[name] = i18n.D(
 			"已挂载 {n} 个工具（约占 {tokens} 上下文）", "n", mounted, "tokens", formatTokens(mountedTokens),
@@ -1142,7 +1157,15 @@ func (s *Session) currentEmitter() Emitter {
 func (s *Session) Tools() []string { return s.registry.Names() }
 
 // MCPStatus 返回各 MCP server 的挂载结果。
-func (s *Session) MCPStatus() map[string]string { return s.mcpStatus }
+func (s *Session) MCPStatus() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]string{}
+	for k, v := range s.mcpStatus {
+		out[k] = v
+	}
+	return out
+}
 
 // MountsMatch 报告这个会话挂载时用的配置是不是就是 want。
 //
@@ -1444,4 +1467,24 @@ func (s *Session) Guard(paths ...string) {
 		seen[path] = true
 		s.config.ProtectedPaths = append(s.config.ProtectedPaths, path)
 	}
+}
+
+// ConfigureApproval does not mutate the environment of an admitted turn.
+func (s *Session) ConfigureApproval(ctx context.Context, policy protocol.ApprovalPolicy) error {
+	if policy != protocol.ApprovalAuto && policy != protocol.ApprovalAlways && policy != protocol.ApprovalBypass {
+		return fmt.Errorf("invalid desktop approval policy")
+	}
+	s.mu.Lock()
+	previous := s.config.ApprovalPolicy
+	s.config.ApprovalPolicy, s.applied.ApprovalPolicy = policy, policy
+	s.mu.Unlock()
+	if s.db != nil {
+		if err := s.Save(ctx, s.db); err != nil {
+			s.mu.Lock()
+			s.config.ApprovalPolicy, s.applied.ApprovalPolicy = previous, previous
+			s.mu.Unlock()
+			return err
+		}
+	}
+	return nil
 }
