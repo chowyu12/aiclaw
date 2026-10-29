@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -136,5 +137,25 @@ func TestReadErrorBodyKeepsRetryAfterAndCode(t *testing.T) {
 	}
 	if apiErr.RetryAfter != 7*time.Second || apiErr.Code != "rate_limit_exceeded" {
 		t.Errorf("RetryAfter=%v Code=%q", apiErr.RetryAfter, apiErr.Code)
+	}
+}
+
+func TestMissingModelIsTerminalAcrossStatusesAndStream(t *testing.T) {
+	for _, status := range []int{0, 400, 403, 404, 429, 500} {
+		e := &Error{Status: status, Code: "model_not_found invalid_request_error", Message: "fixture unavailable"}
+		if e.Retryable() {
+			t.Fatalf("missing model retried for HTTP %d", status)
+		}
+	}
+	for _, frame := range []string{
+		`{"error":{"message":"fixture unavailable","code":"model_not_found"}}`,
+		`{"type":"error","message":"fixture unavailable","code":"model_not_found"}`,
+		`{"type":"response.failed","response":{"error":{"message":"fixture unavailable","code":"model_not_found"}}}`,
+	} {
+		_, err := consumeStream(strings.NewReader("data: "+frame+"\n\n"), nil)
+		var e *Error
+		if !errors.As(err, &e) || e.Code != "model_not_found" || e.Message != "fixture unavailable" || e.Retryable() {
+			t.Fatalf("stream classification: %+v", err)
+		}
 	}
 }

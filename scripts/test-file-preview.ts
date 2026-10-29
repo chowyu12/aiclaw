@@ -155,3 +155,19 @@ test("file find is literal, case-insensitive and bounded", () => {
  assert.equal(textMatches("中文中文","中文").matches.length,2);assert.equal(textMatches("aaa","",2).matches.length,0);
  assert.equal(textMatches("aaa","a",2).truncated,true);
 });
+
+test("memory import deduplicates exact entries and preserves existing text", async () => {
+  const {memoryImportEntries,mergeMemoryImport} = await import("../apps/desktop/src/shared/memory.ts");
+  const original = "# Existing\n- Keep this\n  continuation\n";
+  const incoming = "- Keep this\n  continuation\n* New fact\n- New fact\n- Another fact\n";
+  const entries = memoryImportEntries(original,incoming);
+  assert.equal(entries.length,2);
+  const merged = mergeMemoryImport(original,[entries[0]!]);
+  assert.ok(merged.startsWith(original));
+  assert.ok(merged.includes("New fact"));
+  assert.ok(!merged.includes("Another fact"));
+  assert.deepEqual(memoryImportEntries(merged,incoming),["- Another fact\n"]);
+  assert.equal(mergeMemoryImport(original,[]),original);
+  assert.equal(mergeMemoryImport("- Existing",["- New\n"]),"- Existing\n- New\n");
+  assert.equal(memoryImportEntries("", "\n\n").length,0);
+});

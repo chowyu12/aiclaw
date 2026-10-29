@@ -859,8 +859,9 @@ type MCPToolInfo struct {
 }
 
 type SessionStartResult struct {
-	SessionID string   `json:"sessionId"`
-	Tools     []string `json:"tools"`
+	ReasoningEffort string   `json:"reasoningEffort"`
+	SessionID       string   `json:"sessionId"`
+	Tools           []string `json:"tools"`
 	/** MCP server 挂载结果，失败的在这里带原因，不让整个会话起不来。 */
 	MCPStatus map[string]string `json:"mcpStatus,omitempty"`
 	/**
@@ -938,9 +939,10 @@ type SessionIDParams struct {
 // 「哦这事要在那个仓库里做」，让他为此新开一个会话、把上文再说一遍，
 // 只是把一个纯粹的界面问题变成了他的负担。
 type SessionConfigureParams struct {
-	ApprovalPolicy ApprovalPolicy `json:"approvalPolicy,omitempty"`
-	SessionID      string         `json:"sessionId"`
-	Model          ModelConfig    `json:"model"`
+	ReasoningEffort *string        `json:"reasoningEffort,omitempty"`
+	ApprovalPolicy  ApprovalPolicy `json:"approvalPolicy,omitempty"`
+	SessionID       string         `json:"sessionId"`
+	Model           ModelConfig    `json:"model"`
 	/** 新的会话工作区。nil 表示不动；指向空串表示清掉（回到「没设置」）。 */
 	Workspace *string `json:"workspace,omitempty"`
 }

@@ -1451,6 +1451,9 @@ func TestReasoningEffortIsDroppedWhenRejected(t *testing.T) {
 			t.Errorf("第 %d 次请求不该再带 reasoning_effort", index+1)
 		}
 	}
+	if !emitter.find("session/reasoningUpdated", "reasoningEffort") {
+		t.Error("missing fallback notification")
+	}
 	if !emitter.find(protocol.NotifyItemCompleted, "好的。") {
 		t.Error("去掉参数之后这一轮应正常完成")
 	}

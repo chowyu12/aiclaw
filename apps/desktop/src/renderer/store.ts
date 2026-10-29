@@ -72,6 +72,7 @@ const state = reactive({
   /** 当前会话用的模型与模型服务。与配置页的默认值分开：切模型只影响当前会话。 */
   model: "",
   providerId: 0,
+  modelChanging: false,
   /**
    * 每个会话自己的时间线与运行状态，按 sessionId 存。
    *
@@ -246,6 +247,10 @@ export const actions = {
 
     window.aiclaw.on.agentEvent((payload) => {
       const event = payload as AgentEventPayload;
+      if (event.method === "session/reasoningUpdated") {
+        const updated = event.params as {sessionId: string; reasoningEffort: string};
+        if (updated.sessionId === state.sessionId && state.sessionInfo) state.sessionInfo = {...state.sessionInfo, reasoningEffort: updated.reasoningEffort};
+      }
       if (event.method === "session/toolsUpdated") {
         const updated = event.params as {sessionId:string;tools:string[];mcpStatus:Record<string,string>;foldedTools:string[]};
         if (updated.sessionId === state.sessionId && state.sessionInfo) state.sessionInfo = {...state.sessionInfo,tools:updated.tools,mcpStatus:updated.mcpStatus,foldedTools:updated.foldedTools};
@@ -1219,7 +1224,7 @@ export const actions = {
    * 会让内核要么过早压缩、要么撑爆窗口。这里只知道默认模型的窗口，别的传 0。
    */
   async switchModel(providerId: number, modelId: string, contextWindow = 0): Promise<void> {
-    if (!modelId || (modelId === state.model && providerId === state.providerId)) return;
+    if (state.modelChanging || !modelId || (modelId === state.model && providerId === state.providerId)) return;
     const previous = { model: state.model, providerId: state.providerId };
     state.model = modelId;
     state.providerId = providerId;
@@ -1229,12 +1234,14 @@ export const actions = {
     const isDefault = modelId === state.config?.model && providerId === state.config?.providerId;
     const sessionId = state.sessionId;
     const limit = contextWindow || (isDefault ? (state.config?.contextWindow ?? 0) : 0);
+    state.modelChanging = true;
     try {
       await window.aiclaw.session.configure({
         sessionId,
         providerId,
         model: modelId,
         contextWindow: limit,
+        reasoningEffort: state.sessionInfo?.reasoningEffort ?? state.config?.reasoningEffort,
       });
       if (state.sessionId === sessionId && state.sessionInfo?.sessionId === sessionId) state.sessionInfo = { ...state.sessionInfo, model: modelId, providerId };
       await actions.refreshSessions();
@@ -1243,7 +1250,20 @@ export const actions = {
       state.model = previous.model;
       state.providerId = previous.providerId;
       state.error = t("切换模型失败：{error}", { error: describeError(error) });
+    } finally {
+      state.modelChanging = false;
     }
+  },
+
+  async switchReasoning(effort: string): Promise<void> {
+    const sessionId = state.sessionId;
+    if (!sessionId || state.modelChanging) return;
+    state.modelChanging = true;
+    try {
+      const applied = await window.aiclaw.session.reasoning(sessionId,effort) as string;
+      if (state.sessionId === sessionId && state.sessionInfo) state.sessionInfo = {...state.sessionInfo,reasoningEffort:applied};
+    } catch (error) { state.error = t("切换推理强度失败：{error}", {error:describeError(error)}); }
+    finally { state.modelChanging = false; }
   },
 
   // ---------- 对话 ----------

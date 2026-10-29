@@ -107,10 +107,12 @@ type Session struct {
 	// folded 是代码模式下收进 exec 的工具名，给宿主展示用。
 	folded []string
 
-	runMu     sync.Mutex
-	finishing bool
-	mu        sync.Mutex
-	turnCount int
+	runMu          sync.Mutex
+	finishing      bool
+	wakeGeneration uint64
+	wakeStopped    bool
+	mu             sync.Mutex
+	turnCount      int
 	// cancelTurn 是当前轮次的取消函数；没有进行中的轮次时为 nil。
 	cancelTurn context.CancelFunc
 	// User steering cancels the active sampling request or tool batch, not the turn.
@@ -1140,6 +1142,29 @@ func (s *Session) Configure(model protocol.ModelConfig) error {
 	return nil
 }
 
+// Only the next sampling snapshot sees this change; an in-flight request keeps
+// its original effort and client. Keep context usage and other model fields.
+func (s *Session) ConfigureReasoning(ctx context.Context, effort string) error {
+	switch effort {
+	case "", "low", "medium", "high":
+	default:
+		return fmt.Errorf("unsupported reasoning effort: %s", effort)
+	}
+	s.mu.Lock()
+	previous := s.config.Model.ReasoningEffort
+	s.config.Model.ReasoningEffort = effort
+	s.mu.Unlock()
+	if s.db != nil {
+		if err := s.Save(ctx, s.db); err != nil {
+			s.mu.Lock()
+			s.config.Model.ReasoningEffort = previous
+			s.mu.Unlock()
+			return err
+		}
+	}
+	return nil
+}
+
 // Model 返回会话当前的模型配置。
 func (s *Session) Model() protocol.ModelConfig {
 	s.mu.Lock()
@@ -1215,12 +1240,7 @@ func (s *Session) Busy() bool {
 
 // Close 关闭所有 MCP 子进程。
 func (s *Session) Close() {
-	s.mu.Lock()
-	cancel := s.cancelTurn
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
+	s.Interrupt()
 	if s.shells != nil {
 		s.shells.Close()
 	}
@@ -1232,14 +1252,32 @@ func (s *Session) Close() {
 	s.mcpKeys = nil
 }
 
-// Interrupt 取消进行中的轮次。没有进行中的轮次时无副作用。
+// Interrupt also invalidates reserved automatic wakes; mail stays queued until
+// an explicit turn or follow-up reopens admission.
 func (s *Session) Interrupt() {
 	s.mu.Lock()
+	s.wakeGeneration++
+	s.wakeStopped = true
 	cancel := s.cancelTurn
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
+}
+
+func (s *Session) ReserveWake() (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.wakeGeneration, !s.wakeStopped
+}
+
+// A new explicit follow-up reopens admission at scheduling time, not when its
+// goroutine eventually acquires runMu. A later stop can still invalidate it.
+func (s *Session) ReserveFollowup() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wakeStopped = false
+	return s.wakeGeneration
 }
 
 // ---------- 持久化 ----------

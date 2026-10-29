@@ -40,6 +40,7 @@ export interface AgentEventPayload {
 }
 
 export interface SessionStartView {
+  reasoningEffort?: string;
   sessionId: string;
   tools: string[];
   mcpStatus: Record<string, string>;

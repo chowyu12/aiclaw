@@ -11,3 +11,19 @@ export function memoryEntries(content: string): string[] {
   }
   return entries;
 }
+
+/** Exact textual deduplication only; preserve the user's existing text and dates. */
+export function memoryImportEntries(existing: string, incoming: string): string[] {
+  const key = (entry: string) => entry.trim().replace(/^[-*]\s+/, "").replace(/\s+/g," ");
+  const seen = new Set(memoryEntries(existing).map(key));
+  return memoryEntries(incoming).filter(entry => {
+    const id = key(entry);
+    if (!id || seen.has(id)) return false;
+    seen.add(id); return true;
+  });
+}
+
+export function mergeMemoryImport(existing: string, selected: readonly string[]): string {
+  const additions = memoryImportEntries(existing, selected.join("\n"));
+  return existing + (existing && !existing.endsWith("\n") && additions.length ? "\n" : "") + additions.map(entry=>entry.trimEnd()+"\n").join("");
+}

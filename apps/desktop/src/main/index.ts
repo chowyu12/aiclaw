@@ -328,9 +328,10 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionDelete, (_event, sessionId: string) => sessions.deleteSession(sessionId));
   ipcMain.handle(
     IPC.sessionConfigure,
-    (_event, input: { sessionId: string; providerId: number; model: string; contextWindow: number }) =>
-      sessions.configureSession(input.sessionId, input.providerId, input.model, input.contextWindow),
+    (_event, input: { sessionId: string; providerId: number; model: string; contextWindow: number; reasoningEffort?:string }) =>
+      sessions.configureSession(input.sessionId, input.providerId, input.model, input.contextWindow, input.reasoningEffort),
   );
+  ipcMain.handle(IPC.sessionReasoning, (_event, input: {sessionId:string;effort:string}) => sessions.configureReasoning(input.sessionId,input.effort));
 
   ipcMain.handle(IPC.providerList, () => sessions.listProviders());
   ipcMain.handle(IPC.providerCreate, (_event, params) => sessions.createProvider(params));
@@ -430,6 +431,13 @@ function registerIpc(): void {
     const session = (await sessions.listSessions()).find(session => session.id === input.sessionId && !session.archivedAt);
     if (!session?.workdir) throw new Error(tr("找不到记忆所属的会话。"));
     return saveMemoryDocument(join(session.workdir, ".aiclaw", "memory.md"), session.workdir, [store.dataDir], input);
+  });
+  ipcMain.handle(IPC.memoryImportRead, async () => {
+    const result = await dialog.showOpenDialog({properties:["openFile"],filters:[{name:"Memory",extensions:["md","markdown","txt"]}]});
+    if (result.canceled || !result.filePaths[0]) return null;
+    const preview = readTextPreview(result.filePaths[0], {base:store.homeDir,protectedPaths:[store.dataDir]});
+    if (!preview) throw new Error(tr("请选择 UTF-8 文本或 Markdown 文件。"));
+    return {path:preview.path,content:preview.content};
   });
   ipcMain.handle(IPC.filePreviewLayout, (_event, open: boolean) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;

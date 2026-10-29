@@ -357,11 +357,25 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 			// Hold queue dispatch through validation and the durable policy checkpoint.
 			s.submissionMu.Lock()
 			defer s.submissionMu.Unlock()
-			if strings.HasPrefix(params.SessionID, channelSessionPrefix) || params.Workspace != nil || params.Model.Model != "" {
+			if strings.HasPrefix(params.SessionID, channelSessionPrefix) || params.Workspace != nil || params.Model.Model != "" || params.ReasoningEffort != nil {
 				s.writeError(f.ID, codeInvalidParams, "policy changes require a desktop session and a policy-only request")
 				return
 			}
 			if err := session.ConfigureApproval(ctx, params.ApprovalPolicy); err != nil {
+				s.writeError(f.ID, codeInvalidParams, err.Error())
+				return
+			}
+			s.writeResult(f.ID, map[string]any{"model": session.Model()})
+			return
+		}
+		if params.ReasoningEffort != nil {
+			if strings.HasPrefix(params.SessionID, channelSessionPrefix) || params.Workspace != nil || params.Model.Model != "" {
+				s.writeError(f.ID, codeInvalidParams, "reasoning changes require a desktop session and a reasoning-only request")
+				return
+			}
+			s.submissionMu.Lock()
+			defer s.submissionMu.Unlock()
+			if err := session.ConfigureReasoning(ctx, *params.ReasoningEffort); err != nil {
 				s.writeError(f.ID, codeInvalidParams, err.Error())
 				return
 			}
@@ -513,14 +527,15 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 		s.options.Logf("保存会话失败：%v", err)
 	}
 	s.writeResult(f.ID, protocol.SessionStartResult{
-		SessionID:   id,
-		Tools:       session.Tools(),
-		MCPStatus:   session.MCPStatus(),
-		Model:       session.Model().Model,
-		ProviderID:  session.Model().ProviderID,
-		Skills:      session.Skills(),
-		FoldedTools: session.FoldedTools(),
-		Workspace:   session.Workspace(),
+		SessionID:       id,
+		Tools:           session.Tools(),
+		MCPStatus:       session.MCPStatus(),
+		Model:           session.Model().Model,
+		ProviderID:      session.Model().ProviderID,
+		ReasoningEffort: session.Model().ReasoningEffort,
+		Skills:          session.Skills(),
+		FoldedTools:     session.FoldedTools(),
+		Workspace:       session.Workspace(),
 	})
 }
 
@@ -561,8 +576,8 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 			s.writeResult(f.ID, protocol.SessionStartResult{
 				SessionID: existing.ID, Tools: existing.Tools(),
 				MCPStatus: existing.MCPStatus(), Model: existing.Model().Model,
-				ProviderID: existing.Model().ProviderID,
-				Skills:     existing.Skills(), FoldedTools: existing.FoldedTools(), Workspace: existing.Workspace(),
+				ProviderID: existing.Model().ProviderID, ReasoningEffort: existing.Model().ReasoningEffort,
+				Skills: existing.Skills(), FoldedTools: existing.FoldedTools(), Workspace: existing.Workspace(),
 			})
 			return
 		}
@@ -599,8 +614,8 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 	s.writeResult(f.ID, protocol.SessionStartResult{
 		SessionID: session.ID, Tools: session.Tools(),
 		MCPStatus: session.MCPStatus(), Model: session.Model().Model,
-		ProviderID: session.Model().ProviderID,
-		Skills:     session.Skills(), FoldedTools: session.FoldedTools(), Workspace: session.Workspace(),
+		ProviderID: session.Model().ProviderID, ReasoningEffort: session.Model().ReasoningEffort,
+		Skills: session.Skills(), FoldedTools: session.FoldedTools(), Workspace: session.Workspace(),
 	})
 }
 

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -71,12 +72,27 @@ func startHTTP(config Config) (*httpTransport, error) {
 }
 
 func (t *httpTransport) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if t.closed.Load() {
 		return nil, i18n.E("MCP server 已关闭")
 	}
 	id := t.nextID.Add(1)
-	resp, err := t.post(ctx, rpcRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}, &id)
+	var sent atomic.Bool
+	requestCtx := httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{WroteRequest: func(info httptrace.WroteRequestInfo) { sent.Store(info.Err == nil) }})
+	resp, err := t.post(requestCtx, rpcRequest{JSONRPC: "2.0", ID: &id, Method: method, Params: params}, &id)
 	if err != nil {
+		if ctx.Err() != nil && sent.Load() && method != "initialize" {
+			go func() {
+				if t.closed.Load() {
+					return
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				_, _ = t.post(ctx, rpcRequest{JSONRPC: "2.0", Method: "notifications/cancelled", Params: map[string]any{"requestId": id, "reason": "client cancelled"}}, nil)
+			}()
+		}
 		return nil, err
 	}
 	if resp.Error != nil {

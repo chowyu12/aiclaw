@@ -40,6 +40,11 @@ func (e *Error) Unwrap() error { return e.Err }
 // 过一会儿重试有意义；参数错、鉴权失败、超出上下文窗口，重试只是把同一个
 // 错误再收一遍，还要多花一次额度。
 func (e *Error) Retryable() bool {
+	for _, code := range strings.Fields(strings.ToLower(e.Code)) {
+		if code == "model_not_found" {
+			return false
+		}
+	}
 	if e.Code == "response_incomplete" {
 		return false
 	}

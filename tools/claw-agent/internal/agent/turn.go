@@ -26,6 +26,11 @@ import (
 const maxModelRetries = 4
 
 type inputRequestKey struct{}
+type wakeReservationKey struct{}
+
+func (s *Session) RunReservedTurn(ctx context.Context, turnID, text string, emitter Emitter, generation uint64) {
+	s.RunTurn(context.WithValue(ctx, wakeReservationKey{}, generation), turnID, text, nil, nil, emitter)
+}
 
 // RunRequest associates the user event with a stable client submission identity.
 func (s *Session) RunRequest(ctx context.Context, turnID string, input protocol.TurnStartParams, emitter Emitter) {
@@ -51,12 +56,20 @@ func (s *Session) RunTurn(
 	ctx, cancel := context.WithCancel(parent)
 	ctx = context.WithValue(ctx, skillUsageKey{}, s.newSkillUsage(turnID))
 	s.mu.Lock()
+	if generation, automatic := parent.Value(wakeReservationKey{}).(uint64); automatic && (parent.Err() != nil || s.wakeStopped || generation != s.wakeGeneration) {
+		s.mu.Unlock()
+		cancel()
+		return
+	}
 	// Another queued wakeup may already have consumed the mailbox while this
 	// goroutine waited for the preceding turn to finish.
 	if text == "" && len(images) == 0 && len(audioPaths) == 0 && len(s.pending) == 0 {
 		s.mu.Unlock()
 		cancel()
 		return
+	}
+	if _, automatic := parent.Value(wakeReservationKey{}).(uint64); !automatic {
+		s.wakeStopped = false
 	}
 	s.cancelTurn = cancel
 	s.finishing = false
@@ -599,6 +612,7 @@ func (s *Session) sample(
 		case isAPIErr && apiErr.RejectsReasoningEffort() && s.dropReasoningEffort():
 			// 不认推理档位的上游（非推理模型、Azure）：去掉它重发一次，这个会话之后都不带。
 			// 不算一次重试——请求本身变了，不是在赌网络。
+			emitter.Notify("session/reasoningUpdated", map[string]any{"sessionId": s.ID, "reasoningEffort": ""})
 			s.notify(emitter, turnID, i18n.D("这个模型不支持推理档位参数，已去掉后重试。"))
 			continue
 		case isAPIErr && !apiErr.Retryable():
@@ -680,6 +694,9 @@ func (s *Session) callModel(
 	steps *stepCounter,
 	round int,
 ) (llm.Response, error) {
+	s.mu.Lock()
+	model, client := s.config.Model, s.llm
+	s.mu.Unlock()
 	itemID := newID("msg")
 	started := false
 	var streamed strings.Builder
@@ -697,7 +714,7 @@ func (s *Session) callModel(
 		SessionID: s.ID, TurnID: turnID,
 		Item: protocol.Item{
 			ID: llmItemID, Kind: protocol.ItemLLM,
-			Summary: s.config.Model.Model, Model: s.config.Model.Model,
+			Summary: model.Model, Model: model.Model,
 			Seq: llmSeq, Round: round, StartedAt: llmStart.UnixMilli(),
 		},
 	})
@@ -721,18 +738,18 @@ func (s *Session) callModel(
 	}
 
 	var temperature *float64
-	if s.config.Model.Temperature > 0 {
-		value := s.config.Model.Temperature
+	if model.Temperature > 0 {
+		value := model.Temperature
 		temperature = &value
 	}
 
-	response, err := s.llm.Stream(ctx, llm.Request{
-		Model:           s.config.Model.Model,
+	response, err := client.Stream(ctx, llm.Request{
+		Model:           model.Model,
 		Messages:        s.snapshotMessages(),
 		Tools:           s.llmTools(),
 		Temperature:     temperature,
-		MaxTokens:       s.config.Model.MaxTokens,
-		ReasoningEffort: s.config.Model.ReasoningEffort,
+		MaxTokens:       model.MaxTokens,
+		ReasoningEffort: model.ReasoningEffort,
 	}, func(delta llm.Delta) {
 		// 首字节：正文与推理哪个先来都算。慢在等模型还是慢在生成，
 		// 是两种完全不同的问题。
@@ -768,7 +785,7 @@ func (s *Session) callModel(
 	response.LocalItemID = itemID
 	usage := response.Usage
 	s.recordUsage(store.UsageEvent{
-		Kind: store.UsageModel, Model: s.config.Model.Model,
+		Kind: store.UsageModel, Model: model.Model,
 		Input: usage.InputTokens, Output: usage.OutputTokens, Total: usage.TotalTokens,
 		Failed: err != nil, DurationMS: time.Since(llmStart).Milliseconds(),
 	})
@@ -776,7 +793,7 @@ func (s *Session) callModel(
 		SessionID: s.ID, TurnID: turnID,
 		Item: protocol.Item{
 			ID: llmItemID, Kind: protocol.ItemLLM,
-			Summary: s.config.Model.Model, Model: s.config.Model.Model,
+			Summary: model.Model, Model: model.Model,
 			Text:       strings.TrimSpace(reasoning.String()),
 			Seq:        llmSeq,
 			Round:      round,

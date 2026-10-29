@@ -154,6 +154,7 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 		return agent.SpawnResult{}, err
 	}
 	child.ForkFrom(parent, request.ForkTurns)
+	generation := child.ReserveFollowup()
 	h.server.guard(child)
 	h.server.sessMu.Lock()
 	h.server.sessions[id] = child
@@ -173,7 +174,7 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 		encoded, _ := json.Marshal(mounts)
 		task += "\n\nEnvironment preparation results (some tools may be unavailable):\n" + string(encoded)
 	}
-	go h.runTurn(child, node, task)
+	go h.runTurn(child, node, task, generation)
 	return agent.SpawnResult{TaskName: path, Nickname: request.TaskName, MCPStatus: child.MCPStatus()}, nil
 }
 
@@ -198,10 +199,15 @@ func (h *collabHub) Send(_ context.Context, from *agent.Session, target, message
 	if trigger {
 		notice = i18n.D("📨 {path} 派来新任务", "path", sender.path)
 	}
-	running := session.DeliverAgentMail(sender.path, text, notice)
-	if trigger && !running {
-		h.setStatus(node, agent.AgentRunning)
-		go h.runTurn(session, node, "")
+	var generation uint64
+	if trigger {
+		generation = session.ReserveFollowup()
+	}
+	session.DeliverAgentMail(sender.path, text, notice)
+	if trigger {
+		// Also reserve while busy: a canceled turn may still be unwinding.
+		// If it consumes the mail, the queued turn exits without sampling.
+		go h.runTurn(session, node, "", generation)
 	}
 	return nil
 }
@@ -376,7 +382,7 @@ func (h *collabHub) setStatus(node *collabNode, status string) {
 
 // runTurn 在后台替一个 agent 跑一轮；text 为空表示由邮箱里的消息开起来。
 // 这一轮结束后，它是子 agent 的话就把结果投进父 agent 的邮箱。
-func (h *collabHub) runTurn(session *agent.Session, node *collabNode, text string) {
+func (h *collabHub) runTurn(session *agent.Session, node *collabNode, text string, wake ...uint64) {
 	ctx := h.context()
 	h.mu.Lock()
 	if node.status == agent.AgentPreparing && node.prepareCtx != nil {
@@ -385,8 +391,15 @@ func (h *collabHub) runTurn(session *agent.Session, node *collabNode, text strin
 	h.mu.Unlock()
 	turnID := fmt.Sprintf("t_%d", time.Now().UnixNano())
 	watcher := &turnWatcher{emitter: emitter{server: h.server}, sessionID: session.ID, onStart: func() { h.setStatus(node, agent.AgentRunning) }}
-	session.RunTurn(ctx, turnID, text, nil, nil, watcher)
+	if len(wake) > 0 {
+		session.RunReservedTurn(ctx, turnID, text, watcher, wake[0])
+	} else {
+		session.RunTurn(ctx, turnID, text, nil, nil, watcher)
+	}
 	if !watcher.started {
+		if _, allowed := session.ReserveWake(); !allowed {
+			h.setStatus(node, agent.AgentInterrupted)
+		}
 		return
 	}
 	if err := session.Save(ctx, h.server.db); err != nil {
@@ -430,11 +443,12 @@ func (h *collabHub) runTurn(session *agent.Session, node *collabNode, text strin
 	// 父 agent 闲着：开一轮让它接收结果，不然结果就搁在邮箱里没人看。被打断的不叫醒——
 	// 那多半是用户在停整棵树。
 	if !running && status != agent.AgentInterrupted {
-		parentNode := h.node(parent)
-		if parentNode.depth > 0 {
-			h.setStatus(parentNode, agent.AgentRunning)
+		generation, allowed := parent.ReserveWake()
+		if !allowed {
+			return
 		}
-		go h.runTurn(parent, parentNode, "")
+		parentNode := h.node(parent)
+		go h.runTurn(parent, parentNode, "", generation)
 	}
 }
 

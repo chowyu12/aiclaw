@@ -46,6 +46,7 @@ const api = {
     archive: (sessionId: string, archived: boolean) => ipcRenderer.invoke(IPC.sessionArchive, { sessionId, archived }),
     archived: () => ipcRenderer.invoke(IPC.sessionArchived),
     configure: (input: unknown) => ipcRenderer.invoke(IPC.sessionConfigure, input),
+    reasoning: (sessionId: string, effort: string) => ipcRenderer.invoke(IPC.sessionReasoning, {sessionId,effort}),
     assign: (input: unknown) => ipcRenderer.invoke(IPC.sessionAssign, input),
   },
   providers: {
@@ -114,7 +115,7 @@ const api = {
     write: (servers: unknown) => ipcRenderer.invoke(IPC.mcpWrite, servers),
     probe: (server: unknown) => ipcRenderer.invoke(IPC.mcpProbe, server),
   },
-  memory: { read: (sessionId = "") => ipcRenderer.invoke(IPC.memoryRead, sessionId), save: (input: import("../shared/types.js").MemorySaveInput) => ipcRenderer.invoke(IPC.memorySave, input) },
+  memory: { read: (sessionId = "") => ipcRenderer.invoke(IPC.memoryRead, sessionId), save: (input: import("../shared/types.js").MemorySaveInput) => ipcRenderer.invoke(IPC.memorySave, input), importRead: () => ipcRenderer.invoke(IPC.memoryImportRead) },
   skills: {
     list: () => ipcRenderer.invoke(IPC.skillList),
     toggle: (input: unknown) => ipcRenderer.invoke(IPC.skillToggle, input),

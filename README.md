@@ -226,6 +226,26 @@ Memory has two layers:
 - A project's conventions and lessons go to `<workspace>/.aiclaw/memory.md`, which travels
   with the repo. The `remember` tool writes there by default when a workspace is set.
 
+## Session controls and memory import
+
+- Stop invalidates pending automatic agent wakes. Late child results remain in the mailbox
+  until an explicit user turn or follow-up reopens the session.
+- Cancelling an MCP call sends a best-effort `notifications/cancelled` for that request on
+  stdio and HTTP transports. Other calls can keep using the connection; the remote server
+  must support cancellation for its work to stop.
+- A provider `model_not_found` code stops retries, including errors delivered in a stream.
+  The original provider message is retained. This does not add a Responses or WebSocket transport.
+- In the desktop model menu, choose Model default, low, medium or high reasoning effort for
+  the current session. Changes are saved and acknowledged before the selection updates and
+  apply from the next model request, including the next sampling within a running turn.
+  Support depends on the provider; rejection falls back to the model default with a notice.
+- In Settings → Memory, choose Import memory on the global or workspace card and select
+  a UTF-8 text/Markdown file. Select entries, review the merged text, then confirm to save.
+  Text duplicates are skipped; semantic conflicts need manual review. Existing memory is
+  preserved, concurrent edits are rejected, and each destination is limited to 32 KiB.
+  Imported memory loads when a session is created or reopened. Other applications’
+  data directories are never scanned automatically.
+
 ## Packaging and releases
 
 `make package` uses `@electron/packager` to build all four packages (macOS arm64/x64,

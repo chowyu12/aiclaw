@@ -93,6 +93,7 @@ export function profileSpecs(): ProfileSpec[] {
 
 /** 一个会话起来之后宿主需要知道的东西。 */
 export interface SessionInfo {
+  reasoningEffort?: string;
   sessionId: string;
   tools: string[];
   mcpStatus: Record<string, string>;
@@ -398,6 +399,7 @@ export class SessionManager extends EventEmitter {
       mcpStatus: result.mcpStatus ?? {},
       workspace: result.workspace ?? "",
       model: params.model.model,
+      reasoningEffort: result.reasoningEffort ?? params.model.reasoningEffort,
       providerId: result.providerId ?? 0,
       skills: result.skills ?? [],
       foldedTools: result.foldedTools ?? [],
@@ -476,6 +478,7 @@ export class SessionManager extends EventEmitter {
       mcpStatus: result.mcpStatus ?? {},
       workspace: result.workspace ?? "",
       model: result.model ?? this.store.readConfig().model,
+      reasoningEffort: result.reasoningEffort ?? "",
       providerId: result.providerId ?? 0,
       skills: result.skills ?? [],
       foldedTools: result.foldedTools ?? [],
@@ -494,15 +497,21 @@ export class SessionManager extends EventEmitter {
     providerId: number,
     model: string,
     contextWindow: number,
+    reasoningEffort?: string,
   ): Promise<void> {
     const config = this.store.readConfig();
     await this.requireClient().sessionConfigure(sessionId, {
       providerId: providerId || undefined,
       baseUrl: "",
       model,
-      reasoningEffort: config.reasoningEffort || undefined,
+      reasoningEffort: reasoningEffort ?? config.reasoningEffort,
       contextWindow: contextWindow || undefined,
     });
+  }
+
+  async configureReasoning(sessionId: string, effort: string): Promise<string> {
+    const result = await this.requireClient().sessionConfigure(sessionId, {model:"",baseUrl:""}, undefined, undefined, effort);
+    return result.model.reasoningEffort ?? "";
   }
 
   async syncDesktopPolicy(policy: ApprovalPolicy, previous: ApprovalPolicy): Promise<void> {

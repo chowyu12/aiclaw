@@ -1074,6 +1074,13 @@ const forking = ref(false);
                     <span class="caret-down">⌄</span>
                   </button>
                   <div v-if="modelOpen" class="menu model-menu" @click.stop>
+                    <label v-if="store.sessionId && !store.sessionId.startsWith('c_')" class="reasoning-picker">
+                      <span>{{ t('推理强度') }}</span>
+                      <select :value="store.sessionInfo?.reasoningEffort ?? ''" :disabled="store.modelChanging" :aria-label="t('会话推理强度')" @change="actions.switchReasoning(($event.target as HTMLSelectElement).value)">
+                        <option value="">{{ t('模型默认') }}</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+                      </select>
+                      <small>{{ t('从下一次模型请求生效；不支持时自动回退。') }}</small>
+                    </label>
                     <div class="menu-head">
                       <span>{{ t("模型") }}<em v-if="modelSearch">{{ choices.length }} / {{ allChoices.length }}</em></span>
                       <button class="link" @click="actions.loadProviders()">{{ t("刷新") }}</button>
@@ -1101,6 +1108,7 @@ const forking = ref(false);
                       :key="`${choice.providerId}/${choice.model}`"
                       class="menu-item"
                       :class="{ picked: choice.providerId === store.providerId && choice.model === store.model }"
+                      :disabled="store.modelChanging"
                       @click="pickModel(choice)"
                     >
                       <span class="menu-name">{{ choice.model }}</span>
@@ -2122,4 +2130,8 @@ const forking = ref(false);
 .ref:hover {
   background: var(--accent-soft);
 }
+
+.reasoning-picker { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:12px 14px; border-bottom:1px solid var(--rule); font-size:12px; }
+.reasoning-picker select { margin-left:auto; padding:4px 8px; color:var(--ink); background:var(--surface); border:1px solid var(--rule); border-radius:6px; }
+.reasoning-picker small { width:100%; color:var(--muted); }
 </style>

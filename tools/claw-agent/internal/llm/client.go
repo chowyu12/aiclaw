@@ -255,10 +255,19 @@ type wireChunk struct {
 		CompletionTokens int `json:"completion_tokens"`
 		TotalTokens      int `json:"total_tokens"`
 	} `json:"usage"`
-	Error *struct {
-		Message string `json:"message"`
-		Type    string `json:"type"`
-	} `json:"error"`
+	Error    *wireError `json:"error"`
+	Type     string     `json:"type"`
+	Code     any        `json:"code"`
+	Message  string     `json:"message"`
+	Response *struct {
+		Error *wireError `json:"error"`
+	} `json:"response"`
+}
+
+type wireError struct {
+	Message string `json:"message"`
+	Type    string `json:"type"`
+	Code    any    `json:"code"`
 }
 
 func buildWireRequest(req Request) wireRequest {
@@ -497,11 +506,20 @@ func consumeStream(body io.Reader, onDelta func(Delta)) (response Response, err 
 			// 单个坏分片不中断整条流：上游偶尔会插入心跳或非标准行。
 			continue
 		}
-		if chunk.Error != nil && chunk.Error.Message != "" {
-			// 流里带出来的错误没有 HTTP 状态码可依。当成传输层问题（可重试）：
-			// 上游把错误塞进流里通常是后端临时故障，而请求本身的问题
-			// （参数、鉴权、超窗）在建流之前就以 4xx 返回了。
-			return response, &Error{Message: i18n.D("模型流式返回错误：{message}", "message", chunk.Error.Message)}
+		failure := chunk.Error
+		if failure == nil && chunk.Type == "response.failed" && chunk.Response != nil {
+			failure = chunk.Response.Error
+		}
+		if failure == nil && chunk.Type == "error" {
+			failure = &wireError{Message: chunk.Message, Code: chunk.Code}
+		}
+		if failure != nil {
+			code := strings.TrimSpace(fmt.Sprint(firstNonNil(failure.Code)) + " " + failure.Type)
+			message := failure.Message
+			if message == "" {
+				message = code
+			}
+			return response, &Error{Code: code, Message: message}
 		}
 		if chunk.Usage != nil {
 			response.Usage = Usage{

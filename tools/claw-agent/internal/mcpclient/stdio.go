@@ -68,6 +68,9 @@ func startStdio(config Config) (*stdioTransport, error) {
 }
 
 func (t *stdioTransport) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	t.pendMu.Lock()
 	t.nextID++
 	id := t.nextID
@@ -88,6 +91,11 @@ func (t *stdioTransport) Call(ctx context.Context, method string, params any) (j
 		return resp.Result, nil
 	case <-ctx.Done():
 		t.removePending(id)
+		if method != "initialize" {
+			// The call has been written before we can enter this branch. The
+			// transport write lock preserves request-before-cancellation order.
+			go t.Notify("notifications/cancelled", map[string]any{"requestId": id, "reason": "client cancelled"})
+		}
 		return nil, ctx.Err()
 	case <-t.done:
 		return nil, i18n.E("MCP server 已关闭")

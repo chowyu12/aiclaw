@@ -396,6 +396,7 @@ export interface MCPToolInfo {
 }
 
 export interface SessionStartResult {
+  reasoningEffort?: string;
   /** 会话用的模型服务 id；0 或缺省表示走环境变量的 Key。 */
   providerId?: number;
   /** 代码模式下被收进 exec 的工具名：tools 里只剩 exec，但这些在脚本里仍能调。 */
@@ -631,6 +632,7 @@ export interface ApprovalRequestParams {
 
 /** 服务端通知的判别联合，宿主按 method 分发。 */
 export type AgentNotification =
+ | { method: "session/reasoningUpdated"; params: {sessionId: string; reasoningEffort: string} }
  | { method: "session/toolsUpdated"; params: {sessionId: string; tools: string[]; mcpStatus: Record<string,string>; foldedTools: string[]} }
  | { method: "session/workUpdated"; params: {sessionId: string; goal: Goal} }
   | { method: "turn/started"; params: TurnNotification }

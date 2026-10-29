@@ -37,6 +37,7 @@ export const IPC = {
   sessionArchive: "session:archive",
   sessionArchived: "session:archived",
   sessionConfigure: "session:configure",
+  sessionReasoning: "session:reasoning",
 
   providerList: "provider:list",
   providerCreate: "provider:create",
@@ -104,6 +105,7 @@ export const IPC = {
   filePreviewLayout: "file:previewLayout",
   memoryRead: "memory:read",
   memorySave: "memory:save",
+  memoryImportRead: "memory:import-read",
   /** 读一个图片/音频文件，回 data URL，界面内联显示用。 */
   fileMedia: "file:media",
   /** 把贴进来的音频落到磁盘，回路径。 */
