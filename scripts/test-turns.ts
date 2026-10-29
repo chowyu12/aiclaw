@@ -135,3 +135,30 @@ test("search sources deduplicate within a turn and reject unsafe URLs without gu
   assert.deepEqual(turnSources(turns[0]!), [{ ...source, url: "https://example.com/docs" }]);
   assert.deepEqual(turnSources(turns[1]!), []);
 });
+
+test("Archify intermediate JSON is excluded only from automatic file cards", () => {
+  const root = "/work/.archify/sequence-cache-miss/";
+  const internal = ["candidate.json", "request.delivery.json", "request.finalize.json", "request.finalize-summary.json", "request.browser-check.json", "review-2/request.browser-check.json"].map(name => root + name);
+  const deliverables = [root + "request.html", root + "export.json", "candidate.json", "reports/candidate.json", "reports/request.finalize.json", "report.sql", "report.md", "report.docx"];
+  const artifacts = [...internal, ...deliverables];
+  const turn = groupTurns([user("diagram"), step("write", { artifacts }), agent("answer", "已生成。")])[0]!;
+  assert.deepEqual(unmentionedArtifacts(turn), deliverables);
+  assert.deepEqual(turnArtifacts(turn), artifacts);
+  assert.deepEqual(turn.steps[0]!.artifacts, artifacts);
+});
+
+test("Archify intermediate detection supports relative and Windows paths without hiding other directories", () => {
+  const internal = ["./.archify/run/candidate.json", ".archify/run/review/request.finalize-summary.json", "C:\\work\\.archify\\run\\candidate.json", "C:\\work\\.archify\\run\\request.delivery.json"];
+  const visible = ["C:\\work\\candidate.json", "C:\\work\\exports\\request.finalize.json", ".archify-other/run/candidate.json", ".hidden/run/candidate.json", ".archify/run/unknown.json", ".archify/run/request.json", ".archify/run/request.png"];
+  const turn = groupTurns([user("paths"), step("write", { artifacts: [...internal, ...visible] })])[0]!;
+  assert.deepEqual(unmentionedArtifacts(turn), visible.slice(0, -1));
+  assert.deepEqual(imageArtifacts(turn), [visible.at(-1)]);
+});
+
+test("explicit file references still deduplicate final HTML and candidate JSON", () => {
+  const root = "/work/.archify/run/";
+  const turn = groupTurns([user("source"), step("write", { artifacts: [root + "candidate.json", root + "request.html", "export.json"] }),
+    agent("answer", `[最终页面](${root}request.html) 和 [源文件](${root}candidate.json)`)])[0]!;
+  assert.deepEqual(unmentionedArtifacts(turn), ["export.json"]);
+  assert.deepEqual(turnArtifacts(turn), [root + "candidate.json", root + "request.html", "export.json"]);
+});

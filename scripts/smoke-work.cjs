@@ -61,7 +61,7 @@ app.whenReady().then(async()=>{
  handle('sessionReasoning',async(_e,input)=>{reasoningCalls.push(input);if(reasoningGate)await reasoningGate;if(reasoningFails)throw Error('reasoning save failed');effort=input.effort;return effort;});
  handle('sessionConfigure',(_e,input)=>{contextFixture={...contextFixture,model:input.model,window:input.contextWindow||0,lastInputTokens:0};return {tools:[],mcpStatus:{}};});
  handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
- handle('sessionResume',async(_e,id)=>{if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:'test',providerId:1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论',at:Date.now()}]});});
+ handle('sessionResume',async(_e,id)=>{if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:'test',providerId:1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论',at:Date.now()}]});});
  handle('sessionWork',(_e,id)=>({goal:id==='s'?goal:null,pending:id==='s'?[...pending,...queuedInputs]:[],queuedRequestIds:queueAuto&&id==='s'?queuedInputs.map(p=>p.requestId):[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
  handle('changesList',(_e,id)=>{changeReads.push(id);return id==='s'?changes:[];});
  handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
@@ -286,6 +286,7 @@ app.whenReady().then(async()=>{
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-answer-actions.png',(await win.webContents.capturePage()).toPNG());
  check('only unmentioned files remain below the answer without summary heading',await js("!document.querySelector('.generated-files h3') && document.querySelectorAll('.generated-files .file-card').length===2 && document.querySelectorAll('.prose .file-card').length===2"));
+ check('restored history does not append Archify candidate or validation receipt cards',await js("![...document.querySelectorAll('.generated-files .file-card')].some(e=>e.dataset.filePath.includes('.archify/'))"));
  check('document cards show filenames and types without reading file contents',await js("[...document.querySelectorAll('.file-card')].some(b=>b.querySelector('.file-format').textContent==='Word'&&b.textContent.includes('2026 AI 行业趋势.docx'))")&&!mediaReads.some(p=>p.endsWith('.docx')));
  await js("[...document.querySelectorAll('.file-card')].find(b=>b.textContent.includes('2026 AI 行业趋势.docx')).querySelector('.file-open-trigger').click()");
  check('Word open-with menu offers the system app without starting a preview',await wait("document.querySelector('.file-open-menu:popover-open')?.querySelectorAll('button').length===1")&&openedFiles.length===0&&previewReads.length===0);
@@ -298,6 +299,7 @@ app.whenReady().then(async()=>{
  check('file rows keep the name and type together and opening controls on the right',await js("[...document.querySelectorAll('.file-card')].every(card=>{const name=card.querySelector('.file-info').getBoundingClientRect(),open=card.querySelector('.file-open-trigger').getBoundingClientRect();return name.right<=open.left&&card.scrollWidth<=card.clientWidth})"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-document-cards.png',(await win.webContents.capturePage()).toPNG());
+
  await js("[...document.querySelectorAll('.file-card')].find(b=>b.textContent.includes('2026 AI 行业趋势.docx')).click()");
  check('document card opens exact path through preload',openedFiles.pop()==='generated/2026 AI 行业趋势.docx');
  check('inline file cards hide directories while retaining exact paths',await js("document.querySelector('.prose .file-card').getAttribute('data-file-path')==='/tmp/smoke/generated/2026 AI 行业趋势.md' && !document.querySelector('.prose').textContent.includes('/tmp/smoke/')"));
@@ -742,6 +744,23 @@ app.whenReady().then(async()=>{
  await js("[...document.querySelectorAll('.generated-files')].at(-1).scrollIntoView({block:'center'})");
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-document-cards.png',(await win.webContents.capturePage()).toPNG());
+ const diagramRoot='/tmp/smoke/.archify/diagram-run/';
+ const diagramEvent=(item)=>win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',turnId:'diagram-files',item}});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'diagram-files'}});
+ diagramEvent({id:'diagram-request',kind:'userMessage',text:'生成缓存请求时序图'});
+ diagramEvent({id:'diagram-files',kind:'toolCall',toolName:'write_file',artifacts:[diagramRoot+'candidate.json',diagramRoot+'request.finalize.json',diagramRoot+'request.html','generated/export.json']});
+ diagramEvent({id:'diagram-answer',kind:'agentMessage',text:`已生成：[缓存请求时序图](${diagramRoot}request.html)`});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'diagram-files'}});
+ check('live diagram hides intermediate cards but retains ordinary JSON and the linked HTML',await wait(`document.querySelectorAll('.prose .file-card[data-file-path="${diagramRoot}request.html"]').length===1 && document.querySelectorAll('.generated-files .file-card[data-file-path="generated/export.json"]').length===1`)&&await js(`!document.querySelector('.file-card[data-file-path="${diagramRoot}candidate.json"]') && !document.querySelector('.file-card[data-file-path="${diagramRoot}request.finalize.json"]') && !document.querySelector('.generated-files .file-card[data-file-path="${diagramRoot}request.html"]')`));
+ await js("[...document.querySelectorAll('.steps-head')].at(-1).click()");
+ check('hidden diagram inputs remain available inside execution details',await wait(`!!document.querySelector('.steps-body .artifact-path')`)&&await js(`['${diagramRoot}candidate.json','${diagramRoot}request.finalize.json'].every(path=>[...document.querySelectorAll('.steps-body .artifact-path')].some(e=>e.textContent===path))`));
+ await js("[...document.querySelectorAll('.steps-head')].at(-1).click()");
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'diagram-files'}});
+ diagramEvent({id:'source-request',kind:'userMessage',text:'交付这张图的 JSON 源文件'});
+ diagramEvent({id:'source-files',kind:'toolCall',toolName:'write_file',artifacts:[diagramRoot+'candidate.json']});
+ diagramEvent({id:'source-answer',kind:'agentMessage',text:`[JSON 源文件](${diagramRoot}candidate.json)`});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'diagram-files'}});
+ check('explicitly referenced diagram JSON remains visible as a normal file card',await wait(`document.querySelectorAll('.prose .file-card[data-file-path="${diagramRoot}candidate.json"]').length===1`)&&await js(`!document.querySelector('.generated-files .file-card[data-file-path="${diagramRoot}candidate.json"]')`));
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);

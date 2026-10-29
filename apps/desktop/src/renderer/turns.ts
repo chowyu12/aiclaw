@@ -40,6 +40,15 @@ export function imageArtifacts(turn: Turn): string[] {
   return turnArtifacts(turn).filter(path => /\.(png|jpe?g|webp|gif)$/i.test(path));
 }
 
+/** Keep known Archify inputs and receipts in execution details, not automatic delivery cards. */
+function isIntermediateArtifact(path: string): boolean {
+  const parts = path.replaceAll("\\", "/").split("/");
+  const root = parts.indexOf(".archify");
+  if (root < 0 || parts.length - root < 3) return false;
+  const name = parts.at(-1)!;
+  return name === "candidate.json" || /\.(?:delivery|finalize|finalize-summary|browser-check)\.json$/.test(name);
+}
+
 /** Hide only unambiguous matches; identical filenames in different folders remain distinct. */
 export function unmentionedArtifacts(turn: Turn): string[] {
   const images = new Set(imageArtifacts(turn));
@@ -53,7 +62,7 @@ export function unmentionedArtifacts(turn: Turn): string[] {
       normalize(path).endsWith(`/${normalized}`) || normalized.endsWith(`/${normalize(path)}`));
     if (matches.length === 1) mentioned.add(matches[0]!);
   }
-  return paths.filter(path => !mentioned.has(path));
+  return paths.filter(path => !mentioned.has(path) && !isIntermediateArtifact(path));
 }
 
 export function groupTurns(timeline: readonly TimelineEntry[]): Turn[] {
