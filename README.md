@@ -266,3 +266,7 @@ macOS packages are unsigned:
 - If you unzip by hand, right-click → Open the first time, or run
   `xattr -dr com.apple.quarantine /Applications/AIClaw.app`.
 - `make install-mac` builds locally and installs into Applications.
+
+New chats without a selected workspace use `aiclaw` inside the user's home directory, creating it automatically. Explicit workspace choices take priority; clearing a workspace restores this default. Existing chats retain their saved workspace.
+
+Create independent projects in the sidebar with a name and multiple workspace directories. Choose a working directory for new chats under each project; projects without directories use `~/aiclaw`. Changing project settings or membership does not move files or change existing chat directories. Removing a project keeps its chats and files.

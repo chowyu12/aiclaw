@@ -123,6 +123,7 @@ const api = {
     openDir: () => ipcRenderer.invoke(IPC.skillOpenDir),
   },
   groups: {
+    saveProject: (input: unknown) => ipcRenderer.invoke(IPC.projectSave, input),
     read: () => ipcRenderer.invoke(IPC.groupRead),
     create: (name: string) => ipcRenderer.invoke(IPC.groupCreate, name),
     rename: (input: unknown) => ipcRenderer.invoke(IPC.groupRename, input),

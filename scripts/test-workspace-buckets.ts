@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { workspaceBuckets, workspaceName } from "../apps/desktop/src/renderer/workspace-buckets.ts";
+import { workspaceBuckets, workspaceName, projectBuckets } from "../apps/desktop/src/renderer/workspace-buckets.ts";
 import type { SessionSummaryView } from "../apps/desktop/src/shared/types.ts";
 
 const session = (id: string, workdir: string, updatedAt: string): SessionSummaryView => ({
@@ -27,4 +27,15 @@ test("workspace names support Windows paths and roots without changing stored pa
   const buckets = workspaceBuckets([session("a", "/project", "2026-10-10")]);
   assert.equal(buckets[0]!.detail, undefined);
   assert.equal(buckets[0]!.path, "/project");
+});
+
+test("project identity is independent from shared directories and empty projects remain visible", () => {
+ const projects = [{id:"p_one",name:"One",directories:["/shared","/second"]},{id:"p_two",name:"Two",directories:["/shared"]},{id:"p_empty",name:"Empty",directories:[]},{id:"g_old",name:"Old group"}];
+ const result=projectBuckets([session("a","/shared","2026-10-29"),session("b","/shared","2026-10-28"),session("legacy","/legacy","2026-10-27")], projects, {a:"p_one",b:"p_two",legacy:"g_old"});
+ assert.deepEqual(result.map(bucket=>bucket.id),["p_one","p_two","p_empty","workspace:/legacy"]);
+ assert.deepEqual(result[0]!.sessions.map(item=>item.id),["a"]);
+ assert.deepEqual(result[1]!.sessions.map(item=>item.id),["b"]);
+ assert.deepEqual(result[0]!.directories,["/shared","/second"]);
+ assert.equal(result[2]!.path,"");
+ assert.deepEqual(result[2]!.sessions,[]);
 });

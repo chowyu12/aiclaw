@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { app, clipboard, shell } from "electron";
 import { BROWSER_CANDIDATES, browserIdForApplication } from "./browser-choice.js";
+import { resolveWorkspace } from "./workspace-defaults.js";
 import { toolPath } from "./shell-path.js";
 import { tr } from "../shared/i18n.js";
 import {
@@ -381,9 +382,7 @@ export class SessionManager extends EventEmitter {
    * 模型用配置页的默认值——顶部切模型只改当前会话，新会话回到默认值，
    * 这是刻意的：一次临时换模型不该悄悄变成长期设置。
    *
-   * workspace 默认是**空的**：新会话不预设工作区，用户想好了再指。
-   * 早先这里用一个全局工作目录，结果是所有会话共用一个目录，
-   * 而用户真正想让 Agent 干活的地方在别处——他得先把文件搬进来。
+   * 未指定工作区时使用 Home 下的 aiclaw 目录；显式指定的目录优先。
    */
   async startSession(workspace?: string): Promise<SessionInfo> {
     const client = this.requireClient();
@@ -555,14 +554,15 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * 改一个会话的工作区。传空串表示清掉（回到「没设置」）。
+   * 改一个会话的工作区。传空串恢复为 Home 下的 aiclaw 目录。
    *
    * 中途能改是刻意的：用户开着会话聊着聊着才想起「这事要在那个仓库里做」，
    * 让他为此新开一个会话、把上文再说一遍，只是把界面问题变成他的负担。
    */
   async setWorkspace(sessionId: string, workspace: string): Promise<string> {
     const client = this.requireClient();
-    const trimmed = workspace.trim();
+    const trimmed = resolveWorkspace(workspace);
+    mkdirSync(trimmed, { recursive: true });
     // model 留空表示「这次只改工作区」，内核那边据此跳过换模型。
     await client.sessionConfigure(sessionId, { baseUrl: "", model: "" }, trimmed);
     this.workspace = trimmed;
@@ -628,7 +628,7 @@ export class SessionManager extends EventEmitter {
         reasoningEffort: config.reasoningEffort || undefined,
         contextWindow: config.contextWindow || undefined,
       },
-      workdir: (workspace ?? "").trim(),
+      workdir: resolveWorkspace(workspace),
       approvalPolicy: config.profile,
       // 应用自己存凭据的目录：模型读它没有任何正当用途，而读到之后
       // 可以顺着任何一个对外的工具送出去。硬拒绝，不是「问一句」。

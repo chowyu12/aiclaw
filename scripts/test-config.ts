@@ -74,3 +74,34 @@ test("prompt presets migrate safely and preserve bounded explicit slot contents"
   const long=normalizePresets([{slot:1,title:"a".repeat(100),text:"x".repeat(25000)}])[0]!;
   assert.equal(long.title.length,80);assert.equal(long.text.length,20000);
 });
+
+// Desktop session creation, background tasks and workspace reset share this fallback.
+test("未选择工作区时使用 Home 下的 aiclaw 目录", async () => {
+  const { resolveWorkspace } = await import("../apps/desktop/src/main/workspace-defaults.ts");
+  const { homedir } = await import("node:os");
+  const { join } = await import("node:path");
+  for (const workspace of [undefined, "", "   "]) {
+    assert.equal(resolveWorkspace(workspace), join(homedir(), "aiclaw"));
+  }
+  assert.equal(resolveWorkspace(" /custom/project "), "/custom/project");
+});
+
+test("project configuration preserves ordered multiple directories and validates input", async () => {
+ const { normalizeProject }=await import("../apps/desktop/src/shared/projects.ts");
+ assert.deepEqual(normalizeProject({name:" Project ",directories:[" /first ","/second","/first",""]}),{id:undefined,name:"Project",directories:["/first","/second"]});
+ assert.deepEqual(normalizeProject({name:"Default",directories:[]}).directories,[]);
+ assert.throws(()=>normalizeProject({name:" ",directories:[]}));
+ assert.throws(()=>normalizeProject({name:"Bad",directories:null} as never));
+ assert.throws(()=>normalizeProject({name:"Bad",directories:[1]} as never));
+});
+
+test("new project chats choose only configured directories with a Home fallback", async () => {
+ const {projectWorkspace,resolveWorkspace}=await import("../apps/desktop/src/main/workspace-defaults.ts");
+ const project={directories:["/first","/second"]};
+ assert.equal(projectWorkspace(project),"/first");
+ assert.equal(projectWorkspace(project," /second "),"/second");
+ assert.equal(projectWorkspace({directories:[]}),resolveWorkspace());
+ assert.equal(projectWorkspace(undefined),resolveWorkspace());
+ assert.equal(projectWorkspace(undefined,"/explicit"),"/explicit");
+ assert.throws(()=>projectWorkspace(project,"/outside"));
+});

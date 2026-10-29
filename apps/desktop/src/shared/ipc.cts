@@ -117,6 +117,7 @@ export const IPC = {
   skillOpenDir: "skill:openDir",
 
   groupRead: "group:read",
+  projectSave: "project:save",
   groupCreate: "group:create",
   groupRename: "group:rename",
   groupCollapse: "group:collapse",

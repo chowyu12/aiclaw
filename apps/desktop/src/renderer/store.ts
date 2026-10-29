@@ -441,20 +441,21 @@ export const actions = {
   /**
    * 开一个新会话。模型用配置页的默认值——临时换模型不该变成长期设置。
    *
-   * 工作区默认**不带**：新会话先不预设在哪儿干活，用户想好了再指。
+   * 未指定工作区时，宿主默认使用 Home 下的 aiclaw 目录。
    * 传 workspace 是给「从某个会话的工作区接着开一个」用的。
    */
-  async newSession(workspace?: string): Promise<void> {
+  async newSession(workspace?: string, projectId?: string): Promise<void> {
     sessionRestoreRequest++;
     state.loadingSession = "";
     state.sessionLoadError = "";
     state.view = "chat";
-    const info = (await window.aiclaw.session.start({ workspace })) as SessionStartView;
+    const info = (await window.aiclaw.session.start({ workspace, projectId })) as SessionStartView;
     state.sessionId = info.sessionId;
     state.sessionInfo = info;
     state.model = info.model;
     state.providerId = info.providerId;
     state.live[info.sessionId] = newLive();
+    state.groups = await window.aiclaw.groups.read() as SessionGroupsView;
     await actions.refreshSessions();
   },
 
@@ -502,6 +503,7 @@ export const actions = {
   async refreshSessions(): Promise<void> {
     try {
       state.sessions = (await window.aiclaw.session.list()) as SessionSummaryView[];
+      state.groups = await window.aiclaw.groups.read() as SessionGroupsView;
     } catch {
       // 列表拉不到不该打断正在进行的对话，静默即可——侧边栏空着就空着。
     }
@@ -587,6 +589,10 @@ export const actions = {
 
   async createGroup(name: string): Promise<void> {
     state.groups = (await window.aiclaw.groups.create(name)) as SessionGroupsView;
+  },
+
+  async saveProject(input: import("../shared/projects").ProjectInput): Promise<void> {
+    state.groups = await window.aiclaw.groups.saveProject(plain(input)) as SessionGroupsView;
   },
 
   async renameGroup(groupId: string, name: string): Promise<void> {

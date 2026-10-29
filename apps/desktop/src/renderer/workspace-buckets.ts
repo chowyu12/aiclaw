@@ -35,3 +35,21 @@ export function workspaceBuckets(sessions: readonly SessionSummaryView[]): Works
   }
   return buckets.sort((a, b) => b.sessions[0]!.updatedAt.localeCompare(a.sessions[0]!.updatedAt));
 }
+
+export interface ProjectBucket extends WorkspaceBucket { projectId?: string; directories?: string[] }
+
+/** Explicit membership wins, even when two projects share a directory. */
+export function projectBuckets(sessions: readonly SessionSummaryView[], projects: readonly {id:string; name:string; directories?: readonly string[]}[], assignments: Record<string,string>): ProjectBucket[] {
+  projects = projects.filter(project => Array.isArray(project.directories));
+  const ids = new Set(projects.map(project => project.id));
+  const assigned = new Set<string>();
+  const buckets: ProjectBucket[] = projects.map(project => {
+    const members = sessions.filter(session => assignments[session.id] === project.id);
+    members.forEach(session => assigned.add(session.id));
+    const directories = [...(project.directories ?? [])];
+    return {id:project.id, projectId:project.id, name:project.name, path:directories[0] ?? "", directories, sessions:members.sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt))};
+  });
+  const loose = sessions.filter(session => !assigned.has(session.id) && !ids.has(assignments[session.id] ?? ""));
+  buckets.push(...workspaceBuckets(loose));
+  return buckets;
+}

@@ -1019,7 +1019,7 @@ const forking = ref(false);
                     class="menu-item"
                     @click="clearWorkspace()"
                   >
-                    {{ t("清除（回到未设置）") }}
+                    {{ t("恢复默认目录") }}
                   </button>
                 </div>
                 <!-- 工具数是「这次能用什么」最直接的一个数；有挂载失败时标红。 -->

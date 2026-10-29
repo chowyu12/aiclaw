@@ -3,7 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store } from "../store";
 import { locale, t } from "../i18n";
 import { describeError } from "../errors";
-import { workspaceBuckets, workspaceName } from "../workspace-buckets";
+import { workspaceBuckets, workspaceName, projectBuckets } from "../workspace-buckets";
+import ProjectEditor from "./ProjectEditor.vue";
 import SessionRename from "./SessionRename.vue";
 import type { SessionSummaryView } from "../../shared/types";
 defineEmits<{ close: [] }>();
@@ -54,9 +55,9 @@ watch(() => store.view, () => finishResize());
 
 
 /**
- * 左侧会话栏：新建、按工作区展示、切换、删除。
+ * 左侧会话栏：项目配置、按项目展示会话、切换和归档。
  *
- * 工作区来自会话存档；旧分组数据只用于读取定时任务来源和保存折叠状态。
+ * 项目及目录列表保存在宿主；旧会话保留原路径，尚未配置项目时继续按目录展示。
  */
 
 /** 设置态下左栏显示的导航。与会话行同一套样式，是同一个列表位置上的两种内容。 */
@@ -119,9 +120,27 @@ interface Bucket {
   name: string;
   path?: string;
   detail?: string;
+  projectId?: string;
+  directories?: string[];
   sessions: SessionSummaryView[];
 }
 
+const editingProject = ref<{id:string; name:string; directories?: string[]} | undefined>();
+const projectEditorOpen = ref(false);
+const projectWorkspaces = ref<Record<string,string>>({});
+function editProject(bucket?: Bucket): void {
+  editingProject.value = bucket ? {id:bucket.id,name:bucket.name,directories:bucket.directories ?? (bucket.path ? [bucket.path] : [])} : undefined;
+  projectEditorOpen.value = true;
+  closeWorkspaceMenu();
+}
+function selectedDirectory(bucket: Bucket): string | undefined {
+  const selected = projectWorkspaces.value[bucket.id];
+  return selected && bucket.directories?.includes(selected) ? selected : bucket.path || undefined;
+}
+async function newCurrentProjectChat(): Promise<void> {
+  const bucket = buckets.value.find(item => item.sessions.some(session => session.id === store.sessionId || descendants(session.id).some(child => child.session.id === store.sessionId)));
+  if (bucket) await newWorkspaceChat(bucket); else await actions.newSession();
+}
 const pinned = ref<string[]>([]);
 try {
   const saved = JSON.parse(localStorage.getItem("aiclaw:pinned-workspaces") ?? "[]");
@@ -158,10 +177,10 @@ function pinWorkspace(bucket: Bucket): void {
   } catch (error) { actions.showError(describeError(error)); }
 }
 async function newWorkspaceChat(bucket: Bucket): Promise<void> {
-  if (!bucket.path || creatingWorkspace.value) return;
+  if (creatingWorkspace.value) return;
   creatingWorkspace.value = bucket.id;
   try {
-    await actions.newSession(bucket.path);
+    await actions.newSession(selectedDirectory(bucket), bucket.projectId);
     await actions.collapseGroup(bucket.id, false);
   } catch (error) { actions.showError(describeError(error)); }
   finally { creatingWorkspace.value = ""; }
@@ -241,8 +260,8 @@ function descendants(id: string, depth = 1): { session: SessionSummaryView; dept
 
 const buckets = computed<Bucket[]>(() => {
   const roots = store.sessions.filter(session => !isNestedChild(session));
-  const result: Bucket[] = workspaceBuckets(roots).sort((a, b) => Number(pinned.value.includes(b.path)) - Number(pinned.value.includes(a.path)));
-  const loose = roots.filter(session => !session.workdir?.trim())
+  const result: Bucket[] = projectBuckets(roots, store.groups.groups, store.groups.assignments).sort((a, b) => Number(pinned.value.includes(b.path)) - Number(pinned.value.includes(a.path)));
+  const loose = roots.filter(session => !session.workdir?.trim() && !store.groups.groups.some(project => Array.isArray(project.directories) && project.id === store.groups.assignments[session.id]))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   if (loose.length) result.push({ id: UNGROUPED, name: t("普通会话"), sessions: loose });
   return result;
@@ -323,9 +342,10 @@ function when(iso: string): string {
 
     <div class="head">
       <template v-if="store.view === 'chat'">
-        <button class="new" :disabled="store.runtime.state !== 'ready'" @click="actions.newSession()">
+        <button class="new" :disabled="store.runtime.state !== 'ready'" @click="newCurrentProjectChat()">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7M10 14l1-4L19 2l3 3-8 8Z"/></svg>{{ t("新对话") }}
         </button>
+        <button class="icon" :title="t('新建项目')" :aria-label="t('新建项目')" @click="editProject()">＋</button>
       </template>
       <button v-else class="new" @click="actions.setView('chat')">
         <span class="plus">‹</span> {{ t("返回对话") }}
@@ -407,7 +427,7 @@ function when(iso: string): string {
 
       <section
         v-for="bucket in buckets"
-        v-show="store.sessions.length > 0"
+
         :key="bucket.id"
         class="bucket" :data-bucket-id="bucket.id"
       >
@@ -430,7 +450,7 @@ function when(iso: string): string {
             </span>
             <span v-if="bucket.path && pinned.includes(bucket.path)" class="workspace-pin" :title="t('已置顶')"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 2 5 5-2 1-2 3-2-2-4 4 M8 9 5 6l3-2Z" /></svg></span>
             <span class="count">{{ bucket.sessions.length }}</span>
-            <div v-if="bucket.path" class="workspace-actions" :class="{ open: workspaceMenu?.id === bucket.id }">
+            <div v-if="bucket.path || bucket.projectId" class="workspace-actions" :class="{ open: workspaceMenu?.id === bucket.id }">
               <button class="icon tiny" :title="t('工作区更多操作')" :aria-label="t('工作区更多操作')" :aria-expanded="workspaceMenu?.id === bucket.id" @click.stop="openWorkspaceMenu(bucket, $event)">⋯</button>
               <button class="icon tiny" :title="t('在此工作区新建会话')" :aria-label="t('在此工作区新建会话')" :disabled="store.runtime.state !== 'ready' || !!creatingWorkspace || !!archivingWorkspace" @click.stop="newWorkspaceChat(bucket)">
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 2.5h-5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-5 M8 8l5-5-1.5-1.5-5 5-.5 2Z" /></svg>
@@ -442,6 +462,12 @@ function when(iso: string): string {
             </span>
             <span v-if="isCollapsed(bucket) && active(bucket)" class="running" :title="t(`有会话正在执行或在等你回答`)"></span>
         </header>
+        <div v-if="bucket.projectId && !isCollapsed(bucket)" class="project-directory">
+          <select v-if="bucket.directories?.length" :aria-label="t('新会话工作目录')" :value="selectedDirectory(bucket)" @change="projectWorkspaces[bucket.id] = ($event.target as HTMLSelectElement).value">
+            <option v-for="directory in bucket.directories" :key="directory" :value="directory">{{ directory }}</option>
+          </select>
+          <span v-else>{{ t('默认目录：~/aiclaw') }}</span>
+        </div>
         <div v-if="bucket.detail" class="bucket-detail" :title="bucket.path">{{ bucket.detail }}</div>
 
         <template v-for="session in visibleSessions(bucket)" :key="session.id">
@@ -474,6 +500,10 @@ function when(iso: string): string {
             </button>
           </div>
           <div class="item-actions" @click.stop>
+            <select v-if="store.groups.groups.some(project => Array.isArray(project.directories))" class="project-move" :aria-label="t('移动到项目')" :value="store.groups.assignments[session.id] || ''" @change="actions.assignSession(session.id, ($event.target as HTMLSelectElement).value || null)">
+              <option value="">{{ t('未分配项目') }}</option>
+              <option v-for="project in store.groups.groups.filter(project => Array.isArray(project.directories))" :key="project.id" :value="project.id">{{ project.name }}</option>
+            </select>
             <button class="icon tiny" :title="t(`重命名会话`)" :aria-label="t(`重命名会话`)" :disabled="!!renamingSession" @click="renamingSession = session.id">
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 2 4 4-7.5 7.5-4.5.5.5-4.5Z M8.5 3.5l4 4" /></svg>
             </button>
@@ -522,11 +552,14 @@ function when(iso: string): string {
       </section>
     </div>
 
+    <ProjectEditor v-if="projectEditorOpen" :project="editingProject" @close="projectEditorOpen = false" />
     <template v-if="workspaceMenu">
       <div class="workspace-menu-backdrop" @click="closeWorkspaceMenu()" />
       <div ref="menuElement" class="workspace-menu" :style="menuPosition" role="group" :aria-label="t('工作区更多操作')" @keydown.esc.prevent.stop="closeWorkspaceMenu()">
-        <button @click="pinWorkspace(workspaceMenu)">{{ workspaceMenu.path && pinned.includes(workspaceMenu.path) ? t('取消置顶') : t('置顶') }}</button>
-        <button @click="actions.revealWorkspace(workspaceMenu.path!); closeWorkspaceMenu()">{{ t('在 Finder 中显示') }}</button>
+        <button @click="editProject(workspaceMenu)">{{ t('项目设置') }}</button>
+        <button v-if="workspaceMenu.projectId" @click="actions.deleteGroup(workspaceMenu.projectId); closeWorkspaceMenu()">{{ t('移除项目（保留会话和文件）') }}</button>
+        <button v-if="workspaceMenu.path" @click="pinWorkspace(workspaceMenu)">{{ workspaceMenu.path && pinned.includes(workspaceMenu.path) ? t('取消置顶') : t('置顶') }}</button>
+        <button v-if="workspaceMenu.path" @click="actions.revealWorkspace(workspaceMenu.path!); closeWorkspaceMenu()">{{ t('在 Finder 中显示') }}</button>
         <button :disabled="!!archivingWorkspace" @click="archiveWorkspace(workspaceMenu)">{{ t('归档工作区会话') }}</button>
       </div>
     </template>
@@ -536,6 +569,10 @@ function when(iso: string): string {
 </template>
 
 <style scoped>
+.project-directory{padding:0 10px 8px;font-size:11px;color:var(--muted)}
+.project-directory select{width:100%;font-size:11px;min-width:0;padding:5px}
+.project-move{max-width:80px;font-size:10px;padding:2px}
+
 .sidebar {
   position: relative;
   display: flex;

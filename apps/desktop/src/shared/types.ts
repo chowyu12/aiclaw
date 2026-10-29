@@ -271,6 +271,7 @@ export interface UpdateStatusView {
 export interface SessionGroupView {
   id: string;
   name: string;
+  directories?: string[];
 }
 
 export interface SessionGroupsView {

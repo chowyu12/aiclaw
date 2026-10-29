@@ -13,6 +13,7 @@ app.whenReady().then(async()=>{
  const {profileSpecs,SessionManager}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/session.js')).href);
  const profiles=profileSpecs();
  check('desktop offers exactly default strict and allow-all policies',profiles.map(p=>p.id).join('|')==='auto|always|bypass'&&profiles[0].label==='默认');
+ let directoryPicks=0;const documentDirectory=()=>win && projectDirectoryMode ? ['/tmp/first','/tmp/second'][directoryPicks++ % 2] : '/tmp/smoke';let projectDirectoryMode=false;
  let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',sessionWorkspace='/tmp/smoke',renameFails=false;const renameCalls=[];
  let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[],schedulesFail=false;
  let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
@@ -47,10 +48,13 @@ app.whenReady().then(async()=>{
  let configGate=null, configWriteFails=false;
  handle('configRead',()=>config);handle('configWrite',async(_e,p)=>{if(configWriteFails)throw Error('config write failed');if(p.profile&&configGate)await configGate;return Object.assign(config,p);});handle('runtimeStart',()=>undefined);
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
+ handle('projectSave',(_e,input)=>{const project={...input,id:input.id||'p_fixture',directories:input.directories.map(path=>path.trim()).filter(Boolean)};const index=groups.groups.findIndex(p=>p.id===project.id);if(index<0)groups.groups.push(project);else groups.groups[index]=project;return groups;});
+ handle('groupDelete',(_e,id)=>{groups.groups=groups.groups.filter(p=>p.id!==id);for(const key of Object.keys(groups.assignments))if(groups.assignments[key]===id)delete groups.assignments[key];return groups;});
+ handle('sessionAssign',(_e,input)=>{if(input.groupId)groups.assignments[input.sessionId]=input.groupId;else delete groups.assignments[input.sessionId];return groups;});
  handle('groupRead',()=>groups);handle('groupCollapse',(_e,input)=>{groups.collapsed[input.groupId]=input.collapsed;groups.seenAt[input.groupId]=Date.now();return groups;});handle('sessionSearch',()=>list().filter(s=>!s.parentId));handle('mcpRead',()=>mcpServers);handle('skillList',()=>{if(skillListFails)throw Error('skill list unavailable');return skillCatalog;});
  handle('providerList',()=>[{id:1,name:'fixture',type:'openai-compatible',enabled:true,apiKeySet:true,models:['test','test2']}]);
  handle('sessionRename',(_e,input)=>{renameCalls.push(input);if(renameFails)throw Error('rename failure');sessionTitle=input.title;return {sessionId:input.sessionId,title:sessionTitle};});
- handle('sessionWorkspace',(_e,input)=>{sessionWorkspace=input.workspace;return sessionWorkspace;});handle('pickDirectory',()=>'/tmp/smoke');handle('workspaceReveal',(_e,path)=>{revealedWorkspaces.push(path);});handle('sessionStart',(_e,input)=>{startedWorkspaces.push(input.workspace);const session={id:'new-workspace',title:'Workspace new chat',workdir:input.workspace,model:'test',turnCount:0,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};newSessions.push(session);return {sessionId:session.id,workspace:input.workspace,tools:[],mcpStatus:{},model:'test',providerId:1};});handle('sessionArchive',(_e,input)=>{archiveCalls.push(input.sessionId);const ids=[input.sessionId,...list().filter(s=>s.parentId===input.sessionId).map(s=>s.id)];ids.forEach(id=>archivedIds.add(id));return ids;});handle('sessionList',list);handle('sessionArchived',()=>[]);
+ handle('sessionWorkspace',(_e,input)=>{sessionWorkspace=input.workspace || '/fixture/home/aiclaw';return sessionWorkspace;});handle('pickDirectory',()=>documentDirectory());handle('workspaceReveal',(_e,path)=>{revealedWorkspaces.push(path);});handle('sessionStart',(_e,input)=>{startedWorkspaces.push(input.workspace);const session={id:'new-workspace-'+newSessions.length,title:'Workspace new chat',workdir:input.workspace,model:'test',turnCount:0,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};newSessions.push(session);if(input.projectId)groups.assignments[session.id]=input.projectId;return {sessionId:session.id,workspace:input.workspace,tools:[],mcpStatus:{},model:'test',providerId:1};});handle('sessionArchive',(_e,input)=>{archiveCalls.push(input.sessionId);const ids=[input.sessionId,...list().filter(s=>s.parentId===input.sessionId).map(s=>s.id)];ids.forEach(id=>archivedIds.add(id));return ids;});handle('sessionList',list);handle('sessionArchived',()=>[]);
  handle('configurationPending',()=>configurationCards);handle('configurationRespond',(_e,reply)=>{configurationReplies.push(reply);configurationCards=configurationCards.filter(c=>c.id!==reply.id);win.webContents.send(IPC.onConfiguration,configurationCards);return {text:reply.cancel?'Cancelled.':'Configuration saved. Connection test passed.'};});handle('searchList',()=>[]);handle('pluginList',()=>pluginFixtures);handle('pluginConfig',()=>[]);handle('pluginContributions',()=>({mcpServers:{},skills:[],computerUse:false}));handle('channelStatus',()=>[]);handle('channelBindings',()=>bindingFixtures);handle('channelAuthorize',(_e,input)=>{channelAuthorizations.push(input);const binding=bindingFixtures.find(b=>b.externalKey===input.externalKey);Object.assign(binding,{approvalPolicy:input.approvalPolicy,allowed:true});});handle('approvalPending',()=>[]);handle('questionPending',()=>[]);handle('scheduleList',()=>{if(schedulesFail)throw Error('fixture task storage damaged; original preserved');return tasks;});
  let browserFixture={listening:false,port:17891,browser:'',browsers:[]};const browserOpens=[];let browserOpenFails=false;
  handle('browserBridgeStatus',()=>browserFixture);
@@ -176,9 +180,9 @@ app.whenReady().then(async()=>{
  writeFileSync('/tmp/aiclaw-approval-profiles.png',(await win.webContents.capturePage()).toPNG());
  await js("document.querySelector('.composer .chip[data-policy]').click()");
  await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('smoke')).click()");
- await click('清除（回到未设置）');
- check('clearing workspace immediately moves the chat to general chats',await wait("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count').textContent==='2' && document.querySelector('[data-bucket-id=\"__ungrouped__\"] .count').textContent==='2'"));
- await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('未设工作区')).click()");
+ await click('恢复默认目录');
+ check('resetting workspace moves the chat to the home aiclaw directory',await wait("document.querySelector('[data-bucket-id=\"workspace:/fixture/home/aiclaw\"] .item.active')"));
+ await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('aiclaw')).click()");
  await click('选择目录…');
  check('choosing workspace immediately restores the matching workspace bucket',await wait("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count')?.textContent==='3'"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
@@ -802,6 +806,19 @@ app.whenReady().then(async()=>{
  win.webContents.send(IPC.onRuntimeStatus,{state:'ready'});
  await selectChat('General chat');
  check('runtime restart invalidates the current chat restoration so it can be resumed again',await wait("!!document.querySelector('.prose') && !document.querySelector('.session-retry')")&&resumeCalls.filter(id=>id==='general').length===callsBeforeRestart+1);
+
+ await openSessions();
+ await js("document.querySelector('button[aria-label=\"新建项目\"]').click()");await wait("!!document.querySelector('.project-editor')");
+ await js("(()=>{const input=document.querySelector('.project-editor input');input.value='My project';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
+ projectDirectoryMode=true;await click('添加目录');await click('添加目录');projectDirectoryMode=false;
+ await js("document.querySelector('.project-editor').requestSubmit()");
+ check('project with multiple directories is persisted and visible without chats',await wait("!document.querySelector('.project-editor') && !!document.querySelector('[data-bucket-id=\"p_fixture\"]')")&&groups.groups.find(p=>p.id==='p_fixture')?.directories.length===2);
+ await win.reload();await wait("!!document.querySelector('[data-bucket-id=\"p_fixture\"]')");await openSessions();
+ check('project directories survive renderer reload',await wait("document.querySelectorAll('[data-bucket-id=\"p_fixture\"] select option').length===2"));
+ await js("(()=>{const select=document.querySelector('.project-move');select.value='p_fixture';select.dispatchEvent(new Event('change',{bubbles:true}))})()");
+ check('moving chat changes project membership without moving files',await wait("document.querySelector('[data-bucket-id=\"p_fixture\"] .item')")&&sessionWorkspace==='/tmp/smoke');
+ await js("(()=>{const select=document.querySelector('[data-bucket-id=\"p_fixture\"] .project-directory select');select.value='/tmp/second';select.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"在此工作区新建会话\"]').click()})()");
+ check('project new chat uses the selected second directory and keeps project membership',await wait("document.querySelectorAll('[data-bucket-id=\"p_fixture\"] .item').length===2")&&startedWorkspaces.at(-1)==='/tmp/second');
 
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);

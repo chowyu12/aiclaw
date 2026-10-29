@@ -110,6 +110,7 @@ export interface McpServer {
 export interface SessionGroup {
   id: string;
   name: string;
+  directories?: string[];
 }
 
 export interface SessionGroups {

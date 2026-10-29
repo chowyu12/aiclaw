@@ -1,5 +1,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences } from "electron";
-import { join, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { projectWorkspace } from "./workspace-defaults.js";
+import { normalizeProject, type ProjectInput } from "../shared/projects.js";
+import { join, dirname, isAbsolute } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { PendingApproval, PendingUserInput } from "@aiclaw/agent-client";
@@ -291,14 +294,29 @@ function registerIpc(): void {
   ipcMain.handle(IPC.runtimeStop, () => sessions.stop());
   ipcMain.handle(IPC.runtimeStatus, () => ({ state: sessions.running ? "ready" : "stopped" }));
 
-  ipcMain.handle(IPC.sessionStart, (_event, input?: { workspace?: string }) =>
-    sessions.startSession(input?.workspace),
-  );
+  ipcMain.handle(IPC.sessionStart, async (_event, input?: { workspace?: string; projectId?: string }) => {
+    const current = store.readGroups();
+    const project = input?.projectId ? current.groups.find(group => group.id === input.projectId) : undefined;
+    if (input?.projectId && !project) throw new Error("Project does not exist");
+    const workspace = projectWorkspace(project, input?.workspace);
+    const result = await sessions.startSession(workspace);
+    if (project) {
+      const latest = store.readGroups();
+      store.writeGroups({assignments: {...latest.assignments, [result.sessionId]: project.id}});
+    }
+    return result;
+  });
   ipcMain.handle(IPC.sessionContext, (_event, id: string) => sessions.sessionContext(id));
   ipcMain.handle(IPC.sessionWork, (_event, id: string) => sessions.sessionWork(id));
   ipcMain.handle(IPC.goalSet, (_event, id: string, goal) => sessions.goalSet(id, goal));
   ipcMain.handle(IPC.goalUpdate, (_event, id: string, update) => sessions.goalUpdate(id, update));
-  ipcMain.handle(IPC.sessionFork, (_event, id: string, itemId?: string) => sessions.forkSession(id, itemId));
+  ipcMain.handle(IPC.sessionFork, async (_event, id: string, itemId?: string) => {
+    const result = await sessions.forkSession(id, itemId);
+    const current = store.readGroups();
+    const projectId = current.assignments[id];
+    if (projectId && current.groups.some(group => group.id === projectId)) store.writeGroups({assignments: {...current.assignments, [result.sessionId]: projectId}});
+    return result;
+  });
   ipcMain.handle(IPC.sessionRecover, (_event, id: string, requestId: string, action: "resume" | "dismiss" | "steer") => sessions.recoverSession(id, requestId, action));
   ipcMain.handle(IPC.changesList, (_event, id: string) => sessions.changesList(id));
   ipcMain.handle(IPC.changesUndo, (_event, id: string, changeId: string) => sessions.changesUndo(id, changeId));
@@ -323,8 +341,11 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionSearch, (_event, keyword: string) => sessions.searchSessions(keyword));
   ipcMain.handle(
     IPC.sessionWorkspace,
-    (_event, input: { sessionId: string; workspace: string }) =>
-      sessions.setWorkspace(input.sessionId, input.workspace),
+    (_event, input: { sessionId: string; workspace: string }) => {
+      const current = store.readGroups();
+      const project = current.groups.find(group => group.id === current.assignments[input.sessionId]);
+      return sessions.setWorkspace(input.sessionId, input.workspace.trim() || project?.directories?.[0] || "");
+    },
   );
   ipcMain.handle(IPC.sessionDelete, (_event, sessionId: string) => sessions.deleteSession(sessionId));
   ipcMain.handle(
@@ -519,6 +540,22 @@ function registerIpc(): void {
   ipcMain.handle(IPC.groupCollapse, (_event, input: { groupId: string; collapsed: boolean }) =>
     store.setGroupCollapsed(String(input.groupId), input.collapsed === true),
   );
+  ipcMain.handle(IPC.projectSave, async (_event, input: ProjectInput) => {
+    const project = normalizeProject(input);
+    if (project.directories.some(path => !isAbsolute(path) || path.includes("\0"))) throw new Error("Project directories must be absolute paths");
+    const sessionsForProjects = project.id?.startsWith("workspace:") ? await sessions.listSessions() : [];
+    const current = store.readGroups();
+    const id = project.id || `p_${randomUUID()}`;
+    const next = {id, name: project.name, directories: project.directories};
+    const groups = current.groups.some(group => group.id === id) ? current.groups.map(group => group.id === id ? next : group) : [...current.groups, next];
+    // Adopting an existing workspace bucket preserves its conversations as project members.
+    const assignments = {...current.assignments};
+    if (!current.groups.some(group => group.id === id) && id.startsWith("workspace:")) {
+      const path = id.slice("workspace:".length);
+      for (const session of sessionsForProjects) { if (session.workdir === path && !current.groups.some(group => Array.isArray(group.directories) && group.id === assignments[session.id])) assignments[session.id] = id; }
+    }
+    return store.writeGroups({groups, assignments});
+  });
   ipcMain.handle(IPC.groupCreate, (_event, name: string) => {
     const current = store.readGroups();
     const group = { id: `g_${Date.now().toString(36)}`, name: name.trim() || tr("新分组") };

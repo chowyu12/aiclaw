@@ -1,5 +1,22 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+ "工作区目录": "Workspace directories",
+ "移除目录": "Remove directory",
+ "未添加目录，默认使用 ~/aiclaw": "No directories added; defaults to ~/aiclaw",
+ "输入目录路径": "Enter a directory path",
+ "恢复默认目录": "Restore default directory",
+ "项目设置": "Project settings",
+ "项目名称": "Project name",
+ "新建项目": "New project",
+ "工作区目录（每行一个）": "Workspace directories (one per line)",
+ "可以配置多个目录；新会话可选择其中一个执行。留空默认使用 ~/aiclaw。修改目录不会移动已有会话的文件。": "Configure multiple directories and choose one for each new chat. Leave empty to use ~/aiclaw. Editing directories does not move existing files.",
+ "添加目录": "Add directory",
+ "新会话工作目录": "Working directory for new chats",
+ "默认目录：~/aiclaw": "Default directory: ~/aiclaw",
+ "移除项目（保留会话和文件）": "Remove project (keep chats and files)",
+ "移动到项目": "Move to project",
+ "未分配项目": "Unassigned project",
+
   "调整会话列表宽度": "Resize conversation sidebar",
   "拖动调整会话列表宽度": "Drag to resize the conversation sidebar",
   "应用导航": "App navigation",
