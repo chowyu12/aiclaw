@@ -37,7 +37,7 @@ function fixture() {
     const tasks = read().map((task) => (task.id === id ? { ...task, ...change } : task));
     writeFileSync(file, JSON.stringify(tasks));
   };
-  return { scheduler, runs, notes, read, patch, fail: (message: string) => (failNext = message) };
+  return { scheduler, runs, notes, read, patch, file, fail: (message: string) => (failNext = message) };
 }
 
 const at = (y: number, m: number, d: number, h = 0, min = 0) => new Date(y, m - 1, d, h, min);
@@ -225,4 +225,101 @@ test("completion arriving before the start receipt is reconciled to the right ru
  await scheduler.runNow(task.id);
  assert.equal(scheduler.list()[0]!.lastStatus, "ok");
  assert.deepEqual(notes, ["ready"]);
+});
+
+
+test("malformed task storage is preserved and blocks reads and writes without blocking app startup", async () => {
+  const { scheduler, runs, file } = fixture();
+  scheduler.save({ name: "Existing", prompt: "Keep it", rule: { kind: "interval", everyMinutes: 30 } });
+  const damaged = '[{"id":"existing"';
+  writeFileSync(file, damaged);
+  assert.throws(() => scheduler.list(), /原文件已保留/);
+  assert.throws(() => scheduler.save({ name: "New", prompt: "Do not overwrite", rule: { kind: "interval", everyMinutes: 60 } }), /不能修改/);
+  assert.throws(() => scheduler.remove("existing"), /不能修改/);
+  assert.throws(() => scheduler.setEnabled("existing", true), /不能修改/);
+  await assert.rejects(scheduler.runNow("existing"), /不能修改/);
+  await scheduler.tick();
+  assert.deepEqual(runs, []);
+  assert.doesNotThrow(() => new Scheduler(join(file, ".."), { runTask: async () => "unused", notify() {} }));
+  assert.equal(readFileSync(file, "utf8"), damaged);
+});
+
+test("invalid task file structures cannot silently become an empty schedule", () => {
+  const { scheduler, file } = fixture();
+  const task = scheduler.save({ name: "Valid", prompt: "Check", rule: { kind: "interval", everyMinutes: 30 } });
+  for (const value of [{ tasks: [] }, [null], [{ ...task, rule: { kind: "unknown" } }], [{ ...task, anchorAt: "invalid" }]]) {
+    const contents = JSON.stringify(value);
+    writeFileSync(file, contents);
+    assert.throws(() => scheduler.list(), /原文件已保留/);
+    assert.throws(() => scheduler.save({ name: "New", prompt: "Check", rule: { kind: "daily", time: "09:00" } }), /不能修改/);
+    assert.equal(readFileSync(file, "utf8"), contents);
+  }
+});
+
+test("runtime loss pauses uncertain tasks, releases their locks, and requires explicit continuation", async () => {
+  const { scheduler, runs, read } = fixture();
+  const task = scheduler.save({ name: "Check", prompt: "Inspect", rule: { kind: "interval", everyMinutes: 30 } });
+  await scheduler.runNow(task.id);
+  scheduler.runtimeStopped();
+  assert.equal(read()[0]!.lastStatus, "failed");
+  assert.equal(read()[0]!.enabled, false);
+  assert.equal(read()[0]!.lastSessionId, "s_1");
+  assert.match(read()[0]!.lastError!, /结果不确定/);
+  await scheduler.tick(new Date(Date.now() + 60 * 60_000));
+  assert.equal(runs.length, 1, "uncertain work must not be replayed automatically");
+  scheduler.setEnabled(task.id, true);
+  assert.equal(await scheduler.runNow(task.id), "s_2");
+  scheduler.onTurnCompleted("s_1", undefined);
+  assert.equal(read()[0]!.lastStatus, "running", "old completion must not finish the new run");
+  scheduler.onTurnCompleted("s_2", undefined);
+  assert.equal(read()[0]!.lastStatus, "ok");
+});
+
+test("a late dispatch receipt cannot resurrect a task after runtime loss", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aiclaw-scheduler-interrupted-"));
+  let finish!: (receipt: {sessionId: string; turnId: string}) => void;
+  const scheduler = new Scheduler(dir, { runTask: () => new Promise(resolve => { finish = resolve; }), notify() {} });
+  const task = scheduler.save({ name: "Late", prompt: "Inspect", rule: { kind: "interval", everyMinutes: 30 } });
+  const run = scheduler.runNow(task.id);
+  const rejected = assert.rejects(run, /结果不确定/);
+  scheduler.runtimeStopped();
+  finish({ sessionId: "late-session", turnId: "late-turn" });
+  await rejected;
+  assert.equal(scheduler.list()[0]!.lastStatus, "failed");
+  assert.equal(scheduler.list()[0]!.enabled, false);
+});
+
+test("a late error from an interrupted run cannot release or fail its replacement", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aiclaw-scheduler-replacement-"));
+  let rejectOld!: (error: Error) => void, calls = 0;
+  const scheduler = new Scheduler(dir, {
+    runTask: () => ++calls === 1 ? new Promise((_resolve, reject) => { rejectOld = reject; }) : Promise.resolve({ sessionId: "new-session", turnId: "new-turn" }), notify() {},
+  });
+  const task = scheduler.save({ name: "Replace", prompt: "Inspect", rule: { kind: "interval", everyMinutes: 30 } });
+  const old = scheduler.runNow(task.id);
+  const rejected = assert.rejects(old, /old dispatch failed/);
+  scheduler.runtimeStopped();
+  await scheduler.runNow(task.id);
+  rejectOld(new Error("old dispatch failed"));
+  await rejected;
+  assert.equal(scheduler.list()[0]!.lastStatus, "running");
+  assert.equal(scheduler.list()[0]!.lastSessionId, "new-session");
+  await assert.rejects(scheduler.runNow(task.id), /已经在执行/);
+  scheduler.onTurnCompleted("new-session", undefined, "new-turn");
+  assert.equal(scheduler.list()[0]!.lastStatus, "ok");
+});
+
+
+test("a tick interrupted during dispatch does not start remaining tasks from its old snapshot", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aiclaw-scheduler-tick-stop-"));
+  let finish!: (receipt: {sessionId: string; turnId: string}) => void, calls = 0;
+  const scheduler = new Scheduler(dir, { runTask: () => { calls++; return new Promise(resolve => { finish = resolve; }); }, notify() {} });
+  scheduler.save({ name: "First", prompt: "Check", rule: { kind: "interval", everyMinutes: 5 } });
+  scheduler.save({ name: "Second", prompt: "Check", rule: { kind: "interval", everyMinutes: 5 } });
+  const tick = scheduler.tick(new Date(Date.now() + 6 * 60_000));
+  assert.equal(calls, 1);
+  scheduler.runtimeStopped();
+  finish({ sessionId: "old-session", turnId: "old-turn" });
+  await tick;
+  assert.equal(calls, 1);
 });

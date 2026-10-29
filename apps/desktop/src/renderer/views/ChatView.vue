@@ -735,6 +735,10 @@ const forking = ref(false);
           <p v-if="store.loadingSession === store.sessionId && store.timeline.length === 0" class="blank">
             {{ t("正在载入这个会话…") }}
           </p>
+          <div v-else-if="store.sessionId && store.sessionLoadError" class="blank session-retry" role="alert">
+            <p>{{ store.sessionLoadError }}</p>
+            <button class="ghost" @click="actions.openSession(store.sessionId)">{{ t("重试") }}</button>
+          </div>
           <p v-else-if="store.timeline.length === 0" class="blank">
             {{ t("这个会话还没有内容。说点什么开始。") }}
           </p>

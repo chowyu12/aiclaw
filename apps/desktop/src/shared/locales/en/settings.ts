@@ -57,6 +57,8 @@ export const settings: Record<string, string> = {
   "已满足停止条件": "Stop condition met",
   "可在原会话持续跟进，也可每次开启新会话。跟进会保留检查结果，默认仅在结果变化、失败或完成时通知。": "Follow up in an existing chat or start a new chat each run. Follow-ups keep results and notify on changes, failures or completion.",
   "上次执行结果不确定，请检查原会话后再启用": "The previous run has an uncertain outcome. Inspect the chat before enabling it again.",
+  "定时任务文件格式无效": "Invalid scheduled-task file format",
+  "无法读取定时任务文件 {path}，原文件已保留，修复前不能修改：{error}": "Cannot read scheduled-task file {path}. The original file is preserved and changes are blocked until it is repaired: {error}",
   "任务已经在执行": "This task is already running",
   "原会话已有跟进任务在执行": "A follow-up is already running in this chat",
   "原会话不存在或已归档": "The original chat is missing or archived",

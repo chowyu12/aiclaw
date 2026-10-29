@@ -43,6 +43,7 @@ export class Scheduler extends EventEmitter {
   private reports = new Map<string, {result: string; resultKey: string; complete: boolean}>();
   private earlyCompletions = new Map<string, {sessionId: string; error?: string}>();
   private startup: ReturnType<typeof setTimeout> | undefined;
+  private generation = 0;
 
   private readonly dir: string;
   private readonly host: SchedulerHost;
@@ -51,6 +52,16 @@ export class Scheduler extends EventEmitter {
     super();
     this.dir = dir;
     this.host = host;
+    try { this.runtimeStopped(); }
+    catch { /* Keep the app usable; list/save expose the preserved file error. */ }
+  }
+
+  /** A missing completion receipt has an uncertain outcome, so never replay it automatically. */
+  runtimeStopped(): void {
+    this.generation++;
+    this.running.clear();
+    this.reports.clear();
+    this.earlyCompletions.clear();
     const tasks = this.read();
     let recovered = false;
     for (const task of tasks) if (task.lastStatus === "running") {
@@ -70,9 +81,16 @@ export class Scheduler extends EventEmitter {
     if (!existsSync(this.path)) return [];
     try {
       const raw = JSON.parse(readFileSync(this.path, "utf8")) as unknown;
-      return Array.isArray(raw) ? (raw as ScheduledTask[]) : [];
-    } catch {
-      return [];
+      if (!Array.isArray(raw) || !raw.every(task => task && typeof task === "object" &&
+        typeof task.id === "string" && typeof task.name === "string" && typeof task.prompt === "string" &&
+        typeof task.enabled === "boolean" && typeof task.workspace === "string" &&
+        typeof task.anchorAt === "string" && Number.isFinite(Date.parse(task.anchorAt)) &&
+        task.rule && !validateRule(task.rule))) throw new Error(tr("定时任务文件格式无效"));
+      return raw as ScheduledTask[];
+    } catch (error) {
+      throw new Error(tr("无法读取定时任务文件 {path}，原文件已保留，修复前不能修改：{error}", {
+        path: this.path, error: error instanceof Error ? error.message : String(error),
+      }));
     }
   }
 
@@ -185,7 +203,12 @@ export class Scheduler extends EventEmitter {
   }
 
   async tick(now = new Date()): Promise<void> {
-    for (const task of this.read()) {
+    let tasks: ScheduledTask[];
+    try { tasks = this.read(); }
+    catch { return; } // Invalid storage blocks scheduling; settings shows the read error.
+    const generation = this.generation;
+    for (const task of tasks) {
+      if (generation !== this.generation) return;
       if (!task.enabled || this.running.has(task.id)) continue;
       const state = dueState(task.rule, new Date(task.anchorAt), now);
       if (state === "missed") {
@@ -204,6 +227,7 @@ export class Scheduler extends EventEmitter {
     if (this.running.has(task.id)) throw new Error(tr("任务已经在执行"));
     if (task.mode === "followup" && this.read().some(item => item.id !== task.id && item.lastStatus === "running" && item.lastSessionId === task.sessionId)) throw new Error(tr("原会话已有跟进任务在执行"));
     this.running.add(task.id);
+    const generation = this.generation;
     task.lastRunId = `run_${randomBytes(12).toString("hex")}`;
     const startedAt = new Date().toISOString();
     this.update(task.id, item => {
@@ -213,6 +237,7 @@ export class Scheduler extends EventEmitter {
     });
     try {
       const receipt = await this.host.runTask(task);
+      if (generation !== this.generation) throw new Error(tr("上次执行结果不确定，请检查原会话后再启用"));
       const sessionId = typeof receipt === "string" ? receipt : receipt.sessionId;
       const turnId = typeof receipt === "string" ? undefined : receipt.turnId;
       this.update(task.id, (item) => {
@@ -234,6 +259,7 @@ export class Scheduler extends EventEmitter {
       }
       return sessionId;
     } catch (error) {
+      if (generation !== this.generation) throw error;
       const message = error instanceof Error ? error.message : String(error);
       this.update(task.id, (item) => {
         item.lastRunAt = startedAt;

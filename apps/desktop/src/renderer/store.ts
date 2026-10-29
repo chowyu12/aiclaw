@@ -55,6 +55,7 @@ export interface FilePreviewState {
   reading?: { mode: string; layout: string; positions: Record<string, { top: number; left: number }> };
 }
 let previewRequest = 0;
+let sessionRestoreRequest = 0;
 const queueRevisions = new Map<string, number>();
 
 const state = reactive({
@@ -69,6 +70,7 @@ const state = reactive({
   filePreviews: [] as FilePreviewState[],
   /** 会话启动时挂载的工具与 MCP 状态，展示给用户看「这次能用什么」。 */
   sessionInfo: null as SessionStartView | null,
+  sessionLoadError: "",
   /** 当前会话用的模型与模型服务。与配置页的默认值分开：切模型只影响当前会话。 */
   model: "",
   providerId: 0,
@@ -93,6 +95,7 @@ const state = reactive({
   archived: [] as SessionSummaryView[],
   /** 定时任务。主进程改了会推过来（建、改、删、跑完）。 */
   schedules: [] as ScheduledTaskView[],
+  schedulesError: "",
   /** 模型提的、还没回答的问题（ask_user）。按会话显示在对话里。 */
   questions: [] as QuestionPayload[],
   configurations: [] as ConfigurationCard[],
@@ -286,6 +289,7 @@ export const actions = {
     });
     window.aiclaw.on.schedules((payload) => {
       state.schedules = payload as ScheduledTaskView[];
+      state.schedulesError = "";
     });
     // 点了定时任务的系统通知：打开那次运行开的会话。
     window.aiclaw.on.openSession((payload) => {
@@ -328,6 +332,9 @@ export const actions = {
       state.runtime = payload as RuntimeStatus;
       // 运行时一停，内存里跑着的轮次全没了；不清的话「正在执行」会一直亮着。
       if (state.runtime.state !== "ready") {
+        sessionRestoreRequest++;
+        state.loadingSession = "";
+        state.sessionInfo = null;
         state.configurations = [];
         for (const record of Object.values(state.live)) record.busy = false;
       }
@@ -438,6 +445,9 @@ export const actions = {
    * 传 workspace 是给「从某个会话的工作区接着开一个」用的。
    */
   async newSession(workspace?: string): Promise<void> {
+    sessionRestoreRequest++;
+    state.loadingSession = "";
+    state.sessionLoadError = "";
     state.view = "chat";
     const info = (await window.aiclaw.session.start({ workspace })) as SessionStartView;
     state.sessionId = info.sessionId;
@@ -459,8 +469,10 @@ export const actions = {
    */
   async openSession(sessionId: string): Promise<void> {
     state.view = "chat";
-    if (sessionId === state.sessionId) return;
+    if (sessionId === state.sessionId && (state.loadingSession === sessionId || state.sessionInfo?.sessionId === sessionId)) return;
+    const request = ++sessionRestoreRequest;
     state.error = "";
+    state.sessionLoadError = "";
     state.sessionId = sessionId;
     // 这个会话还没有任何记录时先建一个空的：界面要有东西可渲染。
     ensureLive(state.live, sessionId);
@@ -469,7 +481,7 @@ export const actions = {
     try {
       const info = (await window.aiclaw.session.resume(sessionId)) as SessionStartView;
       // 等的这几秒里用户可能又切走了；切走了就别把结果盖到别人头上。
-      if (state.sessionId !== sessionId) return;
+      if (state.sessionId !== sessionId || request !== sessionRestoreRequest) return;
       state.sessionInfo = info;
       state.model = info.model;
       state.providerId = info.providerId;
@@ -481,9 +493,9 @@ export const actions = {
         state.live[sessionId] = newLive(restoreHistory(info.history ?? []));
       }
     } catch (error) {
-      if (state.sessionId === sessionId) state.error = t("打开会话失败：{error}", { error: describeError(error) });
+      if (state.sessionId === sessionId && request === sessionRestoreRequest) state.sessionLoadError = t("打开会话失败：{error}", { error: describeError(error) });
     } finally {
-      if (state.loadingSession === sessionId) state.loadingSession = "";
+      if (state.loadingSession === sessionId && request === sessionRestoreRequest) state.loadingSession = "";
     }
   },
 
@@ -927,8 +939,9 @@ export const actions = {
   async loadSchedules(): Promise<void> {
     try {
       state.schedules = (await window.aiclaw.schedules.list()) as ScheduledTaskView[];
-    } catch {
-      // 读不到就是空列表；设置页会再读一次。
+      state.schedulesError = "";
+    } catch (error) {
+      state.schedulesError = describeError(error);
     }
   },
 
@@ -1235,13 +1248,19 @@ export const actions = {
         contextWindow: limit,
         reasoningEffort: state.sessionInfo?.reasoningEffort ?? state.config?.reasoningEffort,
       });
-      if (state.sessionId === sessionId && state.sessionInfo?.sessionId === sessionId) state.sessionInfo = { ...state.sessionInfo, model: modelId, providerId };
+      if (state.sessionId === sessionId && state.sessionInfo?.sessionId === sessionId) {
+        state.model = modelId;
+        state.providerId = providerId;
+        state.sessionInfo = { ...state.sessionInfo, model: modelId, providerId };
+      }
       await actions.refreshSessions();
     } catch (error) {
       // 切失败就把显示切回去，别让界面显示一个内核并没有在用的模型。
-      state.model = previous.model;
-      state.providerId = previous.providerId;
-      state.error = t("切换模型失败：{error}", { error: describeError(error) });
+      if (state.sessionId === sessionId && state.sessionInfo?.sessionId === sessionId) {
+        state.model = previous.model;
+        state.providerId = previous.providerId;
+        state.error = t("切换模型失败：{error}", { error: describeError(error) });
+      }
     } finally {
       state.modelChanging = false;
     }

@@ -671,6 +671,8 @@ sessions.on("status", (state, detail) => {
   logApp(`运行时 ${state}${detail ? `：${detail}` : ""}`);
   // 运行时停了，所有待回应的审批都作废。
   if (state !== "ready" && state !== "starting") {
+    try { scheduler.runtimeStopped(); }
+    catch (error) { logApp(`Recover scheduled tasks: ${String(error)}`); }
     pendingApprovals.clear();
     pendingPayloads.clear();
     pendingQuestions.clear();

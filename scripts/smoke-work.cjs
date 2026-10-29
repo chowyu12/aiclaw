@@ -14,7 +14,7 @@ app.whenReady().then(async()=>{
  const profiles=profileSpecs();
  check('desktop offers exactly default strict and allow-all policies',profiles.map(p=>p.id).join('|')==='auto|always|bypass'&&profiles[0].label==='默认');
  let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',sessionWorkspace='/tmp/smoke',renameFails=false;const renameCalls=[];
- let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[];
+ let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[],schedulesFail=false;
  let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
  let queueMode=false,queueAuto=true,queuedInputs=[];
  let configurationCards=[];const configurationReplies=[];
@@ -51,7 +51,7 @@ app.whenReady().then(async()=>{
  handle('providerList',()=>[{id:1,name:'fixture',type:'openai-compatible',enabled:true,apiKeySet:true,models:['test','test2']}]);
  handle('sessionRename',(_e,input)=>{renameCalls.push(input);if(renameFails)throw Error('rename failure');sessionTitle=input.title;return {sessionId:input.sessionId,title:sessionTitle};});
  handle('sessionWorkspace',(_e,input)=>{sessionWorkspace=input.workspace;return sessionWorkspace;});handle('pickDirectory',()=>'/tmp/smoke');handle('workspaceReveal',(_e,path)=>{revealedWorkspaces.push(path);});handle('sessionStart',(_e,input)=>{startedWorkspaces.push(input.workspace);const session={id:'new-workspace',title:'Workspace new chat',workdir:input.workspace,model:'test',turnCount:0,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};newSessions.push(session);return {sessionId:session.id,workspace:input.workspace,tools:[],mcpStatus:{},model:'test',providerId:1};});handle('sessionArchive',(_e,input)=>{archiveCalls.push(input.sessionId);const ids=[input.sessionId,...list().filter(s=>s.parentId===input.sessionId).map(s=>s.id)];ids.forEach(id=>archivedIds.add(id));return ids;});handle('sessionList',list);handle('sessionArchived',()=>[]);
- handle('configurationPending',()=>configurationCards);handle('configurationRespond',(_e,reply)=>{configurationReplies.push(reply);configurationCards=configurationCards.filter(c=>c.id!==reply.id);win.webContents.send(IPC.onConfiguration,configurationCards);return {text:reply.cancel?'Cancelled.':'Configuration saved. Connection test passed.'};});handle('searchList',()=>[]);handle('pluginList',()=>pluginFixtures);handle('pluginConfig',()=>[]);handle('pluginContributions',()=>({mcpServers:{},skills:[],computerUse:false}));handle('channelStatus',()=>[]);handle('channelBindings',()=>bindingFixtures);handle('channelAuthorize',(_e,input)=>{channelAuthorizations.push(input);const binding=bindingFixtures.find(b=>b.externalKey===input.externalKey);Object.assign(binding,{approvalPolicy:input.approvalPolicy,allowed:true});});handle('approvalPending',()=>[]);handle('questionPending',()=>[]);handle('scheduleList',()=>tasks);
+ handle('configurationPending',()=>configurationCards);handle('configurationRespond',(_e,reply)=>{configurationReplies.push(reply);configurationCards=configurationCards.filter(c=>c.id!==reply.id);win.webContents.send(IPC.onConfiguration,configurationCards);return {text:reply.cancel?'Cancelled.':'Configuration saved. Connection test passed.'};});handle('searchList',()=>[]);handle('pluginList',()=>pluginFixtures);handle('pluginConfig',()=>[]);handle('pluginContributions',()=>({mcpServers:{},skills:[],computerUse:false}));handle('channelStatus',()=>[]);handle('channelBindings',()=>bindingFixtures);handle('channelAuthorize',(_e,input)=>{channelAuthorizations.push(input);const binding=bindingFixtures.find(b=>b.externalKey===input.externalKey);Object.assign(binding,{approvalPolicy:input.approvalPolicy,allowed:true});});handle('approvalPending',()=>[]);handle('questionPending',()=>[]);handle('scheduleList',()=>{if(schedulesFail)throw Error('fixture task storage damaged; original preserved');return tasks;});
  let browserFixture={listening:false,port:17891,browser:'',browsers:[]};const browserOpens=[];let browserOpenFails=false;
  handle('browserBridgeStatus',()=>browserFixture);
  handle('browserBridgeOpenPage',(_e,id)=>{browserOpens.push(id);if(browserOpenFails)throw Error('browser launch failed');});
@@ -59,9 +59,11 @@ app.whenReady().then(async()=>{
  handle('mcpOAuthStatus',()=>({state:authState}));handle('mcpOAuthLogin',(_e,input)=>{authCalls.push(input);authState='authorizing';return {state:authState};});handle('mcpOAuthLogout',()=>{authState='needs_login';return {disconnected:true};});
  let effort='medium',reasoningGate=null,reasoningFails=false;const reasoningCalls=[];
  handle('sessionReasoning',async(_e,input)=>{reasoningCalls.push(input);if(reasoningGate)await reasoningGate;if(reasoningFails)throw Error('reasoning save failed');effort=input.effort;return effort;});
- handle('sessionConfigure',(_e,input)=>{contextFixture={...contextFixture,model:input.model,window:input.contextWindow||0,lastInputTokens:0};return {tools:[],mcpStatus:{}};});
+ let configureGate=null,configureFails=false,configureSettled=0;const configureCalls=[];
+ const resumeFailures=new Set(),resumeModels=new Map(),resumeCalls=[];
+ handle('sessionConfigure',async(_e,input)=>{configureCalls.push(input);try{if(configureGate)await configureGate;if(configureFails)throw Error('fixture model switch failed');contextFixture={...contextFixture,model:input.model,window:input.contextWindow||0,lastInputTokens:0};return {tools:[],mcpStatus:{}};}finally{configureSettled++;}});
  handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
- handle('sessionResume',async(_e,id)=>{if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:'test',providerId:1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论',at:Date.now()}]});});
+ handle('sessionResume',async(_e,id)=>{resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论',at:Date.now()}]});});
  handle('sessionWork',(_e,id)=>({goal:id==='s'?goal:null,pending:id==='s'?[...pending,...queuedInputs]:[],queuedRequestIds:queueAuto&&id==='s'?queuedInputs.map(p=>p.requestId):[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
  handle('changesList',(_e,id)=>{changeReads.push(id);return id==='s'?changes:[];});
  handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
@@ -761,6 +763,46 @@ app.whenReady().then(async()=>{
  diagramEvent({id:'source-answer',kind:'agentMessage',text:`[JSON 源文件](${diagramRoot}candidate.json)`});
  win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'diagram-files'}});
  check('explicitly referenced diagram JSON remains visible as a normal file card',await wait(`document.querySelectorAll('.prose .file-card[data-file-path="${diagramRoot}candidate.json"]').length===1`)&&await js(`!document.querySelector('.generated-files .file-card[data-file-path="${diagramRoot}candidate.json"]')`));
+
+ resumeGate=null;
+ const selectChat=async title=>{await openSessions();await js(`[...document.querySelectorAll('.sidebar .item')].find(e=>e.querySelector('.title')?.textContent.trim()===${JSON.stringify(title)}).click()`);};
+ const selectModel=async name=>{await js("document.querySelector('.composer .model-button').click()");await wait("!!document.querySelector('.model-menu')");await js(`[...document.querySelectorAll('.model-menu .menu-item')].find(e=>e.querySelector('.menu-name')?.textContent===${JSON.stringify(name)}).click()`);};
+ const settleModel=async()=>{await js("document.querySelector('.composer .model-button').click()");await wait("!!document.querySelector('.reasoning-picker select') && !document.querySelector('.reasoning-picker select').disabled");await js("document.querySelector('.composer .model-button').click()");};
+ await selectChat('General chat');await wait("document.querySelector('.model-button')?.childNodes[0].textContent.trim()==='test'");
+ let finishConfigure;configureFails=true;configureGate=new Promise(resolve=>{finishConfigure=resolve;});
+ await selectModel('test2');
+ resumeModels.set('s',{model:'test2',providerId:1});
+ await selectChat('Retry name');await wait("document.querySelector('.model-button')?.childNodes[0].textContent.trim()==='test2'");
+ finishConfigure();await settleModel();configureGate=null;
+ check('late model failure cannot roll back the active model of another conversation',await js("document.querySelector('.model-button').childNodes[0].textContent.trim()==='test2' && !document.querySelector('.error-bar')?.textContent.includes('fixture model switch failed')")&&configureCalls.at(-1).sessionId==='general');
+ configureGate=new Promise(resolve=>{finishConfigure=resolve;});
+ await selectModel('test');finishConfigure();await settleModel();configureGate=null;
+ check('a model failure in the same conversation still rolls back and explains the error',await wait("document.querySelector('.error-bar')?.textContent.includes('fixture model switch failed')")&&await js("document.querySelector('.model-button').childNodes[0].textContent.trim()==='test2'"));
+ await js("document.querySelector('.error-bar button').click()");configureFails=false;
+ configureGate=new Promise(resolve=>{finishConfigure=resolve;});await selectModel('test');
+ await selectChat('General chat');await wait("document.querySelector('.chat-session-title')?.textContent==='General chat'");
+ finishConfigure();await settleModel();configureGate=null;
+ check('late model success also leaves a different conversation unchanged',await js("document.querySelector('.model-button').childNodes[0].textContent.trim()==='test' && document.querySelector('.chat-session-title').textContent==='General chat'"));
+ await selectChat('Retry name');await wait("document.querySelector('.chat-session-title')?.textContent==='Retry name'");
+ resumeFailures.add('general');await selectChat('General chat');
+ check('failed conversation restoration displays a local retry entry',await wait("document.querySelector('.session-retry')?.textContent.includes('fixture resume failed') && !document.querySelector('.blank:not(.session-retry)')"));
+ const failedCalls=resumeCalls.filter(id=>id==='general').length;
+ await selectChat('General chat');
+ check('selecting the same failed conversation retries restoration',await wait("!!document.querySelector('.session-retry')")&&resumeCalls.filter(id=>id==='general').length===failedCalls+1);
+ resumeFailures.delete('general');await js("document.querySelector('.session-retry button').click()");
+ check('retry restores the failed conversation without navigating away',await wait("!document.querySelector('.session-retry') && document.querySelector('.prose')?.textContent.includes('original answer')")&&await js("document.querySelector('.chat-session-title').textContent==='General chat'"));
+ schedulesFail=true;await js("document.querySelector('.activity-rail [data-view=schedules]').click()");
+ check('unreadable schedule storage is visible and blocks editing instead of looking empty',await wait("document.querySelector('.schedule-read-error')?.textContent.includes('original preserved')")&&await js("document.querySelector('.page .add button').disabled && [...document.querySelectorAll('.page article button,.page article input[type=checkbox]')].filter(e=>!e.classList.contains('link')).every(e=>e.disabled)"));
+ schedulesFail=false;await js("document.querySelector('.schedule-read-error button').click()");
+ check('schedule read retry clears the error after storage is repaired',await wait("!document.querySelector('.schedule-read-error') && !document.querySelector('.page .add button').disabled"));
+ await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
+ const callsBeforeRestart=resumeCalls.filter(id=>id==='general').length;
+ win.webContents.send(IPC.onRuntimeStatus,{state:'failed',detail:'fixture runtime exited'});
+ await wait("document.querySelector('.error-bar')?.textContent.includes('fixture runtime exited')");
+ win.webContents.send(IPC.onRuntimeStatus,{state:'ready'});
+ await selectChat('General chat');
+ check('runtime restart invalidates the current chat restoration so it can be resumed again',await wait("!!document.querySelector('.prose') && !document.querySelector('.session-retry')")&&resumeCalls.filter(id=>id==='general').length===callsBeforeRestart+1);
+
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);

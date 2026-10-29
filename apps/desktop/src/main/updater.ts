@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { closeSync, existsSync, openSync } from "node:fs";
 import { copyFile, mkdtemp, open, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { app, shell } from "electron";
 
 import { tr } from "../shared/i18n.js";
@@ -305,21 +305,55 @@ export class Updater {
    */
   private replaceAndRelaunch(zip: string): void {
     const bundle = resolve(dirname(app.getPath("exe")), "..", "..");
+    const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+    const log = join(app.getPath("userData"), "update-install.log");
     const script = [
       "set -e",
+      `BUNDLE=${quote(bundle)}`,
+      `EXECUTABLE=${quote(basename(app.getPath("exe")))}`,
+      'TMP=""; STAGE=""; BACKED_UP=0; INSTALLED=0',
+      'cleanup() {',
+      '  code=$?; trap - EXIT',
+      '  if [ "$code" -ne 0 ]; then',
+      '    echo "Update failed (exit $code); attempting recovery"',
+      '    if [ "$BACKED_UP" = 1 ]; then',
+      '      if [ "$INSTALLED" = 1 ]; then rm -rf "$BUNDLE"; fi',
+      '      if mv "$STAGE/previous.app" "$BUNDLE"; then',
+      '        echo "Previous application restored"',
+      '      else',
+      '        echo "Recovery could not finish; previous application preserved at $STAGE/previous.app"',
+      '      fi',
+      '    fi',
+      '    if [ -d "$BUNDLE" ]; then open "$BUNDLE" || true; fi',
+      '  fi',
+      '  if [ -n "$TMP" ]; then rm -rf "$TMP"; fi',
+      '  if [ -n "$STAGE" ] && { [ "$code" = 0 ] || [ ! -e "$STAGE/previous.app" ]; }; then rm -rf "$STAGE"; fi',
+      '  exit "$code"',
+      '}',
+      'trap cleanup EXIT',
+      'echo "Starting application replacement"',
       `while kill -0 ${process.pid} 2>/dev/null; do sleep 0.2; done`,
       `TMP=$(mktemp -d)`,
-      `ditto -x -k '${zip}' "$TMP"`,
+      `ditto -x -k ${quote(zip)} "$TMP"`,
       `NEW=$(find "$TMP" -maxdepth 2 -name '*.app' -print -quit)`,
-      `[ -n "$NEW" ] || { echo "zip 里没有 .app"; exit 1; }`,
-      `rm -rf '${bundle}'`,
-      `mv "$NEW" '${bundle}'`,
-      `xattr -dr com.apple.quarantine '${bundle}' 2>/dev/null || true`,
-      `rm -rf "$TMP"`,
-      `open '${bundle}'`,
+      '[ -n "$NEW" ] && [ -f "$NEW/Contents/Info.plist" ] && [ -x "$NEW/Contents/MacOS/$EXECUTABLE" ] || { echo "Invalid application bundle"; exit 1; }',
+      `STAGE=$(mktemp -d ${quote(join(dirname(bundle), ".aiclaw-update-XXXXXX"))})`,
+      'ditto "$NEW" "$STAGE/new.app"',
+      'mv "$BUNDLE" "$STAGE/previous.app"',
+      'BACKED_UP=1',
+      'echo "Previous application backup: $STAGE/previous.app"',
+      'mv "$STAGE/new.app" "$BUNDLE"',
+      'INSTALLED=1',
+      'xattr -dr com.apple.quarantine "$BUNDLE" 2>/dev/null || true',
+      'open "$BUNDLE"',
+      'echo "Application replacement completed"',
     ].join("\n");
-    const child = spawn("/bin/bash", ["-c", script], { detached: true, stdio: "ignore" });
-    child.unref();
+    const fd = openSync(log, "a", 0o600);
+    try {
+      const child = spawn("/bin/bash", ["-c", script], { detached: true, stdio: ["ignore", fd, fd] });
+      child.unref();
+      this.log(`Replacement and recovery log: ${log}`);
+    } finally { closeSync(fd); }
   }
 
   /** Windows / Linux：把包下到「下载」目录并在文件管理器里选中它。 */

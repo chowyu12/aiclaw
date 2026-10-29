@@ -225,8 +225,11 @@ function lastText(task: TaskRow): string {
       </p>
 
       <div class="add">
-        <button class="ghost" @click="editing = blank(); formError = ''">+ {{ t("新建定时任务") }}</button>
+        <button class="ghost" :disabled="!!store.schedulesError" @click="editing = blank(); formError = ''">+ {{ t("新建定时任务") }}</button>
       </div>
+      <p v-if="store.schedulesError" class="note bad schedule-read-error" role="alert">
+        {{ store.schedulesError }} <button class="link" @click="actions.loadSchedules()">{{ t("重试") }}</button>
+      </p>
 
       <!-- 新建 / 修改 -->
       <article v-if="editing" class="card editor">
@@ -292,7 +295,7 @@ function lastText(task: TaskRow): string {
         </label>
         <p class="hint" :class="{ bad: !!validateRule(ruleOf(editing)) }">{{ preview }}</p>
         <div class="actions">
-          <button class="primary" :disabled="saving" @click="save()">{{ editing.id ? t("保存") : t("建好") }}</button>
+          <button class="primary" :disabled="saving || !!store.schedulesError" @click="save()">{{ editing.id ? t("保存") : t("建好") }}</button>
           <button class="ghost" @click="editing = null">{{ t("取消") }}</button>
           <span v-if="formError" class="hint bad">{{ formError }}</span>
         </div>
@@ -311,11 +314,12 @@ function lastText(task: TaskRow): string {
             <input
               type="checkbox"
               :checked="task.enabled"
+              :disabled="!!store.schedulesError"
               @change="actions.toggleSchedule(task.id, ($event.target as HTMLInputElement).checked)"
             />
             {{ t("启用") }}
           </label>
-          <button class="icon" :title="t(`删除`)" @click="remove(task)">×</button>
+          <button class="icon" :disabled="!!store.schedulesError" :title="t(`删除`)" @click="remove(task)">×</button>
         </div>
         <p class="hint">{{ task.mode === "followup" ? t("在原会话跟进") : t("每次新建会话") }} · {{ task.notificationPolicy === "changes" ? t("仅变化、失败或完成时通知") : t("每次执行后通知") }}</p>
         <p class="prompt">{{ task.prompt }}</p>
@@ -327,8 +331,8 @@ function lastText(task: TaskRow): string {
         </p>
         <p v-if="task.workspace" class="hint">{{ t("工作区：") }}<code>{{ task.workspace }}</code></p>
         <div class="actions">
-          <button class="ghost small" :disabled="!!busy[task.id] && busy[task.id] === t(`正在开会话…`)" @click="runNow(task)">{{ t("立即运行") }}</button>
-          <button class="ghost small" @click="edit(task)">{{ t("修改") }}</button>
+          <button class="ghost small" :disabled="!!store.schedulesError || (!!busy[task.id] && busy[task.id] === t(`正在开会话…`))" @click="runNow(task)">{{ t("立即运行") }}</button>
+          <button class="ghost small" :disabled="!!store.schedulesError" @click="edit(task)">{{ t("修改") }}</button>
           <span v-if="busy[task.id]" class="hint">{{ busy[task.id] }}</span>
         </div>
       </article>
