@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store } from "./store";
 import ChatView from "./views/ChatView.vue";
 import SettingsShell from "./views/SettingsShell.vue";
 import SessionSidebar from "./views/SessionSidebar.vue";
+import ActivityRail from "./views/ActivityRail.vue";
 import ApprovalDialog from "./views/ApprovalDialog.vue";
 import { locale, t } from "./i18n";
 
@@ -16,6 +17,18 @@ watch(() => store.view === 'chat' && (store.fileBrowser || !!store.filePreview),
 });
 
 const configured = computed(() => Boolean(store.config?.providerId && store.config.model));
+const sessionsOpen = ref(true);
+const isMac = navigator.userAgent.includes("Macintosh");
+function toggleSessions(): void {
+  if (store.view !== "chat") { actions.setView("chat"); sessionsOpen.value = true; }
+  else sessionsOpen.value = !sessionsOpen.value;
+  if (sessionsOpen.value) void nextTick(() => (document.querySelector<HTMLElement>(".sidebar .search input") ?? document.querySelector<HTMLElement>(".sidebar .head .new"))?.focus());
+}
+function closeSessions(): void {
+  if (store.view !== "chat" || !sessionsOpen.value) return;
+  sessionsOpen.value = false;
+  void nextTick(() => document.querySelector<HTMLButtonElement>('.activity-rail [aria-controls="session-sidebar"]')?.focus());
+}
 
 onMounted(async () => {
   await actions.bootstrap();
@@ -48,11 +61,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <!-- 没有顶栏：窗口自己有标题栏，再挂一条就是两层。导航挪进了侧边栏底部的
-       设置菜单——MCP、技能和配置都是低频的全局设置，不值得常驻一整行。 -->
   <!-- 按语言设 key：切换语言时整棵树重新挂载一次，纯函数算出来的文案也跟着换。 -->
-  <div :key="locale" class="shell">
-    <SessionSidebar />
+  <div :key="locale" class="shell" :class="{ mac: isMac }">
+    <div v-if="isMac" class="window-titlebar"><span>AIClaw</span></div>
+    <ActivityRail :sessions-open="sessionsOpen && store.view === 'chat'" @sessions="toggleSessions" />
+    <SessionSidebar v-show="sessionsOpen || store.view !== 'chat'" id="session-sidebar" @close="closeSessions" @keydown.esc="closeSessions" />
 
     <main class="pane">
       <div v-if="store.error" class="error-bar">
@@ -84,9 +97,13 @@ onMounted(() => {
 
 <style scoped>
 .shell {
+  position: relative;
   display: flex;
   height: 100vh;
 }
+
+.shell.mac { padding-top: 34px; }
+.window-titlebar { position:absolute; inset:0 0 auto; height:34px; display:flex; align-items:center; padding-left:84px; background:var(--surface); color:var(--muted); font-size:12px; user-select:none; -webkit-app-region:drag; }
 
 .pane {
   display: flex;

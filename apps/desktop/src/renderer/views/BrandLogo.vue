@@ -10,7 +10,7 @@ import { useId } from "vue";
  * 渐变 id 用 useId 生成：SVG 的 `<defs>` id 是**全文档**唯一的，同一页里出现
  * 两个写死同名渐变的标识时，后一个会引用到前一个的定义。
  */
-withDefaults(defineProps<{ size?: "sm" | "md" }>(), { size: "md" });
+withDefaults(defineProps<{ size?: "sm" | "md"; compact?: boolean }>(), { size: "md" });
 
 const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
 const gradId = `ac-grad-${uid}`;
@@ -47,7 +47,7 @@ const liftId = `ac-lift-${uid}`;
         </g>
       </svg>
     </span>
-    <span class="wordmark">AIClaw</span>
+    <span v-if="!compact" class="wordmark">AIClaw</span>
   </div>
 </template>
 

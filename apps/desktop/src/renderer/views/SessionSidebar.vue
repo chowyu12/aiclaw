@@ -1,12 +1,57 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store } from "../store";
 import { locale, t } from "../i18n";
 import { describeError } from "../errors";
 import { workspaceBuckets, workspaceName } from "../workspace-buckets";
-import BrandLogo from "./BrandLogo.vue";
 import SessionRename from "./SessionRename.vue";
 import type { SessionSummaryView } from "../../shared/types";
+defineEmits<{ close: [] }>();
+
+const WIDTH_KEY = "aiclaw:session-sidebar-width", MIN_WIDTH = 220, DEFAULT_WIDTH = 300;
+const preferredWidth = ref(DEFAULT_WIDTH), windowWidth = ref(window.innerWidth), resizing = ref(false);
+try {
+  const saved = Number(localStorage.getItem(WIDTH_KEY));
+  if (Number.isFinite(saved) && saved >= MIN_WIDTH && saved <= 480) preferredWidth.value = saved;
+} catch { /* Layout remains usable when storage is unavailable. */ }
+const maxWidth = computed(() => Math.min(480, Math.max(MIN_WIDTH, windowWidth.value - 56 - 500)));
+const sidebarWidth = computed(() => Math.min(maxWidth.value, Math.max(MIN_WIDTH, preferredWidth.value)));
+let drag: { pointerId: number; startX: number; width: number } | null = null;
+function rememberWidth(): void {
+  try { localStorage.setItem(WIDTH_KEY, String(preferredWidth.value)); }
+  catch { /* The new width still applies for this window. */ }
+}
+function startResize(event: PointerEvent): void {
+  if (event.button !== 0 || drag) return;
+  event.preventDefault();
+  drag = {pointerId:event.pointerId,startX:event.clientX,width:sidebarWidth.value};
+  resizing.value = true;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+}
+function moveResize(event: PointerEvent): void {
+  if (!drag || event.pointerId !== drag.pointerId) return;
+  preferredWidth.value = Math.min(maxWidth.value, Math.max(MIN_WIDTH, drag.width + event.clientX - drag.startX));
+}
+function finishResize(): void {
+  if (!drag) return;
+  drag = null; resizing.value = false; rememberWidth();
+}
+function resizeKey(event: KeyboardEvent): void {
+  let width = sidebarWidth.value;
+  if (event.key === "ArrowLeft") width -= 10;
+  else if (event.key === "ArrowRight") width += 10;
+  else if (event.key === "Home") width = MIN_WIDTH;
+  else if (event.key === "End") width = maxWidth.value;
+  else return;
+  event.preventDefault();
+  preferredWidth.value = Math.min(maxWidth.value, Math.max(MIN_WIDTH, width));
+  rememberWidth();
+}
+function updateWindowWidth(): void { windowWidth.value = window.innerWidth; }
+onMounted(() => window.addEventListener("resize", updateWindowWidth));
+onUnmounted(() => { window.removeEventListener("resize", updateWindowWidth); finishResize(); });
+watch(() => store.view, () => finishResize());
+
 
 /**
  * 左侧会话栏：新建、按工作区展示、切换、删除。
@@ -41,6 +86,14 @@ function waiting(sessionId: string): boolean {
 }
 
 const keyword = ref("");
+const searchOpen = ref(false), searchInput = ref<HTMLInputElement>(), searchButton = ref<HTMLButtonElement>();
+async function toggleSearch(): Promise<void> {
+  searchOpen.value = !searchOpen.value;
+  if (!searchOpen.value) keyword.value = "";
+  await nextTick();
+  if (searchOpen.value) searchInput.value?.focus();
+  else searchButton.value?.focus();
+}
 let searchTimer: ReturnType<typeof setTimeout> | undefined;
 watch(keyword, (value) => {
   clearTimeout(searchTimer);
@@ -243,46 +296,6 @@ async function removeSession(session: SessionSummaryView): Promise<void> {
   await actions.deleteSession(session.id);
 }
 
-/** 底部那个更新按钮上写什么；没有新版本时是空串，按钮不显示。 */
-const updateLabel = computed(() => {
-  const update = store.update;
-  if (!update?.hasUpdate) return "";
-  if (store.updating || store.updateDownloading) {
-    if (store.updatePhase === "checking") return t("检查中…");
-    if (store.updatePhase === "verifying") return t("校验中…");
-    if (store.updatePhase === "installing") return t("安装中…");
-    if (store.updateProgress >= 0) return t("下载 {percent}%", { percent: store.updateProgress });
-    return store.updateReceived > 0 ? t("下载 {size} MB", { size: (store.updateReceived / 1048576).toFixed(1) }) : t("连接中…");
-  }
-  // 侧边栏只有两百来像素宽：按钮文字要短，版本号放在悬停说明里。
-  if (store.updateReady) return t("重启更新");
-  return update.canInstall ? t("更新到 {version}", { version: update.latest }) : t("新版 {version}", { version: update.latest });
-});
-
-/** 悬停时的完整说明：按钮上只放得下几个字。 */
-const updateTitle = computed(() => {
-  const update = store.update;
-  if (!update?.hasUpdate) return "";
-  if (store.updating || store.updateDownloading) return t("正在更新到 {version}：{stage}", { version: update.latest, stage: updateLabel.value });
-  if (store.updateReady) return t("新版本 {version} 已下载好，点一下替换并重启", { version: update.latest });
-  return update.canInstall
-    ? t("当前 {current}，新版本 {latest}：{action}", { current: update.current, latest: update.latest, action: update.installLabel ?? "" })
-    : t("当前 {current}，新版本 {latest}：打开发布页下载", { current: update.current, latest: update.latest });
-});
-
-const runtimeLabel = computed(() => {
-  switch (store.runtime.state) {
-    case "ready":
-      return t("运行中");
-    case "starting":
-      return t("启动中");
-    case "failed":
-      return t("启动失败");
-    default:
-      return t("未启动");
-  }
-});
-
 /** 相对时间。列表里绝对时间戳太占地方，也不是用户关心的。 */
 function when(iso: string): string {
   const then = new Date(iso).getTime();
@@ -299,13 +312,19 @@ function when(iso: string): string {
 </script>
 
 <template>
-  <aside class="sidebar">
-    <div class="brand"><BrandLogo /></div>
+  <aside class="sidebar" :class="{ 'is-chat': store.view === 'chat', resizing }" :style="{'--session-sidebar-width': `${sidebarWidth}px`}">
+    <div class="brand">
+      <strong>{{ store.view === 'chat' ? 'AIClaw' : t('设置') }}</strong>
+      <div v-if="store.view === 'chat'" class="sidebar-header-actions">
+        <button ref="searchButton" class="icon tiny search-toggle" :aria-label="t('搜索会话与内容')" :title="t('搜索会话与内容')" :aria-expanded="searchOpen" aria-controls="session-search" @click="toggleSearch"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
+        <button class="icon tiny" :aria-label="t('收起会话列表')" :title="t('收起会话列表')" @click="$emit('close')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
+      </div>
+    </div>
 
     <div class="head">
       <template v-if="store.view === 'chat'">
         <button class="new" :disabled="store.runtime.state !== 'ready'" @click="actions.newSession()">
-          <span class="plus">+</span> {{ t("新对话") }}
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7M10 14l1-4L19 2l3 3-8 8Z"/></svg>{{ t("新对话") }}
         </button>
       </template>
       <button v-else class="new" @click="actions.setView('chat')">
@@ -314,10 +333,12 @@ function when(iso: string): string {
     </div>
 
     <!-- 搜索只在对话态出现：设置态那个列表是固定的四项，搜它没有意义。 -->
-    <div v-if="store.view === 'chat'" class="search">
-      <input v-model="keyword" :placeholder="t(`搜索会话与内容`)" />
+    <div v-if="store.view === 'chat' && searchOpen" id="session-search" class="search" @keydown.esc.prevent.stop="toggleSearch">
+      <input ref="searchInput" v-model="keyword" :aria-label="t('搜索会话与内容')" :placeholder="t(`搜索会话与内容`)" />
       <button v-if="keyword" class="icon tiny" :title="t(`清空`)" @click="keyword = ''">×</button>
     </div>
+
+    <div v-if="store.view === 'chat' && !searching" class="list-heading">{{ t('项目') }}</div>
 
     <!-- 同一个列表位置，两种内容：对话态是会话，设置态是导航。
          导航复用会话行的样式，因为它们在视觉上就该是一回事。 -->
@@ -444,9 +465,11 @@ function when(iso: string): string {
               class="agents-toggle"
               :class="{ current: agentsCollapsed(session.id) && agentsHoldCurrent(session.id) }"
               :aria-expanded="!agentsCollapsed(session.id)"
+              :aria-label="t('{n} 个子 agent', { n: descendants(session.id).length })"
+              :title="t('{n} 个子 agent', { n: descendants(session.id).length })"
               @click.stop="toggleAgents(session.id)"
             >
-              {{ agentsCollapsed(session.id) ? "▸" : "▾" }} {{ t("{n} 个子 agent", { n: descendants(session.id).length }) }}
+              {{ agentsCollapsed(session.id) ? "▸" : "▾" }} {{ descendants(session.id).length }}
               <span v-if="agentsCollapsed(session.id) && agentsBusy(session.id)" class="running" :title="t(`有子 agent 正在执行`)"></span>
             </button>
           </div>
@@ -508,58 +531,40 @@ function when(iso: string): string {
       </div>
     </template>
 
-    <!-- 底部：运行状态 + 设置。插件与配置都是低频的全局设置，收在这里
-         比在顶上常驻一整行合适。 -->
-    <footer class="foot">
-      <span class="status" :data-state="store.runtime.state">
-        <span class="dot" />
-        {{ runtimeLabel }}
-        <em v-if="store.appVersion" class="version">v{{ store.appVersion }}</em>
-      </span>
-      <!-- 更新提示放在版本号旁边：一眼看到「我现在是几、有没有新的」，
-           而不是在对话区顶上横一条，挤着正在看的内容。 -->
-      <button
-        v-if="updateLabel"
-        class="update"
-        :class="{ ready: store.updateReady }"
-        :disabled="store.updating || store.updateDownloading"
-        :title="updateTitle"
-        @click="actions.installUpdate()"
-      >
-        {{ updateLabel }}
-      </button>
-      <button
-        class="icon gear"
-        :class="{ on: store.view !== 'chat' }"
-        :title="t(`设置`)"
-        @click="actions.setView('settings')"
-      >
-        ⚙
-      </button>
-    </footer>
+    <div v-if="store.view === 'chat'" class="sidebar-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="session-sidebar" :aria-label="t('调整会话列表宽度')" :title="t('拖动调整会话列表宽度')" :aria-valuemin="MIN_WIDTH" :aria-valuemax="maxWidth" :aria-valuenow="sidebarWidth" @pointerdown="startResize" @pointermove="moveResize" @pointerup="finishResize" @pointercancel="finishResize" @lostpointercapture="finishResize" @keydown="resizeKey" />
   </aside>
 </template>
 
 <style scoped>
 .sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   width: 248px;
   flex: 0 0 248px;
   min-height: 0;
-  border-right: 1px solid var(--rule);
+  border-right: 1px solid var(--chrome-rule);
   background: var(--sidebar);
 }
 
-/* 品牌放侧边栏顶上，顶栏整条去掉了——窗口自己有标题栏，再挂一条就是两层。 */
+/* 会话态使用品牌标题与轻量操作，设置态继续显示分类标题。 */
 .brand {
-  padding: 13px 12px 8px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  min-height:60px;
+  padding:16px 18px 8px;
 }
+.brand strong { font-size:18px; font-weight:500; letter-spacing:-.3px; }
+.sidebar-header-actions{display:flex;align-items:center;gap:9px}.sidebar-header-actions .icon{width:26px;height:28px;box-shadow:none;color:var(--muted)}.sidebar-header-actions .icon:hover{background:var(--hover);color:var(--ink)}.sidebar-header-actions svg,.new svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.sidebar.is-chat{width:var(--session-sidebar-width,300px);flex-basis:var(--session-sidebar-width,300px);background:var(--sidebar)}
+.sidebar.resizing{user-select:none}.sidebar-resizer{position:absolute;top:0;bottom:0;right:-4px;width:8px;z-index:3;cursor:col-resize;touch-action:none}.sidebar-resizer::after{content:"";position:absolute;top:50%;left:3px;width:2px;height:64px;transform:translateY(-50%);border-radius:2px;background:var(--accent);opacity:0;transition:opacity .15s ease}.sidebar-resizer:hover::after,.sidebar-resizer:focus-visible::after,.resizing .sidebar-resizer::after{opacity:1}.sidebar-resizer:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.list-heading{padding:12px 18px 2px;color:var(--muted);font-size:13px}
 
 .head {
   display: flex;
   gap: 6px;
-  padding: 6px 10px 10px;
+  padding: 0 10px 6px;
 }
 
 .new {
@@ -567,20 +572,20 @@ function when(iso: string): string {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 7px 10px;
-  border: 1px solid var(--rule-strong);
+  padding: 8px 10px;
+  border: 0;
   border-radius: var(--r-md);
-  background: var(--surface);
-  font-size: 13px;
-  font-weight: 500;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 400;
   cursor: pointer;
-  box-shadow: var(--shadow-1);
-  transition: border-color 0.12s, color 0.12s;
+  transition: background-color 0.12s, color 0.12s;
 }
 
 .new:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--hover);
+  color: var(--ink);
 }
 
 .new:disabled {
@@ -614,6 +619,7 @@ function when(iso: string): string {
   height: 22px;
   border: none;
   background: none;
+  box-shadow: none;
   font-size: 13px;
   line-height: 1;
   padding: 0;
@@ -623,14 +629,14 @@ function when(iso: string): string {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 10px 8px;
+  padding: 3px 14px 7px;
 }
 
 .search input {
   flex: 1;
   min-width: 0;
-  padding: 5px 9px;
-  font-size: 12px;
+  padding: 7px 9px;
+  font-size: 13px;
 }
 
 .workspace-actions { display: flex; gap: 2px; opacity: 0; pointer-events: none; }
@@ -670,17 +676,17 @@ function when(iso: string): string {
 }
 
 .bucket + .bucket {
-  margin-top: 10px;
+  margin-top: 12px;
 }
 
 .bucket-head {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 6px 8px;
-  color: var(--ink-2);
-  font-size: 13px;
-  font-weight: 500;
+  padding: 6px 10px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 400;
 }
 
 .bucket-name {
@@ -699,9 +705,10 @@ function when(iso: string): string {
 }
 .bucket-head:hover .count, .bucket-head:focus-within .count { opacity: 1; }
 
-.bucket .item { min-height: 32px; padding: 6px 8px 6px 32px; align-items: center; }
-.bucket .item .title { line-height: 20px; }
-.bucket .item.active { background: var(--hover); }
+.bucket .item { min-height: 32px; padding: 5px 10px 5px 33px; align-items: center; }
+.bucket .item-main { display:flex; align-items:center; gap:6px; }
+.bucket .item .title { flex:1; min-width:0; line-height:20px; }
+.sidebar.is-chat .item.active { background: color-mix(in srgb,var(--ink) 6%,var(--surface)); }
 .bucket .item.active .title { font-weight: 400; }
 .bucket .item-actions { position: absolute; right: 6px; top: 5px; pointer-events: none; }
 .bucket .item:hover, .bucket .item:focus-within { padding-right: 78px; }
@@ -715,7 +722,7 @@ function when(iso: string): string {
   align-items: flex-start;
   gap: 4px;
   padding: 7px 9px;
-  border-radius: var(--r-md);
+  border-radius: 8px;
   cursor: pointer;
   transition: background-color 0.1s;
 }
@@ -729,8 +736,9 @@ function when(iso: string): string {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-top: 3px;
-  padding: 1px 7px;
+  flex:none;
+  margin-top:0;
+  padding:1px 5px;
   border: none;
   border-radius: var(--r-full);
   background: var(--surface-2, transparent);
@@ -754,7 +762,7 @@ function when(iso: string): string {
   padding-bottom: 4px;
 }
 
-.source-label { margin-right: 5px; padding: 1px 4px; border-radius: 4px; background: var(--surface-2); color: var(--muted); font-size: 10px; font-weight: 400; }
+.source-label { margin-right:6px; color:var(--muted); font-size:11px; font-weight:400; }
 
 .item.child .title {
   color: var(--ink-2);
@@ -776,8 +784,8 @@ function when(iso: string): string {
 }
 
 .title {
-  font-size: 13px;
-  color: var(--ink-2);
+  font-size: 14px;
+  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -873,99 +881,5 @@ function when(iso: string): string {
 .item:hover .item-actions {
   opacity: 1;
 }
-
-/* ---------- 底部 ---------- */
-
-.foot {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 8px 10px;
-  border-top: 1px solid var(--rule);
-}
-
-.version {
-  margin-left: 6px;
-  color: var(--muted);
-  font-style: normal;
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* 更新按钮：小，但颜色要够让人注意到；下载好之后换成强调色。 */
-.update {
-  margin-left: auto;
-  margin-right: 6px;
-  flex-shrink: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 2px 8px;
-  border: 1px solid var(--accent, #3b82f6);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--accent, #3b82f6);
-  font-size: 11px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.update.ready {
-  background: var(--brand, var(--accent));
-  color: #fff;
-}
-
-.update:disabled {
-  opacity: 0.7;
-  cursor: default;
-}
-
-.status {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  color: var(--muted);
-  font-family: var(--mono);
-  white-space: nowrap;
-  min-width: 0;
-  flex-shrink: 1;
-}
-
-.dot {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-
-.status[data-state="ready"] .dot {
-  background: var(--ok);
-}
-
-.status[data-state="starting"] .dot {
-  background: var(--warn);
-}
-
-.status[data-state="failed"] .dot {
-  background: var(--danger);
-}
-
-.gear {
-  width: 28px;
-  height: 28px;
-  font-size: 14px;
-  line-height: 1;
-  padding: 0;
-}
-
-.gear.on {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
 
 </style>

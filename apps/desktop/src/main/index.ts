@@ -155,6 +155,7 @@ function createWindow(): void {
     minWidth: 860,
     minHeight: 600,
     title: "AIClaw",
+    ...(process.platform === "darwin" ? { titleBarStyle: "hidden" as const, trafficLightPosition: { x: 12, y: 10 } } : {}),
     backgroundColor: "#f3f8f4",
     // macOS 忽略这个字段（那边走 app.dock.setIcon），Windows 与 Linux 看它。
     icon: existsSync(iconPath) ? iconPath : undefined,
@@ -444,7 +445,7 @@ function registerIpc(): void {
     if (open) {
       if (previewWindowBounds || mainWindow.isMaximized() || mainWindow.isFullScreen()) return;
       const bounds = mainWindow.getBounds(), area = screen.getDisplayMatching(bounds).workArea;
-      const width = Math.min(bounds.width + 640, area.width);
+      const width = Math.min(bounds.width + 730, area.width);
       previewWindowBounds = { x: bounds.x, width: bounds.width };
       mainWindow.setBounds({ x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)), width });
     } else if (previewWindowBounds) {

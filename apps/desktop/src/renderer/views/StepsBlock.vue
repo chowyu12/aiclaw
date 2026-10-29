@@ -140,26 +140,31 @@ function llmSubline(step: Turn["steps"][number]): string {
      三处各写各的话，窗口一拉大它们就会错开，看着像没对齐。 */
   max-width: var(--content-width, 74ch);
   margin: 0 auto 14px;
-  padding: 0 28px;
+  padding: 0;
 }
 
 .steps-head {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px 3px 6px;
-  border: 1px solid var(--rule);
-  border-radius: var(--r-full);
-  background: var(--surface);
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
   color: var(--muted);
+  font: inherit;
   font-size: 12px;
+  line-height: 20px;
   cursor: pointer;
 }
 
 .steps-head:hover {
-  border-color: var(--rule-strong);
+  background: var(--hover);
   color: var(--ink-2);
 }
+
+.steps-head:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 
 .chev {
   display: inline-block;
@@ -381,7 +386,7 @@ function llmSubline(step: Turn["steps"][number]): string {
 
 /* 跑着的那一块把折叠条点亮：它是这一屏里唯一在动的东西。 */
 .steps-head.live {
-  border-color: var(--accent);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 </style>

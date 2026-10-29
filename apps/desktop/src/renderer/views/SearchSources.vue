@@ -27,7 +27,7 @@ function onKey(event: KeyboardEvent): void {
 <template>
   <div class="search-sources">
     <button ref="trigger" class="sources-trigger" :aria-expanded="open" @click="show">
-      <span class="source-symbol" aria-hidden="true">◎</span>{{ t('参考来源 · {n}', { n: sources.length }) }}
+      <svg class="source-symbol" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><ellipse cx="10" cy="10" rx="3" ry="7"/><path d="M3 10h14"/></svg>{{ t('参考来源 · {n}', { n: sources.length }) }}
     </button>
     <Teleport to="body">
       <div v-if="open" class="sources-overlay" @click.self="close">
@@ -50,10 +50,10 @@ function onKey(event: KeyboardEvent): void {
 </template>
 
 <style scoped>
-.search-sources { max-width: var(--content-width); margin: 12px auto 8px; padding: 0 28px; }
-.sources-trigger { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--rule); background: var(--surface, white); color: var(--muted); border-radius: 16px; padding: 6px 11px; font-size: 12px; cursor: pointer; }
+.search-sources { min-width:0; }
+.sources-trigger { display:inline-flex; align-items:center; gap:6px; min-height:28px; border:0; background:transparent; color:var(--muted); border-radius:6px; padding:4px 6px; font:inherit; font-size:12px; line-height:20px; cursor:pointer; }
 .sources-trigger:hover { background: var(--accent-soft); color: var(--accent); }
-.source-symbol { font-size: 16px; }
+.source-symbol { width:14px; height:14px; flex:none; fill:none; stroke:currentColor; stroke-width:1.3; }
 .sources-overlay { position: fixed; inset: 0; z-index: 100; background: #00000012; display: flex; justify-content: flex-end; }
 .sources-drawer { width: min(360px, 100vw); height: 100%; display: flex; flex-direction: column; background: var(--ground); border-left: 1px solid var(--rule); box-shadow: -8px 0 24px #0000000c; }
 .sources-drawer header { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px 6px; font-size: 14px; }

@@ -128,8 +128,6 @@ const state = reactive({
   bindings: [] as ChannelBindingView[],
   /** 检查更新的结果。null 表示还没查过。 */
   update: null as UpdateStatusView | null,
-  /** 当前运行的版本号，侧边栏底部显示。启动时读一次。 */
-  appVersion: "",
   /**
    * 有一次重挂被推迟了：用户在轮次跑着的时候改了 MCP / 技能 / 插件配置。
    * 跑着时不能卸会话（那一轮的事件会没有出口），轮次结束时补上这一次。
@@ -204,6 +202,14 @@ function putFilePreview(preview: FilePreviewState, activate = true, previousRequ
   if (activate || wasActive || duplicateActive) state.filePreview = preview;
 }
 
+function acceptUpdateStatus(status: UpdateStatusView): void {
+  // A temporary check failure must not hide an active download or a ready package.
+  if (status.error && state.update?.hasUpdate) return;
+  if (state.update?.latest !== status.latest || !status.hasUpdate) state.updateReady = false;
+  state.update = status;
+  if (status.hasUpdate && status.canInstall) void actions.prepareUpdate();
+}
+
 export const actions = {
   /**
    * 拉起界面需要的全部状态。
@@ -236,14 +242,6 @@ export const actions = {
       state.error = t("读取本地配置失败：{error}", { error: describeError(error) });
       return;
     }
-
-    // 版本号单独取、失败不报：它只是显示用，不该因为它让启动走进错误分支。
-    window.aiclaw.update
-      .version()
-      .then((version) => {
-        state.appVersion = String(version ?? "");
-      })
-      .catch(() => undefined);
 
     window.aiclaw.on.agentEvent((payload) => {
       const event = payload as AgentEventPayload;
@@ -344,8 +342,7 @@ export const actions = {
       state.updateProgress = total > 0 ? Math.round((received / total) * 100) : -1;
     });
     window.aiclaw.on.updateCheck((payload) => {
-      state.update = payload as UpdateStatusView;
-      if (state.update.hasUpdate && state.update.canInstall) void actions.prepareUpdate();
+      acceptUpdateStatus(payload as UpdateStatusView);
     });
   },
 
@@ -1066,16 +1063,9 @@ export const actions = {
    */
   async checkUpdate(): Promise<void> {
     try {
-      state.update = (await window.aiclaw.update.check()) as UpdateStatusView;
+      acceptUpdateStatus((await window.aiclaw.update.check()) as UpdateStatusView);
     } catch {
-      state.update = null;
       return;
-    }
-    // 发现新版本就先下好，别等用户点。旧流程里那几十秒的下载卡在他按下
-    // 按钮之后，只能盯着一个不动的界面等；先下好之后，点下去只剩替换与
-    // 重开，两三秒的事。
-    if (state.update?.hasUpdate && state.update.canInstall) {
-      void actions.prepareUpdate();
     }
   },
 
@@ -1086,7 +1076,8 @@ export const actions = {
    * 点「重启更新」时还会再试一次，那时候失败才该说。
    */
   async prepareUpdate(): Promise<void> {
-    if (state.updating || state.updateDownloading || state.updateReady) return;
+    if (!state.update?.hasUpdate || !state.update.canInstall || state.updating || state.updateDownloading || state.updateReady) return;
+    const requestedVersion = state.update.latest;
     state.updateDownloading = true;
     state.updateProgress = -1;
     state.updateReceived = 0;
@@ -1101,6 +1092,7 @@ export const actions = {
       state.updateReady = false;
     } finally {
       state.updateDownloading = false;
+      if (state.update?.hasUpdate && state.update.latest !== requestedVersion) void actions.prepareUpdate();
     }
   },
 

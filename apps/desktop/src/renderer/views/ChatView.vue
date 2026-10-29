@@ -402,6 +402,8 @@ const workspaceLabel = computed(() => {
   return parts[parts.length - 1] ?? path;
 });
 
+const sessionTitle = computed(() => store.sessions.find(session => session.id === store.sessionId)?.title || t("新对话"));
+
 const workspaceTitle = computed(() =>
   store.sessionInfo?.workspace
     ? t("会话工作区：{path}", { path: store.sessionInfo.workspace })
@@ -698,6 +700,7 @@ const forking = ref(false);
 <template>
   <PromptPresets v-if="presetsOpen" :draft="presetDraft" @close="presetsOpen=false; input?.focus()" />
   <div class="chat">
+    <header class="chat-header" :aria-label="t('对话')"><strong class="chat-session-title" :title="sessionTitle">{{ sessionTitle }}</strong><span class="chat-workspace" :title="workspaceTitle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg>{{ workspaceLabel }}</span></header>
     <div v-if="!configured" class="gate">
       <h2>{{ t("先完成配置") }}</h2>
       <p>{{ t("到「模型服务」页添加一个端点、填上 Key、写上模型名，再回来选一个默认模型。") }}</p>
@@ -822,6 +825,7 @@ const forking = ref(false);
               @loaded="turn.key === runningKey && scrollToEnd()"
             />
             <GeneratedFiles v-if="unmentionedArtifacts(turn).length > 0" :paths="unmentionedArtifacts(turn)" />
+            <div v-if="answerDone(turn) || turnSources(turn).length > 0" class="answer-footer">
             <SearchSources v-if="turnSources(turn).length > 0" :key="`${store.sessionId}:${turn.key}`" :sources="turnSources(turn)" />
             <!-- 一轮一行，不是每截一行：一轮里模型会被采样好几次，回答散成几截，
                  每截都挂一个复制按钮只会满屏按钮，而用户要的是整段回答。 -->
@@ -859,6 +863,7 @@ const forking = ref(false);
                   <rect x="1.5" y="7" width="4" height="6.5" rx="1" />
                 </svg>
               </button>
+            </div>
             </div>
             </div>
 
@@ -1183,25 +1188,14 @@ const forking = ref(false);
   min-height: 0;
   background: var(--ground);
 
-  /*
-   * 正文栏宽。窗口大就跟着变宽，但有上限。
-   *
-   * 原来写死 74ch：小窗口挤，大窗口两边空出一大片，把窗口拉到 1600px 宽
-   * 也还是那么一条。现在窗口小就占满、窗口大到一定程度就打住——行太长，
-   * 眼睛回到下一行开头会找不着位置，那正是「拉大窗口反而更难读」的成因。
-   *
-   * **用 % 不用 vw**：左边侧边栏占掉两百多像素，按视口算会多算出那一截，
-   * 结果内容横向溢出。% 算的是容器宽度，正好是能用的那部分。
-   *
-   * 减掉的 64px 是小窗口下两边的留白。不减的话窗口一小内容就贴着边，
-   * 只剩下气泡自己那 28px 内边距——读起来发憋。窗口大到用上限时这一项
-   * 不起作用，那时候两边本来就有富余。
-   *
-   * 三处（消息、执行步骤、输入框）共用这一个变量，不然它们会各宽各的，
-   * 窗口一拉大就看着没对齐。
-   */
-  --content-width: min(112ch, 100% - 64px);
+  /* 消息、步骤与输入框共用栏宽；并排阅读时避免重复的内边距挤窄正文。 */
+  --content-width: min(880px, 100% - 40px);
 }
+
+.chat-header { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:58px; flex:none; margin:0 20px; padding:12px 0; border-bottom:1px solid var(--chrome-rule); }
+.chat-session-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; font-size:13px; font-weight:500; }
+.chat-workspace { display:flex; align-items:center; gap:7px; min-width:0; max-width:44%; color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chat-workspace svg { width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linejoin:round; }
 
 .gate {
   margin: auto;
@@ -1242,7 +1236,7 @@ const forking = ref(false);
 .msg {
   max-width: var(--content-width);
   margin: 0 auto 20px;
-  padding: 0 28px;
+  padding: 0;
 }
 
 .msg.user {
@@ -1251,16 +1245,17 @@ const forking = ref(false);
 }
 
 .bubble {
-  max-width: 82%;
+  max-width: 92%;
   padding: 9px 14px;
   border-radius: 16px 16px 4px 16px;
-  background: var(--active);
+  background: var(--surface-2);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .msg.agent {
+  margin-bottom: 12px;
   line-height: 1.75;
 }
 
@@ -1273,7 +1268,7 @@ const forking = ref(false);
   gap: 6px;
   max-width: var(--content-width);
   margin: -16px auto 14px;
-  padding: 0 24px;
+  padding: 0;
   color: var(--muted);
   font-size: 11px;
   opacity: 0;
@@ -1289,7 +1284,7 @@ const forking = ref(false);
 /* 与气泡使用同一栏宽和内边距，操作行沿气泡右侧对齐。 */
 .user-meta {
   justify-content: flex-end;
-  padding: 0 28px;
+  padding: 0;
   gap: 4px;
   font-size: 14px;
   opacity: 1;
@@ -1367,7 +1362,8 @@ const forking = ref(false);
   cursor: default;
 }
 
-.agent-meta { margin: 6px auto 16px; padding: 0 28px; gap: 4px; opacity: 1; font-size: 14px; }
+.answer-footer { display:flex; flex-wrap:wrap; align-items:center; gap:4px 14px; max-width:var(--content-width); margin:0 auto 6px; }
+.agent-meta { flex-wrap:wrap; margin:0; padding:0; gap:2px; opacity:1; font-size:12px; }
 .agent-meta time, .user-meta time { margin-right: 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
 .agent-meta button, .user-meta button { display: inline-flex; align-items: center; justify-content: center; width: 28px; min-height: 28px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
 .agent-meta button:hover:not(:disabled), .agent-meta button.selected, .user-meta button:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
@@ -1672,7 +1668,7 @@ const forking = ref(false);
 
 .composer-wrap {
   position: relative;
-  padding: 8px 24px 12px;
+  padding: 10px 0 18px;
 }
 
 .backdrop {
@@ -1688,13 +1684,13 @@ const forking = ref(false);
   border: 1px solid var(--rule-strong);
   border-radius: var(--r-lg);
   background: var(--surface);
-  box-shadow: var(--shadow-2);
+  box-shadow: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .composer:focus-within {
   border-color: var(--accent);
-  box-shadow: var(--shadow-2), 0 0 0 3px var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 
 /* 输入框本身不要全局表单样式的边框与内阴影——它已经在容器里了。 */
@@ -1722,6 +1718,7 @@ const forking = ref(false);
   justify-content: space-between;
   gap: 8px;
   padding: 6px 8px 8px 12px;
+  flex-wrap: wrap;
 }
 
 .bar-left,
@@ -1729,8 +1726,11 @@ const forking = ref(false);
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
+.bar-right { margin-left:auto; }
 
 .chip {
   display: inline-flex;
@@ -1834,16 +1834,16 @@ const forking = ref(false);
   width: 30px;
   height: 30px;
   border: none;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--on-accent);
+  border-radius: 9px;
+  background: var(--action);
+  color: var(--on-action);
   font-size: 14px;
   cursor: pointer;
   transition: background-color 0.12s, opacity 0.12s;
 }
 
 .send:hover:not(:disabled) {
-  background: var(--accent-hover);
+  opacity: .86;
 }
 
 .mic {

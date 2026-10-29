@@ -89,6 +89,7 @@ app.whenReady().then(async () => {
   ipcMain.handle(IPC.skillList, () => []);
 
   const win = new BrowserWindow({
+    ...(process.platform==='darwin'?{titleBarStyle:'hidden',trafficLightPosition:{x:12,y:10}}:{}),
     show: false,
     webPreferences: {
       preload: PRELOAD,
@@ -154,13 +155,9 @@ app.whenReady().then(async () => {
     fields ? `${fields} 个` : "一个都没有——配置页是空的",
   );
 
-  // 版本号在侧边栏底部：它走单独的 IPC 通道，preload 漏了它的话这里是空的。
-  const version = await waitFor(
-    win,
-    "document.querySelector('.foot .version') ? document.querySelector('.foot .version').innerText : ''",
-    (text) => typeof text === "string" && text.length > 0,
-  );
-  check("侧边栏底部显示版本号", version === "v0.0.0-smoke", version || "没有显示");
+  const version = await win.webContents.executeJavaScript("window.aiclaw.update.version()");
+  check("版本号仍可通过桥接读取", version === "0.0.0-smoke", version || "没有返回");
+  check("导航栏不显示版本号", await win.webContents.executeJavaScript("!document.querySelector('.rail-version')"));
 
   const blocked = await win.webContents.executeJavaScript(
     "document.querySelector('.error-bar') ? document.querySelector('.error-bar').innerText : ''",

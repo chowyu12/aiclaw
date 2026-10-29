@@ -1,46 +1,38 @@
-/* 与 上游界面 保持同一套视觉语言：同样的中性色偏向、同样的等宽字体角色。
- *
- * 几条贯穿全局的规矩：
- *   - 底色分三层：页面 ground → 卡片 surface → 卡片内的凹陷 surface-2。
- *     一个元素属于哪一层决定它用哪个底色，不要临时挑颜色。
- *   - 文字分三级：ink 正文 / ink-2 次要 / muted 辅助。同一段里最多用两级，
- *     三级全上会糊成一锅灰。
- *   - 中性色统一往绿偏一点（与 accent 同向）。纯灰看起来像没调过。
- *   - 绿色分两种：--brand 是标识上那个亮绿，只做装饰（状态点、标识投影、焦点环），
- *     不承载文字；--accent 是它压暗之后的版本，按钮、链接、选中态用它，保证读得清。
- */
+/* 文件工作室：中性背景、细分隔线与克制的蓝色交互；状态色单独保留。 */
 :root {
-  --ground: #f3f8f4;
+  --ground: #ffffff;
   --surface: #ffffff;
-  --surface-2: #edf5ef;
-  --sidebar: #eaf3ec;
+  --surface-2: #f3f4f7;
+  --sidebar: #f7f8fa;
 
-  --ink: #0f1712;
-  --ink-2: #45534b;
-  --muted: #6f7e75;
+  --ink: #252a32;
+  --ink-2: #505a69;
+  --muted: #727d8d;
 
-  --rule: #dce8df;
-  --rule-strong: #c8d8cc;
+  --chrome-rule: rgb(37 42 50 / 6%);
+  --rule: #e5e8ef;
+  --rule-strong: #d6dce7;
 
   /* 标识上的亮绿（make-icon.cjs 渐变的中间色）。白字压在它上面只有 2.6:1，不放文字。 */
   --brand: #1cb85c;
   --brand-soft: #d9f6e3;
 
-  /* 白字压在 accent 上 5.0:1，accent 当文字放在页面底色上 4.6:1——别再往亮了调。 */
-  --accent: #10813f;
-  --accent-hover: #0c6d34;
-  --accent-soft: #e0f5e7;
+  --accent: #4b63a9;
+  --accent-hover: #3e5597;
+  --accent-soft: #edf1fb;
   --on-accent: #ffffff;
+  --action: #2b3246;
+  --on-action: #ffffff;
 
-  --ok: #10813f;
+  --ok: #22804b;
   --ok-soft: #def3e5;
   --warn: #8a6210;
   --warn-soft: #f5ebd6;
   --danger: #a83329;
   --danger-soft: #f7e5e2;
 
-  --hover: #e2ede5;
-  --active: #d4efdc;
+  --hover: #f0f2f6;
+  --active: #edf0f6;
 
   /* 圆角只有这四档。混用会让界面看起来是拼出来的。 */
   --r-sm: 6px;
@@ -59,36 +51,38 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --ground: #0d130f;
-    --surface: #151d18;
-    --surface-2: #1b2620;
-    --sidebar: #101813;
+    --ground: #17191e;
+    --surface: #1c1f26;
+    --surface-2: #252a34;
+    --sidebar: #1a1d23;
 
-    --ink: #e7efe9;
-    --ink-2: #a9b8ae;
-    --muted: #7d8d83;
+    --ink: #e7ebf2;
+    --ink-2: #b2bccb;
+    --muted: #929eaf;
 
-    --rule: #24302a;
-    --rule-strong: #34423a;
+    --chrome-rule: rgb(231 235 242 / 8%);
+    --rule: #333a48;
+    --rule-strong: #424c5f;
 
     --brand: #2fcf6c;
     --brand-soft: #123524;
 
-    /* 深色下 accent 直接用亮绿：它压在深底上 9:1，按钮上配深色字。 */
-    --accent: #3fd67a;
-    --accent-hover: #62e394;
-    --accent-soft: #12321f;
-    --on-accent: #04200e;
+    --accent: #9baded;
+    --accent-hover: #b2c1f5;
+    --accent-soft: #28334e;
+    --on-accent: #20263c;
+    --action: #dfe6f5;
+    --on-action: #22293b;
 
-    --ok: #3fd67a;
+    --ok: #80d6a1;
     --ok-soft: #133524;
     --warn: #d9ac52;
     --warn-soft: #322813;
     --danger: #e98379;
     --danger-soft: #35201d;
 
-    --hover: #1d2a22;
-    --active: #173a26;
+    --hover: #272e3a;
+    --active: #2b3447;
 
     /* 深色下靠亮度分层，投影几乎看不见，所以压得更轻。 */
     --shadow-1: 0 1px 2px rgb(0 0 0 / 30%);

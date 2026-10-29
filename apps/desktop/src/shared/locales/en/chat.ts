@@ -1,5 +1,13 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "调整会话列表宽度": "Resize conversation sidebar",
+  "拖动调整会话列表宽度": "Drag to resize the conversation sidebar",
+  "应用导航": "App navigation",
+  "会话列表": "Conversations",
+  "收起会话列表": "Close conversations",
+  "对话": "Chat",
+  "文件阅读区": "File reader",
+  "只读预览": "Read-only preview",
   "这不是一个目录": "This is not a directory",
   "未知": "Unknown",
   "浏览工作区文件": "Browse workspace files",
