@@ -188,6 +188,8 @@ export const settings: Record<string, string> = {
   "正在打开…": "Opening…",
   "连接我的浏览器（{name}）": "Connect my browser ({name})",
   "连接我的浏览器": "Connect my browser",
+  "已选择系统默认浏览器：{name}。": "Selected your system default browser: {name}.",
+  "系统默认浏览器 {name} 暂不支持扩展连接，请选择已支持的浏览器。": "Your default browser, {name}, is not supported by this extension connection. Choose a supported browser.",
   "安装扩展": "Install the extension",
   "在浏览器里确认配对": "Confirm pairing in the browser",
   "连上": "Connected",

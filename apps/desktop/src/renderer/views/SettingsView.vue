@@ -53,9 +53,14 @@ onMounted(async () => {
 });
 onUnmounted(() => stopBridge?.());
 
-/** 默认浏览器（主进程已经排在第一个）与其它装着的浏览器。 */
-const defaultBrowser = computed(() => bridge.value?.browsers?.[0] ?? null);
-const otherBrowsers = computed(() => (bridge.value?.browsers ?? []).slice(1));
+/** Prefer the system default until the user explicitly chooses another supported browser. */
+const selectedBrowserId = ref("");
+const selectedBrowser = computed(() => {
+  const browsers = bridge.value?.browsers ?? [];
+  return browsers.find(browser => browser.id === selectedBrowserId.value) ?? browsers.find(browser => browser.isDefault) ?? browsers[0] ?? null;
+});
+const otherBrowsers = computed(() => (bridge.value?.browsers ?? []).filter(browser => browser.id !== selectedBrowser.value?.id));
+const unsupportedDefault = computed(() => bridge.value?.defaultBrowserName && bridge.value.browsers.length > 0 && !bridge.value.browsers.some(browser => browser.isDefault));
 const connecting = ref(false);
 
 /**
@@ -68,7 +73,7 @@ async function connectMyBrowser(): Promise<void> {
     await useBackend("extension");
     await new Promise((resolve) => setTimeout(resolve, 2500));
     if (bridge.value?.browser || bridge.value?.pairingCode) return;
-    await openInBrowser(defaultBrowser.value?.id ?? "");
+    await openInBrowser(selectedBrowser.value?.id ?? "");
   } finally {
     connecting.value = false;
   }
@@ -99,6 +104,7 @@ async function repairToken(): Promise<void> {
 async function openInBrowser(browserId: string): Promise<void> {
   try {
     await window.aiclaw.browserBridge.openPage(browserId);
+    selectedBrowserId.value = browserId;
   } catch (error) {
     actions.showError(t("打不开扩展页：{error}", { error: describeError(error) }));
   }
@@ -520,6 +526,8 @@ async function purge(): Promise<void> {
         <span>{{ t("浏览器：模型按元素编号打开网页、点、填、读（勾上后可以选用你自己的 Chrome / Edge）") }}</span>
       </label>
       <div v-if="store.config.browser" class="field backend">
+        <p v-if="!bridge?.browser && unsupportedDefault" class="note browser-default-note">{{ t("系统默认浏览器 {name} 暂不支持扩展连接，请选择已支持的浏览器。", { name: bridge?.defaultBrowserName ?? '' }) }}</p>
+        <p v-else-if="!bridge?.browser && selectedBrowser?.isDefault" class="note browser-default-note">{{ t("已选择系统默认浏览器：{name}。", { name: selectedBrowser.name }) }}</p>
         <!-- 已连上：一行状态，外加改回去的入口。 -->
         <template v-if="store.config.browserBackend === 'extension' && bridge?.browser">
           <p class="bridge-status ok">
@@ -540,8 +548,8 @@ async function purge(): Promise<void> {
               {{
                 connecting
                   ? t("正在打开…")
-                  : defaultBrowser
-                    ? t("连接我的浏览器（{name}）", { name: defaultBrowser.name })
+                  : selectedBrowser
+                    ? t("连接我的浏览器（{name}）", { name: selectedBrowser.name })
                     : t("连接我的浏览器")
               }}
             </button>
@@ -561,11 +569,11 @@ async function purge(): Promise<void> {
             <span>{{ t("浏览器里弹出了配对页：核对代码一致，在") }}<strong>{{ t("浏览器里") }}</strong>{{ t("点「允许」。") }}</span>
           </div>
           <template v-else>
-            <p v-if="defaultBrowser?.fromStore" class="guide-lead">
+            <p v-if="selectedBrowser?.fromStore" class="guide-lead">
               {{ t("在打开的商店页点「获取」，装好后浏览器会自动弹出配对页。") }}
             </p>
-            <p v-else-if="defaultBrowser" class="guide-lead">
-              {{ t("{name} 的扩展页已经打开，扩展目录的路径也复制好了：打开「开发者模式」→ 点「加载已解压的扩展程序」→ 按", { name: defaultBrowser.name }) }}
+            <p v-else-if="selectedBrowser" class="guide-lead">
+              {{ t("{name} 的扩展页已经打开，扩展目录的路径也复制好了：打开「开发者模式」→ 点「加载已解压的扩展程序」→ 按", { name: selectedBrowser.name }) }}
               <kbd>Cmd</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> {{ t("粘贴、回车、点「选择」。") }}
               {{ t("装好后浏览器会自动弹出配对页。") }}
             </p>
@@ -574,7 +582,7 @@ async function purge(): Promise<void> {
               <code class="path">{{ bridge?.extensionDir }}</code>
             </p>
             <div class="row links">
-              <button v-if="defaultBrowser" class="link" @click="openInBrowser(defaultBrowser.id)">{{ t("重新打开扩展页") }}</button>
+              <button v-if="selectedBrowser" class="link" @click="openInBrowser(selectedBrowser.id)">{{ t("重新打开扩展页") }}</button>
               <button
                 v-for="item in otherBrowsers"
                 :key="item.id"

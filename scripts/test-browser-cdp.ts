@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 
+import { browserIdForApplication } from "../apps/desktop/src/main/browser-choice.ts";
 import { browserName, cdpKey, pngSize } from "../apps/desktop/src/main/browser-cdp.ts";
 import { UNTRUSTED_CLOSE, UNTRUSTED_OPEN, formatTabs } from "../apps/desktop/src/main/browser-snapshot.ts";
 
@@ -115,4 +116,10 @@ test("扩展只清理创建时记录的本轮标签，跨 worker 重启也不按
   assert.equal([...tabs.values()].filter(tab => tab.windowId === 1).length, 1, "keep a blank tab so the browser window stays open");
   assert.equal([...tabs.values()][0].url, "about:blank");
   await assert.rejects(restarted("tabs.cleanup", {}), /Missing browser tab owner/);
+});
+
+test("system browser detection matches supported application names without treating unsupported apps as Edge", () => {
+  for (const [name, id] of [["Google Chrome", "chrome"], ["Google Chrome.app", "chrome"], ["Chrome", "chrome"], [" microsoft edge.app ", "edge"], ["Brave Browser.app", "brave"], ["Arc.app", "arc"], ["Chromium", "chromium"], ["Safari", ""], ["ego lite.app", ""], ["", ""]]) {
+    assert.equal(browserIdForApplication(name!), id, name);
+  }
 });

@@ -1,12 +1,13 @@
 import { EventEmitter } from "node:events";
-import { execFile, execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { clipboard, shell } from "electron";
+import { app, clipboard, shell } from "electron";
+import { BROWSER_CANDIDATES, browserIdForApplication } from "./browser-choice.js";
 import { toolPath } from "./shell-path.js";
 import { tr } from "../shared/i18n.js";
 import {
@@ -327,6 +328,7 @@ export class SessionManager extends EventEmitter {
       extensionVersion: status.connected?.extension ?? "",
       extensionDir: extensionDir(),
       pairingCode: status.pairing?.code ?? "",
+      defaultBrowserName: defaultBrowserApplication(),
       browsers: installedBrowsers().map(({ id, name, isDefault, storeUrl }) => ({
         id,
         name,
@@ -965,43 +967,16 @@ interface KnownBrowser {
   storeUrl: string;
 }
 
-interface BrowserCandidate {
-  id: string;
-  name: string;
-  bundle: string;
-  bundleId: string;
-  extensionsPage: string;
-  /** 上架后填：这个浏览器的扩展商店里「AIClaw 浏览器助手」的页面。 */
-  storeUrl: string;
-}
+let defaultBrowserCache: { at: number; name: string } | null = null;
 
-const BROWSER_CANDIDATES: BrowserCandidate[] = [
-  { id: "edge", name: "Microsoft Edge", bundle: "Microsoft Edge.app", bundleId: "com.microsoft.edgemac", extensionsPage: "edge://extensions", storeUrl: "" },
-  { id: "chrome", name: "Chrome", bundle: "Google Chrome.app", bundleId: "com.google.chrome", extensionsPage: "chrome://extensions", storeUrl: "" },
-  { id: "brave", name: "Brave", bundle: "Brave Browser.app", bundleId: "com.brave.browser", extensionsPage: "brave://extensions", storeUrl: "" },
-  { id: "arc", name: "Arc", bundle: "Arc.app", bundleId: "company.thebrowser.browser", extensionsPage: "chrome://extensions", storeUrl: "" },
-  { id: "chromium", name: "Chromium", bundle: "Chromium.app", bundleId: "org.chromium.chromium", extensionsPage: "chrome://extensions", storeUrl: "" },
-];
-
-let defaultBrowserCache: { at: number; bundleId: string } | null = null;
-
-/**
- * 系统默认浏览器的 bundle id（小写）。读 LaunchServices 里 https 的处理程序。
- * 读不到返回空串。缓存一分钟：连接状态每变一次都要列浏览器，不必每次都读。
- */
-function defaultBrowserBundleId(): string {
-  if (defaultBrowserCache && Date.now() - defaultBrowserCache.at < 60_000) return defaultBrowserCache.bundleId;
-  let bundleId = "";
-  try {
-    const plist = join(homedir(), "Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist");
-    const raw = execFileSync("plutil", ["-convert", "json", "-o", "-", plist], { encoding: "utf8", timeout: 2000 });
-    const handlers = (JSON.parse(raw) as { LSHandlers?: { LSHandlerURLScheme?: string; LSHandlerRoleAll?: string }[] }).LSHandlers ?? [];
-    bundleId = (handlers.find((handler) => handler.LSHandlerURLScheme === "https")?.LSHandlerRoleAll ?? "").toLowerCase();
-  } catch {
-    bundleId = "";
-  }
-  defaultBrowserCache = { at: Date.now(), bundleId };
-  return bundleId;
+/** Ask the OS for its current HTTPS handler; avoid stale LaunchServices plist entries. */
+function defaultBrowserApplication(): string {
+  if (defaultBrowserCache && Date.now() - defaultBrowserCache.at < 60_000) return defaultBrowserCache.name;
+  let name = "";
+  try { name = app.getApplicationNameForProtocol("https://example.com"); }
+  catch { /* An unavailable handler leaves the supported browsers selectable. */ }
+  defaultBrowserCache = { at: Date.now(), name };
+  return name;
 }
 
 /**
@@ -1011,7 +986,7 @@ function defaultBrowserBundleId(): string {
 function installedBrowsers(): KnownBrowser[] {
   if (process.platform !== "darwin") return [];
   const roots = ["/Applications", join(homedir(), "Applications")];
-  const preferred = defaultBrowserBundleId();
+  const preferred = browserIdForApplication(defaultBrowserApplication());
   const found: KnownBrowser[] = [];
   for (const candidate of BROWSER_CANDIDATES) {
     const app = roots.map((root) => join(root, candidate.bundle)).find((path) => existsSync(path));
@@ -1021,7 +996,7 @@ function installedBrowsers(): KnownBrowser[] {
       name: candidate.name,
       app,
       extensionsPage: candidate.extensionsPage,
-      isDefault: candidate.bundleId === preferred,
+      isDefault: candidate.id === preferred,
       storeUrl: candidate.storeUrl,
     });
   }

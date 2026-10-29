@@ -52,7 +52,9 @@ app.whenReady().then(async()=>{
  handle('sessionRename',(_e,input)=>{renameCalls.push(input);if(renameFails)throw Error('rename failure');sessionTitle=input.title;return {sessionId:input.sessionId,title:sessionTitle};});
  handle('sessionWorkspace',(_e,input)=>{sessionWorkspace=input.workspace;return sessionWorkspace;});handle('pickDirectory',()=>'/tmp/smoke');handle('workspaceReveal',(_e,path)=>{revealedWorkspaces.push(path);});handle('sessionStart',(_e,input)=>{startedWorkspaces.push(input.workspace);const session={id:'new-workspace',title:'Workspace new chat',workdir:input.workspace,model:'test',turnCount:0,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};newSessions.push(session);return {sessionId:session.id,workspace:input.workspace,tools:[],mcpStatus:{},model:'test',providerId:1};});handle('sessionArchive',(_e,input)=>{archiveCalls.push(input.sessionId);const ids=[input.sessionId,...list().filter(s=>s.parentId===input.sessionId).map(s=>s.id)];ids.forEach(id=>archivedIds.add(id));return ids;});handle('sessionList',list);handle('sessionArchived',()=>[]);
  handle('configurationPending',()=>configurationCards);handle('configurationRespond',(_e,reply)=>{configurationReplies.push(reply);configurationCards=configurationCards.filter(c=>c.id!==reply.id);win.webContents.send(IPC.onConfiguration,configurationCards);return {text:reply.cancel?'Cancelled.':'Configuration saved. Connection test passed.'};});handle('searchList',()=>[]);handle('pluginList',()=>pluginFixtures);handle('pluginConfig',()=>[]);handle('pluginContributions',()=>({mcpServers:{},skills:[],computerUse:false}));handle('channelStatus',()=>[]);handle('channelBindings',()=>bindingFixtures);handle('channelAuthorize',(_e,input)=>{channelAuthorizations.push(input);const binding=bindingFixtures.find(b=>b.externalKey===input.externalKey);Object.assign(binding,{approvalPolicy:input.approvalPolicy,allowed:true});});handle('approvalPending',()=>[]);handle('questionPending',()=>[]);handle('scheduleList',()=>tasks);
- handle('browserBridgeStatus',()=>({listening:false,port:17891,browser:'',browsers:[]}));
+ let browserFixture={listening:false,port:17891,browser:'',browsers:[]};const browserOpens=[];let browserOpenFails=false;
+ handle('browserBridgeStatus',()=>browserFixture);
+ handle('browserBridgeOpenPage',(_e,id)=>{browserOpens.push(id);if(browserOpenFails)throw Error('browser launch failed');});
  handle('mcpWrite',(_e,input)=>{mcpServers=input;return input;});handle('mcpProbe',()=>({ok:true,tools:[]}));
  handle('mcpOAuthStatus',()=>({state:authState}));handle('mcpOAuthLogin',(_e,input)=>{authCalls.push(input);authState='authorizing';return {state:authState};});handle('mcpOAuthLogout',()=>{authState='needs_login';return {disconnected:true};});
  let effort='medium',reasoningGate=null,reasoningFails=false;const reasoningCalls=[];
@@ -85,6 +87,12 @@ app.whenReady().then(async()=>{
  check('studio opens with navigation and the conversation sidebar visible by default',await wait("document.querySelector('.activity-rail')?.getBoundingClientRect().width===56 && document.querySelector('.sidebar').getBoundingClientRect().width===300 && document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').getAttribute('aria-expanded')==='true' && !!document.querySelector('.chat-header')"));
  check('window title area keeps native controls clear and content below its drag region',await js("(()=>{const bar=document.querySelector('.window-titlebar'),sidebar=document.querySelector('.sidebar').getBoundingClientRect();return navigator.userAgent.includes('Macintosh') ? !!bar && bar.getBoundingClientRect().bottom<=sidebar.top && getComputedStyle(bar).getPropertyValue('-webkit-app-region')==='drag' && getComputedStyle(bar).borderBottomWidth==='0px' : !bar})()"));
  check('compact navigation offers one settings entry and no memory shortcut or version text',await js("document.querySelectorAll('.rail-bottom > button').length===1 && !!document.querySelector('.rail-bottom [data-view=settings]') && !document.querySelector('.activity-rail button[aria-label=\"记忆\"]') && !document.querySelector('.rail-version')"));
+ for(const [view,label] of [['providers','模型服务'],['skills','技能'],['schedules','定时任务']]){
+  await js(`document.querySelector('.activity-rail [data-view="${view}"]').click()`);
+  check('navigation shortcut opens '+view+' settings with one active entry',await wait(`document.querySelector('.page h2')?.textContent.trim()===${JSON.stringify(label)} && document.querySelector('.activity-rail [data-view="${view}"]').getAttribute('aria-pressed')==='true' && document.querySelectorAll('.activity-rail [aria-pressed="true"]').length===1`));
+ }
+ await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
+ check('home returns from settings shortcuts to the current conversation',await wait("!!document.querySelector('.composer') && document.querySelector('.sidebar').getBoundingClientRect().width===300 && document.querySelector('.chat-header')?.textContent.includes('Workflow test')"));
  const sidebarDrag = async deltaX => {
   const point=await js("(()=>{const r=document.querySelector('.sidebar-resizer').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:100}})()");
   const targetX=point.x+deltaX;
@@ -649,6 +657,23 @@ app.whenReady().then(async()=>{
  finishUpdate({started:false,detail:''});
  win.webContents.send(IPC.onUpdateCheck,{current:'3.7.8',latest:'3.7.8',hasUpdate:false,canInstall:true,error:''});
  check('up-to-date menu result clears upgrade entry',await wait("!document.querySelector('.activity-rail .rail-update')"));
+ browserFixture={listening:true,port:17891,browser:'',defaultBrowserName:'Google Chrome.app',browsers:[{id:'edge',name:'Microsoft Edge',isDefault:false,fromStore:false},{id:'chrome',name:'Chrome',isDefault:true,fromStore:false}]};
+ await js("document.querySelector('.activity-rail [data-view=settings]').click()");
+ await wait("document.querySelector('.settings') || [...document.querySelectorAll('label.switch')].some(e=>e.textContent.includes('浏览器：'))");
+ await js("[...document.querySelectorAll('label.switch')].find(e=>e.textContent.includes('浏览器：')).querySelector('input').click()");
+ check('browser setup automatically selects the system default even when listed after Edge',await wait("document.querySelector('.browser-default-note')?.textContent.includes('系统默认浏览器：Chrome') && [...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='连接我的浏览器（Chrome）')"));
+ await click('连接我的浏览器（Chrome）');
+ check('connect opens the detected default browser extension page',await wait("!!document.querySelector('.backend .progress')")&&await wait("[...document.querySelectorAll('.backend .guide-lead')].some(e=>e.textContent.includes('Chrome 的扩展页'))")&&await (async()=>{for(let i=0;i<60&&browserOpens.length<1;i++)await new Promise(r=>setTimeout(r,50));return browserOpens[0]==='chrome';})());
+ await click('改用 Microsoft Edge');
+ check('manual browser switch updates installation instructions and reopen target',await wait("[...document.querySelectorAll('.backend .guide-lead')].some(e=>e.textContent.includes('Microsoft Edge 的扩展页'))")&&await (async()=>{await click('重新打开扩展页');return browserOpens.at(-1)==='edge';})());
+ browserFixture={...browserFixture,defaultBrowserName:'ego lite.app',browsers:browserFixture.browsers.map(b=>({...b,isDefault:false}))};
+ win.webContents.send(IPC.onBrowserBridge,browserFixture);
+ check('unsupported system default is explained while preserving the chosen compatible browser',await wait("document.querySelector('.browser-default-note')?.textContent.includes('ego lite.app 暂不支持') && [...document.querySelectorAll('.backend .guide-lead')].some(e=>e.textContent.includes('Microsoft Edge 的扩展页'))"));
+ browserOpenFails=true;await click('改用 Chrome');
+ check('failed launch does not replace the selected browser instructions',await wait("document.querySelector('.error-bar')?.textContent.includes('browser launch failed')")&&await js("[...document.querySelectorAll('.backend .guide-lead')].some(e=>e.textContent.includes('Microsoft Edge 的扩展页'))"));
+ browserOpenFails=false;await js("document.querySelector('.error-bar button')?.click()");await click('取消，改回自带窗口');
+ await js("[...document.querySelectorAll('label.switch')].find(e=>e.textContent.includes('浏览器：')).querySelector('input').click()");
+ await click('‹ 返回对话');
  pluginFixtures=[{uuid:'wecom-fixture',pluginId:'aiclaw.wecom',name:'企业微信',source:'builtin',enabled:true,permissions:['filesystem.write','shell.exec'],missingConfig:[],channels:1,tools:0,skills:0,mcp:0,connections:[{uuid:'conn-fixture',name:'示例机器人',missingConfig:[]}]}];
  bindingFixtures=['external-one','external-two'].map((key,index)=>({pluginUuid:'wecom-fixture',channelId:'wecom',connectionId:'conn-fixture',externalKey:key,displayName:'示例会话 '+(index+1),providerId:1,model:'test',allowed:true,allowedTools:['run_command']}));
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
