@@ -630,6 +630,22 @@ const runningKey = computed(() => {
 
 /** Execution details are opt-in, including while the turn is running. */
 const stepsOverride = ref(new Map<string, boolean>());
+// Completing a turn clears any expansion chosen while it was running, including in background chats.
+watch(
+  () => Object.entries(store.live).filter(([, session]) => session.busy).map(([id]) => id),
+  (running, previous) => {
+    const ended = previous.filter(id => !running.includes(id));
+    if (!ended.length) return;
+    const next = new Map(stepsOverride.value);
+    for (const id of ended) {
+      const session = store.live[id];
+      const turn = session && groupTurns(session.timeline.filter(entry => entry.kind !== "user" || !entry.queued)).at(-1);
+      if (turn) next.delete(turn.key);
+    }
+    stepsOverride.value = next;
+  },
+);
+
 function stepsOpen(key: string): boolean {
   return stepsOverride.value.get(key) ?? false;
 }

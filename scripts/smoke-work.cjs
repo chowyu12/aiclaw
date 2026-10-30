@@ -756,6 +756,10 @@ app.whenReady().then(async()=>{
  check('running process interleaves progress and compact activities',await wait("(()=>{const p=[...document.querySelectorAll('.process-body')].at(-1);return p&&[...p.children].filter(e=>e.matches('.progress-message,.steps')).map(e=>e.classList.contains('progress-message')?'message':'activity').join('|')==='message|activity|message|activity'})()"));
  await js("[...document.querySelectorAll('.turn-process')].at(-1).scrollIntoView({block:'center'})");
  writeFileSync('/tmp/aiclaw-process-running.png',(await win.webContents.capturePage()).toPNG());
+ await js("[...document.querySelectorAll('.process-head')].at(-1).click()");
+ check('running process can be collapsed manually',await wait("![...document.querySelectorAll('.turn-process')].at(-1).querySelector('.process-body')"));
+ await js("[...document.querySelectorAll('.process-head')].at(-1).click()");
+ check('running process can be expanded manually before completion',await wait("!![...document.querySelectorAll('.turn-process')].at(-1).querySelector('.process-body')"));
  processEvent('item/completed',{id:'process-final',kind:'agentMessage',text:'浏览器自动化验证通过，输入和点击均正常。'});
  win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'process-test'}});
  check('completed process collapses and final answer contains only the conclusion',await wait("(()=>{const process=[...document.querySelectorAll('.turn-process')].at(-1);const final=process?.nextElementSibling;return process&&!process.querySelector('.process-body')&&final?.classList.contains('final-answer')&&final.querySelector('.prose .file-reference-content').textContent.trim()==='浏览器自动化验证通过，输入和点击均正常。'&&process.querySelector('.process-head').textContent.includes('用时')})()"));
