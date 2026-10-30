@@ -10,8 +10,11 @@ export function activitySummary(steps: readonly StepEntry[]): string {
     if (steps.some(step => step.state === "failed")) return notice?.title || tr("处理失败");
     return notice?.title || (running ? tr("正在思考…") : tr("处理完成"));
   }
+  const actions: string[] = [];
   const counts = new Map<string, number>();
   for (const step of tools.filter(step => step.state === "done")) {
+    const action = step.title.split(" · ").slice(1).join(" · ").trim();
+    if (action) { actions.push(action); continue; }
     const name = step.title.split(" · ")[0]!;
     const type = /^(read_file|read_office|view_image|list_dir|grep)$/.test(name) ? "read"
       : /^(run_command|exec|write_stdin)$/.test(name) ? "command"
@@ -19,7 +22,7 @@ export function activitySummary(steps: readonly StepEntry[]): string {
       : /^(write_|edit_|apply_patch)/.test(name) ? "write" : "tool";
     counts.set(type, (counts.get(type) ?? 0) + 1);
   }
-  const labels = [...counts].map(([type, n]) => {
+  const labels = [...actions, ...[...counts].map(([type, n]) => {
     switch (type) {
       case "read": return tr("读取了 {n} 项内容", { n });
       case "command": return tr("执行了 {n} 组操作", { n });
@@ -27,7 +30,7 @@ export function activitySummary(steps: readonly StepEntry[]): string {
       case "write": return tr("修改了 {n} 个文件", { n });
       default: return tr("调用了 {n} 个工具", { n });
     }
-  });
+  })];
   if (steps.some(step => step.state === "failed")) labels.push(tr("有操作失败"));
   for (const notice of steps.filter(step => step.step === "notice")) labels.push(notice.title);
   if (running) {

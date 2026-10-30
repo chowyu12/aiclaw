@@ -83,8 +83,11 @@ function llmSubline(step: Turn["steps"][number]): string {
 <template>
   <div class="steps">
     <button class="steps-head" :class="{ live: !!live }" :aria-expanded="open" @click="$emit('toggle')">
-      <span class="chev" :class="{ open }">›</span>
+      <svg v-if="turn.steps.some(step => step.step === 'tool')" class="activity-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M10 2a4 4 0 0 0-4.7 5L2 10.3a2 2 0 0 0 2.8 2.8L8.2 10A4 4 0 0 0 14 5.4l-2.5 2.1-2.2-2.2L11.4 3A4 4 0 0 0 10 2Z" />
+      </svg>
       {{ summary }}
+      <span class="chev" :class="{ open }" aria-hidden="true">›</span>
     </button>
 
     <div v-if="open" class="steps-body">
@@ -152,6 +155,8 @@ function llmSubline(step: Turn["steps"][number]): string {
   line-height: 20px;
   cursor: pointer;
 }
+
+.activity-icon { width: 14px; height: 14px; flex: 0 0 auto; fill: none; stroke: currentColor; stroke-width: 1.1; }
 
 .steps-head:hover {
   background: var(--hover);

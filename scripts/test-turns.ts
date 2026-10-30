@@ -200,3 +200,15 @@ test("活动摘要只汇总已完成的操作，运行和失败不冒充成功",
   assert.equal(activitySummary([{ ...steps[0]!, step: "llm", state: "running" }]), "正在思考…");
   assert.equal(activitySummary([{ ...steps[0]!, step: "llm", state: "failed" }]), "处理失败");
 });
+
+
+test("活动行直接描述工具做了什么，保留在进展说明之间", () => {
+  const turn = groupTurns([user("u"), agent("progress", "先核对连接。"),
+    step("tool", { title: "exec · 检查浏览器连接" }), agent("final", "验证通过。")])[0]!;
+  const blocks = turnBlocks(turn);
+  assert.equal(blocks[0]?.kind, "message");
+  const activity = blocks[1]!;
+  assert.equal(activity.kind, "activity");
+  if (activity.kind === "activity") assert.equal(activitySummary(activity.steps), "检查浏览器连接");
+  assert.equal(finalMessage(turn)?.text, "验证通过。");
+});
