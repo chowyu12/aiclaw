@@ -67,7 +67,7 @@ app.whenReady().then(async()=>{
  const resumeFailures=new Set(),resumeModels=new Map(),resumeCalls=[];
  handle('sessionConfigure',async(_e,input)=>{configureCalls.push(input);try{if(configureGate)await configureGate;if(configureFails)throw Error('fixture model switch failed');contextFixture={...contextFixture,model:input.model,window:input.contextWindow||0,lastInputTokens:0};return {tools:[],mcpStatus:{}};}finally{configureSettled++;}});
  handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
- handle('sessionResume',async(_e,id)=>{resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论',at:Date.now()}]});});
+ handle('sessionResume',async(_e,id)=>{resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论\n\n![猫](generated/cat.png) ![狗](generated/dog.webp) ![缺失图片](generated/missing.png)',at:Date.now()}]});});
  handle('sessionWork',(_e,id)=>({goal:id==='s'?goal:null,pending:id==='s'?[...pending,...queuedInputs]:[],queuedRequestIds:queueAuto&&id==='s'?queuedInputs.map(p=>p.requestId):[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
  handle('changesList',(_e,id)=>{changeReads.push(id);return id==='s'?changes:[];});
  handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
@@ -291,7 +291,7 @@ app.whenReady().then(async()=>{
  check('clicking selected feedback cancels it',await wait("[...document.querySelectorAll('.agent-meta .meta-feedback')].every(b=>b.getAttribute('aria-pressed')==='false')"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-answer-actions.png',(await win.webContents.capturePage()).toPNG());
- check('only unmentioned files remain below the answer without summary heading',await js("!document.querySelector('.generated-files h3') && document.querySelectorAll('.generated-files .file-card').length===2 && document.querySelectorAll('.prose .file-card').length===2"));
+ check('only explicitly referenced files are delivered after history restore',await js("!document.querySelector('.generated-files') && document.querySelectorAll('.final-answer .file-card').length===5"));
  check('restored history does not append Archify candidate or validation receipt cards',await js("![...document.querySelectorAll('.generated-files .file-card')].some(e=>e.dataset.filePath.includes('.archify/'))"));
  check('document cards show filenames and types without reading file contents',await js("[...document.querySelectorAll('.file-card')].some(b=>b.querySelector('.file-format').textContent==='Word'&&b.textContent.includes('2026 AI 行业趋势.docx'))")&&!mediaReads.some(p=>p.endsWith('.docx')));
  await js("[...document.querySelectorAll('.file-card')].find(b=>b.textContent.includes('2026 AI 行业趋势.docx')).querySelector('.file-open-trigger').click()");
@@ -351,8 +351,10 @@ app.whenReady().then(async()=>{
  win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',item:{id:'image-user',kind:'userMessage',text:'draw another cat'}}});
  win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',item:{id:'image-live',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/live.png','generated/live.md']}}});
  check('unfinished answer does not offer feedback',await wait("document.querySelectorAll('.agent-meta').length===1"));
- check('live output summary appears before answer and stays scoped to its turn',await wait("document.querySelectorAll('.generated-files').length===2 && document.querySelectorAll('.generated-files')[1].querySelectorAll('.file-card').length===1"));
- check('single generated image previews before assistant prose arrives',await wait("[...document.querySelectorAll('.generated-images:not(.multiple) img')].some(img=>img.alt==='generated/live.png'&&img.naturalWidth>0)"));
+ check('intermediate image and document stay out of final delivery',await js("!document.querySelector('.generated-files') && ![...document.querySelectorAll('.generated-images img')].some(img=>img.alt==='generated/live.png')"));
+ win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',item:{id:'image-final',kind:'agentMessage',text:'![猫](generated/live.png)'}}});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'image-turn'}});
+ check('explicit final image is previewed after the answer completes',await wait("[...document.querySelectorAll('.generated-images:not(.multiple) img')].some(img=>img.alt==='generated/live.png'&&img.naturalWidth>0)"));
  check('single image is larger than thumbnails and scrolled into view',await wait("(()=>{const img=document.querySelector('.generated-images:not(.multiple) img');const stream=document.querySelector('.stream');return img?.getBoundingClientRect().width>document.querySelector('.generated-images.multiple img').getBoundingClientRect().width && img.getBoundingClientRect().bottom<=stream.getBoundingClientRect().bottom;})()"));
  writeFileSync('/tmp/aiclaw-generated-single-image.png',(await win.webContents.capturePage()).toPNG());
  win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'image-turn'}});
@@ -491,6 +493,8 @@ app.whenReady().then(async()=>{
 
  check('ordinary chat does not display another chats sources',await wait("!document.querySelector('.sources-trigger') && !document.querySelector('.sources-drawer')"));
  win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'fork',item:{id:'live-search',kind:'toolCall',toolName:'search__web_search',sources:[{title:'Live result',url:'https://live.example.com/',snippet:'Live summary'}]}}});
+ check('unfinished tool activity does not create a final-answer footer',await js("!document.querySelector('.sources-trigger')"));
+ win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'fork',item:{id:'live-search-answer',kind:'agentMessage',text:'Search completed.'}}});
  check('live tool completion displays sources without reloading history',await wait("document.querySelector('.sources-trigger')?.textContent.includes('参考来源 · 1')"));
 
 
@@ -709,6 +713,8 @@ app.whenReady().then(async()=>{
  stepEvent('item/completed',{id:'operation-llm',kind:'llm',summary:'deepseek-v4.1-flash',seq:1,round:1,toolCalls:2,startedAt:Date.now(),durationMs:9200});
  const operation={id:'operation-exec',kind:'toolCall',toolName:'exec',summary:'确认当前时间',seq:2,toolArgs:JSON.stringify({title:'确认当前时间',code:"const setup = 'date'; text(await tools.run_command({command: setup}));"})};
  stepEvent('item/started',operation);
+ check('running activity is compact by default',await wait("[...document.querySelectorAll('.activity-block .steps-head')].some(e=>e.textContent.includes('正在执行：确认当前时间'))")&&await js("!document.querySelector('.steps-body')"));
+ await js("[...document.querySelectorAll('.activity-block .steps-head')].at(-1).click()");
  check('running execution step shows the action title instead of script setup',await wait("[...document.querySelectorAll('.steps-body .name')].some(e=>e.textContent==='exec · 确认当前时间')")&&await js("![...document.querySelectorAll('.steps-body summary')].some(e=>e.textContent.includes('const setup'))"));
  stepEvent('item/completed',{...operation,toolResult:'2026-10-20',startedAt:Date.now(),durationMs:1440});
  stepEvent('item/completed',{id:'operation-search',kind:'toolCall',toolName:'exec',summary:'联网检索2026年前三季度GDP数据',seq:3,toolArgs:'{}',toolResult:'查询完成'});
@@ -740,14 +746,32 @@ app.whenReady().then(async()=>{
  check('automatic manual and event-driven context reads wait for session restoration',beforeRestoreContextReads.length===0);
  resumeGate.pending=false;finishResume();
  check('context automatically loads after delayed restoration completes',await wait("document.querySelector('.context-trigger')?.title.includes('13%')")&&contextReads.at(-1)==='s');
+ const processEvent=(method,item)=>win.webContents.send(IPC.onAgentEvent,{method,params:{sessionId:'s',turnId:'process-test',item}});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'process-test'}});
+ processEvent('item/completed',{id:'process-user',kind:'userMessage',text:'测试浏览器自动化并给出结论'});
+ processEvent('item/completed',{id:'process-progress-1',kind:'agentMessage',text:'我先检查浏览器连接，再验证页面操作。'});
+ processEvent('item/completed',{id:'process-tool-1',kind:'toolCall',toolName:'exec',summary:'检查浏览器连接',toolResult:'connected',startedAt:Date.now()-2000,durationMs:1000});
+ processEvent('item/completed',{id:'process-progress-2',kind:'agentMessage',text:'浏览器已连接，接下来验证输入和点击。'});
+ processEvent('item/completed',{id:'process-tool-2',kind:'toolCall',toolName:'exec',summary:'验证输入和点击',toolResult:'passed',startedAt:Date.now()-1000,durationMs:1000});
+ check('running process interleaves progress and compact activities',await wait("(()=>{const p=[...document.querySelectorAll('.process-body')].at(-1);return p&&[...p.children].filter(e=>e.matches('.progress-message,.activity-block')).map(e=>e.classList.contains('progress-message')?'message':'activity').join('|')==='message|activity|message|activity'})()"));
+ await js("[...document.querySelectorAll('.turn-process')].at(-1).scrollIntoView({block:'center'})");
+ writeFileSync('/tmp/aiclaw-process-running.png',(await win.webContents.capturePage()).toPNG());
+ processEvent('item/completed',{id:'process-final',kind:'agentMessage',text:'浏览器自动化验证通过，输入和点击均正常。'});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'process-test'}});
+ check('completed process collapses and final answer contains only the conclusion',await wait("(()=>{const process=[...document.querySelectorAll('.turn-process')].at(-1);const final=process?.nextElementSibling;return process&&!process.querySelector('.process-body')&&final?.classList.contains('final-answer')&&final.querySelector('.prose .file-reference-content').textContent.trim()==='浏览器自动化验证通过，输入和点击均正常。'&&process.querySelector('.process-head').textContent.includes('用时')})()"));
+ await js("[...document.querySelectorAll('.turn-process')].at(-1).scrollIntoView({block:'center'})");
+ writeFileSync('/tmp/aiclaw-process-completed.png',(await win.webContents.capturePage()).toPNG());
+ await js("[...document.querySelectorAll('.process-head')].at(-1).click()");
+ check('expanded process restores progress but excludes final answer',await wait("(()=>{const p=[...document.querySelectorAll('.process-body')].at(-1);return p?.textContent.includes('接下来验证输入和点击')&&!p.textContent.includes('输入和点击均正常。')})()"));
+ await js("[...document.querySelectorAll('.process-head')].at(-1).click()");
  const documentEvent=(method,item)=>win.webContents.send(IPC.onAgentEvent,{method,params:{sessionId:'s',turnId:'document-rows',item}});
  win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'document-rows'}});
  documentEvent('item/completed',{id:'document-request',kind:'userMessage',text:'生成语法练习题目册和配套答案册'});
  documentEvent('item/completed',{id:'document-output',kind:'toolCall',toolName:'write_file',artifacts:['generated/三年级英语语法进阶练习_题目册_第5至8章.docx','generated/三年级英语语法进阶练习_答案册_第5至8章.docx']});
- documentEvent('item/completed',{id:'document-answer',kind:'agentMessage',text:'已生成练习题目册和配套答案册。'});
+ documentEvent('item/completed',{id:'document-answer',kind:'agentMessage',text:'已生成：[题目册](generated/三年级英语语法进阶练习_题目册_第5至8章.docx) [答案册](generated/三年级英语语法进阶练习_答案册_第5至8章.docx)'});
  win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'document-rows'}});
- check('multiple Word documents share one bordered list with individual open controls',await wait("(()=>{const list=[...document.querySelectorAll('.generated-files')].at(-1);return list?.querySelectorAll('.file-card').length===2&&[...list.querySelectorAll('.file-format')].every(e=>e.textContent==='Word')&&list.querySelectorAll('.file-open-trigger').length===2})()"));
- await js("[...document.querySelectorAll('.generated-files')].at(-1).scrollIntoView({block:'center'})");
+ check('final answer explicitly delivers both Word documents',await wait("(()=>{const list=[...document.querySelectorAll('.final-answer')].at(-1);return list?.querySelectorAll('.file-card').length===2&&[...list.querySelectorAll('.file-format')].every(e=>e.textContent==='Word')&&list.querySelectorAll('.file-open-trigger').length===2})()"));
+ await js("[...document.querySelectorAll('.final-answer')].at(-1).scrollIntoView({block:'center'})");
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-document-cards.png',(await win.webContents.capturePage()).toPNG());
  const diagramRoot='/tmp/smoke/.archify/diagram-run/';
@@ -757,7 +781,8 @@ app.whenReady().then(async()=>{
  diagramEvent({id:'diagram-files',kind:'toolCall',toolName:'write_file',artifacts:[diagramRoot+'candidate.json',diagramRoot+'request.finalize.json',diagramRoot+'request.html','generated/export.json']});
  diagramEvent({id:'diagram-answer',kind:'agentMessage',text:`已生成：[缓存请求时序图](${diagramRoot}request.html)`});
  win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'diagram-files'}});
- check('live diagram hides intermediate cards but retains ordinary JSON and the linked HTML',await wait(`document.querySelectorAll('.prose .file-card[data-file-path="${diagramRoot}request.html"]').length===1 && document.querySelectorAll('.generated-files .file-card[data-file-path="generated/export.json"]').length===1`)&&await js(`!document.querySelector('.file-card[data-file-path="${diagramRoot}candidate.json"]') && !document.querySelector('.file-card[data-file-path="${diagramRoot}request.finalize.json"]') && !document.querySelector('.generated-files .file-card[data-file-path="${diagramRoot}request.html"]')`));
+ check('diagram delivers linked HTML without automatically attaching any unmentioned JSON',await wait(`document.querySelectorAll('.prose .file-card[data-file-path="${diagramRoot}request.html"]').length===1 && !document.querySelector('.final-answer .file-card[data-file-path="generated/export.json"]')`)&&await js(`!document.querySelector('.file-card[data-file-path="${diagramRoot}candidate.json"]') && !document.querySelector('.file-card[data-file-path="${diagramRoot}request.finalize.json"]') && !document.querySelector('.generated-files .file-card[data-file-path="${diagramRoot}request.html"]')`));
+ await js("[...document.querySelectorAll('.process-head')].at(-1).click()");
  await js("[...document.querySelectorAll('.steps-head')].at(-1).click()");
  check('hidden diagram inputs remain available inside execution details',await wait(`!!document.querySelector('.steps-body .artifact-path')`)&&await js(`['${diagramRoot}candidate.json','${diagramRoot}request.finalize.json'].every(path=>[...document.querySelectorAll('.steps-body .artifact-path')].some(e=>e.textContent===path))`));
  await js("[...document.querySelectorAll('.steps-head')].at(-1).click()");

@@ -135,10 +135,16 @@ md.renderer.rules.link_open = (tokens, index, options, _env, self) => {
  * 加了之后对端最多知道「有人加载了这张图」。
  * 地址协议不对就退化成纯文字，不留空图标。
  */
-md.renderer.rules.image = (tokens, index) => {
+md.renderer.rules.image = (tokens, index, _options, env) => {
   const token = tokens[index]!;
   const src = String(token.attrGet("src") ?? "");
   const alt = token.content || "";
+  if (isLocalFileLink(src)) {
+    let path = src;
+    try { path = decodeURIComponent(src); } catch { /* Keep literal percent signs. */ }
+    if (env?.files instanceof Set) env.files.add(path);
+    return fileCard(path);
+  }
   if (!isSafeImage(src)) return md.utils.escapeHtml(alt || "图片");
   const safeSrc = md.utils.escapeHtml(src);
   // 缩略图 + 可点开原图。对话气泡里塞一张原尺寸的图会把整屏顶掉，

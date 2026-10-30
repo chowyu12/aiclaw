@@ -7,10 +7,8 @@ import type { TimelineEntry } from "./store.js";
  *
  * 一轮 = 一条用户消息，加上它触发的全部执行步骤与全部回答。
  *
- * 为什么不按时间线原样平铺：一轮里模型会被采样好几次（每次工具回填之后再问
- * 一次），于是「几句话 → 几个步骤 → 又几句话」交替出现，答案被切成好几截，
- * 中间夹着执行细节。把步骤全部抽出来归成一块之后，回答是连着读的一段，
- * 步骤是一个可以展开的整体。
+ * 保留正文与工具活动的原始顺序，展示时连续的工具合并成一行活动摘要。
+ * messages 和 steps 仍用于复制回答、引用来源与展开执行详情。
  *
  * 纯函数、单独成文件，为的是能在 node 里直接测（`scripts/test-turns.ts`）；
  * ChatView 里那段分组逻辑出过一次错就很难发现——界面还是有东西的，只是
@@ -28,41 +26,24 @@ export interface Turn {
   user: UserEntry | null;
   messages: AgentEntry[];
   steps: StepEntry[];
+  entries: (AgentEntry | StepEntry)[];
 }
 
-/** Only successful structured artifacts, never paths guessed from assistant prose. */
+/** A message followed by more tool/model activity is progress, including interrupted turns. */
+export function finalMessage(turn: Turn): AgentEntry | null {
+  const last = turn.entries.at(-1);
+  return last?.kind === "agent" && !last.streaming ? last : null;
+}
+
+/** Tool artifacts stay in steps; only final-answer references select user-facing previews. */
 export function turnArtifacts(turn: Turn): string[] {
-  return [...new Set(turn.steps.filter(step => step.state === "done")
-    .flatMap(step => step.artifacts ?? []).filter(path => path.trim() !== ""))];
+  const answer = finalMessage(turn);
+  if (!answer) return [];
+  return referencedFiles(answer.text);
 }
 
 export function imageArtifacts(turn: Turn): string[] {
   return turnArtifacts(turn).filter(path => /\.(png|jpe?g|webp|gif)$/i.test(path));
-}
-
-/** Keep known Archify inputs and receipts in execution details, not automatic delivery cards. */
-function isIntermediateArtifact(path: string): boolean {
-  const parts = path.replaceAll("\\", "/").split("/");
-  const root = parts.indexOf(".archify");
-  if (root < 0 || parts.length - root < 3) return false;
-  const name = parts.at(-1)!;
-  return name === "candidate.json" || /\.(?:delivery|finalize|finalize-summary|browser-check)\.json$/.test(name);
-}
-
-/** Hide only unambiguous matches; identical filenames in different folders remain distinct. */
-export function unmentionedArtifacts(turn: Turn): string[] {
-  const images = new Set(imageArtifacts(turn));
-  const paths = turnArtifacts(turn).filter(path => !images.has(path));
-  const mentioned = new Set<string>();
-  const normalize = (path: string) => path.replaceAll("\\", "/").replace(/^\.\//, "");
-  for (const ref of turn.messages.flatMap(message => referencedFiles(message.text))) {
-    const normalized = normalize(ref);
-    const exact = paths.filter(path => normalize(path) === normalized);
-    const matches = exact.length ? exact : paths.filter(path =>
-      normalize(path).endsWith(`/${normalized}`) || normalized.endsWith(`/${normalize(path)}`));
-    if (matches.length === 1) mentioned.add(matches[0]!);
-  }
-  return paths.filter(path => !mentioned.has(path) && !isIntermediateArtifact(path));
 }
 
 export function groupTurns(timeline: readonly TimelineEntry[]): Turn[] {
@@ -71,21 +52,44 @@ export function groupTurns(timeline: readonly TimelineEntry[]): Turn[] {
 
   for (const entry of timeline) {
     if (entry.kind === "user") {
-      current = { key: entry.id, user: entry, messages: [], steps: [] };
+      current = { key: entry.id, user: entry, messages: [], steps: [], entries: [] };
       turns.push(current);
       continue;
     }
     if (!current) {
       // 没有用户消息打头的条目自成一轮，不要并进后面那一轮——并进去的话
       // 它会显示在一条它根本不属于的提问底下。
-      current = { key: `lead-${entry.id}`, user: null, messages: [], steps: [] };
+      current = { key: `lead-${entry.id}`, user: null, messages: [], steps: [], entries: [] };
       turns.push(current);
     }
+    current.entries.push(entry);
     if (entry.kind === "step") current.steps.push(entry);
     else current.messages.push(entry);
   }
 
   return turns;
+}
+
+export type TurnBlock =
+  | { kind: "message"; key: string; message: AgentEntry }
+  | { kind: "activity"; key: string; steps: StepEntry[] };
+
+/** Only adjacent activities merge; a progress message always keeps its place. */
+export function turnBlocks(turn: Turn, live = false): TurnBlock[] {
+  const final = live ? null : finalMessage(turn);
+  const blocks: TurnBlock[] = [];
+  for (const entry of turn.entries) {
+    if (entry === final) continue;
+    if (entry.kind === "agent") {
+      blocks.push({ kind: "message", key: entry.id, message: entry });
+      continue;
+    }
+    const previous = blocks.at(-1);
+    if (previous?.kind === "activity") previous.steps.push(entry);
+    else blocks.push({ kind: "activity", key: entry.id, steps: [entry] });
+  }
+  // Completed sampling alone adds no user-facing activity; its metrics remain in execution details.
+  return blocks.filter(block => block.kind === "message" || block.steps.some(step => step.step !== "llm" || step.state !== "done"));
 }
 
 /**

@@ -18,9 +18,10 @@ import {
   type TextAttachment,
 } from "../attachments";
 import ContextIndicator from "./ContextIndicator.vue";
-import { groupTurns, imageArtifacts, turnArtifacts, unmentionedArtifacts, turnSources, stepsElapsed, type Turn } from "../turns";
+import { groupTurns, turnBlocks, finalMessage, imageArtifacts, turnSources, stepsElapsed, type Turn } from "../turns";
+import { activitySummary } from "../activity-summary";
 import { renderMarkdown } from "../markdown";
-import { answerText, answerTime, formatMessageTime, fullMessageTime } from "../message-meta";
+import { formatMessageTime, fullMessageTime } from "../message-meta";
 import { formatDuration as formatVoiceTime, MAX_SECONDS, VoiceRecorder } from "../voice";
 import {
   activeReferences,
@@ -36,7 +37,6 @@ import {
 import type { SessionSummaryView, SkillView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
 import GeneratedImages from "./GeneratedImages.vue";
-import GeneratedFiles from "./GeneratedFiles.vue";
 import FileReferences from "./FileReferences.vue";
 import SearchSources from "./SearchSources.vue";
 import ConfigurationCard from "./ConfigurationCard.vue";
@@ -69,6 +69,9 @@ watch(
   },
   () => void scrollToEnd(),
 );
+
+// Completing a turn collapses its process and moves the final answer into place.
+watch(() => store.busy, () => void scrollToEnd());
 
 // ---------- 语音输入 ----------
 //
@@ -599,7 +602,7 @@ function rateAnswer(key: string, value: Feedback): void {
 
 /** 这一轮的回答说完了没有：还在流式输出的时候不给复制，复制到的是半句话。 */
 function answerDone(turn: Turn): boolean {
-  return turn.messages.length > 0 && turn.messages.every((message) => !message.streaming);
+  return turn.key !== runningKey.value && finalMessage(turn) !== null;
 }
 
 /** 按轮分组：一条提问 + 它触发的全部步骤 + 全部回答。 */
@@ -625,39 +628,33 @@ const runningKey = computed(() => {
   return turns.value[turns.value.length - 1]?.key ?? "";
 });
 
-/**
- * 步骤块的展开状态：**只记用户点过的**，没点过的按当轮状态取默认值。
- *
- * 这样「跑完自动收起」是免费的——默认值从「跑着＝展开」翻到「跑完＝收起」，
- * 而用户点过的那一块不受影响。如果改成记一个 collapsed 集合，跑完那一刻
- * 就得去补写一次状态，而那次补写会把用户自己展开的也一起收掉。
- */
+/** Execution details are opt-in, including while the turn is running. */
 const stepsOverride = ref(new Map<string, boolean>());
-
-function stepsOpen(turn: Turn): boolean {
-  return stepsOverride.value.get(turn.key) ?? turn.key === runningKey.value;
+function stepsOpen(key: string): boolean {
+  return stepsOverride.value.get(key) ?? false;
 }
-
-function toggleSteps(turn: Turn): void {
-  // 换一个新 Map 而不是原地改：ref 里装的 Map 改内容不会触发重渲染。
+function toggleSteps(key: string): void {
   const next = new Map(stepsOverride.value);
-  next.set(turn.key, !stepsOpen(turn));
+  next.set(key, !stepsOpen(key));
   stepsOverride.value = next;
 }
 
-/** 耗时按量级换单位：毫秒级的东西写成 0.02 s 读不出快慢。 */
-function formatDuration(ms: number | undefined): string {
-  if (ms === undefined) return "";
-  if (ms < 1000) return `${ms} ms`;
-  return `${(ms / 1000).toFixed(2)} s`;
+function processOpen(turn: Turn): boolean {
+  return stepsOverride.value.get(turn.key) ?? turn.key === runningKey.value;
+}
+function toggleProcess(turn: Turn): void {
+  const next = new Map(stepsOverride.value);
+  next.set(turn.key, !processOpen(turn));
+  stepsOverride.value = next;
 }
 
-/** 步骤块折叠时那一行：跑着的时候说在跑，跑完了说花了多久。 */
 function stepsSummary(turn: Turn): string {
-  if (turn.key === runningKey.value) return t("执行中 · 已 {n} 步", { n: turn.steps.length });
+  if (turn.key === runningKey.value) return t("正在处理…");
   const elapsed = stepsElapsed(turn.steps);
-  const n = turn.steps.length;
-  return elapsed ? t("{n} 个执行步骤 · 用时 {time}", { n, time: formatDuration(elapsed) }) : t("{n} 个执行步骤", { n });
+  if (!elapsed) return t("执行过程");
+  const seconds = Math.round(elapsed / 1000);
+  if (seconds < 60) return t("用时 {n} 秒", { n: seconds });
+  return t("用时 {minutes} 分 {seconds} 秒", { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
 }
 
 /**
@@ -743,9 +740,7 @@ const forking = ref(false);
             {{ t("这个会话还没有内容。说点什么开始。") }}
           </p>
 
-          <!-- 按轮渲染。一轮里步骤只出现一次，位置随状态走：
-               跑着的时候在回答上面（那时用户看的就是它，且回答还没出来），
-               跑完了挪到回答下面并收起（那时用户要读的是答案，不是过程）。 -->
+          <!-- 按原始顺序展示进展正文与工具活动，细节默认折叠。 -->
           <template v-for="turn in turns" :key="turn.key">
             <!-- 用户消息是纯文本气泡：他自己打的字，不该被 Markdown 重新解释
                  （写个 *星号* 不该变成斜体）。助手消息才渲染 Markdown。 -->
@@ -805,43 +800,57 @@ const forking = ref(false);
             </div>
             </div>
 
-            <StepsBlock
-              v-if="turn.steps.length > 0 && turn.key === runningKey"
-              :turn="turn"
-              :open="stepsOpen(turn)"
-              live
-              :summary="stepsSummary(turn)"
-              @toggle="toggleSteps(turn)"
-            />
+            <section v-if="turn.steps.length > 0 || turnBlocks(turn, turn.key === runningKey).length > 0" class="turn-process">
+              <button class="process-head" :aria-expanded="processOpen(turn)" @click="toggleProcess(turn)">
+                {{ stepsSummary(turn) }}
+                <span class="process-chevron" :class="{ open: processOpen(turn) }" aria-hidden="true">›</span>
+              </button>
+              <div v-if="processOpen(turn)" class="process-body">
+                <template v-for="block in turnBlocks(turn, turn.key === runningKey)" :key="block.key">
+                  <div v-if="block.kind === 'message'" class="msg agent progress-message">
+                    <FileReferences class="prose" :html="renderMarkdown(block.message.text)" />
+                    <span v-if="block.message.streaming" class="caret">▌</span>
+                  </div>
+                  <StepsBlock v-else
+                    class="activity-block"
+                    :turn="{ ...turn, steps: block.steps }"
+                    :open="stepsOpen(block.key)"
+                    :live="block.steps.some(step => step.state === 'running')"
+                    :summary="activitySummary(block.steps)"
+                    @toggle="toggleSteps(block.key)"
+                  />
+                </template>
+                <StepsBlock v-if="turn.steps.length > 0"
+                  :turn="turn" :open="stepsOpen(`details:${turn.key}`)" :summary="t('执行详情')"
+                  @toggle="toggleSteps(`details:${turn.key}`)"
+                />
+              </div>
+            </section>
 
-            <!-- 一轮的回答与它下面那一行包在一起，理由同提问。 -->
-            <div v-if="turn.messages.length > 0 || turnArtifacts(turn).length > 0 || turnSources(turn).length > 0" class="say">
-            <div v-for="message in turn.messages" :key="message.id" class="msg agent">
-              <!-- 文件名点了直接打开。用事件委托而不是给每个 code 绑监听：
-                   这段 HTML 是 v-html 塞进来的，Vue 的事件绑定管不到它。 -->
-              <FileReferences class="prose" :html="renderMarkdown(message.text)" />
-              <span v-if="message.streaming" class="caret">▌</span>
+            <!-- 最终回答独立于过程；复制、反馈和交付文件均只属于这条回答。 -->
+            <div v-if="answerDone(turn)" class="say final-answer">
+            <div v-if="answerDone(turn)" class="msg agent">
+              <FileReferences class="prose" :html="renderMarkdown(finalMessage(turn)!.text)" />
             </div>
             <GeneratedImages
-              v-if="imageArtifacts(turn).length > 0"
+              v-if="answerDone(turn) && imageArtifacts(turn).length > 0"
               :key="`${store.sessionId}:${turn.key}`"
               :paths="imageArtifacts(turn)"
-              @loaded="turn.key === runningKey && scrollToEnd()"
+              @loaded="turn.key === turns.at(-1)?.key && scrollToEnd()"
             />
-            <GeneratedFiles v-if="unmentionedArtifacts(turn).length > 0" :paths="unmentionedArtifacts(turn)" />
             <div v-if="answerDone(turn) || turnSources(turn).length > 0" class="answer-footer">
             <SearchSources v-if="turnSources(turn).length > 0" :key="`${store.sessionId}:${turn.key}`" :sources="turnSources(turn)" />
             <!-- 一轮一行，不是每截一行：一轮里模型会被采样好几次，回答散成几截，
                  每截都挂一个复制按钮只会满屏按钮，而用户要的是整段回答。 -->
             <div v-if="answerDone(turn)" class="msg-meta agent-meta" :class="{ pinned: isMarked(`a-${turn.key}`) }">
-              <time v-if="answerTime(turn.messages)" :title="fullMessageTime(answerTime(turn.messages))">
-                {{ formatMessageTime(answerTime(turn.messages)) }}
+              <time v-if="finalMessage(turn)?.at ?? 0" :title="fullMessageTime(finalMessage(turn)?.at ?? 0)">
+                {{ formatMessageTime(finalMessage(turn)?.at ?? 0) }}
               </time>
               <button
                 class="meta-copy"
                 :title="copiedKey === `a-${turn.key}` || failedKey === `a-${turn.key}` ? copyLabel(`a-${turn.key}`) : t(`复制回答（Markdown 原文）`)"
                 :aria-label="copyLabel(`a-${turn.key}`)"
-                @click="copyText(`a-${turn.key}`, answerText(turn.messages), renderMarkdown(answerText(turn.messages)))"
+                @click="copyText(`a-${turn.key}`, finalMessage(turn)!.text, renderMarkdown(finalMessage(turn)!.text))"
               >
                 <svg v-if="copiedKey === `a-${turn.key}`" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7" /></svg>
                 <svg v-else-if="failedKey === `a-${turn.key}`" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" /></svg>
@@ -850,7 +859,7 @@ const forking = ref(false);
                   <path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2" />
                 </svg>
               </button>
-              <button class="meta-fork" :title="t('从这里分叉')" :aria-label="t('从这里分叉')" :disabled="store.busy || forking" @click="forkAt(turn.messages[turn.messages.length - 1]!.id)">
+              <button class="meta-fork" :title="t('从这里分叉')" :aria-label="t('从这里分叉')" :disabled="store.busy || forking" @click="forkAt(finalMessage(turn)!.id)">
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path d="M4 11V5m0 4h3a5 5 0 0 0 5-5" />
                   <circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="13" r="1.5" /><circle cx="12" cy="2.5" r="1.5" />
@@ -871,13 +880,6 @@ const forking = ref(false);
             </div>
             </div>
 
-            <StepsBlock
-              v-if="turn.steps.length > 0 && turn.key !== runningKey"
-              :turn="turn"
-              :open="stepsOpen(turn)"
-              :summary="stepsSummary(turn)"
-              @toggle="toggleSteps(turn)"
-            />
           </template>
         </div>
 
@@ -1256,6 +1258,33 @@ const forking = ref(false);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.turn-process {
+  max-width: var(--content-width);
+  margin: 0 auto 16px;
+}
+.process-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.process-head:hover { color: var(--ink-2); }
+.process-head:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.process-chevron { display: inline-block; transition: transform 0.15s; }
+.process-chevron.open { transform: rotate(90deg); }
+.process-body { padding-top: 14px; }
+.activity-block { margin: 4px 0 18px; }
+@media (prefers-reduced-motion: reduce) {
+  .process-chevron { transition: none; }
 }
 
 .msg.agent {

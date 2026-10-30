@@ -5,13 +5,7 @@ import { describeError } from "../errors";
 import { locale, t } from "../i18n";
 import type { Turn } from "../turns";
 
-/**
- * 一轮的执行步骤块。
- *
- * 单独成组件是因为它在 ChatView 里要出现在两个位置（跑着的时候在回答上面、
- * 跑完挪到回答下面），同一段标记写两遍迟早会改歪一份。样式跟着搬过来：
- * scoped 样式进不到子组件里，留在 ChatView 的话这里会秃。
- */
+/** Expandable technical details shared by activity summaries and the full execution log. */
 
 defineProps<{
   turn: Turn;
@@ -88,7 +82,7 @@ function llmSubline(step: Turn["steps"][number]): string {
 
 <template>
   <div class="steps">
-    <button class="steps-head" :class="{ live: !!live }" @click="$emit('toggle')">
+    <button class="steps-head" :class="{ live: !!live }" :aria-expanded="open" @click="$emit('toggle')">
       <span class="chev" :class="{ open }">›</span>
       {{ summary }}
     </button>
@@ -386,7 +380,6 @@ function llmSubline(step: Turn["steps"][number]): string {
 
 /* 跑着的那一块把折叠条点亮：它是这一屏里唯一在动的东西。 */
 .steps-head.live {
-  background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--ink-2);
 }
 </style>

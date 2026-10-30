@@ -599,3 +599,18 @@ test("local Markdown previews never fetch images or inline CSS resources", () =>
  assert.ok(doc.querySelector('h3'));assert.equal(doc.querySelector('img'),null);assert.equal(doc.querySelector('[style]'),null);assert.equal(doc.querySelector('script'),null);
  assert.ok(doc.body.textContent?.includes('Text'));
 });
+
+
+test("explicit local image references use host-validated files without fetching local URLs", () => {
+  for (const source of ["![最终图](/work/final.png)", "![最终图](</work/final image.png>)"]) {
+    const doc = new JSDOM(renderMarkdown(source)).window.document;
+    const path = source.includes("final image") ? "/work/final image.png" : "/work/final.png";
+    assert.equal(doc.querySelector(".file-card")?.getAttribute("data-file-path"), path);
+    assert.equal(doc.querySelector("img"), null);
+    assert.deepEqual(referencedFiles(source), [path]);
+  }
+  for (const source of ["![bad](file:///etc/passwd)", "![bad](javascript:alert(1))"]) {
+    assert.deepEqual(referencedFiles(source), []);
+    assert.doesNotMatch(renderMarkdown(source), /data-file-path/);
+  }
+});
