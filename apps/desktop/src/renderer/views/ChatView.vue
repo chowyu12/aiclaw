@@ -820,10 +820,6 @@ const forking = ref(false);
                     @toggle="toggleSteps(block.key)"
                   />
                 </template>
-                <StepsBlock v-if="turn.steps.length > 0"
-                  :turn="turn" :open="stepsOpen(`details:${turn.key}`)" :summary="t('执行详情')"
-                  @toggle="toggleSteps(`details:${turn.key}`)"
-                />
               </div>
             </section>
 

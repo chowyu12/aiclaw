@@ -753,7 +753,7 @@ app.whenReady().then(async()=>{
  processEvent('item/completed',{id:'process-tool-1',kind:'toolCall',toolName:'exec',summary:'检查浏览器连接',toolResult:'connected',startedAt:Date.now()-2000,durationMs:1000});
  processEvent('item/completed',{id:'process-progress-2',kind:'agentMessage',text:'浏览器已连接，接下来验证输入和点击。'});
  processEvent('item/completed',{id:'process-tool-2',kind:'toolCall',toolName:'exec',summary:'验证输入和点击',toolResult:'passed',startedAt:Date.now()-1000,durationMs:1000});
- check('running process interleaves progress and compact activities',await wait("(()=>{const p=[...document.querySelectorAll('.process-body')].at(-1);return p&&[...p.children].filter(e=>e.matches('.progress-message,.activity-block')).map(e=>e.classList.contains('progress-message')?'message':'activity').join('|')==='message|activity|message|activity'})()"));
+ check('running process interleaves progress and compact activities',await wait("(()=>{const p=[...document.querySelectorAll('.process-body')].at(-1);return p&&[...p.children].filter(e=>e.matches('.progress-message,.steps')).map(e=>e.classList.contains('progress-message')?'message':'activity').join('|')==='message|activity|message|activity'})()"));
  await js("[...document.querySelectorAll('.turn-process')].at(-1).scrollIntoView({block:'center'})");
  writeFileSync('/tmp/aiclaw-process-running.png',(await win.webContents.capturePage()).toPNG());
  processEvent('item/completed',{id:'process-final',kind:'agentMessage',text:'浏览器自动化验证通过，输入和点击均正常。'});

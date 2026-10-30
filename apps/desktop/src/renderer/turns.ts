@@ -88,7 +88,7 @@ export function turnBlocks(turn: Turn, live = false): TurnBlock[] {
     if (previous?.kind === "activity") previous.steps.push(entry);
     else blocks.push({ kind: "activity", key: entry.id, steps: [entry] });
   }
-  // Completed sampling alone adds no user-facing activity; its metrics remain in execution details.
+  // Completed sampling alone adds no extra user-facing activity row.
   return blocks.filter(block => block.kind === "message" || block.steps.some(step => step.step !== "llm" || step.state !== "done"));
 }
 
