@@ -1252,6 +1252,7 @@ const forking = ref(false);
    这个不对称是刻意的：用户说的话短而少，气泡把它们标出来；助手的回答长，
    套在气泡里会挤成一条窄柱子，读长文最费劲的就是行宽不够。 */
 .msg {
+  font-size: var(--conversation-font-size, 14px);
   max-width: var(--content-width);
   margin: 0 auto 20px;
   padding: 0;
@@ -1752,6 +1753,7 @@ const forking = ref(false);
   resize: none;
   padding: 12px 14px 4px;
   font: inherit;
+  font-size: var(--conversation-font-size, 14px);
   line-height: 1.6;
   color: inherit;
   outline: none;

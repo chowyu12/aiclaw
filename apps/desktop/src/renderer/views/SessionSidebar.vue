@@ -65,6 +65,7 @@ const NAV = computed(
   () =>
     [
       { id: "settings", label: t("配置"), note: t("默认模型、审批档位、数据") },
+      { id: "theme", label: t("主题"), note: t("配色、字体、字号") },
       { id: "providers", label: t("模型服务"), note: t("端点、Key、模型清单") },
       { id: "search", label: t("搜索引擎"), note: t("Tavily、SerpAPI、阿里云 IQS，启用后模型能联网搜") },
       { id: "plugins", label: t("插件"), note: t("邮件、computer use、微信、企业微信，以及从目录装的") },
@@ -745,7 +746,7 @@ function when(iso: string): string {
 .bucket .item { min-height: 32px; padding: 5px 10px 5px 33px; align-items: center; }
 .bucket .item-main { display:flex; align-items:center; gap:6px; }
 .bucket .item .title { flex:1; min-width:0; line-height:20px; }
-.sidebar.is-chat .item.active { background: color-mix(in srgb,var(--ink) 6%,var(--surface)); }
+.sidebar.is-chat .item.active { background: var(--chat-selected, color-mix(in srgb,var(--ink) 6%,var(--surface))); }
 .bucket .item.active .title { font-weight: 400; }
 .bucket .item-actions { position: absolute; right: 6px; top: 5px; pointer-events: none; }
 .bucket .item:hover, .bucket .item:focus-within { padding-right: 78px; }
@@ -811,7 +812,7 @@ function when(iso: string): string {
 }
 
 .item.active .title {
-  color: var(--ink);
+  color: var(--chat-selected-ink, var(--ink));
   font-weight: 500;
 }
 

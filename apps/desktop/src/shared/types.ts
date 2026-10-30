@@ -315,6 +315,9 @@ export interface RoleConfigView {
 }
 
 export interface AppConfigView {
+  theme: import("./themes.js").Theme;
+  font: import("./typography.js").Font;
+  fontSize: import("./typography.js").FontSize;
   presets: import("./presets.js").PromptPreset[];
   /** 界面语言。 */
   language: "en" | "zh-CN";

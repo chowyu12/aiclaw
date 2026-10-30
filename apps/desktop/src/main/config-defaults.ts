@@ -1,3 +1,5 @@
+import { normalizeFont, normalizeFontSize } from "../shared/typography.js";
+import { normalizeTheme } from "../shared/themes.js";
 import { normalizePresets } from "../shared/presets.js";
 import type { AppConfig, RoleConfig, RoleModelConfig } from "./config.js";
 
@@ -20,6 +22,9 @@ const NO_ROLES: RoleConfig = {
 
 export const DEFAULT_CONFIG: AppConfig = {
   language: "en",
+  theme: "white",
+  font: "system",
+  fontSize: 14,
   presets: [],
   providerId: 0,
   model: "",
@@ -64,6 +69,9 @@ export function normalizeConfig(config: AppConfig): AppConfig {
   const providerId = Number(config.providerId);
   return {
     ...config,
+    theme: normalizeTheme(config.theme),
+    font: normalizeFont(config.font),
+    fontSize: normalizeFontSize(config.fontSize),
     presets: normalizePresets(config.presets),
     // Never elevate an older unattended configuration to full access automatically.
     profile: config.profile === "always" || config.profile === "bypass" ? config.profile : "auto",

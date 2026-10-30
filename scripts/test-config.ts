@@ -105,3 +105,32 @@ test("new project chats choose only configured directories with a Home fallback"
  assert.equal(projectWorkspace(undefined,"/explicit"),"/explicit");
  assert.throws(()=>projectWorkspace(project,"/outside"));
 });
+
+
+test("主题缺省和损坏值恢复白色，所有已支持的颜色可以保存", async () => {
+  const { THEMES, normalizeTheme } = await import("../apps/desktop/src/shared/themes.ts");
+  assert.equal(DEFAULT_CONFIG.theme, "white");
+  for (const value of [undefined, null, "", "unknown", "system", {}, 1]) {
+    assert.equal(normalizeTheme(value), "white");
+    assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, theme: value } as never).theme, "white");
+  }
+  const legacy = { ...DEFAULT_CONFIG } as Record<string, unknown>;
+  delete legacy.theme;
+  assert.equal(normalizeConfig(legacy as never).theme, "white");
+  for (const { id } of THEMES) assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, theme: id }).theme, id);
+});
+
+
+test("字体和字号缺省安全，保存值限于支持的选项", async () => {
+  const { FONTS, FONT_SIZES, normalizeFont, normalizeFontSize } = await import("../apps/desktop/src/shared/typography.ts");
+  assert.equal(DEFAULT_CONFIG.font, "system");
+  assert.equal(DEFAULT_CONFIG.fontSize, 14);
+  const legacy = { ...DEFAULT_CONFIG } as Record<string, unknown>;
+  delete legacy.font; delete legacy.fontSize;
+  assert.equal(normalizeConfig(legacy as never).font, "system");
+  assert.equal(normalizeConfig(legacy as never).fontSize, 14);
+  for (const value of [undefined, null, "", "unknown", {}, 16]) assert.equal(normalizeFont(value), "system");
+  for (const value of [undefined, null, "18", 0, 11, 25, 14.5, Infinity]) assert.equal(normalizeFontSize(value), 14);
+  for (const { id } of FONTS) assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, font: id }).font, id);
+  for (const fontSize of FONT_SIZES) assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, fontSize }).fontSize, fontSize);
+});

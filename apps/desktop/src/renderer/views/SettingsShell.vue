@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { store } from "../store";
+import ThemeView from "./ThemeView.vue";
 import SettingsView from "./SettingsView.vue";
 import ProvidersView from "./ProvidersView.vue";
 import PluginsView from "./PluginsView.vue";
@@ -22,6 +23,7 @@ import ArchivedView from "./ArchivedView.vue";
 
 <template>
   <SettingsView v-if="store.view === 'settings'" />
+  <ThemeView v-else-if="store.view === 'theme'" />
   <ProvidersView v-else-if="store.view === 'providers'" />
   <SearchEnginesView v-else-if="store.view === 'search'" />
   <PluginsView v-else-if="store.view === 'plugins'" />

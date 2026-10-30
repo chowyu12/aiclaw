@@ -28,6 +28,9 @@ export interface RoleConfig {
 }
 
 export interface AppConfig {
+  theme: import("../shared/themes.js").Theme;
+  font: import("../shared/typography.js").Font;
+  fontSize: import("../shared/typography.js").FontSize;
   presets: import("../shared/presets.js").PromptPreset[];
   /** 界面语言。新装默认英文，见 shared/i18n.ts。 */
   language: "en" | "zh-CN";

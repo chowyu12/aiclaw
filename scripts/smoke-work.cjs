@@ -1,5 +1,5 @@
 /** Exercises the real Vue/preload workflow without touching user data or paid models. */
-const {app,BrowserWindow,ipcMain}=require('electron');
+const {app,BrowserWindow,ipcMain,nativeTheme}=require('electron');
 const {join}=require('node:path');
 const {writeFileSync,readFileSync}=require('node:fs');
 const desktop=join(__dirname,'../apps/desktop');
@@ -99,6 +99,69 @@ app.whenReady().then(async()=>{
  }
  await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
  check('home returns from settings shortcuts to the current conversation',await wait("!!document.querySelector('.composer') && document.querySelector('.sidebar').getBoundingClientRect().width===300 && document.querySelector('.chat-header')?.textContent.includes('Workflow test')"));
+ check('missing theme defaults to white even on a dark system',await (async()=>{const previous=nativeTheme.themeSource;nativeTheme.themeSource='dark';const result=await wait("document.documentElement.dataset.theme==='white' && getComputedStyle(document.body).backgroundColor==='rgb(255, 255, 255)'");nativeTheme.themeSource=previous;return result;})());
+ const {ConfigStore}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/config.js')).href);
+ const themeDirectory=require('node:fs').mkdtempSync(join(app.getPath('temp'),'aiclaw-theme-config-'));
+ try {
+  const settings=new ConfigStore(themeDirectory);
+  check('real config store starts with white and preserves saved theme across instances',settings.readConfig().theme==='white'&&settings.writeConfig({theme:'sand',font:'songti',fontSize:18}).theme==='sand'&&new ConfigStore(themeDirectory).readConfig().theme==='sand'&&new ConfigStore(themeDirectory).readConfig().font==='songti'&&new ConfigStore(themeDirectory).readConfig().fontSize===18);
+ } finally { require('node:fs').rmSync(themeDirectory,{recursive:true,force:true}); }
+ await js("document.querySelector('.activity-rail [data-view=settings]').click()");
+ check('theme has a dedicated settings navigation item and is absent from general configuration',await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题')")&&await js("!document.querySelector('[data-theme-option]') && !!document.querySelector('.settings select')"));
+ const openThemes=async()=>{
+  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
+  await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题')");
+  await js("[...document.querySelectorAll('.sidebar .item')].find(e=>e.querySelector('.title')?.textContent==='主题').click()");
+  await wait("!!document.querySelector('.theme-settings [data-theme-option]')");
+ };
+ await openThemes();
+ check('settings offers theme previews with white selected by default',await wait("document.querySelectorAll('[data-theme-option]').length===6 && document.querySelector('[data-theme-option=white]').getAttribute('aria-pressed')==='true'"));
+ for(const [theme,background] of [['green','rgb(243, 247, 245)'],['blue','rgb(242, 245, 252)'],['violet','rgb(245, 242, 250)'],['dark','rgb(26, 29, 35)'],['sand','rgb(247, 244, 237)']]){
+  await js(`document.querySelector('[data-theme-option="${theme}"]').click()`);
+  check('theme '+theme+' updates the app immediately after saving',await wait(`document.documentElement.dataset.theme==='${theme}' && document.querySelector('[data-theme-option="${theme}"]').getAttribute('aria-pressed')==='true' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='${background}'`)&&config.theme===theme);
+ }
+ await js("document.querySelector('.theme-options').scrollIntoView({block:'center'})");
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-theme-settings-sand.png',(await win.webContents.capturePage()).toPNG());
+ await win.loadFile(join(desktop,'dist/renderer/index.html'));
+ check('saved theme is applied after reloading the renderer',await wait("document.documentElement.dataset.theme==='sand' && getComputedStyle(document.body).backgroundColor==='rgb(255, 254, 251)'"));
+ await wait("!!document.querySelector('.composer') && document.querySelector('.chat-session-title')?.textContent==='Workflow test'");
+ await js("document.querySelector('.activity-rail [data-view=settings]').click()");
+ await openThemes();
+ await wait("!!document.querySelector('[data-theme-option=green]')");
+ configWriteFails=true;
+ await js("document.querySelector('[data-theme-option=green]').click()");
+ check('failed theme save keeps the previous theme and selected option',await wait("document.querySelector('.error-bar')?.textContent.includes('config write failed') && !document.querySelector('[data-theme-option=green]').disabled")&&await js("document.documentElement.dataset.theme==='sand' && document.querySelector('[data-theme-option=sand]').getAttribute('aria-pressed')==='true'"));
+ configWriteFails=false;await click('知道了');
+ await js("document.querySelector('[data-theme-option=white]').click()");
+ check('white restores original neutral colors',await wait("document.documentElement.dataset.theme==='white' && getComputedStyle(document.body).backgroundColor==='rgb(255, 255, 255)' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='rgb(247, 248, 250)'"));
+ check('theme page includes font and conversation text size with original defaults',await js("document.querySelector('[data-font-setting]').value==='system' && document.querySelector('[data-font-size-setting]').value==='14' && document.querySelectorAll('[data-font-setting] option').length===5"));
+ for(const [font,family] of [['pingfang','PingFang SC'],['yahei','Microsoft YaHei'],['mono','SF Mono'],['system','-apple-system'],['songti','Songti SC']]){
+  await js(`(()=>{const select=document.querySelector('[data-font-setting]');select.value='${font}';select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
+  check('font '+font+' applies after saving',await wait(`document.querySelector('[data-font-setting]').value==='${font}' && document.documentElement.style.getPropertyValue('--ui-font').includes('${family}')`)&&config.font===font);
+ }
+ await js("(()=>{const select=document.querySelector('[data-font-size-setting]');select.value='18';select.dispatchEvent(new Event('change',{bubbles:true}))})()");
+ check('text size updates the live preview',await wait("getComputedStyle(document.querySelector('.font-preview')).fontSize==='18px'")&&config.fontSize===18);
+ await js("document.querySelector('.font-preview').scrollIntoView({block:'center'})");
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-theme-font-settings.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
+ check('conversation font size applies to messages and input without scaling navigation',await wait("getComputedStyle(document.querySelector('.msg.agent')).fontSize==='18px' && getComputedStyle(document.querySelector('.composer textarea')).fontSize==='18px'")&&await js("getComputedStyle(document.querySelector('.sidebar .item .title')).fontSize==='14px'"));
+ await win.loadFile(join(desktop,'dist/renderer/index.html'));
+ check('font and size remain selected after reload',await wait("!!document.querySelector('.composer') && getComputedStyle(document.querySelector('.composer textarea')).fontSize==='18px' && getComputedStyle(document.body).fontFamily.includes('Songti SC')"));
+ await openThemes();
+ configWriteFails=true;
+ await js("(()=>{const select=document.querySelector('[data-font-setting]');select.value='mono';select.dispatchEvent(new Event('change',{bubbles:true}))})()");
+ check('failed font save keeps the stored font and selector',await wait("document.querySelector('.error-bar')?.textContent.includes('config write failed') && !document.querySelector('[data-font-setting]').disabled")&&await js("document.querySelector('[data-font-setting]').value==='songti' && getComputedStyle(document.body).fontFamily.includes('Songti SC')"));
+ configWriteFails=false;await click('知道了');
+ await js("(()=>{const select=document.querySelector('[data-font-setting]');select.value='system';select.dispatchEvent(new Event('change',{bubbles:true}))})()");
+ await wait("!document.querySelector('[data-font-size-setting]').disabled");
+ await js("(()=>{const select=document.querySelector('[data-font-size-setting]');select.value='14';select.dispatchEvent(new Event('change',{bubbles:true}))})()");
+ check('original font and size can be restored',await wait("document.querySelector('[data-font-setting]').value==='system' && document.querySelector('[data-font-size-setting]').value==='14' && document.documentElement.style.getPropertyValue('--conversation-font-size')==='14px'"));
+
+ await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
+ await wait("!!document.querySelector('.composer')");
+
  const sidebarDrag = async deltaX => {
   const point=await js("(()=>{const r=document.querySelector('.sidebar-resizer').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:100}})()");
   const targetX=point.x+deltaX;
@@ -839,7 +902,7 @@ app.whenReady().then(async()=>{
  await openSessions();
  await js("document.querySelector('button[aria-label=\"新建项目\"]').click()");await wait("!!document.querySelector('.project-editor')");
  await js("(()=>{const input=document.querySelector('.project-editor input');input.value='My project';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
- projectDirectoryMode=true;await click('添加目录');await click('添加目录');projectDirectoryMode=false;
+ projectDirectoryMode=true;await click('添加目录');await wait("document.querySelectorAll('.project-editor .directory-row').length===1");await click('添加目录');await wait("document.querySelectorAll('.project-editor .directory-row').length===2");projectDirectoryMode=false;
  await js("document.querySelector('.project-editor').requestSubmit()");
  check('project with multiple directories is persisted and visible without chats',await wait("!document.querySelector('.project-editor') && !!document.querySelector('[data-bucket-id=\"p_fixture\"]')")&&groups.groups.find(p=>p.id==='p_fixture')?.directories.length===2);
  await win.reload();await wait("!!document.querySelector('[data-bucket-id=\"p_fixture\"]')");await openSessions();

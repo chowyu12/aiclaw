@@ -60,7 +60,7 @@ const queueRevisions = new Map<string, number>();
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "usage" | "schedules" | "archived",
+  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived",
   runtime: { state: "stopped" } as RuntimeStatus,
   sessionId: "",
   queuedInputs: {} as Record<string, PendingSubmission[]>,
@@ -1403,7 +1403,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "usage" | "schedules" | "archived"): void {
+  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived"): void {
     state.view = view;
   },
 
