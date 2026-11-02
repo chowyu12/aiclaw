@@ -270,3 +270,9 @@ macOS packages are unsigned:
 New chats without a selected workspace use `aiclaw` inside the user's home directory, creating it automatically. Explicit workspace choices take priority; clearing a workspace restores this default. Existing chats retain their saved workspace.
 
 Create independent projects in the sidebar with a name and multiple workspace directories. Choose a working directory for new chats under each project; projects without directories use `~/aiclaw`. Changing project settings or membership does not move files or change existing chat directories. Removing a project keeps its chats and files.
+
+### Questions and network diagnostics
+
+Question cards support safe inline Markdown in prompts and choices; selected values remain unchanged. Prompt links support HTTP(S), while choices do not contain active links or file actions. In Settings, **Network diagnostics** checks the configured provider with a bounded `GET /models` request, reports observed DNS/TCP/TLS phases and HTTP/catalog status, and never sends a generation request. Missing catalog entries or an unsupported `/models` route do not prove generation is unavailable. Redirects are not followed and reports omit credentials and response bodies.
+
+Cold session restoration retains matching provider input usage for compaction; legacy records and forks use local estimates without presenting them as provider usage. Archive/delete/shutdown invalidate pending restores. Kernel memory appends are serialized across agent sessions, use unique atomic replacement files, and bound reads to 32 KiB.

@@ -495,6 +495,7 @@ function registerIpc(): void {
     stageAudio(input.name, input.data),
   );
 
+  ipcMain.handle(IPC.diagnosticsNetwork, () => sessions.networkDiagnostics());
   ipcMain.handle(IPC.diagnosticsRead, () => {
     const config = store.readConfig();
     return buildReport(

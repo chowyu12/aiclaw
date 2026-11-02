@@ -27,6 +27,15 @@ const purgeConfirm = ref(false);
 const report = ref("");
 const reportOpen = ref(false);
 const copied = ref(false);
+const networkBusy = ref(false);
+async function diagnoseNetwork(): Promise<void> {
+  if (networkBusy.value) return;
+  networkBusy.value = true;
+  reportOpen.value = true;
+  try { report.value = await window.aiclaw.diagnostics.network(); }
+  catch { report.value = t("网络诊断未完成，请确认内核已启动后重试。"); }
+  finally { networkBusy.value = false; }
+}
 
 async function loadReport(): Promise<void> {
   reportOpen.value = !reportOpen.value;
@@ -666,13 +675,15 @@ async function purge(): Promise<void> {
         </p>
       </header>
       <div class="row">
-        <button class="ghost" @click="loadReport()">
+        <button class="ghost" :disabled="networkBusy" @click="diagnoseNetwork()">{{ networkBusy ? t("诊断中…") : t("网络专项诊断") }}</button>
+        <button class="ghost" :disabled="networkBusy" @click="loadReport()">
           {{ reportOpen ? t("收起") : t("查看诊断信息") }}
         </button>
         <button v-if="reportOpen" class="ghost" @click="copyReport()">
           {{ copied ? t("已复制") : t("复制") }}
         </button>
       </div>
+      <p class="sub">{{ t("网络诊断仅检查已配置模型服务的连接与模型列表，不发送生成请求，不显示凭据或响应正文。") }}</p>
       <pre v-if="reportOpen" class="report">{{ report }}</pre>
     </section>
 

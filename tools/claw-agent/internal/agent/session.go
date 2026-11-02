@@ -138,9 +138,10 @@ type Session struct {
 	// backoff 给出第 n 次重试前的等待时长；测试把它换成零等待。
 	backoff func(attempt int) time.Duration
 	// lastInputTokens 是最近一次采样上游报的输入 token 数，压缩阈值据此判断。
-	// 用上游报的而不是本地估算：估算只在上游不给 usage 时才有意义，而那种
-	// 情况下不压缩也比按错误的估算乱压强。
-	lastInputTokens int
+	// 冷恢复保留与模型配置匹配的读数；旧存档、换模型和分叉没有可复用读数时
+	// 单独允许本地估算判断压缩，不将估算写成上游用量。
+	lastInputTokens    int
+	estimateCompaction bool
 	// 最近一次 MCP 挂载结果，起会话时回给宿主。
 	mcpStatus map[string]string
 	// skills 是本次会话可用的技能。只把名字与说明放进提示词，
@@ -1140,6 +1141,7 @@ func (s *Session) Configure(model protocol.ModelConfig) error {
 	s.config.Model = model
 	// 换了模型窗口就不一样了，旧的用量读数不能再拿来判断要不要压缩。
 	s.lastInputTokens = 0
+	s.estimateCompaction = true
 	s.UpdatedAt = time.Now()
 	return nil
 }
@@ -1284,14 +1286,23 @@ func (s *Session) ReserveFollowup() uint64 {
 
 // ---------- 持久化 ----------
 
+type savedContextUsage struct {
+	Input int                  `json:"input"`
+	Model protocol.ModelConfig `json:"model"`
+}
+type savedConfig struct {
+	protocol.SessionStartParams
+	ContextUsage *savedContextUsage `json:"contextUsage,omitempty"`
+}
+
 type persisted struct {
-	ID        string                      `json:"id"`
-	Title     string                      `json:"title"`
-	CreatedAt time.Time                   `json:"createdAt"`
-	UpdatedAt time.Time                   `json:"updatedAt"`
-	Config    protocol.SessionStartParams `json:"config"`
-	Messages  []llm.Message               `json:"messages"`
-	TurnCount int                         `json:"turnCount"`
+	ID        string        `json:"id"`
+	Title     string        `json:"title"`
+	CreatedAt time.Time     `json:"createdAt"`
+	UpdatedAt time.Time     `json:"updatedAt"`
+	Config    savedConfig   `json:"config"`
+	Messages  []llm.Message `json:"messages"`
+	TurnCount int           `json:"turnCount"`
 }
 
 // Save 把会话写进 SQLite 库。每轮结束都调一次。
@@ -1310,7 +1321,7 @@ func (s *Session) Save(ctx context.Context, db *store.Store) error {
 		Title:     s.Title,
 		CreatedAt: s.CreatedAt,
 		UpdatedAt: s.UpdatedAt,
-		Config:    s.config,
+		Config:    savedConfig{SessionStartParams: s.config, ContextUsage: &savedContextUsage{Input: s.lastInputTokens, Model: s.config.Model}},
 		Messages:  append([]llm.Message(nil), s.messages...),
 		TurnCount: s.turnCount,
 	}
@@ -1399,6 +1410,16 @@ func Load(
 			session.Close()
 			return nil, fmt.Errorf("%s%w", i18n.D("会话历史损坏："), err)
 		}
+	}
+	var saved savedConfig
+	if err := json.Unmarshal(record.Config, &saved); err != nil {
+		session.Close()
+		return nil, err
+	}
+	session.estimateCompaction = true
+	if saved.ContextUsage != nil && saved.ContextUsage.Model == session.config.Model && saved.ContextUsage.Input > 0 {
+		session.lastInputTokens = saved.ContextUsage.Input
+		session.estimateCompaction = false
 	}
 	session.Title = record.Title
 	session.CreatedAt = record.CreatedAt

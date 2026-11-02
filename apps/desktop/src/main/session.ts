@@ -906,6 +906,11 @@ export class SessionManager extends EventEmitter {
   async mcpOAuthLogout(url: string) { await this.start(); return this.requireClient().mcpOAuthLogout(url); }
 
   /** 试连一个 MCP server 并列出它的工具。配置页用，与会话无关。 */
+  async networkDiagnostics(): Promise<string> {
+    const config = this.store.readConfig();
+    return this.requireClient().networkDiagnostics(config.providerId, config.model);
+  }
+
   async probeMcp(server: McpServer): Promise<MCPProbeResult> {
     const client = this.requireClient();
     return client.mcpProbe(

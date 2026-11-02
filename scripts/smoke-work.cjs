@@ -47,6 +47,7 @@ app.whenReady().then(async()=>{
  handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
  let configGate=null, configWriteFails=false;
  handle('configRead',()=>config);handle('configWrite',async(_e,p)=>{if(configWriteFails)throw Error('config write failed');if(p.profile&&configGate)await configGate;return Object.assign(config,p);});handle('runtimeStart',()=>undefined);
+ handle('diagnosticsNetwork',()=> 'PASS configuration\nPASS HTTP: Model catalog received.');handle('questionRespond',(_e,input)=>{questionReplies.push(input);});const questionReplies=[];
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
  handle('projectSave',(_e,input)=>{const project={...input,id:input.id||'p_fixture',directories:input.directories.map(path=>path.trim()).filter(Boolean)};const index=groups.groups.findIndex(p=>p.id===project.id);if(index<0)groups.groups.push(project);else groups.groups[index]=project;return groups;});
  handle('groupDelete',(_e,id)=>{groups.groups=groups.groups.filter(p=>p.id!==id);for(const key of Object.keys(groups.assignments))if(groups.assignments[key]===id)delete groups.assignments[key];return groups;});
@@ -161,6 +162,15 @@ app.whenReady().then(async()=>{
 
  await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
  await wait("!!document.querySelector('.composer')");
+
+ win.webContents.send(IPC.onQuestion,{id:'markdown-question',sessionId:'s',question:'**Choose** `mode` [Docs](https://example.com/help)',multiSelect:false,options:[{label:'**Safe** mode',description:'Use `read-only` <script>bad</script>'}]});
+ check('questions render safe Markdown while keeping original option values',await wait("!!document.querySelector('.question .text strong') && !!document.querySelector('.question .text code') && !!document.querySelector('.question .label strong') && !document.querySelector('.question script,.question img')"));
+ await js("document.querySelector('.question .option').click()");await wait("!document.querySelector('.question .send').disabled");await js("document.querySelector('.question .send').click()");
+ check('Markdown question submits original selected value',await wait("!document.querySelector('.question')")&&questionReplies[0]?.answer?.selected?.[0]==='**Safe** mode');
+ await js("document.querySelector('.activity-rail [data-view=settings]').click()");
+ await wait("[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='网络专项诊断')");await click('网络专项诊断');
+ check('network diagnostics has a reachable settings entry and displays report',await wait("document.querySelector('.report')?.textContent.includes('PASS HTTP')"));
+ await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");await wait("!!document.querySelector('.composer')");
 
  const sidebarDrag = async deltaX => {
   const point=await js("(()=>{const r=document.querySelector('.sidebar-resizer').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:100}})()");
@@ -812,6 +822,11 @@ app.whenReady().then(async()=>{
  const processEvent=(method,item)=>win.webContents.send(IPC.onAgentEvent,{method,params:{sessionId:'s',turnId:'process-test',item}});
  win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'process-test'}});
  processEvent('item/completed',{id:'process-user',kind:'userMessage',text:'测试浏览器自动化并给出结论'});
+ processEvent('item/started',{id:'process-thinking',kind:'llm',model:'test',round:1});
+ check('thinking has a single collapsed status instead of duplicate nested summaries',await wait("(()=>{const p=[...document.querySelectorAll('.turn-process')].at(-1);return p?.querySelector('.process-head').textContent.includes('正在思考')&&!p.querySelector('.process-body')})()"));
+ await js("[...document.querySelectorAll('.process-head')].at(-1).click()");
+ check('single thinking status still expands sampling details without a second heading',await wait("(()=>{const p=[...document.querySelectorAll('.turn-process')].at(-1);return !!p?.querySelector('.steps-body .step')&&!p.querySelector('.steps-head')})()"));
+ processEvent('item/completed',{id:'process-thinking',kind:'llm',model:'test',round:1});
  processEvent('item/completed',{id:'process-progress-1',kind:'agentMessage',text:'我先检查浏览器连接，再验证页面操作。'});
  processEvent('item/completed',{id:'process-tool-1',kind:'toolCall',toolName:'exec',summary:'检查浏览器连接',toolResult:'connected',startedAt:Date.now()-2000,durationMs:1000});
  processEvent('item/completed',{id:'process-progress-2',kind:'agentMessage',text:'浏览器已连接，接下来验证输入和点击。'});

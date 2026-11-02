@@ -14,6 +14,8 @@ defineProps<{
   summary: string;
   /** 这一轮正在跑：折叠条点亮。原来靠 summary 以「执行中」开头来判断，翻译之后就不成立了。 */
   live?: boolean;
+  /** A sole thinking status uses the parent toggle; details remain available. */
+  hideHeader?: boolean;
 }>();
 
 defineEmits<{ toggle: [] }>();
@@ -82,7 +84,7 @@ function llmSubline(step: Turn["steps"][number]): string {
 
 <template>
   <div class="steps">
-    <button class="steps-head" :class="{ live: !!live }" :aria-expanded="open" @click="$emit('toggle')">
+    <button v-if="!hideHeader" class="steps-head" :class="{ live: !!live }" :aria-expanded="open" @click="$emit('toggle')">
       <svg v-if="turn.steps.some(step => step.step === 'tool')" class="activity-icon" viewBox="0 0 16 16" aria-hidden="true">
         <path d="M10 2a4 4 0 0 0-4.7 5L2 10.3a2 2 0 0 0 2.8 2.8L8.2 10A4 4 0 0 0 14 5.4l-2.5 2.1-2.2-2.2L11.4 3A4 4 0 0 0 10 2Z" />
       </svg>

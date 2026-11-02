@@ -23,7 +23,7 @@ if (!(globalThis as { window?: unknown }).window) {
   (globalThis as { document?: unknown }).document = dom.window.document;
 }
 
-const { renderMarkdown, looksLikePath, referencedFiles, renderPreviewMarkdown } = await import("../apps/desktop/src/renderer/markdown.ts");
+const { renderQuestionMarkdown, renderMarkdown, looksLikePath, referencedFiles, renderPreviewMarkdown } = await import("../apps/desktop/src/renderer/markdown.ts");
 
 /**
  * 把块之间的换行挤掉再比对。
@@ -613,4 +613,18 @@ test("explicit local image references use host-validated files without fetching 
     assert.deepEqual(referencedFiles(source), []);
     assert.doesNotMatch(renderMarkdown(source), /data-file-path/);
   }
+});
+
+
+test("question Markdown renders formatting without images, HTML, files or nested active controls", () => {
+ const text='**Choose** `safe` [Docs](https://example.com/help) ![image](https://example.com/tracker) <button onclick="alert(1)">bad</button> [Local](/work/report.md)';
+ const doc=new JSDOM(renderQuestionMarkdown(text,true)).window.document;
+ assert.equal(doc.querySelector('strong')?.textContent,'Choose');
+ assert.equal(doc.querySelector('code')?.textContent,'safe');
+ assert.equal(doc.querySelector('a[href]')?.getAttribute('href'),'https://example.com/help');
+ assert.equal(doc.querySelectorAll('a[href]').length,1);
+ assert.equal(doc.querySelector('img,button,script,.file-card,[onclick]'),null);
+ const option=new JSDOM(renderQuestionMarkdown(text)).window.document;
+ assert.equal(option.querySelector('[href],img,button,input'),null);
+ for(const value of ['[bad](javascript:alert(1))','[bad](file:///etc/passwd)','[bad](https://user:secret@example.com/)']) assert.equal(new JSDOM(renderQuestionMarkdown(value,true)).window.document.querySelector('a[href]'),null);
 });

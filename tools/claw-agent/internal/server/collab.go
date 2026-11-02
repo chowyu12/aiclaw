@@ -294,11 +294,14 @@ func (s *Server) unload(id string) {
 
 // deleteSessionTree 删掉一个会话，连同它开出的子 agent。返回删掉的全部 id，子的在前。
 func (s *Server) deleteSessionTree(ctx context.Context, rootID string) ([]string, error) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	order, err := s.sessionTree(ctx, rootID)
 	if err != nil {
 		return nil, err
 	}
 	for _, id := range order {
+		s.invalidateRestore(id)
 		if session := s.session(id); session != nil {
 			session.MarkDeleted()
 		}
@@ -315,6 +318,8 @@ func (s *Server) deleteSessionTree(ctx context.Context, rootID string) ([]string
 // 归档时把它们从内存里摘掉：还在跑的就停下——归档的意思是「这件事先放一边」，
 // 放一边的会话不该还在后台花钱。恢复只是改回标记，点开时照常重新挂载。
 func (s *Server) archiveSessionTree(ctx context.Context, rootID string, archived bool) ([]string, error) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
 	order, err := s.sessionTree(ctx, rootID)
 	if err != nil {
 		return nil, err
@@ -323,6 +328,7 @@ func (s *Server) archiveSessionTree(ctx context.Context, rootID string, archived
 	if archived {
 		at = time.Now()
 		for _, id := range order {
+			s.invalidateRestore(id)
 			s.unload(id)
 		}
 	}
@@ -474,4 +480,12 @@ func (w *turnWatcher) Notify(method string, params any) {
 		}
 	}
 	w.emitter.Notify(method, params)
+}
+
+// Caller holds lifecycleMu; slow mounts must not resurrect retired sessions.
+func (s *Server) invalidateRestore(id string) {
+	if s.lifecycleEpoch == nil {
+		s.lifecycleEpoch = map[string]uint64{}
+	}
+	s.lifecycleEpoch[id]++
 }

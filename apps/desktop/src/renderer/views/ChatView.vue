@@ -655,8 +655,11 @@ function toggleSteps(key: string): void {
   stepsOverride.value = next;
 }
 
+function thinkingOnly(turn: Turn): boolean {
+  return turn.key === runningKey.value && turn.entries.every(entry => entry.kind === "step" && entry.step === "llm" && entry.state !== "failed");
+}
 function processOpen(turn: Turn): boolean {
-  return stepsOverride.value.get(turn.key) ?? turn.key === runningKey.value;
+  return stepsOverride.value.get(turn.key) ?? (turn.key === runningKey.value && !thinkingOnly(turn));
 }
 function toggleProcess(turn: Turn): void {
   const next = new Map(stepsOverride.value);
@@ -665,7 +668,7 @@ function toggleProcess(turn: Turn): void {
 }
 
 function stepsSummary(turn: Turn): string {
-  if (turn.key === runningKey.value) return t("正在处理…");
+  if (turn.key === runningKey.value) return t(thinkingOnly(turn) ? "正在思考…" : "正在处理…");
   const elapsed = stepsElapsed(turn.steps);
   if (!elapsed) return t("执行过程");
   const seconds = Math.round(elapsed / 1000);
@@ -830,7 +833,8 @@ const forking = ref(false);
                   <StepsBlock v-else
                     class="activity-block"
                     :turn="{ ...turn, steps: block.steps }"
-                    :open="stepsOpen(block.key)"
+                    :open="thinkingOnly(turn) || stepsOpen(block.key)"
+                    :hide-header="thinkingOnly(turn)"
                     :live="block.steps.some(step => step.state === 'running')"
                     :summary="activitySummary(block.steps)"
                     @toggle="toggleSteps(block.key)"

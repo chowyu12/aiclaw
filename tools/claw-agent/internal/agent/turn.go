@@ -584,6 +584,7 @@ func (s *Session) sample(
 		if err == nil {
 			s.mu.Lock()
 			s.lastInputTokens = response.Usage.InputTokens
+			s.estimateCompaction = false
 			s.mu.Unlock()
 			return response, nil
 		}

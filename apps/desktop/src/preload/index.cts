@@ -135,6 +135,7 @@ const api = {
     list: () => ipcRenderer.invoke(IPC.profileList),
   },
   diagnostics: {
+    network: () => ipcRenderer.invoke(IPC.diagnosticsNetwork),
     read: () => ipcRenderer.invoke(IPC.diagnosticsRead),
   },
   files: {

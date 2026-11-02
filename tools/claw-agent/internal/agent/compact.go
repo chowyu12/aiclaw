@@ -61,7 +61,11 @@ func (s *Session) needsCompaction() bool {
 	}
 	s.mu.Lock()
 	used := s.lastInputTokens
+	estimate := s.estimateCompaction
 	s.mu.Unlock()
+	if used == 0 && estimate {
+		used, _ = contextEstimate(s.snapshotMessages(), s.llmTools())
+	}
 	return used > 0 && used >= window*autoCompactPercent/100
 }
 
@@ -106,6 +110,7 @@ func (s *Session) compact(ctx context.Context, turnID string, emitter Emitter) e
 	s.mu.Lock()
 	s.messages = compacted
 	s.lastInputTokens = 0
+	s.estimateCompaction = false
 	s.mu.Unlock()
 
 	if err := s.recordCompaction(history, compacted); err != nil {

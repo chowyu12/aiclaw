@@ -337,3 +337,21 @@ export function renderMarkdown(source: string): string {
 export function renderPreviewMarkdown(source: string): string {
   return sanitizer().sanitize(md.render(source), { ...PURIFY_CONFIG, FORBID_TAGS: ["img"], FORBID_ATTR: ["style"] }) as unknown as string;
 }
+
+/** Questions render formatting without HTML, images or file actions; choices keep links inert. */
+const questionMarkdown = new MarkdownIt({ html: false, linkify: false });
+questionMarkdown.renderer.rules.link_open = (tokens, index) => {
+  const href = String(tokens[index]!.attrGet("href") ?? "");
+  try {
+    const url = new URL(href);
+    if (["http:", "https:"].includes(url.protocol) && !url.username && !url.password) {
+      return `<a href="${questionMarkdown.utils.escapeHtml(href)}">`;
+    }
+  } catch { /* Unsupported or relative references remain text. */ }
+  return "<a>";
+};
+export function renderQuestionMarkdown(source: string, links = false): string {
+  return sanitizer().sanitize(questionMarkdown.renderInline(source), {
+    ALLOWED_TAGS: ["strong", "em", "s", "code", "br", "a"], ALLOWED_ATTR: links ? ["href", "target", "rel"] : [],
+  }) as unknown as string;
+}

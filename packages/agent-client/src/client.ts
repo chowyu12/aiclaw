@@ -472,6 +472,11 @@ export class ClawAgentClient extends EventEmitter {
 
   /** 取会话历史，还原成可直接渲染的时间线条目。 */
   sessionWork(sessionId: string): Promise<SessionWork> { return this.transport.request("session/work", { sessionId }); }
+  async networkDiagnostics(providerId: number, model: string): Promise<string> {
+    const result = await this.transport.request<{report:string}>("diagnostics/network", {providerId,model});
+    return result.report;
+  }
+
   sessionContext(sessionId: string): Promise<ContextStatus> { return this.transport.request("session/context", { sessionId }); }
   goalSet(sessionId: string, goal: GoalInput): Promise<Goal> { return this.transport.request("goal/set", { sessionId, goal }); }
   goalUpdate(sessionId: string, update: GoalUpdate): Promise<Goal> { return this.transport.request("goal/update", { sessionId, update }); }

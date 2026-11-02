@@ -97,6 +97,7 @@ export const IPC = {
   mcpRead: "mcp:read",
   mcpWrite: "mcp:write",
   mcpProbe: "mcp:probe",
+  diagnosticsNetwork: "diagnostics:network",
   diagnosticsRead: "diagnostics:read",
   workspaceFiles: "workspace:files",
   workspaceReveal: "workspace:reveal",

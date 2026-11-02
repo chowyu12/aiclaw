@@ -12,10 +12,13 @@ package memory
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
 )
@@ -30,22 +33,40 @@ const (
 	maxEntryBytes = 2000
 )
 
+// appendMu serializes read-modify-replace across agent sessions in this kernel.
+var appendMu sync.Mutex
+
 // Load 读记忆。文件不存在返回空串，这不是错误。
 func Load(path string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", nil
 	}
-	raw, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return "", nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("%s%w", i18n.D("读取长期记忆失败："), err)
 	}
+	defer file.Close()
+	raw, err := io.ReadAll(io.LimitReader(file, MaxBytes+1))
+	if err != nil {
+		return "", err
+	}
 	if len(raw) > MaxBytes {
 		// 超限的文件多半是被手工塞了别的东西。读前面那截总比整个放弃强，
 		// 但要让调用方知道。
-		return string(raw[:MaxBytes]), i18n.E("长期记忆超过 {n} 字节，只读取了前面部分", "n", MaxBytes)
+		prefix := raw[:MaxBytes]
+		for n := 0; n < utf8.UTFMax && len(prefix) > 0 && !utf8.Valid(prefix); n++ {
+			prefix = prefix[:len(prefix)-1]
+		}
+		if !utf8.Valid(prefix) {
+			return "", fmt.Errorf("memory is not valid UTF-8")
+		}
+		return string(prefix), i18n.E("长期记忆超过 {n} 字节，只读取了前面部分", "n", MaxBytes)
+	}
+	if !utf8.Valid(raw) {
+		return "", fmt.Errorf("memory is not valid UTF-8")
 	}
 	return string(raw), nil
 }
@@ -55,6 +76,8 @@ func Load(path string) (string, error) {
 // 追加而不是覆盖：模型每次只该说「再记住这一条」，不该有能力一次抹掉全部。
 // 要删就让用户自己去编辑那个文件——那是他的东西。
 func Append(path, entry string) (string, error) {
+	appendMu.Lock()
+	defer appendMu.Unlock()
 	text := strings.TrimSpace(entry)
 	if text == "" {
 		return "", i18n.E("记忆内容为空")
@@ -63,7 +86,10 @@ func Append(path, entry string) (string, error) {
 		return "", i18n.E("单条记忆超过 {n} 字节；长期记忆放的是结论，不是原始内容", "n", maxEntryBytes)
 	}
 
-	existing, _ := Load(path)
+	existing, err := Load(path)
+	if err != nil {
+		return "", err
+	}
 	if strings.Contains(existing, text) {
 		// 模型经常在一轮里重复确认同一件事。重复写入会让记忆很快被同义句撑满。
 		return existing, nil
@@ -89,11 +115,23 @@ func Append(path, entry string) (string, error) {
 
 	updated := builder.String()
 	// 先写临时文件再改名：进程在写一半时被杀不会留下半条记忆。
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(updated), 0o600); err != nil {
-		return "", fmt.Errorf("%s%w", i18n.D("写入长期记忆失败："), err)
+	if len(updated) > MaxBytes {
+		return "", i18n.E("长期记忆已接近 {n} 字节上限，这条没有写入；请先整理 {path}", "n", MaxBytes, "path", path)
 	}
-	if err := os.Rename(tmp, path); err != nil {
+	file, err := os.CreateTemp(filepath.Dir(path), ".memory-*")
+	if err != nil {
+		return "", err
+	}
+	tmp := file.Name()
+	defer os.Remove(tmp)
+	if _, err = file.WriteString(updated); err != nil {
+		file.Close()
+		return "", err
+	}
+	if err = file.Close(); err != nil {
+		return "", err
+	}
+	if err = os.Rename(tmp, path); err != nil {
 		return "", fmt.Errorf("%s%w", i18n.D("写入长期记忆失败："), err)
 	}
 	return updated, nil

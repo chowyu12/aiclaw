@@ -59,6 +59,9 @@ type Options struct {
 }
 
 type Server struct {
+	lifecycleMu    sync.Mutex
+	lifecycleEpoch map[string]uint64
+	closing        bool
 	oauth          *mcpclient.OAuthManager
 	submissionMu   sync.Mutex
 	activeTurns    map[string]string
@@ -223,6 +226,8 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 
 func (s *Server) dispatch(ctx context.Context, f frame) {
 	switch f.Method {
+	case "diagnostics/network":
+		s.handleNetworkDiagnostics(ctx, f)
 	case "session/work", "session/context", "session/fork", "session/recover", "goal/set", "goal/update", "changes/list", "changes/undo":
 		s.handleWork(ctx, f)
 	case protocol.MethodInitialize:
@@ -519,6 +524,13 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 	s.options.Logf("开会话 %s：挂 MCP %dms（%s）+ 其余 %dms = 共 %dms",
 		id, session.MountMS(), describeDials(session.MCPDials()),
 		time.Since(started).Milliseconds()-session.MountMS(), time.Since(started).Milliseconds())
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closing || ctx.Err() != nil {
+		session.Close()
+		s.writeError(f.ID, codeInvalidParams, "runtime is closing")
+		return
+	}
 	s.guard(session)
 	s.sessMu.Lock()
 	s.sessions[id] = session
@@ -555,6 +567,15 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		}
 		params.Refresh = refresh
 	}
+	s.lifecycleMu.Lock()
+	epoch := s.lifecycleEpoch[params.SessionID]
+	archived, err := s.db.IsArchived(ctx, params.SessionID)
+	closing := s.closing
+	if err != nil || archived || closing {
+		s.lifecycleMu.Unlock()
+		s.writeError(f.ID, codeInvalidParams, "session is archived, missing or closing")
+		return
+	}
 	s.submissionMu.Lock()
 	if existing := s.session(params.SessionID); existing != nil {
 		// 已经在内存里的会话，配置没变就直接回它现在的样子。
@@ -568,11 +589,13 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		running, err := s.db.HasRunningSubmission(ctx, params.SessionID)
 		if err != nil {
 			s.submissionMu.Unlock()
+			s.lifecycleMu.Unlock()
 			s.writeError(f.ID, codeInternal, err.Error())
 			return
 		}
 		if !fresh || existing.Busy() || running {
 			s.submissionMu.Unlock()
+			s.lifecycleMu.Unlock()
 			s.writeResult(f.ID, protocol.SessionStartResult{
 				SessionID: existing.ID, Tools: existing.Tools(),
 				MCPStatus: existing.MCPStatus(), Model: existing.Model().Model,
@@ -583,6 +606,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		}
 		if err := existing.Save(ctx, s.db); err != nil {
 			s.submissionMu.Unlock()
+			s.lifecycleMu.Unlock()
 			s.writeError(f.ID, codeInternal, err.Error())
 			return
 		}
@@ -590,6 +614,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 	}
 	// Slow MCP mounting must not block submissions to unrelated sessions.
 	s.submissionMu.Unlock()
+	s.lifecycleMu.Unlock()
 	loadStarted := time.Now()
 	session, err := agent.Load(ctx, s.db, params.SessionID, s.keyFor, params.Refresh, s.sessionOptions(params.SessionID)...)
 	if err != nil {
@@ -599,6 +624,13 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 	s.options.Logf("恢复会话 %s：挂 MCP %dms（%s）+ 其余 %dms = 共 %dms",
 		params.SessionID, session.MountMS(), describeDials(session.MCPDials()),
 		time.Since(loadStarted).Milliseconds()-session.MountMS(), time.Since(loadStarted).Milliseconds())
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closing || s.lifecycleEpoch[params.SessionID] != epoch || ctx.Err() != nil {
+		session.Close()
+		s.writeError(f.ID, codeInvalidParams, "session changed while restoring; retry after checking its state")
+		return
+	}
 	s.guard(session)
 	if err = session.RecoverInterrupted(); err == nil {
 		err = session.Checkpoint()
@@ -775,6 +807,12 @@ func (s *Server) session(id string) *agent.Session {
 }
 
 func (s *Server) closeAll() {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.closing {
+		return
+	}
+	s.closing = true
 	if s.oauth != nil {
 		s.oauth.Close()
 	}

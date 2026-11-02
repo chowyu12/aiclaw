@@ -2,6 +2,7 @@
 import { computed, ref, type DeepReadonly } from "vue";
 import type { QuestionAnswer, QuestionPayload } from "../../shared/types";
 import { t } from "../i18n";
+import { renderQuestionMarkdown } from "../markdown";
 
 /**
  * 模型提的一个问题（ask_user）：几个选项，也可以自己写，或者跳过。
@@ -57,7 +58,7 @@ function onKeydown(event: KeyboardEvent): void {
       <span class="badge">{{ t("等你回答") }}</span>
       <span class="hint">{{ question.multiSelect ? t("可以选多个，也可以自己写") : t("选一个，也可以自己写") }}</span>
     </div>
-    <p class="text">{{ question.question }}</p>
+    <p class="text" v-html="renderQuestionMarkdown(question.question, true)"></p>
     <div v-if="question.options.length > 0" class="options">
       <button
         v-for="(option, index) in question.options"
@@ -70,8 +71,8 @@ function onKeydown(event: KeyboardEvent): void {
       >
         <span class="mark" aria-hidden="true">{{ index + 1 }}</span>
         <span class="body">
-          <span class="label">{{ option.label }}</span>
-          <span v-if="option.description" class="desc">{{ option.description }}</span>
+          <span class="label" v-html="renderQuestionMarkdown(option.label)"></span>
+          <span v-if="option.description" class="desc" v-html="renderQuestionMarkdown(option.description)"></span>
         </span>
       </button>
     </div>

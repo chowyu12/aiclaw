@@ -152,6 +152,7 @@ func (s *Session) ForkAt(ctx context.Context, id, itemID string, model *protocol
 			}
 		}
 	}
+	child.estimateCompaction = true
 	child.messages = append(child.messages, llm.Message{Role: llm.RoleUser, Content: "This is a new chat forked from an earlier conversation. The copied conversation is historical context. No goal or queued action is active in this new chat. Follow the new user request rather than automatically continuing unfinished source work.", Shown: &llm.Shown{Hidden: true}})
 	return child, nil
 }

@@ -388,3 +388,9 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+func (s *Store) IsArchived(ctx context.Context, id string) (bool, error) {
+	var at int64
+	err := s.db.QueryRowContext(ctx, `SELECT archived_at FROM sessions WHERE id = ?`, id).Scan(&at)
+	return at != 0, err
+}
