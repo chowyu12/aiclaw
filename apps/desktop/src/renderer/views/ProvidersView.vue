@@ -35,6 +35,7 @@ const TYPES: { id: string; label: string; baseUrl: string }[] = [
     baseUrl: "",
   },
   { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  {id:"azure",label:"Azure / Microsoft Foundry",baseUrl:""},
   {
     id: "qwen",
     get label() {
@@ -47,20 +48,31 @@ const TYPES: { id: string; label: string; baseUrl: string }[] = [
   {
     id: "claude",
     get label() {
-      return t("Claude（OpenAI 兼容入口）");
+      return "Claude";
     },
     baseUrl: "https://api.anthropic.com/v1",
   },
   {
     id: "gemini",
     get label() {
-      return t("Gemini（OpenAI 兼容入口）");
+      return "Gemini";
     },
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
   },
 ];
 
+const PROTOCOLS = [
+  {id: "chat-completions", label: "OpenAI Chat Completions"},
+  {id: "responses", label: "OpenAI Responses"},
+  {id: "anthropic-messages", label: "Claude Messages"},
+  {id: "gemini", label: "Gemini Generate Content"},
+];
+function protocolLabel(protocol?: string): string {
+  return PROTOCOLS.find(item => item.id === (protocol || "chat-completions"))?.label ?? protocol ?? "";
+}
+
 const expanded = ref(0);
+const advanced = reactive<Record<number,boolean>>({});
 /** 清单的搜索词与「添加模型」输入框，按服务 id 存。 */
 const modelSearch = reactive<Record<number, string>>({});
 const modelDrafts = reactive<Record<number, string>>({});
@@ -144,7 +156,10 @@ onMounted(() => {
   if (store.providers.length === 0) void actions.loadProviders();
 });
 
-function placeholderFor(type: string): string {
+function placeholderFor(type: string, api = "chat-completions"): string {
+ if(type === "azure") return "https://your-resource.openai.azure.com/openai/v1";
+  if (api === "anthropic-messages") return "https://api.anthropic.com/v1";
+  if (api === "gemini") return "https://generativelanguage.googleapis.com/v1beta";
   return TYPES.find((item) => item.id === type)?.baseUrl || "https://example.com/v1";
 }
 
@@ -169,9 +184,33 @@ async function add(): Promise<void> {
 
 async function patch(
   id: number,
-  change: { name?: string; type?: string; baseUrl?: string; models?: string[]; enabled?: boolean },
+  change: { routingMode?: "auto" | "manual"; modelOverrides?: ProviderRow["modelOverrides"]; apiProtocol?: ProviderRow["apiProtocol"]; name?: string; type?: string; baseUrl?: string; models?: string[]; enabled?: boolean },
 ): Promise<void> {
   await run(() => actions.updateProvider({ id, ...change }));
+}
+
+async function changeProtocol(provider: ProviderRow, event: Event): Promise<void> {
+  const select = event.target as HTMLSelectElement;
+  const next = select.value as ProviderRow["apiProtocol"];
+  select.value = provider.apiProtocol || "chat-completions";
+  await patch(provider.id, { apiProtocol: next });
+}
+
+async function changeRouting(provider: ProviderRow, event: Event): Promise<void> {
+ const select=event.target as HTMLSelectElement;
+ const next=select.value as "auto" | "manual";
+ select.value=provider.routingMode || "auto";
+ await patch(provider.id,{routingMode:next});
+}
+
+async function changeModelProtocol(provider: ProviderRow, entry: string, event: Event): Promise<void> {
+ const select=event.target as HTMLSelectElement;
+ const name=parseModelMark(entry).name;
+ const value=select.value as ProviderRow["apiProtocol"];
+ select.value=provider.modelOverrides?.[name] || "";
+ const overrides={...provider.modelOverrides};
+ if(value) overrides[name]=value; else delete overrides[name];
+ await patch(provider.id,{modelOverrides:overrides});
 }
 
 async function saveKey(id: number): Promise<void> {
@@ -246,7 +285,7 @@ function summary(provider: ProviderRow): string {
       <header>
         <h2>{{ t("模型服务") }}</h2>
         <p class="sub">
-          {{ t("一个模型服务就是一个 OpenAI 兼容端点：填地址、Key，再写上要用的模型名。") }}
+          {{ t("模型服务由厂商、API 协议、基础地址、Key 和模型清单组成。") }}
           {{ t("清单里的模型就是对话页顶部能选的那些；改动立刻生效，新会话与切模型都用得上。") }}
         </p>
       </header>
@@ -280,6 +319,7 @@ function summary(provider: ProviderRow): string {
           >
             <span class="chevron">{{ expanded === provider.id ? "▾" : "▸" }}</span>
             <span class="name">{{ provider.name || t("未命名") }}</span>
+            <span class="badge">{{ provider.routingMode === "manual" ? protocolLabel(provider.apiProtocol) : t("自动路由") }}</span>
             <span class="badge">{{ TYPES.find((item) => item.id === provider.type)?.label ?? provider.type }}</span>
             <span class="state" :class="{ bad: !provider.apiKeySet }">{{ summary(provider) }}</span>
           </button>
@@ -304,6 +344,27 @@ function summary(provider: ProviderRow): string {
             />
           </label>
 
+          <button class="ghost small provider-advanced" :aria-expanded="!!advanced[provider.id]" @click="advanced[provider.id] = !advanced[provider.id]">{{ t("高级设置") }}</button>
+          <template v-if="advanced[provider.id]">
+          <label>
+            <span>{{ t("接入策略") }}</span>
+            <select class="provider-routing" :value="provider.routingMode || 'auto'" :disabled="saving" @change="changeRouting(provider,$event)">
+              <option value="auto">{{ t("自动（推荐）") }}</option>
+              <option value="manual">{{ t("手动指定服务协议") }}</option>
+            </select>
+          </label>
+          <label v-if="provider.routingMode === 'manual'">
+            <span>{{ t("API 协议") }}</span>
+            <select class="provider-protocol" :value="provider.apiProtocol || 'chat-completions'"
+              :disabled="saving" @change="changeProtocol(provider, $event)">
+              <option v-for="item in PROTOCOLS" :key="item.id" :value="item.id">{{ item.label }}</option>
+            </select>
+          </label>
+          <p class="hint">{{ t("按服务商提供的接口选择协议；切换不会自动修改已有端点、模型或推理强度。") }}</p>
+          <p v-if="provider.apiProtocol === 'anthropic-messages'" class="hint">{{ t("Claude 原生协议支持对话、工具和图片理解；画图与语音请选择其他支持的服务。显式推理档位需要模型支持 adaptive thinking。") }}</p>
+          <p v-if="provider.apiProtocol === 'gemini'" class="hint">{{ t("Gemini 原生协议使用 /v1beta 基础地址；显式推理档位需要模型支持 thinkingLevel，旧模型可选模型默认。") }}</p>
+          </template>
+          <p class="hint">{{ t("接入策略") }}：{{ provider.serviceProfile || provider.type }} · {{ t("修改从下一次模型请求生效") }}</p>
           <div class="pair">
             <label>
               <span>{{ t("类型") }}</span>
@@ -318,7 +379,7 @@ function summary(provider: ProviderRow): string {
               <span>{{ t("端点") }}</span>
               <input
                 :value="provider.baseUrl"
-                :placeholder="placeholderFor(provider.type)"
+                :placeholder="provider.defaultBaseUrl || placeholderFor(provider.type, provider.apiProtocol)"
                 @change="patch(provider.id, { baseUrl: ($event.target as HTMLInputElement).value })"
               />
             </label>
@@ -375,6 +436,13 @@ function summary(provider: ProviderRow): string {
 
             <div v-for="entry in modelRows(provider)" :key="entry" class="model-row">
               <code class="model-name">{{ parseModelMark(entry).name }}</code>
+              <span class="model-route" :title="provider.modelRoutes?.[parseModelMark(entry).name]?.source">
+                {{ provider.modelRoutes?.[parseModelMark(entry).name] ? protocolLabel(provider.modelRoutes?.[parseModelMark(entry).name]?.apiProtocol) : t("待解析") }}
+              </span>
+              <select v-if="advanced[provider.id]" class="model-protocol" :aria-label="t('模型协议覆盖')" :value="provider.modelOverrides?.[parseModelMark(entry).name] || ''" :disabled="saving" @change="changeModelProtocol(provider,entry,$event)">
+                <option value="">{{ t("自动（推荐）") }}</option>
+                <option v-for="item in PROTOCOLS" :key="item.id" :value="item.id">{{ item.label }}</option>
+              </select>
               <label v-for="role in MODEL_ROLES" :key="role" class="cap" :title="ROLE_LABELS[role]">
                 <input
                   type="checkbox"
@@ -684,6 +752,8 @@ label > span em {
   white-space: nowrap;
 }
 
+.model-route { color: var(--muted); font-size: 11px; }
+.model-protocol { max-width: 180px; }
 .model-row {
   display: flex;
   align-items: center;

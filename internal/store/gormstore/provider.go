@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/chowyu12/aiclaw/internal/model"
+	"gorm.io/gorm"
 )
 
 func (s *GormStore) CreateProvider(ctx context.Context, p *model.Provider) error {
@@ -13,7 +14,7 @@ func (s *GormStore) CreateProvider(ctx context.Context, p *model.Provider) error
 	if err := s.db.WithContext(ctx).Create(&stored).Error; err != nil {
 		return err
 	}
-	p.ID, p.CreatedAt, p.UpdatedAt = stored.ID, stored.CreatedAt, stored.UpdatedAt
+	p.ID, p.CreatedAt, p.UpdatedAt, p.Revision = stored.ID, stored.CreatedAt, stored.UpdatedAt, stored.Revision
 	return nil
 }
 
@@ -49,11 +50,23 @@ func (s *GormStore) ListProviders(ctx context.Context, q model.ListQuery) ([]*mo
 
 func (s *GormStore) UpdateProvider(ctx context.Context, id int64, req model.UpdateProviderReq) error {
 	updates := map[string]any{}
+	if req.RoutingMode != nil {
+		updates["routing_mode"] = *req.RoutingMode
+	}
+	if req.ModelOverrides != nil {
+		updates["model_overrides"] = req.ModelOverrides
+	}
+	if req.ModelMetadata != nil {
+		updates["model_metadata"] = req.ModelMetadata
+	}
 	if req.Name != nil {
 		updates["name"] = *req.Name
 	}
 	if req.Type != nil {
 		updates["type"] = *req.Type
+	}
+	if req.APIProtocol != nil {
+		updates["api_protocol"] = req.APIProtocol.Normalized()
 	}
 	if req.BaseURL != nil {
 		updates["base_url"] = *req.BaseURL
@@ -70,7 +83,20 @@ func (s *GormStore) UpdateProvider(ctx context.Context, id int64, req model.Upda
 	if len(updates) == 0 {
 		return nil
 	}
+	updates["revision"] = gorm.Expr("revision + 1")
 	return s.db.WithContext(ctx).Model(&model.Provider{}).Where("id = ?", id).Updates(updates).Error
+}
+
+// Cache only against the configuration snapshot which produced the response.
+func (s *GormStore) CacheProviderModelMetadata(ctx context.Context, id, revision int64, metadata model.JSON) (bool, error) {
+	result := s.db.WithContext(ctx).Model(&model.Provider{}).Where("id = ? AND revision = ?", id, revision).UpdateColumn("model_metadata", metadata)
+	if result.Error != nil || result.RowsAffected > 0 {
+		return result.RowsAffected == 1, result.Error
+	}
+	// Drivers which report changed rows may return zero for an identical cache.
+	var count int64
+	err := s.db.WithContext(ctx).Model(&model.Provider{}).Where("id = ? AND revision = ? AND model_metadata = ?", id, revision, metadata).Count(&count).Error
+	return count == 1, err
 }
 
 func (s *GormStore) DeleteProvider(ctx context.Context, id int64) error {

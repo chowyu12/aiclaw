@@ -1,8 +1,8 @@
-// Package providers 是模型服务（Provider）的配置库：多个 OpenAI 兼容端点，
-// 各带自己的 Key 与模型清单，会话按 providerId 选其中一个。
+// Package providers 保存模型服务：厂商、API 协议、基础地址、Key 与模型清单。
+// 会话按 providerId 选择服务，协议与厂商类型独立。
 //
-// 数据落在 AIClaw 沿用至今的 SQLite 库（gorm 的 providers 表）里，表结构不动——
-// 用户在旧版里配好的模型服务升级后原样可用。这也是 Key 唯一存放的地方：
+// 数据沿用 SQLite 的 providers 表，新增协议列默认 Chat Completions，保留旧配置。
+// 这也是 Key 唯一存放的地方：
 // 它**不经协议帧**，宿主只拿到 apiKeySet 这一位；打模型时由内核按 providerId
 // 在这里查出来。
 package providers
@@ -11,8 +11,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -20,13 +18,14 @@ import (
 	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
 // 各类型的默认端点。用户留空 baseUrl 时用它。
 //
-// claude / gemini 给的是它们的 **OpenAI 兼容**入口：内核的模型客户端只会说
-// chat/completions 这一种话，原生的 Messages / generateContent 接口不支持。
+// 这是旧版 Chat Completions 地址预设；原生协议有独立的默认地址。
+// 对话协议由模型服务显式配置，厂商类型不决定协议。
 var defaultBaseURLs = map[string]string{
 	string(model.ProviderOpenAI):     "https://api.openai.com/v1",
 	string(model.ProviderQwen):       "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -39,6 +38,17 @@ var defaultBaseURLs = map[string]string{
 // DefaultBaseURL 返回某类型的默认端点；没有就是空串（openai-compatible 必须自己填）。
 func DefaultBaseURL(providerType string) string {
 	return defaultBaseURLs[providerType]
+}
+
+func defaultAPIBaseURL(providerType string, api model.APIProtocol) string {
+	switch api.Normalized() {
+	case model.APIAnthropic:
+		return "https://api.anthropic.com/v1"
+	case model.APIGemini:
+		return "https://generativelanguage.googleapis.com/v1beta"
+	default:
+		return DefaultBaseURL(providerType)
+	}
 }
 
 // Store 是模型服务的配置库。
@@ -68,6 +78,12 @@ func (s *Store) List(ctx context.Context) ([]protocol.ProviderView, error) {
 
 // Create 新建一个模型服务。
 func (s *Store) Create(ctx context.Context, params protocol.ProviderCreateParams) (protocol.ProviderView, error) {
+	if params.RoutingMode != "" && params.RoutingMode != "auto" && params.RoutingMode != "manual" {
+		return protocol.ProviderView{}, fmt.Errorf("invalid routing mode")
+	}
+	if !params.APIProtocol.Valid() {
+		return protocol.ProviderView{}, fmt.Errorf("unsupported model API protocol: %s", params.APIProtocol)
+	}
 	name := strings.TrimSpace(params.Name)
 	if name == "" {
 		return protocol.ProviderView{}, i18n.E("名字不能为空")
@@ -80,13 +96,26 @@ func (s *Store) Create(ctx context.Context, params protocol.ProviderCreateParams
 	if params.Enabled != nil {
 		enabled = *params.Enabled
 	}
+	mode := params.RoutingMode
+	if mode == "" {
+		mode = "auto"
+		if params.APIProtocol != "" {
+			mode = "manual"
+		}
+	}
+	overrides, err := validateOverrides(params.ModelOverrides)
+	if err != nil {
+		return protocol.ProviderView{}, err
+	}
 	item := &model.Provider{
-		Name:    name,
-		Type:    model.ProviderType(providerType),
-		BaseURL: strings.TrimRight(strings.TrimSpace(params.BaseURL), "/"),
-		APIKey:  strings.TrimSpace(params.APIKey),
-		Models:  encodeModels(params.Models),
-		Enabled: enabled,
+		RoutingMode: mode, ModelOverrides: overrides,
+		Name:        name,
+		Type:        model.ProviderType(providerType),
+		APIProtocol: params.APIProtocol.Normalized(),
+		BaseURL:     strings.TrimRight(strings.TrimSpace(params.BaseURL), "/"),
+		APIKey:      strings.TrimSpace(params.APIKey),
+		Models:      encodeModels(params.Models),
+		Enabled:     enabled,
 	}
 	if err := s.db.CreateProvider(ctx, item); err != nil {
 		return protocol.ProviderView{}, err
@@ -97,6 +126,30 @@ func (s *Store) Create(ctx context.Context, params protocol.ProviderCreateParams
 // Update 改一个模型服务。nil 的字段不动；apiKey 传空串表示清掉。
 func (s *Store) Update(ctx context.Context, params protocol.ProviderUpdateParams) (protocol.ProviderView, error) {
 	req := model.UpdateProviderReq{Enabled: params.Enabled}
+	if params.ModelOverrides != nil {
+		raw, err := validateOverrides(params.ModelOverrides)
+		if err != nil {
+			return protocol.ProviderView{}, err
+		}
+		req.ModelOverrides = raw
+	}
+	if params.RoutingMode != nil {
+		if *params.RoutingMode != "auto" && *params.RoutingMode != "manual" {
+			return protocol.ProviderView{}, fmt.Errorf("invalid routing mode")
+		}
+		req.RoutingMode = params.RoutingMode
+	}
+
+	if params.APIProtocol != nil {
+		if !params.APIProtocol.Valid() {
+			return protocol.ProviderView{}, fmt.Errorf("unsupported model API protocol: %s", *params.APIProtocol)
+		}
+		req.APIProtocol = params.APIProtocol
+		if params.RoutingMode == nil {
+			manual := "manual"
+			req.RoutingMode = &manual
+		}
+	}
 	if params.Name != nil {
 		name := strings.TrimSpace(*params.Name)
 		if name == "" {
@@ -144,17 +197,26 @@ func (s *Store) Resolve(ctx context.Context, m *protocol.ModelConfig) (string, e
 	if err != nil {
 		return "", fmt.Errorf("%s%w", i18n.D("模型服务不存在（id={id}）：", "id", m.ProviderID), err)
 	}
+	return resolveProvider(item, m)
+}
+
+func resolveProvider(item *model.Provider, m *protocol.ModelConfig) (string, error) {
 	if !item.Enabled {
 		return "", i18n.E("模型服务「{name}」已停用", "name", item.Name)
 	}
+	route := resolveRoute(item, m.Model)
 	baseURL := item.BaseURL
 	if strings.TrimSpace(baseURL) == "" {
-		baseURL = defaultBaseURLs[string(item.Type)]
+		baseURL = defaultAPIBaseURL(serviceProfile(item), route.APIProtocol)
 	}
 	if strings.TrimSpace(baseURL) == "" {
 		return "", i18n.E("模型服务「{name}」没有填端点", "name", item.Name)
 	}
 	m.BaseURL = baseURL
+	m.APIProtocol = route.APIProtocol
+	m.ProtocolSource = route.Source
+	m.ServiceProfile = serviceProfile(item)
+	m.Capabilities = route.Capabilities
 	if strings.TrimSpace(item.APIKey) == "" {
 		return "", i18n.E("模型服务「{name}」没有配置 Key", "name", item.Name)
 	}
@@ -164,69 +226,54 @@ func (s *Store) Resolve(ctx context.Context, m *protocol.ModelConfig) (string, e
 // FetchModels 到端点的 /models 拉一遍模型名。给「从端点拉取」按钮用，
 // 结果由用户决定要不要写进模型清单，这里不落库。
 func (s *Store) FetchModels(ctx context.Context, id int64) ([]string, error) {
+	item, err := s.db.GetProvider(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	m := protocol.ModelConfig{ProviderID: id}
-	key, err := s.Resolve(ctx, &m)
+	key, err := resolveProvider(item, &m)
 	if err != nil {
 		return nil, err
 	}
 	// 拉列表不该无限等：端点不通时用户面前是一个一直转的按钮。
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.BaseURL+"/models", nil)
+	client, err := llm.NewConfigured(llm.Config{ProviderID: m.ProviderID, BaseURL: m.BaseURL, APIKey: key, Protocol: m.APIProtocol})
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Accept", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	if serviceProfile(item) != "openrouter" {
+		return client.ListModels(ctx)
+	}
+	names, caps, err := client.ListModelsAndMetadata(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("%s%w", i18n.D("连接模型服务失败："), err)
+		return nil, err
 	}
-	defer resp.Body.Close()
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, (4<<20)+1))
-	if readErr != nil {
-		return nil, readErr
+	raw, err := json.Marshal(catalogMetadata{Profile: "openrouter", BaseURL: item.BaseURL, Models: caps})
+	if err != nil {
+		return nil, err
 	}
-	if len(body) > 4<<20 {
-		return nil, i18n.E("模型列表超过 4 MiB，无法读取")
+	cached, err := s.db.CacheProviderModelMetadata(ctx, id, item.Revision, model.JSON(raw))
+	if err != nil {
+		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK {
-		// 把上游的话带出来：401/403 最常见，都是 Key 的问题，直接说比让人猜强。
-		return nil, i18n.E("模型服务返回 {status}：{message}", "status", resp.StatusCode, "message", upstreamMessage(body))
+	if !cached {
+		return nil, fmt.Errorf("model service configuration changed while fetching its catalog; refresh the model list again")
 	}
-	var parsed struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return nil, fmt.Errorf("%s%w", i18n.D("模型列表不是预期的格式："), err)
-	}
-	if parsed.Data == nil {
-		return nil, i18n.E("模型列表不是预期的格式：缺少 data 数组")
-	}
-	names := make([]string, 0, len(parsed.Data))
-	seen := map[string]bool{}
-	for _, entry := range parsed.Data {
-		name := strings.TrimSpace(entry.ID)
-		if name != "" && !seen[name] {
-			names = append(names, name)
-			seen[name] = true
-		}
-	}
-	sort.Strings(names)
 	return names, nil
 }
 
 func view(item *model.Provider) protocol.ProviderView {
 	return protocol.ProviderView{
-		ID:        item.ID,
-		Name:      item.Name,
-		Type:      string(item.Type),
-		BaseURL:   item.BaseURL,
-		APIKeySet: strings.TrimSpace(item.APIKey) != "",
-		Models:    decodeModels(item.Models),
-		Enabled:   item.Enabled,
+		DefaultBaseURL: defaultAPIBaseURL(serviceProfile(item), resolveRoute(item, "").APIProtocol), RoutingMode: pRoutingMode(item), ServiceProfile: serviceProfile(item), ModelOverrides: modelOverrides(item), ModelRoutes: modelRoutes(item),
+		ID:          item.ID,
+		Name:        item.Name,
+		Type:        string(item.Type),
+		APIProtocol: item.APIProtocol.Normalized(),
+		BaseURL:     item.BaseURL,
+		APIKeySet:   strings.TrimSpace(item.APIKey) != "",
+		Models:      decodeModels(item.Models),
+		Enabled:     item.Enabled,
 	}
 }
 
@@ -321,24 +368,9 @@ func decodeModels(raw model.JSON) []string {
 	return names
 }
 
-func upstreamMessage(body []byte) string {
-	var parsed struct {
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-		Message string `json:"message"`
+func pRoutingMode(p *model.Provider) string {
+	if p.RoutingMode == "manual" {
+		return "manual"
 	}
-	if json.Unmarshal(body, &parsed) == nil {
-		if parsed.Error != nil && parsed.Error.Message != "" {
-			return parsed.Error.Message
-		}
-		if parsed.Message != "" {
-			return parsed.Message
-		}
-	}
-	text := strings.TrimSpace(string(body))
-	if len(text) > 200 {
-		text = text[:200]
-	}
-	return text
+	return "auto"
 }

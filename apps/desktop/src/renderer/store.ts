@@ -1156,6 +1156,9 @@ export const actions = {
   },
 
   async createProvider(params: {
+ routingMode?: "auto" | "manual";
+ modelOverrides?: ProviderView["modelOverrides"];
+    apiProtocol?: ProviderView["apiProtocol"];
     name: string;
     type?: string;
     baseUrl?: string;
@@ -1170,6 +1173,9 @@ export const actions = {
 
   /** 没给的字段不动；apiKey 给空串表示清掉。 */
   async updateProvider(params: {
+ routingMode?: "auto" | "manual";
+ modelOverrides?: ProviderView["modelOverrides"];
+    apiProtocol?: ProviderView["apiProtocol"];
     id: number;
     name?: string;
     type?: string;

@@ -59,7 +59,7 @@ func (s *Session) roleClient(role protocol.RoleModel) (*llm.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return llm.New(config.BaseURL, apiKey, 0)
+	return llm.NewConfigured(llm.Config{ProviderID: config.ProviderID, BaseURL: config.BaseURL, APIKey: apiKey, Protocol: config.APIProtocol, Capabilities: config.Capabilities})
 }
 
 func (s *Session) generateImageTool(role protocol.RoleModel) tools.Tool {

@@ -240,7 +240,7 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	if err != nil {
 		return nil, err
 	}
-	client, err := llm.New(config.Model.BaseURL, apiKey, 0)
+	client, err := llm.NewConfigured(llm.Config{ProviderID: config.Model.ProviderID, BaseURL: config.Model.BaseURL, APIKey: apiKey, Protocol: config.Model.APIProtocol, Capabilities: config.Model.Capabilities})
 	if err != nil {
 		return nil, err
 	}
@@ -1129,11 +1129,14 @@ func (s *Session) Configure(model protocol.ModelConfig) error {
 		model.BaseURL = s.config.Model.BaseURL
 	}
 	// 每次都重建客户端：Key 与端点都可能已经变了，而 llm.New 只是构造，不连网。
+	if model.ReasoningEffort == s.config.Model.ReasoningEffort && s.config.Model.ReasoningExplicit {
+		model.ReasoningExplicit = true
+	}
 	apiKey, err := s.keyFor(&model)
 	if err != nil {
 		return err
 	}
-	client, err := llm.New(model.BaseURL, apiKey, 0)
+	client, err := llm.NewConfigured(llm.Config{ProviderID: model.ProviderID, BaseURL: model.BaseURL, APIKey: apiKey, Protocol: model.APIProtocol, Capabilities: model.Capabilities})
 	if err != nil {
 		return err
 	}
@@ -1156,12 +1159,15 @@ func (s *Session) ConfigureReasoning(ctx context.Context, effort string) error {
 	}
 	s.mu.Lock()
 	previous := s.config.Model.ReasoningEffort
+	previousExplicit := s.config.Model.ReasoningExplicit
 	s.config.Model.ReasoningEffort = effort
+	s.config.Model.ReasoningExplicit = true
 	s.mu.Unlock()
 	if s.db != nil {
 		if err := s.Save(ctx, s.db); err != nil {
 			s.mu.Lock()
 			s.config.Model.ReasoningEffort = previous
+			s.config.Model.ReasoningExplicit = previousExplicit
 			s.mu.Unlock()
 			return err
 		}

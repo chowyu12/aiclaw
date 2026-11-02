@@ -60,6 +60,15 @@ func (s *Session) approvalReviewer(turnID string, emitter Emitter, client *llm.C
 		}
 		reviewCtx, cancel := context.WithTimeout(ctx, approvalReviewTimeout)
 		defer cancel()
+		resolved := model
+		key, err := s.keyFor(&resolved)
+		if err != nil {
+			return false, err
+		}
+		client, err = llm.NewConfigured(llm.Config{ProviderID: resolved.ProviderID, BaseURL: resolved.BaseURL, APIKey: key, Protocol: resolved.APIProtocol, Capabilities: resolved.Capabilities})
+		if err != nil {
+			return false, err
+		}
 		response, err := client.Stream(reviewCtx, llm.Request{
 			Model: model.Model, MaxTokens: 128, DisableThinking: true,
 			Messages: []llm.Message{{Role: llm.RoleSystem, Content: approvalReviewPrompt}, {Role: llm.RoleUser, Content: string(payload)}},

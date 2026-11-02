@@ -473,7 +473,7 @@ func (s *Server) handleAudioTranscribe(ctx context.Context, f frame) {
 			s.writeError(f.ID, codeInternal, err.Error())
 			return
 		}
-		client, err := llm.New(config.BaseURL, apiKey, 0)
+		client, err := llm.NewConfigured(llm.Config{ProviderID: config.ProviderID, BaseURL: config.BaseURL, APIKey: apiKey, Protocol: config.APIProtocol, Capabilities: config.Capabilities})
 		if err != nil {
 			s.writeError(f.ID, codeInternal, err.Error())
 			return

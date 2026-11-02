@@ -81,7 +81,7 @@ func TestAutoReviewTimeoutFallsBackOnceWithoutExecuting(t *testing.T) {
 	}))
 	defer server.Close()
 	var err error
-	s.llm, err = llm.New(server.URL, "fixture", time.Minute)
+	err = s.Configure(protocol.ModelConfig{BaseURL: server.URL, Model: "test"})
 	if err != nil {
 		t.Fatal(err)
 	}

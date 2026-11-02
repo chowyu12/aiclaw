@@ -32,7 +32,7 @@ func TestReasoningChangeAppliesAtNextSamplingAndPersists(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	s, err := New(context.Background(), "reasoning", protocol.SessionStartParams{Model: protocol.ModelConfig{BaseURL: server.URL, Model: "fixture", ReasoningEffort: "low", ContextWindow: 12345}, Workdir: t.TempDir(), ApprovalPolicy: protocol.ApprovalBypass}, StaticKey("fake"))
+	s, err := New(context.Background(), "reasoning", protocol.SessionStartParams{Model: protocol.ModelConfig{BaseURL: server.URL, Model: "fixture", ReasoningEffort: "low", ReasoningExplicit: true, ContextWindow: 12345}, Workdir: t.TempDir(), ApprovalPolicy: protocol.ApprovalBypass}, StaticKey("fake"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestReasoningChangeAppliesAtNextSamplingAndPersists(t *testing.T) {
 	}
 	var config protocol.SessionStartParams
 	_ = json.Unmarshal(record.Config, &config)
-	if config.Model.ReasoningEffort != "high" {
+	if config.Model.ReasoningEffort != "high" || !config.Model.ReasoningExplicit {
 		t.Fatal("not persisted")
 	}
 	if err = s.ConfigureReasoning(ctx, "invalid"); err == nil {

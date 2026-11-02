@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -59,13 +60,14 @@ func probeNetwork(ctx context.Context, model protocol.ModelConfig, key string, c
 		ConnectDone:      func(_, _ string, err error) { set("TCP / proxy connection", err) },
 		TLSHandshakeDone: func(_ tls.ConnectionState, err error) { set("TLS", err) },
 	}
-	u.Path = strings.TrimRight(u.Path, "/") + "/models"
-	req, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), http.MethodGet, u.String(), nil)
+	modelClient, err := llm.NewConfigured(llm.Config{ProviderID: model.ProviderID, BaseURL: model.BaseURL, APIKey: key, Protocol: model.APIProtocol})
+	if err != nil {
+		return "FAIL configuration: Invalid API protocol or endpoint; no requests sent."
+	}
+	req, err := modelClient.CatalogRequest(httptrace.WithClientTrace(ctx, trace))
 	if err != nil {
 		return "FAIL configuration: Cannot construct a request; no requests sent."
 	}
-	req.Header.Set("Authorization", "Bearer "+key)
-	req.Header.Set("Accept", "application/json")
 	c := *client
 	c.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	started := time.Now()
@@ -102,20 +104,16 @@ func probeNetwork(ctx context.Context, model protocol.ModelConfig, key string, c
 		rows = append(rows, "FAIL provider: Non-success HTTP response; response body omitted.")
 	default:
 		raw, e := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
-		var catalog struct {
-			Data []struct {
-				ID string `json:"id"`
-			} `json:"data"`
-		}
-		if e != nil || len(raw) > 1024*1024 || json.Unmarshal(raw, &catalog) != nil || catalog.Data == nil {
+		catalog, catalogErr := modelClient.DecodeCatalog(raw)
+		if e != nil || len(raw) > 1024*1024 || catalogErr != nil {
 			rows = append(rows, "UNKNOWN catalog: Response is incomplete, too large or not a model list; body omitted.")
 			break
 		}
 		rows = append(rows, "PASS HTTP: Model catalog received.")
 		if model.Model != "" {
 			found := false
-			for _, item := range catalog.Data {
-				found = found || item.ID == model.Model
+			for _, item := range catalog {
+				found = found || item == model.Model
 			}
 			if found {
 				rows = append(rows, "PASS model: Configured model appears in this catalog.")

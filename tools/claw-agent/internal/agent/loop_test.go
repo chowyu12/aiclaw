@@ -1427,35 +1427,19 @@ func TestImageOnlyMessageIsLabelledAsNew(t *testing.T) {
 	}
 }
 
-// 非推理模型、Azure 会因为 reasoning_effort 直接 400：去掉它重发一次，而且之后都不带。
-func TestReasoningEffortIsDroppedWhenRejected(t *testing.T) {
-	model := &fakeModel{script: []string{
-		"!400 Unsupported parameter: 'reasoning_effort' is not supported with this model.",
-		sseText("好的。"),
-		sseText("第二轮。"),
-	}}
+// A rejected explicit parameter is a configuration error, not permission to change the model.
+func TestReasoningRejectionDoesNotChangeConfigurationOrRetry(t *testing.T) {
+	model := &fakeModel{script: []string{"!400 Unsupported parameter: 'reasoning_effort' is not supported with this model.", sseText("must not retry")}}
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	session.config.Model.ReasoningEffort = "medium"
-	emitter := &recordingEmitter{approve: true}
+	session.config.Model.ReasoningExplicit = true
+	emitter := &recordingEmitter{}
 	session.RunTurn(context.Background(), "t1", "hi", nil, nil, emitter)
-	session.RunTurn(context.Background(), "t2", "再来", nil, nil, emitter)
-
-	if len(model.requests) != 3 {
-		t.Fatalf("应是 被拒 → 去掉重发 → 第二轮，实际 %d 次", len(model.requests))
+	if len(model.requests) != 1 || session.Model().ReasoningEffort != "medium" {
+		t.Fatal("rejected request changed configuration or was retried", model.requests)
 	}
-	if model.requests[0]["reasoning_effort"] != "medium" {
-		t.Errorf("第一次应带着推理档位：%v", model.requests[0]["reasoning_effort"])
-	}
-	for _, index := range []int{1, 2} {
-		if _, present := model.requests[index]["reasoning_effort"]; present {
-			t.Errorf("第 %d 次请求不该再带 reasoning_effort", index+1)
-		}
-	}
-	if !emitter.find("session/reasoningUpdated", "reasoningEffort") {
-		t.Error("missing fallback notification")
-	}
-	if !emitter.find(protocol.NotifyItemCompleted, "好的。") {
-		t.Error("去掉参数之后这一轮应正常完成")
+	if !emitter.find(protocol.NotifyTurnCompleted, "reasoning_effort") {
+		t.Fatal("configuration error not reported")
 	}
 }
 

@@ -1,152 +1,64 @@
-// Package llm 是 OpenAI Chat Completions 兼容的客户端，带流式与工具调用。
-//
-// 选 Chat Completions 而不是 Responses API：常见模型网关的全部渠道
-// （OpenAI / Claude / DeepSeek / Kimi / Qwen）都原生支持它，工具调用语义
-// 成熟稳定；Responses 是 OpenAI 特有的，网关对非 OpenAI 上游会在内部
-// 转成 chat，等于多一层转换且能力取决于上游。
+// Package llm supplies one model-call contract with explicit protocol adapters.
 package llm
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/chowyu12/aiclaw/internal/i18n"
+	"github.com/chowyu12/aiclaw/internal/model"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/chowyu12/aiclaw/internal/i18n"
-	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
-
-type Role string
-
-const (
-	RoleSystem    Role = "system"
-	RoleUser      Role = "user"
-	RoleAssistant Role = "assistant"
-	RoleTool      Role = "tool"
-)
-
-// ToolCall 是模型发起的一次工具调用。
-type ToolCall struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-// Message 是一条对话消息。
-//
-// ToolCallID 只在 RoleTool 上有值：Chat Completions 要求工具结果消息
-// 通过它关联回是哪一次调用，缺了上游会报 400。
-type Message struct {
-	ID         string `json:",omitempty"`
-	RequestID  string `json:",omitempty"`
-	Role       Role
-	Content    string
-	ToolCalls  []ToolCall
-	ToolCallID string
-	// Artifacts and Sources are local UI metadata, omitted from model requests.
-	Artifacts []string                `json:"artifacts,omitempty"`
-	Sources   []protocol.SearchSource `json:"sources,omitempty"`
-	// Images 是随这条消息一起发给模型的图片（PNG 字节）。
-	//
-	// 只在 RoleUser 上有意义：Chat Completions 的 tool 结果消息必须是纯字符串，
-	// 没有地方放图。所以截屏这类工具的图是作为**紧随其后的一条 user 消息**
-	// 送进去的，不是塞在工具结果里。
-	Images [][]byte
-	// At 是这条消息进历史的时间（Unix 毫秒）。只给界面显示用，不发给上游
-	//（线格式见 wireMessage）。旧存档里没有这一项，是 0，界面上就不显示时间。
-	At int64 `json:",omitempty"`
-	// Shown 是界面上这条消息的样子，只在它和发给模型的不一样时才有值；
-	// 也不发给上游。
-	//
-	// 不一样的情况：对话模型看不了图，图转成文字接在正文后面；音频的转写
-	// 接在正文后面；截屏、中断标记、压缩摘要以 user 消息送进去（那不是用户说的话）。
-	// 没有它，切回会话时还原出来的是给模型看的那一版：用户发的是一张图，
-	// 看到的却是一大段转述。
-	Shown *Shown `json:",omitempty"`
-}
-
-// Shown 见 Message.Shown。
-type Shown struct {
-	Text   string
-	Images [][]byte `json:",omitempty"`
-	// Hidden 表示这条不是用户说的（工具截屏的画面、中断标记、压缩摘要），
-	// 时间线上不显示。
-	Hidden bool `json:",omitempty"`
-	// References 是这条消息里 @ 引用的会话，切回会话时还原成那排引用标签。
-	References []Reference `json:",omitempty"`
-}
-
-// Reference 是一条消息里引用的另一个会话。
-type Reference struct {
-	ID    string
-	Title string
-}
-
-// Tool 是提供给模型的工具定义。Parameters 是 JSON Schema。
-type Tool struct {
-	Name        string
-	Description string
-	Parameters  json.RawMessage
-}
-
-type Request struct {
-	Model           string
-	Messages        []Message
-	Tools           []Tool
-	Temperature     *float64
-	MaxTokens       int
-	ReasoningEffort string
-	// DisableThinking requests a quick response on endpoints with known non-thinking controls.
-	DisableThinking bool
-}
-
-type Usage struct {
-	InputTokens  int
-	OutputTokens int
-	TotalTokens  int
-}
-
-// Response 是一轮模型调用的结果。
-type Response struct {
-	LocalItemID  string
-	Content      string
-	ToolCalls    []ToolCall
-	FinishReason string
-	Usage        Usage
-}
-
-// Delta 是流式过程中推给上层的增量。
-type Delta struct {
-	// Content 是正文增量。
-	Content string
-	// Reasoning 是推理摘要增量（部分模型会给）。
-	Reasoning string
-}
 
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
-	// dialect 决定对话之外的接口（画图、听写、朗读）打哪一套地址。对话本身
-	// 各家都是 /chat/completions，不受它影响。
+	baseURL      string
+	apiKey       string
+	http         *http.Client
+	protocol     model.APIProtocol
+	providerID   int64
+	adapter      adapter
+	capabilities model.ModelCapabilities
+	// dialect 决定画图、听写、朗读及厂商专有的推理控制参数。
 	dialect dialect
 }
 
 func New(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
+	return NewConfigured(Config{BaseURL: baseURL, APIKey: apiKey, Timeout: timeout})
+}
+
+// Config is a resolved, immutable connection snapshot. Credentials are never persisted here.
+type Config struct {
+	Capabilities model.ModelCapabilities
+	ProviderID   int64
+	BaseURL      string
+	APIKey       string
+	Protocol     model.APIProtocol
+	Timeout      time.Duration
+}
+
+func NewConfigured(config Config) (*Client, error) {
+	baseURL, apiKey, timeout := config.BaseURL, config.APIKey, config.Timeout
+	protocol := config.Protocol.Normalized()
+	driver, ok := adapters[protocol]
+	if !ok {
+		return nil, fmt.Errorf("unsupported model API protocol: %s", protocol)
+	}
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
 		return nil, i18n.E("模型端点未配置")
 	}
 	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
 		return nil, i18n.E("模型端点必须是 http(s) 地址：{url}", "url", baseURL)
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("invalid model API base URL: use an HTTP(S) base without credentials, query or fragment")
 	}
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, i18n.E("模型 Key 未配置")
@@ -157,216 +69,94 @@ func New(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
 		timeout = 10 * time.Minute
 	}
 	return &Client{
-		baseURL: baseURL,
-		apiKey:  apiKey,
-		http:    &http.Client{Timeout: timeout},
-		dialect: detectDialect(baseURL),
+		baseURL:      baseURL,
+		apiKey:       apiKey,
+		http:         &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
+		dialect:      detectDialect(baseURL),
+		protocol:     protocol,
+		providerID:   config.ProviderID,
+		adapter:      driver,
+		capabilities: config.Capabilities,
 	}, nil
 }
 
-// ---------- 线格式 ----------
-
-type wireTool struct {
-	Type     string `json:"type"`
-	Function struct {
-		Name        string          `json:"name"`
-		Description string          `json:"description"`
-		Parameters  json.RawMessage `json:"parameters"`
-	} `json:"function"`
-}
-
-type wireToolCall struct {
-	Index    int    `json:"index"`
-	ID       string `json:"id,omitempty"`
-	Type     string `json:"type,omitempty"`
-	Function struct {
-		Name      string `json:"name,omitempty"`
-		Arguments string `json:"arguments,omitempty"`
-	} `json:"function"`
-}
-
-type wireMessage struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content"`
-	ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-}
-
-// contentPart 是多模态消息里的一段。带图时 content 从字符串变成这个的数组。
-type contentPart struct {
-	Type     string    `json:"type"`
-	Text     string    `json:"text,omitempty"`
-	ImageURL *imageURL `json:"image_url,omitempty"`
-}
-
-type imageURL struct {
-	URL string `json:"url"`
-}
-
-type wireRequest struct {
-	Model           string        `json:"model"`
-	Messages        []wireMessage `json:"messages"`
-	Tools           []wireTool    `json:"tools,omitempty"`
-	Stream          bool          `json:"stream"`
-	StreamOptions   *streamOpts   `json:"stream_options,omitempty"`
-	Temperature     *float64      `json:"temperature,omitempty"`
-	MaxTokens       int           `json:"max_tokens,omitempty"`
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
-	EnableThinking  *bool         `json:"enable_thinking,omitempty"`
-	Thinking        *thinkingMode `json:"thinking,omitempty"`
-}
-
-type thinkingMode struct {
-	Type string `json:"type"`
-}
-
-// Use provider controls only for known compatible endpoints/models. Unknown gateways
-// keep their existing wire format and remain bounded by the caller's deadline.
-func (c *Client) disableThinking(wire *wireRequest) {
-	model := strings.ToLower(wire.Model)
-	if strings.Contains(model, "thinking") || model == "deepseek-r1" || model == "deepseek-reasoner" {
-		return
+// Stream never infers a protocol or changes user parameters in response to an error.
+// The caller owns retries; adapters only encode/decode one provider request.
+func (c *Client) Stream(ctx context.Context, req Request, onDelta func(Delta)) (Response, error) {
+	if req.ReasoningEffort != "" && req.ReasoningEffort != "low" && req.ReasoningEffort != "medium" && req.ReasoningEffort != "high" && req.ReasoningEffort != "none" {
+		return Response{}, &Error{Status: 400, Code: "invalid_request", Message: "Unsupported reasoning effort: " + req.ReasoningEffort}
 	}
-	if c.dialect == dialectDashScope && (strings.HasPrefix(model, "qwen3") || strings.HasPrefix(model, "deepseek-v3.1") || strings.HasPrefix(model, "deepseek-v3.2") || strings.HasPrefix(model, "deepseek-v4")) {
-		disabled := false
-		wire.EnableThinking = &disabled
-		wire.ReasoningEffort = ""
-	} else if parsed, err := url.Parse(c.baseURL); err == nil && strings.EqualFold(parsed.Hostname(), "api.deepseek.com") && (model == "deepseek-chat" || strings.HasPrefix(model, "deepseek-v4") || strings.HasPrefix(model, "deepseek-v3.2")) {
-		wire.Thinking = &thinkingMode{Type: "disabled"}
-		wire.ReasoningEffort = ""
-	}
-}
-
-type streamOpts struct {
-	IncludeUsage bool `json:"include_usage"`
-}
-
-type wireChunk struct {
-	Choices []struct {
-		Delta struct {
-			Content          string         `json:"content"`
-			ReasoningContent string         `json:"reasoning_content"`
-			ToolCalls        []wireToolCall `json:"tool_calls"`
-		} `json:"delta"`
-		FinishReason string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
-	Error    *wireError `json:"error"`
-	Type     string     `json:"type"`
-	Code     any        `json:"code"`
-	Message  string     `json:"message"`
-	Response *struct {
-		Error *wireError `json:"error"`
-	} `json:"response"`
-}
-
-type wireError struct {
-	Message string `json:"message"`
-	Type    string `json:"type"`
-	Code    any    `json:"code"`
-}
-
-func buildWireRequest(req Request) wireRequest {
-	messages := make([]wireMessage, 0, len(req.Messages))
-	for _, message := range req.Messages {
-		wire := wireMessage{Role: string(message.Role), ToolCallID: message.ToolCallID}
-		switch {
-		case len(message.Images) > 0:
-			// 有图就把 content 换成分段数组。图用 data URL 内联——
-			// 上游拿不到我们本机的文件，也不该为了一张截图去架一个图床。
-			parts := make([]contentPart, 0, len(message.Images)+1)
-			if message.Content != "" {
-				parts = append(parts, contentPart{Type: "text", Text: message.Content})
-			}
-			for _, image := range message.Images {
-				parts = append(parts, contentPart{
-					Type: "image_url",
-					ImageURL: &imageURL{
-						URL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(image),
-					},
-				})
-			}
-			wire.Content = parts
-		case message.Content == "" && len(message.ToolCalls) > 0:
-			// 带工具调用的 assistant 消息 content 必须是 null 而不是空串：
-			// 部分上游（Claude 兼容层尤其）对空串会报参数错误。
-			wire.Content = nil
-		default:
-			wire.Content = message.Content
+	if req.ReasoningPreference {
+		if c.capabilities.Reasoning != "supported" || (c.capabilities.ReasoningEfforts != "" && !strings.Contains(","+c.capabilities.ReasoningEfforts+",", ","+req.ReasoningEffort+",")) {
+			req.ReasoningEffort = ""
 		}
-		for index, call := range message.ToolCalls {
-			wireCall := wireToolCall{Index: index, ID: call.ID, Type: "function"}
-			wireCall.Function.Name = call.Name
-			wireCall.Function.Arguments = call.Arguments
-			wire.ToolCalls = append(wire.ToolCalls, wireCall)
+	}
+	req.Messages = normaliseHistory(req.Messages)
+	if len(req.Tools) > 0 && c.capabilities.Tools == "unsupported" {
+		return Response{}, &Error{Status: 400, Message: "This model does not support tools; choose a tool-capable model"}
+	}
+	for _, m := range req.Messages {
+		if len(m.Images) > 0 && c.capabilities.Vision == "unsupported" {
+			return Response{}, &Error{Status: 400, Message: "This model does not support image input"}
 		}
-		messages = append(messages, wire)
+	}
+	if req.ReasoningEffort != "" && c.capabilities.Reasoning == "unsupported" {
+		return Response{}, &Error{Status: 400, Message: "This model does not support reasoning settings; choose Model default"}
+	}
+	if req.ReasoningEffort != "" && c.capabilities.ReasoningEfforts != "" && !strings.Contains(","+c.capabilities.ReasoningEfforts+",", ","+req.ReasoningEffort+",") {
+		return Response{}, &Error{Status: 400, Message: "Unsupported reasoning effort for this model: " + req.ReasoningEffort}
 	}
 
-	tools := make([]wireTool, 0, len(req.Tools))
-	for _, tool := range req.Tools {
-		var wire wireTool
-		wire.Type = "function"
-		wire.Function.Name = tool.Name
-		wire.Function.Description = tool.Description
-		wire.Function.Parameters = tool.Parameters
-		if len(wire.Function.Parameters) == 0 {
-			wire.Function.Parameters = json.RawMessage(`{"type":"object","properties":{}}`)
-		}
-		tools = append(tools, wire)
-	}
-
-	return wireRequest{
-		Model:           req.Model,
-		Messages:        messages,
-		Tools:           tools,
-		Stream:          true,
-		StreamOptions:   &streamOpts{IncludeUsage: true},
-		Temperature:     req.Temperature,
-		MaxTokens:       req.MaxTokens,
-		ReasoningEffort: req.ReasoningEffort,
-	}
-}
-
-// Stream 发起一次流式调用，增量经 onDelta 回调推出，返回聚合后的结果。
-func (c *Client) Stream(
-	ctx context.Context,
-	req Request,
-	onDelta func(Delta),
-) (Response, error) {
-	wire := buildWireRequest(req)
-	if req.DisableThinking {
-		c.disableThinking(&wire)
+	path, wire, err := c.adapter.encode(c, req)
+	if err != nil {
+		return Response{}, err
 	}
 	payload, err := json.Marshal(wire)
 	if err != nil {
 		return Response{}, fmt.Errorf("%s: %w", i18n.D("编码请求失败"), err)
 	}
-
-	httpReq, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(payload),
-	)
+	httpReq, err := c.request(ctx, http.MethodPost, path, bytes.NewReader(payload))
 	if err != nil {
 		return Response{}, err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	httpReq.Header.Set("Accept", "text/event-stream")
-
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
 		return Response{}, &Error{Message: i18n.D("调用模型失败：{error}", "error", err), Err: err}
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != http.StatusOK {
 		return Response{}, readErrorBody(resp)
 	}
-	return consumeStream(resp.Body, onDelta)
+	result, err := c.adapter.decode(resp.Body, onDelta)
+	if err == nil {
+		seen := map[string]bool{}
+		for _, call := range result.ToolCalls {
+			if call.ID == "" || call.Name == "" || seen[call.ID] {
+				result.ToolCalls = nil
+				result.ProviderState = nil
+				return result, incompleteNative("invalid or duplicate tool call")
+			}
+			seen[call.ID] = true
+		}
+	}
+	if err == nil && result.ProviderState != nil {
+		result.ProviderState.Protocol = c.protocol
+		result.ProviderState.ProviderID = c.providerID
+		result.ProviderState.BaseURL = c.baseURL
+		result.ProviderState.Model = req.Model
+	}
+	return result, err
+}
+
+func (c *Client) request(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.adapter.authorize(req, c.apiKey)
+	return req, nil
 }
 
 func readErrorBody(resp *http.Response) *Error {
@@ -424,140 +214,4 @@ func parseRetryAfter(header string, now time.Time) time.Duration {
 		return at.Sub(now)
 	}
 	return 0
-}
-
-// toolCallAccumulator 负责把分片的 tool_calls 拼回完整调用。
-//
-// Chat Completions 的流式里，一次工具调用会拆成多个 chunk：id 和 name 通常
-// 只在第一片出现，arguments 逐片追加；多个并行调用靠 index 区分。
-// 这里必须按 index 累积——按 id 累积会在 id 还没出现的分片上丢数据。
-type toolCallAccumulator struct {
-	order []int
-	calls map[int]*ToolCall
-}
-
-func newToolCallAccumulator() *toolCallAccumulator {
-	return &toolCallAccumulator{calls: map[int]*ToolCall{}}
-}
-
-func (a *toolCallAccumulator) add(fragment wireToolCall) {
-	call, exists := a.calls[fragment.Index]
-	if !exists {
-		call = &ToolCall{}
-		a.calls[fragment.Index] = call
-		a.order = append(a.order, fragment.Index)
-	}
-	if fragment.ID != "" {
-		call.ID = fragment.ID
-	}
-	if fragment.Function.Name != "" {
-		call.Name = fragment.Function.Name
-	}
-	call.Arguments += fragment.Function.Arguments
-}
-
-func (a *toolCallAccumulator) result() []ToolCall {
-	calls := make([]ToolCall, 0, len(a.order))
-	for _, index := range a.order {
-		call := a.calls[index]
-		if call.Name == "" {
-			continue
-		}
-		if call.ID == "" {
-			// 少数上游不给 id。自己补一个，否则后面的 tool 结果消息关联不上。
-			call.ID = fmt.Sprintf("call_%d", index)
-		}
-		if strings.TrimSpace(call.Arguments) == "" {
-			call.Arguments = "{}"
-		}
-		calls = append(calls, *call)
-	}
-	return calls
-}
-
-func consumeStream(body io.Reader, onDelta func(Delta)) (response Response, err error) {
-	scanner := bufio.NewScanner(body)
-	// 单个 SSE 事件可能很大（一次给出长参数的工具调用），放宽行上限。
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-
-	accumulator := newToolCallAccumulator()
-	var content strings.Builder
-	complete := false
-	defer func() {
-		response.Content = content.String()
-		if err == nil {
-			response.ToolCalls = accumulator.result()
-		}
-	}()
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || !strings.HasPrefix(line, "data:") {
-			continue
-		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
-		if data == "[DONE]" {
-			complete = true
-			break
-		}
-
-		var chunk wireChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			// 单个坏分片不中断整条流：上游偶尔会插入心跳或非标准行。
-			continue
-		}
-		failure := chunk.Error
-		if failure == nil && chunk.Type == "response.failed" && chunk.Response != nil {
-			failure = chunk.Response.Error
-		}
-		if failure == nil && chunk.Type == "error" {
-			failure = &wireError{Message: chunk.Message, Code: chunk.Code}
-		}
-		if failure != nil {
-			code := strings.TrimSpace(fmt.Sprint(firstNonNil(failure.Code)) + " " + failure.Type)
-			message := failure.Message
-			if message == "" {
-				message = code
-			}
-			return response, &Error{Code: code, Message: message}
-		}
-		if chunk.Usage != nil {
-			response.Usage = Usage{
-				InputTokens:  chunk.Usage.PromptTokens,
-				OutputTokens: chunk.Usage.CompletionTokens,
-				TotalTokens:  chunk.Usage.TotalTokens,
-			}
-		}
-		for _, choice := range chunk.Choices {
-			if choice.Delta.Content != "" {
-				content.WriteString(choice.Delta.Content)
-				if onDelta != nil {
-					onDelta(Delta{Content: choice.Delta.Content})
-				}
-			}
-			if choice.Delta.ReasoningContent != "" && onDelta != nil {
-				onDelta(Delta{Reasoning: choice.Delta.ReasoningContent})
-			}
-			for _, fragment := range choice.Delta.ToolCalls {
-				accumulator.add(fragment)
-			}
-			if choice.FinishReason != "" {
-				response.FinishReason = choice.FinishReason
-				switch choice.FinishReason {
-				case "stop", "tool_calls", "function_call":
-					complete = true
-				default:
-					return response, &Error{Code: "response_incomplete", Message: i18n.D("模型返回不完整（finish_reason={reason}），未执行工具调用。", "reason", choice.FinishReason)}
-				}
-			}
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return response, &Error{Message: i18n.D("读取模型流失败：{error}", "error", err), Err: err}
-	}
-
-	if !complete {
-		return response, &Error{Message: i18n.D("模型流在完成前结束，已保留部分回答，未执行工具调用。"), Err: io.ErrUnexpectedEOF}
-	}
-	return response, nil
 }

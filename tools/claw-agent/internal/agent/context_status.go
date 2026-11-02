@@ -20,6 +20,9 @@ type compactionHistory struct {
 	Records []CompactionRecord `json:"records"`
 }
 type ContextStatus struct {
+	APIProtocol     string             `json:"apiProtocol,omitempty"`
+	ProtocolSource  string             `json:"protocolSource,omitempty"`
+	ServiceProfile  string             `json:"serviceProfile,omitempty"`
 	Model           string             `json:"model"`
 	Window          int                `json:"window"`
 	EstimatedTokens int                `json:"estimatedTokens"`
@@ -44,7 +47,7 @@ func contextEstimate(messages []llm.Message, tools []llm.Tool) (int, bool) {
 }
 func (s *Session) ContextStatus() (ContextStatus, error) {
 	s.mu.Lock()
-	result := ContextStatus{Model: s.config.Model.Model, Window: s.config.Model.ContextWindow, LastInputTokens: s.lastInputTokens, Records: []CompactionRecord{}}
+	result := ContextStatus{APIProtocol: string(s.config.Model.APIProtocol), ProtocolSource: s.config.Model.ProtocolSource, ServiceProfile: s.config.Model.ServiceProfile, Model: s.config.Model.Model, Window: s.config.Model.ContextWindow, LastInputTokens: s.lastInputTokens, Records: []CompactionRecord{}}
 	messages := append([]llm.Message(nil), s.messages...)
 	s.mu.Unlock()
 	result.EstimatedTokens, result.HasImages = contextEstimate(messages, s.llmTools())

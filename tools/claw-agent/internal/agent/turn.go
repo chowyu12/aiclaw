@@ -458,10 +458,11 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			continue
 		}
 		s.appendMessage(llm.Message{
-			ID:        response.LocalItemID,
-			Role:      llm.RoleAssistant,
-			Content:   response.Content,
-			ToolCalls: response.ToolCalls,
+			ID:            response.LocalItemID,
+			Role:          llm.RoleAssistant,
+			Content:       response.Content,
+			ToolCalls:     response.ToolCalls,
+			ProviderState: response.ProviderState,
 		})
 
 		if len(response.ToolCalls) == 0 {
@@ -582,10 +583,6 @@ func (s *Session) sample(
 		total.TotalTokens += response.Usage.TotalTokens
 
 		if err == nil {
-			s.mu.Lock()
-			s.lastInputTokens = response.Usage.InputTokens
-			s.estimateCompaction = false
-			s.mu.Unlock()
 			return response, nil
 		}
 		// 中断优先于一切：用户点了停止就别再重试了。
@@ -609,12 +606,6 @@ func (s *Session) sample(
 			if !s.dropOldest() {
 				return response, err
 			}
-			continue
-		case isAPIErr && apiErr.RejectsReasoningEffort() && s.dropReasoningEffort():
-			// 不认推理档位的上游（非推理模型、Azure）：去掉它重发一次，这个会话之后都不带。
-			// 不算一次重试——请求本身变了，不是在赌网络。
-			emitter.Notify("session/reasoningUpdated", map[string]any{"sessionId": s.ID, "reasoningEffort": ""})
-			s.notify(emitter, turnID, i18n.D("这个模型不支持推理档位参数，已去掉后重试。"))
 			continue
 		case isAPIErr && !apiErr.Retryable():
 			return response, err
@@ -646,17 +637,6 @@ func retryNotice(d time.Duration, attempt int, err error) string {
 	}
 	return i18n.D("模型调用失败，{seconds} 秒后重试（{attempt}/{max}）：{err}",
 		"seconds", int(d.Round(time.Second)/time.Second), "attempt", attempt, "max", maxModelRetries, "err", err)
-}
-
-// dropReasoningEffort 去掉这个会话的推理档位。已经没有了返回 false（再失败就不是它的事）。
-func (s *Session) dropReasoningEffort() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.config.Model.ReasoningEffort == "" {
-		return false
-	}
-	s.config.Model.ReasoningEffort = ""
-	return true
 }
 
 // backoffDelay 是第 n 次重试前等待的时长：1s、2s、4s、8s，封顶 30s，带抖动。
@@ -695,9 +675,10 @@ func (s *Session) callModel(
 	steps *stepCounter,
 	round int,
 ) (llm.Response, error) {
-	s.mu.Lock()
-	model, client := s.config.Model, s.llm
-	s.mu.Unlock()
+	model, client, err := s.samplingClient()
+	if err != nil {
+		return llm.Response{}, err
+	}
 	itemID := newID("msg")
 	started := false
 	var streamed strings.Builder
@@ -745,12 +726,13 @@ func (s *Session) callModel(
 	}
 
 	response, err := client.Stream(ctx, llm.Request{
-		Model:           model.Model,
-		Messages:        s.snapshotMessages(),
-		Tools:           s.llmTools(),
-		Temperature:     temperature,
-		MaxTokens:       model.MaxTokens,
-		ReasoningEffort: model.ReasoningEffort,
+		Model:               model.Model,
+		Messages:            s.snapshotMessages(),
+		Tools:               s.llmTools(),
+		Temperature:         temperature,
+		MaxTokens:           model.MaxTokens,
+		ReasoningEffort:     model.ReasoningEffort,
+		ReasoningPreference: !model.ReasoningExplicit,
 	}, func(delta llm.Delta) {
 		// 首字节：正文与推理哪个先来都算。慢在等模型还是慢在生成，
 		// 是两种完全不同的问题。
@@ -824,6 +806,12 @@ func (s *Session) callModel(
 		}
 		return response, err
 	}
+	s.mu.Lock()
+	if s.config.Model == model {
+		s.lastInputTokens = response.Usage.InputTokens
+		s.estimateCompaction = false
+	}
+	s.mu.Unlock()
 	// 只有产生了正文才发 completed；纯工具调用的轮次没有正文条目。
 	if started || response.Content != "" {
 		completeMessage(response.Content)

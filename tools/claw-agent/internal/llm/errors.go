@@ -41,7 +41,8 @@ func (e *Error) Unwrap() error { return e.Err }
 // 错误再收一遍，还要多花一次额度。
 func (e *Error) Retryable() bool {
 	for _, code := range strings.Fields(strings.ToLower(e.Code)) {
-		if code == "model_not_found" {
+		switch code {
+		case "model_not_found", "invalid_request_error", "invalid_argument", "authentication_error", "permission_error", "permission_denied", "unauthenticated", "not_found":
 			return false
 		}
 	}
@@ -104,29 +105,6 @@ var quotaMarkers = []string{
 func (e *Error) QuotaExhausted() bool {
 	lowered := strings.ToLower(e.Code + " " + e.Message)
 	for _, marker := range quotaMarkers {
-		if strings.Contains(lowered, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-// RejectsReasoningEffort 报告上游是不是因为不认 reasoning_effort 参数而拒绝了请求。
-//
-// 非推理模型（gpt-4o 这一类）与 Azure 会直接 400：Unsupported parameter:
-// 'reasoning_effort'。桌面端默认给每个模型都带推理档位，不认的上游就一轮都跑不起来。
-func (e *Error) RejectsReasoningEffort() bool {
-	if e.Status != 400 && e.Status != 422 {
-		return false
-	}
-	lowered := strings.ToLower(e.Message)
-	if strings.Contains(lowered, "reasoning_effort") || strings.Contains(lowered, "reasoning effort") {
-		return true
-	}
-	if !strings.Contains(lowered, "reasoning") {
-		return false
-	}
-	for _, marker := range []string{"not support", "unsupported", "unrecognized", "unknown", "invalid", "不支持"} {
 		if strings.Contains(lowered, marker) {
 			return true
 		}

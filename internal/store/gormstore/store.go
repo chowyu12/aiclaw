@@ -84,6 +84,7 @@ func New(cfg config.DatabaseConfig) (*GormStore, error) {
 }
 
 func autoMigrate(db *gorm.DB) error {
+	legacyRouting := db.Migrator().HasTable(&model.Provider{}) && !db.Migrator().HasColumn(&model.Provider{}, "routing_mode")
 	if err := dropReplacedIndexes(db); err != nil {
 		return err
 	}
@@ -106,6 +107,13 @@ func autoMigrate(db *gorm.DB) error {
 		&model.AppSetting{},
 	); err != nil {
 		return err
+	}
+	if legacyRouting {
+		// Older Claude/Gemini presets explicitly meant OpenAI-compatible endpoints.
+		// Preserve those contracts, and any explicit native protocol from development builds.
+		if err := db.Model(&model.Provider{}).Where("api_protocol <> ? OR type IN ?", model.APIChatCompletions, []model.ProviderType{model.ProviderClaude, model.ProviderGemini}).Update("routing_mode", "manual").Error; err != nil {
+			return err
+		}
 	}
 	return migrateChannelConnections(db)
 }

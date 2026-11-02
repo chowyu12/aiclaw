@@ -34,7 +34,7 @@ const maxAudioBytes = 25 << 20
 //
 // 兼容两种返回：b64_json（直接给字节）与 url（再去下一次）。DashScope、
 // OpenAI 走前者，有些网关走后者——两种都认，省得用户按服务挑写法。
-func (c *Client) GenerateImage(ctx context.Context, model, prompt, size string) ([]byte, error) {
+func (c *Client) openAIGenerateImage(ctx context.Context, model, prompt, size string) ([]byte, error) {
 	if c.dialect == dialectDashScope {
 		return c.dashScopeGenerateImage(ctx, model, prompt, size)
 	}
@@ -79,7 +79,7 @@ func (c *Client) GenerateImage(ctx context.Context, model, prompt, size string) 
 }
 
 // Transcribe 把一段音频转成文字。name 只用来让服务端认出格式。
-func (c *Client) Transcribe(ctx context.Context, model, name string, audio []byte) (string, error) {
+func (c *Client) openAITranscribe(ctx context.Context, model, name string, audio []byte) (string, error) {
 	if len(audio) > maxAudioBytes {
 		return "", i18n.E("音频太大（{size} MB，上限 {limit} MB）", "size", fmt.Sprintf("%.1f", float64(len(audio))/(1<<20)), "limit", maxAudioBytes>>20)
 	}
@@ -125,7 +125,7 @@ func (c *Client) Transcribe(ctx context.Context, model, name string, audio []byt
 }
 
 // Speak 把文字读成音频，返回音频字节与格式后缀。
-func (c *Client) Speak(ctx context.Context, model, text, voice string) ([]byte, string, error) {
+func (c *Client) openAISpeak(ctx context.Context, model, text, voice string) ([]byte, string, error) {
 	if c.dialect == dialectDashScope {
 		return c.dashScopeSpeak(ctx, model, text, voice)
 	}
@@ -176,22 +176,24 @@ func (c *Client) postJSONTo(ctx context.Context, target string, payload []byte) 
 func (c *Client) do(request *http.Request) ([]byte, error) {
 	response, err := c.http.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.D("请求失败"), err)
+		return nil, &Error{Message: i18n.D("请求失败"), Err: err}
 	}
 	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, 64<<20))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", i18n.D("读取响应失败"), err)
-	}
 	if response.StatusCode != http.StatusOK {
-		message := upstreamMessage(body)
-		if message == "" && response.StatusCode == http.StatusNotFound {
-			// 空的 404 几乎只有一个意思：这个端点没有这条路。说出来，模型才不会
-			// 换个尺寸再试三次。
-			message = i18n.D("这个端点没有 {path} 这条接口，这家服务的这个能力可能要走别的地址", "path", request.URL.Path)
+		apiErr := readErrorBody(response)
+		if apiErr.Message == "" && response.StatusCode == http.StatusNotFound {
+			apiErr.Message = i18n.D("这个端点没有 {path} 这条接口，这家服务的这个能力可能要走别的地址", "path", request.URL.Path)
 		}
-		return nil, i18n.E("上游返回 {status}：{message}", "status", response.StatusCode, "message", message)
+		return nil, apiErr
 	}
+	body, err := io.ReadAll(io.LimitReader(response.Body, (64<<20)+1))
+	if err != nil {
+		return nil, &Error{Message: i18n.D("读取响应失败"), Err: err}
+	}
+	if len(body) > 64<<20 {
+		return nil, incompleteNative("media exceeds 64 MiB")
+	}
+
 	return body, nil
 }
 
@@ -202,7 +204,9 @@ func (c *Client) fetch(ctx context.Context, url string) ([]byte, error) {
 		return nil, err
 	}
 	// 不带 Authorization：那是图床的临时地址，把 Key 发给第三方没有道理。
-	response, err := c.http.Do(request)
+	unsigned := *c.http
+	unsigned.CheckRedirect = nil // Signed CDN download URLs may redirect; no API auth is attached.
+	response, err := unsigned.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.D("下载生成的图片失败"), err)
 	}

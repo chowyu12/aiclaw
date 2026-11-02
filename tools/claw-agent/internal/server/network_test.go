@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,34 @@ import (
 	"testing"
 	"time"
 )
+
+func TestNativeNetworkDiagnosticsUseProtocolCatalog(t *testing.T) {
+	for _, api := range []model.APIProtocol{model.APIAnthropic, model.APIGemini} {
+		t.Run(string(api), func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/native/models" || r.Method != "GET" || r.Header.Get("Authorization") != "" {
+					t.Error("diagnostic ignored native protocol")
+				}
+				if api == model.APIAnthropic {
+					if r.Header.Get("x-api-key") != "fixture" {
+						t.Error("missing Claude diagnostic auth")
+					}
+					w.Write([]byte(`{"data":[{"id":"fixture"}]}`))
+				} else {
+					if r.Header.Get("x-goog-api-key") != "fixture" {
+						t.Error("missing Gemini diagnostic auth")
+					}
+					w.Write([]byte(`{"models":[{"name":"models/fixture"}]}`))
+				}
+			}))
+			defer srv.Close()
+			report := probeNetwork(context.Background(), protocol.ModelConfig{APIProtocol: api, BaseURL: srv.URL + "/native", Model: "fixture"}, "fixture", srv.Client())
+			if !strings.Contains(report, "PASS model") || strings.Contains(report, srv.URL) {
+				t.Fatal(report)
+			}
+		})
+	}
+}
 
 func TestNetworkDiagnosticsStayOnConfiguredCatalogAndOmitSecrets(t *testing.T) {
 	const secret = "synthetic-diagnostic-key"

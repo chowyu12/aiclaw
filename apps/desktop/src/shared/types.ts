@@ -95,7 +95,22 @@ export interface HistoryItemView {
  * 一个模型服务：OpenAI 兼容端点 + Key + 模型清单。与 agent-client 的
  * ProviderView 同形；Key 只进不出，这里只有 apiKeySet 一位。
  */
+export type APIProtocol = "chat-completions" | "responses" | "anthropic-messages" | "gemini";
+
+export interface ModelRouteView {
+ apiProtocol: APIProtocol;
+ source: string;
+ sourceUrl?: string;
+ capabilities: {tools?:string;vision?:string;reasoning?:string;reasoningEfforts?:string};
+}
+
 export interface ProviderView {
+ defaultBaseUrl?:string;
+ routingMode?: "auto" | "manual";
+ serviceProfile?: string;
+ modelOverrides?: Record<string, APIProtocol>;
+ modelRoutes?: Record<string, ModelRouteView>;
+  apiProtocol?: APIProtocol;
   id: number;
   name: string;
   /** openai / qwen / kimi / openrouter / openai-compatible / claude / gemini */

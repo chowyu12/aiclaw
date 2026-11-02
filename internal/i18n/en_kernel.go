@@ -92,7 +92,7 @@ func init() {
 		"回答在模型的输出长度上限处被截断了，后面的内容没有生成。可以让它接着说，或把问题拆小。":  "The reply was cut off at the model's output length limit, so the rest wasn't generated. Ask it to continue, or break the question into smaller parts.",
 		"已完成 {n} 次模型循环，进度已保存，继续执行；可随时停止。":              "Completed {n} model iterations. Progress saved; continuing. You can stop at any time.",
 		"历史超出模型上下文，正在压缩后重试。":                           "The history exceeds the model's context window. Compacting and retrying.",
-		"这个模型不支持推理档位参数，已去掉后重试。":                        "This model doesn't support the reasoning effort parameter. Retrying without it.",
+		"Responses 返回不完整，已保留部分回答，未执行工具调用。":             "The Responses stream was incomplete. Partial text was retained; no tool calls were executed.",
 		"模型调用失败，马上重试（{attempt}/{max}）：{err}":           "Model call failed. Retrying now ({attempt}/{max}): {err}",
 		"模型调用失败，{seconds} 秒后重试（{attempt}/{max}）：{err}": "Model call failed. Retrying in {seconds}s ({attempt}/{max}): {err}",
 		"错误：{err}":      "Error: {err}",

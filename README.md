@@ -234,11 +234,19 @@ Memory has two layers:
   stdio and HTTP transports. Other calls can keep using the connection; the remote server
   must support cancellation for its work to stop.
 - A provider `model_not_found` code stops retries, including errors delivered in a stream.
-  The original provider message is retained. This does not add a Responses or WebSocket transport.
+  The original provider message is retained.
+- Model services use automatic service strategies: OpenRouter follows the gateway contract;
+  direct OpenAI/Azure use sourced model routing rules; Claude and Gemini use native protocols.
+  Unknown compatible gateways retain Chat Completions. Service and model protocol overrides
+  are available in Advanced settings. Each sampling resolves fresh configuration while
+  in-flight requests retain their snapshot. Explicit OpenRouter capability metadata is cached;
+  absent fields remain unknown. Known unsupported capabilities fail before a generation request.
+  Native reasoning state is replayed only to the same service, protocol, endpoint, and model.
+  See [the model service design](docs/design/model-services.md) for routing and migration details.
 - In the desktop model menu, choose Model default, low, medium or high reasoning effort for
   the current session. Changes are saved and acknowledged before the selection updates and
   apply from the next model request, including the next sampling within a running turn.
-  Support depends on the provider; rejection falls back to the model default with a notice.
+  Application defaults are preferences, applied only when model metadata confirms support; otherwise the model default is used without changing the saved preference. Session choices are persisted as explicit overrides; rejected explicit parameters report an error and retain their value. Model default omits protocol-specific reasoning settings.
 - In Settings → Memory, choose Import memory on the global or workspace card and select
   a UTF-8 text/Markdown file. Select entries, review the merged text, then confirm to save.
   Text duplicates are skipped; semantic conflicts need manual review. Existing memory is

@@ -9,7 +9,10 @@
 // 这里十几种就够了。
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"github.com/chowyu12/aiclaw/internal/model"
+)
 
 // ---------- 宿主 → agent 的请求 ----------
 
@@ -269,16 +272,22 @@ type InitializeResult struct {
 // ModelConfig 是打模型所需的全部配置。
 //
 // APIKey 不在这里——它不经过协议帧，免得凭据出现在宿主的日志或崩溃转储里。
-// 填了 ProviderID 时，Key 与端点由内核按 id 到模型配置库里查（见 providers 包）；
+// 填了 ProviderID 时，Key、协议与端点由内核按 id 到模型配置库里查（见 providers 包）；
 // 没填时退回进程环境变量 AICLAW_LLM_KEY 与这里的 BaseURL。
 type ModelConfig struct {
-	/** 模型服务的 id。填了它，BaseURL 以库里的为准，传来的会被盖掉。 */
-	ProviderID      int64   `json:"providerId,omitempty"`
-	BaseURL         string  `json:"baseUrl"`
-	Model           string  `json:"model"`
-	ReasoningEffort string  `json:"reasoningEffort,omitempty"`
-	Temperature     float64 `json:"temperature,omitempty"`
-	MaxTokens       int     `json:"maxTokens,omitempty"`
+	ProtocolSource string                  `json:"protocolSource,omitempty"`
+	ServiceProfile string                  `json:"serviceProfile,omitempty"`
+	Capabilities   model.ModelCapabilities `json:"capabilities,omitempty"`
+	/** 模型服务的 id。填了它，BaseURL 与 APIProtocol 以库里的为准。 */
+	ProviderID      int64             `json:"providerId,omitempty"`
+	APIProtocol     model.APIProtocol `json:"apiProtocol,omitempty"`
+	BaseURL         string            `json:"baseUrl"`
+	Model           string            `json:"model"`
+	ReasoningEffort string            `json:"reasoningEffort,omitempty"`
+	// Legacy/global effort values are preferences; explicit session choices are strict.
+	ReasoningExplicit bool    `json:"reasoningExplicit,omitempty"`
+	Temperature       float64 `json:"temperature,omitempty"`
+	MaxTokens         int     `json:"maxTokens,omitempty"`
 	/**
 	 * 模型的上下文窗口（token）。用于在撑满之前主动压缩历史。
 	 *
@@ -291,14 +300,27 @@ type ModelConfig struct {
 
 // ---------- 模型服务 ----------
 //
-// 一个模型服务是一个 OpenAI 兼容端点加它的 Key 与模型清单。会话按 id 选。
+// 一个模型服务保存显式 API 协议、端点、Key 与模型清单。会话按 id 选。
 // Key 只进库不出库：这里只有 APIKeySet 一位。
 
+type ModelRouteView struct {
+	APIProtocol  model.APIProtocol       `json:"apiProtocol"`
+	Source       string                  `json:"source"`
+	SourceURL    string                  `json:"sourceUrl,omitempty"`
+	Capabilities model.ModelCapabilities `json:"capabilities"`
+}
+
 type ProviderView struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	DefaultBaseURL string                       `json:"defaultBaseUrl,omitempty"`
+	RoutingMode    string                       `json:"routingMode"`
+	ServiceProfile string                       `json:"serviceProfile"`
+	ModelOverrides map[string]model.APIProtocol `json:"modelOverrides"`
+	ModelRoutes    map[string]ModelRouteView    `json:"modelRoutes"`
+	ID             int64                        `json:"id"`
+	Name           string                       `json:"name"`
 	/** openai / qwen / kimi / openrouter / openai-compatible / claude / gemini */
-	Type string `json:"type"`
+	Type        string            `json:"type"`
+	APIProtocol model.APIProtocol `json:"apiProtocol"`
 	/** 空表示用该类型的默认端点。 */
 	BaseURL   string `json:"baseUrl"`
 	APIKeySet bool   `json:"apiKeySet"`
@@ -315,23 +337,29 @@ type ProviderListResult struct {
 }
 
 type ProviderCreateParams struct {
-	Name    string   `json:"name"`
-	Type    string   `json:"type,omitempty"`
-	BaseURL string   `json:"baseUrl,omitempty"`
-	APIKey  string   `json:"apiKey,omitempty"`
-	Models  []string `json:"models,omitempty"`
-	Enabled *bool    `json:"enabled,omitempty"`
+	RoutingMode    string                       `json:"routingMode,omitempty"`
+	ModelOverrides map[string]model.APIProtocol `json:"modelOverrides,omitempty"`
+	APIProtocol    model.APIProtocol            `json:"apiProtocol,omitempty"`
+	Name           string                       `json:"name"`
+	Type           string                       `json:"type,omitempty"`
+	BaseURL        string                       `json:"baseUrl,omitempty"`
+	APIKey         string                       `json:"apiKey,omitempty"`
+	Models         []string                     `json:"models,omitempty"`
+	Enabled        *bool                        `json:"enabled,omitempty"`
 }
 
 // ProviderUpdateParams 里 nil 的字段不动。APIKey 指向空串表示清掉。
 type ProviderUpdateParams struct {
-	ID      int64    `json:"id"`
-	Name    *string  `json:"name,omitempty"`
-	Type    *string  `json:"type,omitempty"`
-	BaseURL *string  `json:"baseUrl,omitempty"`
-	APIKey  *string  `json:"apiKey,omitempty"`
-	Models  []string `json:"models,omitempty"`
-	Enabled *bool    `json:"enabled,omitempty"`
+	RoutingMode    *string                      `json:"routingMode,omitempty"`
+	ModelOverrides map[string]model.APIProtocol `json:"modelOverrides,omitempty"`
+	APIProtocol    *model.APIProtocol           `json:"apiProtocol,omitempty"`
+	ID             int64                        `json:"id"`
+	Name           *string                      `json:"name,omitempty"`
+	Type           *string                      `json:"type,omitempty"`
+	BaseURL        *string                      `json:"baseUrl,omitempty"`
+	APIKey         *string                      `json:"apiKey,omitempty"`
+	Models         []string                     `json:"models,omitempty"`
+	Enabled        *bool                        `json:"enabled,omitempty"`
 }
 
 type ProviderIDParams struct {

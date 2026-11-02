@@ -9,6 +9,11 @@
 export type ApprovalPolicy = "auto" | "on-write" | "always" | "never" | "bypass";
 
 export interface ModelConfig {
+ reasoningExplicit?:boolean;
+ protocolSource?:string;
+ serviceProfile?:string;
+ capabilities?:ModelRouteView["capabilities"];
+  apiProtocol?: APIProtocol;
   /**
    * 模型服务的 id。填了它，Key 与端点由内核按 id 到模型配置库里查，
    * baseUrl 传什么都会被库里的盖掉；不填则走进程环境变量的 Key 与这里的 baseUrl。
@@ -150,7 +155,22 @@ export interface SessionRefresh {
  * 一个模型服务：OpenAI 兼容端点 + Key + 模型清单。会话按 id 选。
  * Key 只进库不出库——这里只有 apiKeySet 一位。
  */
+export type APIProtocol = "chat-completions" | "responses" | "anthropic-messages" | "gemini";
+
+export interface ModelRouteView {
+ apiProtocol: APIProtocol;
+ source: string;
+ sourceUrl?: string;
+ capabilities: {tools?:string;vision?:string;reasoning?:string;reasoningEfforts?:string};
+}
+
 export interface ProviderView {
+ defaultBaseUrl?:string;
+ routingMode?: "auto" | "manual";
+ serviceProfile?: string;
+ modelOverrides?: Record<string, APIProtocol>;
+ modelRoutes?: Record<string, ModelRouteView>;
+  apiProtocol?: APIProtocol;
   id: number;
   name: string;
   /** openai / qwen / kimi / openrouter / openai-compatible / claude / gemini */
@@ -163,6 +183,9 @@ export interface ProviderView {
 }
 
 export interface ProviderCreateParams {
+ routingMode?: "auto" | "manual";
+ modelOverrides?: Record<string,APIProtocol>;
+  apiProtocol?: APIProtocol;
   name: string;
   type?: string;
   baseUrl?: string;
@@ -173,6 +196,9 @@ export interface ProviderCreateParams {
 
 /** 没给的字段不动；apiKey 给空串表示清掉。 */
 export interface ProviderUpdateParams {
+ routingMode?: "auto" | "manual";
+ modelOverrides?: Record<string,APIProtocol>;
+  apiProtocol?: APIProtocol;
   id: number;
   name?: string;
   type?: string;
@@ -760,7 +786,7 @@ export interface MCPOAuthStatus { state: "connected" | "expired" | "needs_login"
 
 export interface SearchSource { title: string; url: string; snippet: string; }
 
-export interface ContextStatus { model: string; window: number; estimatedTokens: number; lastInputTokens: number; hasImages: boolean; compactions: number; records: {at:number;before:number;after:number}[]; }
+export interface ContextStatus { apiProtocol?:string; protocolSource?:string; serviceProfile?:string; model: string; window: number; estimatedTokens: number; lastInputTokens: number; hasImages: boolean; compactions: number; records: {at:number;before:number;after:number}[]; }
 
 /** Application configuration is a desktop-only host capability. Values never carry credentials. */
 export interface AppConfigRequest {

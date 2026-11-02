@@ -34,6 +34,7 @@ const number=(value:number)=>value.toLocaleString();
   <div v-if="opened" class="context-details">
    <header><strong>{{ t('上下文用量') }}</strong><button @click="load">{{ t('刷新') }}</button><button :aria-label="t('关闭上下文详情')" @click="opened=false">×</button></header>
    <template v-if="status">
+    <p v-if="status.apiProtocol" :title="status.protocolSource">{{ t('实际调用协议') }}：{{ status.apiProtocol }} · {{ status.serviceProfile }}</p>
     <p>{{ t('当前文本及工具定义估算：约 {tokens} Token',{tokens:number(status.estimatedTokens)}) }}</p>
     <p>{{ status.window>0?t('配置的上下文窗口：{tokens} Token',{tokens:number(status.window)}):t('上下文窗口未配置，无法计算剩余空间。') }}</p>
     <p v-if="remaining!==null">{{ t('估算剩余：约 {tokens} Token',{tokens:number(remaining)}) }}</p>

@@ -53,7 +53,9 @@ app.whenReady().then(async()=>{
  handle('groupDelete',(_e,id)=>{groups.groups=groups.groups.filter(p=>p.id!==id);for(const key of Object.keys(groups.assignments))if(groups.assignments[key]===id)delete groups.assignments[key];return groups;});
  handle('sessionAssign',(_e,input)=>{if(input.groupId)groups.assignments[input.sessionId]=input.groupId;else delete groups.assignments[input.sessionId];return groups;});
  handle('groupRead',()=>groups);handle('groupCollapse',(_e,input)=>{groups.collapsed[input.groupId]=input.collapsed;groups.seenAt[input.groupId]=Date.now();return groups;});handle('sessionSearch',()=>list().filter(s=>!s.parentId));handle('mcpRead',()=>mcpServers);handle('skillList',()=>{if(skillListFails)throw Error('skill list unavailable');return skillCatalog;});
- handle('providerList',()=>[{id:1,name:'fixture',type:'openai-compatible',enabled:true,apiKeySet:true,models:['test','test2']}]);
+ let providerFixture={id:1,name:'fixture',type:'openai-compatible',baseUrl:'https://fixture.invalid/v1',apiProtocol:'chat-completions',routingMode:'auto',serviceProfile:'openai-compatible',modelOverrides:{},modelRoutes:{test:{apiProtocol:'chat-completions',source:'service:openai-compatible',capabilities:{}}},enabled:true,apiKeySet:true,models:['test','test2']},providerSaveFails=false;const providerUpdates=[];
+ handle('providerList',()=>[providerFixture]);
+ handle('providerUpdate',(_event,input)=>{providerUpdates.push(input);if(providerSaveFails)throw Error('fixture protocol save failed');providerFixture={...providerFixture,...input};return providerFixture;});
  handle('sessionRename',(_e,input)=>{renameCalls.push(input);if(renameFails)throw Error('rename failure');sessionTitle=input.title;return {sessionId:input.sessionId,title:sessionTitle};});
  handle('sessionWorkspace',(_e,input)=>{sessionWorkspace=input.workspace || '/fixture/home/aiclaw';return sessionWorkspace;});handle('pickDirectory',()=>documentDirectory());handle('workspaceReveal',(_e,path)=>{revealedWorkspaces.push(path);});handle('sessionStart',(_e,input)=>{startedWorkspaces.push(input.workspace);const session={id:'new-workspace-'+newSessions.length,title:'Workspace new chat',workdir:input.workspace,model:'test',turnCount:0,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()};newSessions.push(session);if(input.projectId)groups.assignments[session.id]=input.projectId;return {sessionId:session.id,workspace:input.workspace,tools:[],mcpStatus:{},model:'test',providerId:1};});handle('sessionArchive',(_e,input)=>{archiveCalls.push(input.sessionId);const ids=[input.sessionId,...list().filter(s=>s.parentId===input.sessionId).map(s=>s.id)];ids.forEach(id=>archivedIds.add(id));return ids;});handle('sessionList',list);handle('sessionArchived',()=>[]);
  handle('configurationPending',()=>configurationCards);handle('configurationRespond',(_e,reply)=>{configurationReplies.push(reply);configurationCards=configurationCards.filter(c=>c.id!==reply.id);win.webContents.send(IPC.onConfiguration,configurationCards);return {text:reply.cancel?'Cancelled.':'Configuration saved. Connection test passed.'};});handle('searchList',()=>[]);handle('pluginList',()=>pluginFixtures);handle('pluginConfig',()=>[]);handle('pluginContributions',()=>({mcpServers:{},skills:[],computerUse:false}));handle('channelStatus',()=>[]);handle('channelBindings',()=>bindingFixtures);handle('channelAuthorize',(_e,input)=>{channelAuthorizations.push(input);const binding=bindingFixtures.find(b=>b.externalKey===input.externalKey);Object.assign(binding,{approvalPolicy:input.approvalPolicy,allowed:true});});handle('approvalPending',()=>[]);handle('questionPending',()=>[]);handle('scheduleList',()=>{if(schedulesFail)throw Error('fixture task storage damaged; original preserved');return tasks;});
@@ -97,6 +99,27 @@ app.whenReady().then(async()=>{
  for(const [view,label] of [['providers','模型服务'],['skills','技能'],['schedules','定时任务']]){
   await js(`document.querySelector('.activity-rail [data-view="${view}"]').click()`);
   check('navigation shortcut opens '+view+' settings with one active entry',await wait(`document.querySelector('.page h2')?.textContent.trim()===${JSON.stringify(label)} && document.querySelector('.activity-rail [data-view="${view}"]').getAttribute('aria-pressed')==='true' && document.querySelectorAll('.activity-rail [aria-pressed="true"]').length===1`));
+  if(view==='providers'){
+   await js("document.querySelector('.disclose').click()");
+   check('provider hides protocol controls behind advanced settings by default',await js("!document.querySelector('.provider-protocol') && !document.querySelector('.provider-routing') && !document.querySelector('.model-protocol') && !!document.querySelector('.model-route')"));
+   await js("document.querySelector('.provider-advanced').click()");
+   check('automatic service strategy requires no per-model protocol selection',await wait("document.querySelector('.provider-routing')?.value==='auto' && !document.querySelector('.provider-protocol') && document.querySelector('.model-protocol')?.value===''") );
+   await js("(()=>{const s=document.querySelector('.provider-routing');s.value='manual';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   check('provider protocol is explicit and exposes four native API choices',await wait("document.querySelector('.provider-protocol')?.options.length===4 && document.querySelector('.provider-protocol').value==='chat-completions'"));
+   await js("(()=>{const s=document.querySelector('.provider-protocol');s.value='responses';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   check('saving a provider protocol keeps endpoint key and model catalog unchanged',await wait("document.querySelector('.provider-protocol')?.value==='responses'")&&providerFixture.apiProtocol==='responses'&&providerFixture.baseUrl==='https://fixture.invalid/v1'&&providerFixture.apiKeySet&&providerFixture.models.join('|')==='test|test2'&&Object.keys(providerUpdates.at(-1)).sort().join('|')==='apiProtocol|id');
+   providerSaveFails=true;
+   await js("(()=>{const s=document.querySelector('.provider-protocol');s.value='gemini';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   check('failed protocol persistence retains the previous selection and provider state',await wait("document.querySelector('.provider-protocol')?.value==='responses' && document.body.innerText.includes('fixture protocol save failed')")&&providerFixture.apiProtocol==='responses');
+   providerSaveFails=false;
+   await js("(()=>{const s=document.querySelector('.model-protocol');s.value='gemini';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   check('advanced model override stores only the exception',await wait("document.querySelector('.model-protocol')?.value==='gemini'")&&providerFixture.modelOverrides.test==='gemini'&&providerFixture.apiProtocol==='responses');
+   await js("(()=>{const s=document.querySelector('.model-protocol');s.value='';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   check('clearing an override returns the model to automatic routing',await wait("document.querySelector('.model-protocol')?.value===''")&&!Object.keys(providerFixture.modelOverrides).length);
+
+   await js("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='知道了')?.click()");
+  }
+
  }
  await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
  check('home returns from settings shortcuts to the current conversation',await wait("!!document.querySelector('.composer') && document.querySelector('.sidebar').getBoundingClientRect().width===300 && document.querySelector('.chat-header')?.textContent.includes('Workflow test')"));

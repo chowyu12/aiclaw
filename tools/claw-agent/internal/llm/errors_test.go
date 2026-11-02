@@ -78,28 +78,6 @@ func TestQuotaExhaustedIsNotRetried(t *testing.T) {
 	}
 }
 
-func TestRejectsReasoningEffort(t *testing.T) {
-	yes := []*Error{
-		{Status: 400, Message: "Unsupported parameter: 'reasoning_effort' is not supported with this model."},
-		{Status: 400, Message: "Unrecognized request argument supplied: reasoning_effort"},
-		{Status: 422, Message: "reasoning is not supported for this model"},
-	}
-	for _, err := range yes {
-		if !err.RejectsReasoningEffort() {
-			t.Errorf("应认出是推理档位参数被拒：%q", err.Message)
-		}
-	}
-	no := []*Error{
-		{Status: 400, Message: "Invalid value for 'temperature'"},
-		{Status: 500, Message: "reasoning_effort internal error"},
-	}
-	for _, err := range no {
-		if err.RejectsReasoningEffort() {
-			t.Errorf("不该当成推理档位被拒：%+v", err)
-		}
-	}
-}
-
 func TestParseRetryAfter(t *testing.T) {
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
 	cases := map[string]time.Duration{
