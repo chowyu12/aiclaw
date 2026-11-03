@@ -24,6 +24,8 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - name: Download Electron for desktop smoke
+        run: npm run setup:electron
       - name: Go format, vet, no-cgo probe
         run: make fmt-check vet nocgo
       - name: Go tests

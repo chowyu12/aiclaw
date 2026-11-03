@@ -202,7 +202,9 @@ Runtimes, a persistent Python virtual environment with pip, npm global packages,
 
 ## Development
 
-Requires Go 1.27+ and Node 22+.
+Requires Go 1.27+ and Node 22.12+. Electron is pinned to 45.2.1; its binary is downloaded on the first launch, or explicitly with `npm run setup:electron` after installing dependencies. macOS packages require macOS 13 or later.
+
+macOS system notifications require a signed build with this Electron version. The current unsigned packages cannot display scheduled-task system notifications; results remain available in the app.
 
 ```bash
 make dev       # build and launch the app

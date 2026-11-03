@@ -139,7 +139,9 @@ macOS（Apple Silicon / Intel）、Windows x64、Linux x64 会在后台准备应
 
 ## 开发
 
-需要 Go 1.27+ 与 Node 22+。
+需要 Go 1.27+ 与 Node 22.12+。Electron 固定为 45.2.1，二进制在首次启动时下载，也可在安装依赖后执行 `npm run setup:electron` 提前准备。macOS 安装包要求 macOS 13 或更高版本。
+
+此版本 Electron 的 macOS 系统通知要求应用签名。目前的未签名安装包无法显示定时任务系统通知，执行结果仍可在应用内查看。
 
 ```bash
 make dev      # 编译并起应用

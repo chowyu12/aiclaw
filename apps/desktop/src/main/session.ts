@@ -360,7 +360,7 @@ export class SessionManager extends EventEmitter {
       return;
     }
     const dir = extensionDir();
-    clipboard.writeText(dir);
+    await clipboard.writeText(dir);
     await shell.openPath(dir);
     // 经 `open -a` 交给系统启动服务：浏览器在跑就在它里面开一个标签页，没跑就先启动它。
     await run("open", ["-a", browser.app, browser.extensionsPage]).catch(async () => {

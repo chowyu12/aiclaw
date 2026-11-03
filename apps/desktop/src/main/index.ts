@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences } from "electron";
 import { randomUUID } from "node:crypto";
 import { projectWorkspace } from "./workspace-defaults.js";
 import { normalizeProject, type ProjectInput } from "../shared/projects.js";
@@ -264,7 +264,7 @@ function registerIpc(): void {
     if (failure) throw new Error(tr("打不开扩展目录 {dir}：{reason}", { dir, reason: failure }));
     return dir;
   });
-  ipcMain.handle(IPC.clipboardWrite, (_event, text: unknown, html?: unknown) => {
+  ipcMain.handle(IPC.clipboardWrite, async (_event, text: unknown, html?: unknown) => {
     // 只收字符串，而且有上限：渲染层展示的是模型输出，不该借这个口子往剪贴板里
     // 塞任意大小的东西。一段回答再长也到不了这个数。
     if (typeof text !== "string") throw new Error(tr("只能复制文本"));
@@ -272,9 +272,9 @@ function registerIpc(): void {
     // 同时放一份 HTML：粘进 Word、飞书、邮件这类富文本应用时保留标题、列表、表格；
     // 粘进纯文本的地方拿到的仍是 Markdown 原文（与 Codex 0.154 同一个改进）。
     if (typeof html === "string" && html && html.length <= 4_000_000) {
-      clipboard.write({ text, html });
+      await clipboard.write([new ClipboardItem({ "text/plain": text, "text/html": html })]);
     } else {
-      clipboard.writeText(text);
+      await clipboard.writeText(text);
     }
     return true;
   });

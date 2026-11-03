@@ -196,7 +196,7 @@ test("活动摘要只汇总已完成的操作，运行和失败不冒充成功",
     step("run", { title: "exec · 验证修复", state: "running" }),
     step("write", { title: "write_file", state: "failed" }),
   ])[0]!.steps;
-  assert.equal(activitySummary(steps), "读取了 1 项内容 · 有操作失败 · 正在执行：验证修复");
+  assert.equal(activitySummary(steps), "读取了 1 项内容\n有操作失败\n正在执行：验证修复");
   assert.equal(activitySummary([{ ...steps[0]!, step: "llm", state: "running" }]), "正在思考…");
   assert.equal(activitySummary([{ ...steps[0]!, step: "llm", state: "failed" }]), "处理失败");
 });

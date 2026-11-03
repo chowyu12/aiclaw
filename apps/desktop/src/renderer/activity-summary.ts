@@ -38,5 +38,5 @@ export function activitySummary(steps: readonly StepEntry[]): string {
     const action = active?.title.split(" · ").slice(1).join(" · ");
     labels.push(action ? tr("正在执行：{action}", { action }) : tr("正在处理…"));
   }
-  return labels.join(" · ");
+  return labels.join("\n");
 }
