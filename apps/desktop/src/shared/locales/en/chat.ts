@@ -1,5 +1,13 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "在系统 Shell 中执行（不使用沙箱）": "Run in system shell without sandbox",
+  "运行命令": "Run",
+  "停止中…": "Stopping…",
+  "启动中…": "Starting…",
+  "命令执行中…": "Running…",
+  "已停止": "Stopped",
+  "命令执行失败": "Execution failed",
+  "退出码：{code}": "Exit code: {code}",
  "工作区目录": "Workspace directories",
  "移除目录": "Remove directory",
  "未添加目录，默认使用 ~/aiclaw": "No directories added; defaults to ~/aiclaw",

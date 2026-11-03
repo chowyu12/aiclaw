@@ -109,6 +109,8 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - name: Test system shell execution on Windows
+        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-command-runner.ts
       - uses: actions/download-artifact@v4
         with:
           name: aiclaw-packages

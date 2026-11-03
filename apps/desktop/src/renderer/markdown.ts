@@ -61,12 +61,19 @@ function isSafeHref(href: string): boolean {
  *
  * 扩展名要求字母开头是为了挡住版本号：`v0.1.5` 的 `.5` 不算扩展名。
  */
+function isCommand(text: string): boolean {
+  return /^(?:(?:\/[^\s]+\/)?(?:python(?:[0-9]+(?:\.[0-9]+)*)?|node|npm|npx|pip(?:[0-9]+)?|bash|sh|zsh|git|go|ruby|perl|java|ls|pwd|cd|echo|printf|cat|grep|rg|find|sed|awk|curl|wget|docker|kubectl|make|cargo|rustc|yarn|pnpm|bun|nvm|brew|pytest|pipx|dotnet|gradle|mvn|ssh|scp|tar|unzip|dir|powershell|pwsh))(?:\s|$)/i.test(text.trim())
+    || /^\$\s+\S/.test(text.trim());
+}
+
 export function looksLikePath(raw: string): boolean {
   const text = raw.trim();
   if (!text || text.length > 400) return false;
   // 带协议的是链接不是路径，交给 markdown 的链接那条路。
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return false;
   if (/[<>|*?"\n\r]/.test(text)) return false;
+  // Executable references and command lines are code, even when an argument ends in .py.
+  if (isCommand(text)) return false;
   // 纯粹的命令行：有空格且不以扩展名收尾的，一律不认。
   const hasExtension = /\.[A-Za-z][A-Za-z0-9]{0,7}$/.test(text);
   const hasPathPrefix = /^(?:\/(?!\/)|\.{1,2}[\\/]|~[\\/]|[A-Za-z]:[\\/]|\\\\[^\\]+\\)/.test(text);
@@ -161,7 +168,9 @@ md.renderer.rules.fence = (tokens, index) => {
   const token = tokens[index]!;
   const lang = token.info.trim().split(/\s+/)[0] ?? "";
   const attr = lang ? ` data-lang="${md.utils.escapeHtml(lang)}"` : "";
-  return `<pre${attr}><code>${md.utils.escapeHtml(token.content)}</code></pre>\n`;
+  const lines = token.content.split("\n").map(line => line.trim()).filter(Boolean);
+  const kind = /^(?:sh|bash|zsh|shell|console|terminal|powershell|pwsh|cmd)$/i.test(lang) || (!lang && lines.length > 0 && lines.every(isCommand)) ? "command-block" : "code-block";
+  return `<pre class="${kind}"${attr}><code>${md.utils.escapeHtml(token.content)}</code></pre>\n`;
 };
 
 /**
@@ -177,7 +186,7 @@ md.renderer.rules.fence = (tokens, index) => {
  */
 md.renderer.rules.code_inline = (tokens, index, _options, env) => {
   const text = tokens[index]!.content;
-  if (!looksLikePath(text)) return `<code>${md.utils.escapeHtml(text)}</code>`;
+  if (!looksLikePath(text)) return `<code${isCommand(text) ? ' class="command-inline"' : ""}>${md.utils.escapeHtml(text)}</code>`;
   if (env?.files instanceof Set) env.files.add(text);
   return fileCard(text);
 };

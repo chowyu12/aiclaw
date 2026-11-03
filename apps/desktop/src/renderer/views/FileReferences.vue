@@ -1,11 +1,24 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref } from "vue";
+import { nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import CommandAction from "./CommandAction.vue";
 import { fileLanguage, previewReference } from "../../shared/file-preview";
 import { actions } from "../store";
 import { t } from "../i18n";
 
-const props = defineProps<{ html: string; basePath?: string }>();
+const props = defineProps<{ html: string; basePath?: string; sessionId?: string; runScope?: string }>();
 const menu = ref<HTMLElement>();
+const content = ref<HTMLElement>();
+const commandTargets = shallowRef<{node: HTMLElement; command: string; inline: boolean; key: string}[]>([]);
+watch(() => [props.html, props.sessionId, props.runScope], async () => {
+  await nextTick();
+  if (!props.sessionId || !props.runScope || !content.value) { commandTargets.value = []; return; }
+  commandTargets.value = [...content.value.querySelectorAll<HTMLElement>("pre.command-block, code.command-inline")].map((node, index) => {
+    const inline = !node.matches("pre");
+    const raw = (inline ? node.textContent : node.querySelector("code")?.textContent) ?? "";
+    const command = inline ? raw.replace(/^\$\s+/, "") : raw;
+    return {node, command, inline, key: JSON.stringify([props.sessionId, props.runScope, index, command])};
+  }).filter(item => item.command.trim() && !/^(console|terminal)$/i.test(item.node.getAttribute("data-lang") ?? ""));
+}, {immediate:true, flush:"post"});
 const path = ref("");
 const position = ref({ top: "0px", left: "0px" });
 let trigger: HTMLElement | null = null;
@@ -56,7 +69,10 @@ onUnmounted(() => { window.removeEventListener("resize", close); document.remove
 
 <template>
   <div class="file-references">
-    <div class="file-reference-content" @click="activate" @keydown="onKey" v-html="html" />
+    <div ref="content" class="file-reference-content" @click="activate" @keydown="onKey" v-html="html" />
+    <Teleport v-for="target in commandTargets" :key="target.key" :to="target.node">
+      <CommandAction :command="target.command" :session-id="sessionId!" :run-key="target.key" :inline="target.inline" />
+    </Teleport>
     <div ref="menu" popover="auto" class="file-open-menu" role="menu" :aria-label="t('打开方式')" :style="position" @keydown="menuKey">
       <button v-if="fileLanguage(path)" role="menuitem" @click="open(false)">{{ t('在 AIClaw 中预览') }}</button>
       <button role="menuitem" @click="open(true)">{{ t('用系统应用打开') }}</button>

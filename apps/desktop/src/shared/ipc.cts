@@ -17,6 +17,9 @@ export const IPC = {
   runtimeStop: "runtime:stop",
   runtimeStatus: "runtime:status",
 
+  commandRun: "command:run",
+  commandStop: "command:stop",
+  onCommand: "command:event",
   sessionContext: "session:context",
   sessionWork: "session:work",
   goalSet: "goal:set",

@@ -827,7 +827,7 @@ const forking = ref(false);
               <div v-if="processOpen(turn)" class="process-body">
                 <template v-for="block in turnBlocks(turn, turn.key === runningKey)" :key="block.key">
                   <div v-if="block.kind === 'message'" class="msg agent progress-message">
-                    <FileReferences class="prose" :html="renderMarkdown(block.message.text)" />
+                    <FileReferences class="prose" :html="renderMarkdown(block.message.text)" :session-id="store.sessionId" :run-scope="block.message.streaming ? undefined : block.message.id" />
                     <span v-if="block.message.streaming" class="caret">▌</span>
                   </div>
                   <StepsBlock v-else
@@ -846,7 +846,7 @@ const forking = ref(false);
             <!-- 最终回答独立于过程；复制、反馈和交付文件均只属于这条回答。 -->
             <div v-if="answerDone(turn)" class="say final-answer">
             <div v-if="answerDone(turn)" class="msg agent">
-              <FileReferences class="prose" :html="renderMarkdown(finalMessage(turn)!.text)" />
+              <FileReferences class="prose" :html="renderMarkdown(finalMessage(turn)!.text)" :session-id="store.sessionId" :run-scope="finalMessage(turn)!.id" />
             </div>
             <GeneratedImages
               v-if="answerDone(turn) && imageArtifacts(turn).length > 0"
@@ -1485,6 +1485,26 @@ const forking = ref(false);
   border-radius: 10px;
   background: var(--surface-2);
   line-height: 1.55;
+}
+
+/* Terminal commands are visually distinct from source code and file references. */
+.prose :deep(code.command-inline) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
+}
+.prose :deep(pre.command-block) {
+  position: relative;
+  padding-top: 40px;
+  border-left: 3px solid var(--accent);
+  background: var(--surface-2);
+}
+.prose :deep(pre.command-block::before) {
+  content: "›_";
+  display: block;
+  color: var(--accent);
+  font: 600 12px var(--mono);
+  margin-bottom: 7px;
 }
 
 .prose :deep(pre code) {

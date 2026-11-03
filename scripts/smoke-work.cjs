@@ -46,6 +46,9 @@ app.whenReady().then(async()=>{
  handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}if(input.path.endsWith('.sql'))return {path:input.path,language:'sql',content:'SELECT id FROM users WHERE active = 9;'};return {path:input.path,language:'markdown',content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">\n\n'+Array.from({length:140},(_,index)=>'Paragraph '+index+'\n\n').join('')+'wide'.repeat(150)};});
  handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
  let configGate=null, configWriteFails=false;
+ const commandCalls=[], commandStops=[];
+ handle('commandRun',(_e,input)=>{commandCalls.push(input);if(!input.command.includes('python3'))setTimeout(()=>{win.webContents.send(IPC.onCommand,{id:input.id,sessionId:input.sessionId,type:'output',text:'fixture output <img src=x onerror=alert(1)>\n'});win.webContents.send(IPC.onCommand,{id:input.id,sessionId:input.sessionId,type:'exit',code:0,stopped:false});},20);return true;});
+ handle('commandStop',(_e,input)=>{commandStops.push(input);setTimeout(()=>win.webContents.send(IPC.onCommand,{id:input.id,sessionId:input.sessionId,type:'exit',code:null,stopped:true}),0);return true;});
  handle('configRead',()=>config);handle('configWrite',async(_e,p)=>{if(configWriteFails)throw Error('config write failed');if(p.profile&&configGate)await configGate;return Object.assign(config,p);});handle('runtimeStart',()=>undefined);
  handle('diagnosticsNetwork',()=> 'PASS configuration\nPASS HTTP: Model catalog received.');handle('questionRespond',(_e,input)=>{questionReplies.push(input);});const questionReplies=[];
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
@@ -67,10 +70,10 @@ app.whenReady().then(async()=>{
  let effort='medium',reasoningGate=null,reasoningFails=false;const reasoningCalls=[];
  handle('sessionReasoning',async(_e,input)=>{reasoningCalls.push(input);if(reasoningGate)await reasoningGate;if(reasoningFails)throw Error('reasoning save failed');effort=input.effort;return effort;});
  let configureGate=null,configureFails=false,configureSettled=0;const configureCalls=[];
- const resumeFailures=new Set(),resumeModels=new Map(),resumeCalls=[];
+ let commandHistory=false;const resumeFailures=new Set(),resumeModels=new Map(),resumeCalls=[];
  handle('sessionConfigure',async(_e,input)=>{configureCalls.push(input);try{if(configureGate)await configureGate;if(configureFails)throw Error('fixture model switch failed');contextFixture={...contextFixture,model:input.model,window:input.contextWindow||0,lastInputTokens:0};return {tools:[],mcpStatus:{}};}finally{configureSettled++;}});
  handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
- handle('sessionResume',async(_e,id)=>{resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论\n\n![猫](generated/cat.png) ![狗](generated/dog.webp) ![缺失图片](generated/missing.png)',at:Date.now()}]});});
+ handle('sessionResume',async(_e,id)=>{resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论\n\n![猫](generated/cat.png) ![狗](generated/dog.webp) ![缺失图片](generated/missing.png)',at:Date.now()},...(id==='s'&&commandHistory?[{id:'command-user',kind:'userMessage',text:'Test commands'},{id:'command-answer',kind:'agentMessage',text:'运行 `python3 sum.py`。\n\n```bash\nprintf foo\n```\n\n```python\nprint(1)\n```\n\n```console\n$ ls\nexample.txt\n```'}]:[])]});});
  handle('sessionWork',(_e,id)=>({goal:id==='s'?goal:null,pending:id==='s'?[...pending,...queuedInputs]:[],queuedRequestIds:queueAuto&&id==='s'?queuedInputs.map(p=>p.requestId):[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
  handle('changesList',(_e,id)=>{changeReads.push(id);return id==='s'?changes:[];});
  handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
@@ -970,6 +973,33 @@ app.whenReady().then(async()=>{
  await js("(()=>{const select=document.querySelector('[data-bucket-id=\"p_fixture\"] .project-directory select');select.value='/tmp/second';select.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"在此工作区新建会话\"]').click()})()");
  check('project new chat uses the selected second directory and keeps project membership',await wait("document.querySelectorAll('[data-bucket-id=\"p_fixture\"] .item').length===2")&&startedWorkspaces.at(-1)==='/tmp/second');
 
+
+ win.webContents.send(IPC.onOpenSession,'s');await wait("!!document.querySelector('.composer') && !document.body.textContent.includes('正在载入这个会话')");
+ commandHistory=true;
+ const commandEvent=(method,item)=>win.webContents.send(IPC.onAgentEvent,{method,params:{sessionId:'s',turnId:'command-ui-test',item}});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'command-ui-test'}});
+ commandEvent('item/completed',{id:'command-user',kind:'userMessage',text:'Test commands'});
+ commandEvent('item/completed',{id:'command-answer',kind:'agentMessage',text:'运行 `python3 sum.py`。\n\n```bash\nprintf foo\n```\n\n```python\nprint(1)\n```\n\n```console\n$ ls\nexample.txt\n```'});
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'command-ui-test'}});
+ check('run buttons appear only for command content',await wait("document.querySelectorAll('.final-answer pre.command-block .command-button').length===1 && document.querySelectorAll('.final-answer code.command-inline .command-button').length===1 && !document.querySelector('.final-answer pre.code-block .command-button') && !document.querySelector('.final-answer pre[data-lang=console] .command-button')"));
+ await js("document.querySelector('.final-answer pre.command-block .command-button').click()");
+ check('synthetic message clicks cannot start system commands',commandCalls.length===0);
+ const trustedCommandClick=async selector=>{
+   const point=await js(`(()=>{const b=document.querySelector(${JSON.stringify(selector)});b.scrollIntoView({block:'center'});const r=b.getBoundingClientRect();return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()`);
+   win.webContents.sendInputEvent({type:'mouseDown',x:point.x,y:point.y,button:'left',clickCount:1});
+   win.webContents.sendInputEvent({type:'mouseUp',x:point.x,y:point.y,button:'left',clickCount:1});
+ };
+ await trustedCommandClick('.final-answer pre.command-block .command-button');
+ check('command output and exit status are shown for the exact command and session',await wait("document.querySelector('.final-answer pre.command-block .command-output')?.textContent.includes('fixture output') && document.querySelector('.final-answer pre.command-block .command-status')?.textContent.includes('退出码：0')")&&commandCalls.at(-1)?.command==='printf foo\n'&&commandCalls.at(-1)?.sessionId==='s'&&await js("!document.querySelector('.final-answer .command-output img')"));
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-command-execution.png',(await win.webContents.capturePage()).toPNG());
+ await trustedCommandClick('.final-answer code.command-inline .command-button');
+ await wait("document.querySelector('.final-answer code.command-inline .command-button.stop:not(:disabled)')");
+ await selectChat('General chat');await wait("document.querySelector('.chat-session-title')?.textContent==='General chat'");
+ await selectChat('Retry name');
+ check('running command remains available when switching back to its chat',await wait("document.querySelector('.final-answer code.command-inline .command-button.stop:not(:disabled)')"));
+ await js("document.querySelector('.final-answer code.command-inline .command-button.stop').click()");
+ check('running inline command can be stopped',await wait("document.querySelector('.final-answer code.command-inline .command-status')?.textContent.includes('已停止')")&&commandStops.length===1&&commandStops[0].sessionId==='s');
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);

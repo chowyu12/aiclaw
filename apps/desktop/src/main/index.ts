@@ -1,4 +1,7 @@
 import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences } from "electron";
+import { homedir } from "node:os";
+import { toolPath } from "./shell-path.js";
+import { CommandRunner } from "./command-runner.js";
 import { randomUUID } from "node:crypto";
 import { projectWorkspace } from "./workspace-defaults.js";
 import { normalizeProject, type ProjectInput } from "../shared/projects.js";
@@ -56,6 +59,9 @@ const skills = new SkillManager(store);
 const runtimes = new ManagedRuntimes({ root: join(store.homeDir, "runtimes"), report: message => sessions.emit("log", "app", `${message}\n`) });
 // SessionManager 要问技能：会话启动时把当前启用的技能目录下发给内核。
 const sessions = new SessionManager(store, skills, runtimes);
+const commands = new CommandRunner(event => push(IPC.onCommand, event));
+let commandPath: Promise<string> | undefined;
+let commandGeneration = 0;
 
 /** 定时任务开的会话归进侧边栏的这个内置分组。 */
 const SCHEDULED_GROUP = "__scheduled__";
@@ -204,6 +210,8 @@ function createWindow(): void {
   // 一分钟内连着没了三次就不再拉：那是页面自己起不来，拉了也是白转圈。
   const gone: number[] = [];
   window.webContents.on("render-process-gone", (_event, details) => {
+    commandGeneration++;
+    commands.stopAll(false);
     logApp(`渲染进程退出：${details.reason}（exitCode ${details.exitCode}）`);
     if (details.reason === "clean-exit" || window.isDestroyed()) return;
     const now = Date.now();
@@ -220,7 +228,12 @@ function createWindow(): void {
       if (!window.isDestroyed()) load();
     }, 500);
   });
+  mainWindow.webContents.on("did-start-navigation", (_event, _url, _inPlace, mainFrame) => {
+    if (mainFrame) { commandGeneration++; commands.stopAll(false); }
+  });
   mainWindow.on("closed", () => {
+    commandGeneration++;
+    commands.stopAll(false);
     mainWindow = null;
   });
 }
@@ -308,6 +321,19 @@ function registerIpc(): void {
     }
     return result;
   });
+  ipcMain.handle(IPC.commandRun, async (_event, input: {id: string; sessionId: string; command: string}) => {
+    if (!input || typeof input.id !== "string" || typeof input.sessionId !== "string" || typeof input.command !== "string") throw new Error("Invalid command request");
+    const generation = commandGeneration;
+    const list = await sessions.listSessions();
+    const session = list.find(item => item.id === input.sessionId);
+    if (!session) throw new Error("Chat not found or archived");
+    commandPath ??= toolPath(homedir());
+    const path = await commandPath;
+    if (generation !== commandGeneration) throw new Error("Window changed before command started");
+    commands.start({id: input.id, sessionId: input.sessionId, command: input.command, cwd: session.workdir?.trim() || homedir(), path});
+    return true;
+  });
+  ipcMain.handle(IPC.commandStop, (_event, input: {id: string; sessionId: string}) => commands.stop(input.id, input.sessionId));
   ipcMain.handle(IPC.sessionContext, (_event, id: string) => sessions.sessionContext(id));
   ipcMain.handle(IPC.sessionWork, (_event, id: string) => sessions.sessionWork(id));
   ipcMain.handle(IPC.goalSet, (_event, id: string, goal) => sessions.goalSet(id, goal));
@@ -755,6 +781,7 @@ if (!app.requestSingleInstanceLock()) {
 
   app.on("before-quit", () => {
     // 让 claw-agent 有机会落盘会话再退出。
+    commands.stopAll();
     scheduler.stop();
     runtimes.stop();
     void sessions.stop();

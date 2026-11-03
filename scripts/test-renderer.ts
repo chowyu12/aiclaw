@@ -628,3 +628,38 @@ test("question Markdown renders formatting without images, HTML, files or nested
  assert.equal(option.querySelector('[href],img,button,input'),null);
  for(const value of ['[bad](javascript:alert(1))','[bad](file:///etc/passwd)','[bad](https://user:secret@example.com/)']) assert.equal(new JSDOM(renderQuestionMarkdown(value,true)).window.document.querySelector('a[href]'),null);
 });
+
+
+test("Python 可执行路径和运行命令保持行内代码，脚本路径仍可打开", () => {
+ const source = "实际使用的是 `/usr/bin/python3`，系统还有 `python3`。脚本 `sum1to100.py`，运行 `python3 sum1to100.py`。";
+ const doc = new JSDOM(renderMarkdown(source)).window.document;
+ assert.deepEqual([...doc.querySelectorAll("code")].map(node => node.textContent), ["/usr/bin/python3", "python3", "python3 sum1to100.py"]);
+ assert.deepEqual([...doc.querySelectorAll(".file-card")].map(node => node.getAttribute("data-file-path")), ["sum1to100.py"]);
+ assert.deepEqual(referencedFiles(source), ["sum1to100.py"]);
+ assert.equal(looksLikePath("/opt/python3 sum1to100.py"), false);
+ assert.equal(looksLikePath("我的 报表.xlsx"), true);
+});
+
+
+test("终端命令、普通代码和文件引用分别渲染", () => {
+ const source = "运行 `python3 sum1to100.py`，变量 `count + 1`，文件 `sum1to100.py`。\n\n```bash\npython3 sum1to100.py\n```\n\n```python\nprint(1)\n```";
+ const doc = new JSDOM(renderMarkdown(source)).window.document;
+ assert.equal(doc.querySelector("code.command-inline")?.textContent, "python3 sum1to100.py");
+ assert.ok([...doc.querySelectorAll("code:not(.command-inline)")].some(node => node.textContent === "count + 1"));
+ assert.equal(doc.querySelector(".file-card")?.getAttribute("data-file-path"), "sum1to100.py");
+ assert.equal(doc.querySelector("pre.command-block code")?.textContent, "python3 sum1to100.py\n");
+ assert.equal(doc.querySelector("pre.code-block code")?.textContent, "print(1)\n");
+ assert.deepEqual(referencedFiles(source), ["sum1to100.py"]);
+});
+
+
+test("常见命令和无语言标记的命令块可辨认，普通代码保持代码块", () => {
+ for (const command of ["ls -la", "pwd", "curl https://example.com/a.md", "docker ps", "make check"]) {
+   const doc=new JSDOM(renderMarkdown(`运行 \`${command}\``)).window.document;
+   assert.equal(doc.querySelector("code.command-inline")?.textContent,command);
+   assert.equal(doc.querySelector(".file-card"),null);
+ }
+ const doc=new JSDOM(renderMarkdown("```\nls -la\n```\n\n```\nprint(1)\n```" )).window.document;
+ assert.equal(doc.querySelector("pre.command-block code")?.textContent,"ls -la\n");
+ assert.equal(doc.querySelector("pre.code-block code")?.textContent,"print(1)\n");
+});

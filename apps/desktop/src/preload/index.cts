@@ -24,6 +24,13 @@ const api = {
     stop: () => ipcRenderer.invoke(IPC.runtimeStop),
     status: () => ipcRenderer.invoke(IPC.runtimeStatus),
   },
+  command: {
+    run: (input: {id: string; sessionId: string; command: string}) => {
+      if (!navigator.userActivation?.isActive) return Promise.reject(new Error("A direct user action is required to run a command"));
+      return ipcRenderer.invoke(IPC.commandRun, input);
+    },
+    stop: (id: string, sessionId: string) => ipcRenderer.invoke(IPC.commandStop, {id, sessionId}),
+  },
   session: {
     context: (id: string) => ipcRenderer.invoke(IPC.sessionContext, id),
     work: (id: string) => ipcRenderer.invoke(IPC.sessionWork, id),
@@ -191,6 +198,11 @@ const api = {
     pickDirectory: () => ipcRenderer.invoke(IPC.pickDirectory),
   },
   on: {
+    command: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => handler(payload);
+      ipcRenderer.on(IPC.onCommand, listener);
+      return () => ipcRenderer.off(IPC.onCommand, listener);
+    },
     configuration: (handler: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => handler(payload);
       ipcRenderer.on(IPC.onConfiguration, listener);
