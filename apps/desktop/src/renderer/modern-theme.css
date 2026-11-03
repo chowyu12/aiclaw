@@ -1,0 +1,84 @@
+/* 独立实现的石墨黑 / 柔紫外观，只作用于用户选中的现代极简主题。 */
+:root[data-theme="modern"] {
+  color-scheme: dark;
+  --ground: #101113;
+  --surface: #18191c;
+  --surface-2: #202126;
+  --sidebar: #131416;
+  --rail: #0d0e10;
+  --ink: #eeeef2;
+  --ink-2: #c1c1cb;
+  --muted: #9696a3;
+  --chrome-rule: rgb(238 238 242 / 7%);
+  --rule: #2b2c33;
+  --rule-strong: #41424e;
+  --brand: #53d58b;
+  --brand-soft: #163528;
+  --accent: #c1b1ff;
+  --accent-hover: #d4c8ff;
+  --accent-soft: #2a243c;
+  --on-accent: #211638;
+  --action: #eae8f2;
+  --on-action: #17151e;
+  --ok: #84d9ac;
+  --ok-soft: #173427;
+  --warn: #e4bf77;
+  --warn-soft: #392e1c;
+  --danger: #f19c9c;
+  --danger-soft: #3a2328;
+  --hover: #222328;
+  --active: #2a243c;
+  --chat-selected: #2a243c;
+  --chat-selected-ink: #e1d8ff;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --shadow-1: 0 1px 0 rgb(255 255 255 / 3%), 0 4px 16px rgb(0 0 0 / 12%);
+  --shadow-2: 0 8px 24px rgb(0 0 0 / 24%);
+  --shadow-3: 0 20px 56px rgb(0 0 0 / 45%);
+}
+
+html[data-theme="modern"] .sidebar.is-chat .item.active {
+  box-shadow: inset 2px 0 var(--accent);
+}
+
+html[data-theme="modern"] .sidebar.is-chat .item.active .title {
+  color: var(--chat-selected-ink);
+}
+
+html[data-theme="modern"] .composer {
+  border-color: var(--rule-strong);
+  background: linear-gradient(145deg, #1e1e26, var(--surface) 65%);
+  box-shadow: var(--shadow-2);
+}
+
+html[data-theme="modern"] .composer:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-2);
+}
+
+html[data-theme="modern"] :is(.settings, .theme-settings) > section {
+  background: linear-gradient(135deg, #1d1d24, var(--surface) 55%);
+}
+
+html[data-theme="modern"] .steps-body {
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+html[data-theme="modern"] .step[data-state="running"] summary {
+  background: var(--accent-soft);
+}
+
+html[data-theme="modern"] :is(.sidebar .item, .activity-rail button, .steps-head) {
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="modern"] :is(.sidebar .item, .activity-rail button, .steps-head, .composer) {
+    transition: none;
+  }
+  html[data-theme="modern"] .step .dot {
+    animation: none;
+  }
+}

@@ -6,6 +6,7 @@ export const THEMES = [
   { id: "sand", label: "暖砂阅读", accent: "#a87536", surface: "#fffefb", sidebar: "#f7f4ed" },
   { id: "violet", label: "柔和墨紫", accent: "#7b62af", surface: "#ffffff", sidebar: "#f5f2fa" },
   { id: "dark", label: "深色", accent: "#9baded", surface: "#1c1f26", sidebar: "#1a1d23" },
+  { id: "modern", label: "现代极简", accent: "#c1b1ff", surface: "#18191c", sidebar: "#131416" },
 ] as const;
 
 export type Theme = typeof THEMES[number]["id"];

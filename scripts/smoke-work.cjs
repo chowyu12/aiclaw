@@ -129,6 +129,7 @@ app.whenReady().then(async()=>{
  try {
   const settings=new ConfigStore(themeDirectory);
   check('real config store starts with white and preserves saved theme across instances',settings.readConfig().theme==='white'&&settings.writeConfig({theme:'sand',font:'songti',fontSize:18}).theme==='sand'&&new ConfigStore(themeDirectory).readConfig().theme==='sand'&&new ConfigStore(themeDirectory).readConfig().font==='songti'&&new ConfigStore(themeDirectory).readConfig().fontSize===18);
+  check('modern theme persists without changing font or reading size',settings.writeConfig({theme:'modern'}).theme==='modern'&&new ConfigStore(themeDirectory).readConfig().theme==='modern'&&new ConfigStore(themeDirectory).readConfig().font==='songti'&&new ConfigStore(themeDirectory).readConfig().fontSize===18);
  } finally { require('node:fs').rmSync(themeDirectory,{recursive:true,force:true}); }
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
  check('theme has a dedicated settings navigation item and is absent from general configuration',await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题')")&&await js("!document.querySelector('[data-theme-option]') && !!document.querySelector('.settings select')"));
@@ -139,10 +140,23 @@ app.whenReady().then(async()=>{
   await wait("!!document.querySelector('.theme-settings [data-theme-option]')");
  };
  await openThemes();
- check('settings offers theme previews with white selected by default',await wait("document.querySelectorAll('[data-theme-option]').length===6 && document.querySelector('[data-theme-option=white]').getAttribute('aria-pressed')==='true'"));
- for(const [theme,background] of [['green','rgb(243, 247, 245)'],['blue','rgb(242, 245, 252)'],['violet','rgb(245, 242, 250)'],['dark','rgb(26, 29, 35)'],['sand','rgb(247, 244, 237)']]){
+ check('settings offers theme previews with white selected by default',await wait("document.querySelectorAll('[data-theme-option]').length===7 && document.querySelector('[data-theme-option=white]').getAttribute('aria-pressed')==='true'"));
+ for(const [theme,background] of [['green','rgb(243, 247, 245)'],['blue','rgb(242, 245, 252)'],['violet','rgb(245, 242, 250)'],['dark','rgb(26, 29, 35)'],['modern','rgb(19, 20, 22)'],['sand','rgb(247, 244, 237)']]){
   await js(`document.querySelector('[data-theme-option="${theme}"]').click()`);
   check('theme '+theme+' updates the app immediately after saving',await wait(`document.documentElement.dataset.theme==='${theme}' && document.querySelector('[data-theme-option="${theme}"]').getAttribute('aria-pressed')==='true' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='${background}'`)&&config.theme===theme);
+  if(theme==='modern'){
+   check('modern settings use dark controls and layered cards',await js("getComputedStyle(document.documentElement).colorScheme==='dark' && getComputedStyle(document.querySelector('.theme-settings section')).backgroundImage.includes('linear-gradient') && getComputedStyle(document.querySelector('.theme-settings section')).borderRadius==='18px'"));
+   await js("Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");
+   await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+   writeFileSync('/tmp/aiclaw-modern-settings.png',(await win.webContents.capturePage()).toPNG());
+   await win.loadFile(join(desktop,'dist/renderer/index.html'));
+   check('modern theme restores on reload and styles the composer without resizing navigation',await wait("document.documentElement.dataset.theme==='modern' && !!document.querySelector('.composer') && getComputedStyle(document.querySelector('.composer')).backgroundImage.includes('linear-gradient') && getComputedStyle(document.querySelector('.composer')).borderRadius==='18px' && getComputedStyle(document.querySelector('.sidebar .item .title')).fontSize==='14px'"));
+   await wait("![...document.querySelectorAll('.artifact-note')].some(e=>e.textContent.includes('正在读取'))");
+   await js("Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");
+   await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+   writeFileSync('/tmp/aiclaw-modern-chat.png',(await win.webContents.capturePage()).toPNG());
+   await openThemes();
+  }
  }
  await js("document.querySelector('.theme-options').scrollIntoView({block:'center'})");
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
@@ -158,7 +172,7 @@ app.whenReady().then(async()=>{
  check('failed theme save keeps the previous theme and selected option',await wait("document.querySelector('.error-bar')?.textContent.includes('config write failed') && !document.querySelector('[data-theme-option=green]').disabled")&&await js("document.documentElement.dataset.theme==='sand' && document.querySelector('[data-theme-option=sand]').getAttribute('aria-pressed')==='true'"));
  configWriteFails=false;await click('知道了');
  await js("document.querySelector('[data-theme-option=white]').click()");
- check('white restores original neutral colors',await wait("document.documentElement.dataset.theme==='white' && getComputedStyle(document.body).backgroundColor==='rgb(255, 255, 255)' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='rgb(247, 248, 250)'"));
+ check('white restores original neutral colors and corner size',await wait("document.documentElement.dataset.theme==='white' && getComputedStyle(document.body).backgroundColor==='rgb(255, 255, 255)' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='rgb(247, 248, 250)' && getComputedStyle(document.querySelector('.theme-settings section')).borderRadius==='14px'"));
  check('theme page includes font and conversation text size with original defaults',await js("document.querySelector('[data-font-setting]').value==='system' && document.querySelector('[data-font-size-setting]').value==='14' && document.querySelectorAll('[data-font-setting] option').length===5"));
  for(const [font,family] of [['pingfang','PingFang SC'],['yahei','Microsoft YaHei'],['mono','SF Mono'],['system','-apple-system'],['songti','Songti SC']]){
   await js(`(()=>{const select=document.querySelector('[data-font-setting]');select.value='${font}';select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
@@ -824,6 +838,12 @@ app.whenReady().then(async()=>{
  await js("[...document.querySelectorAll('.step')].forEach(e=>e.open=false);document.querySelector('.steps-body:last-child')?.scrollIntoView({block:'center'})");
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-operation-titles.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.documentElement.dataset.theme='modern'");
+ check('modern execution details retain readable surfaces and rounded grouping',await js("getComputedStyle(document.querySelector('.steps-body')).backgroundColor==='rgb(24, 25, 28)' && getComputedStyle(document.querySelector('.steps-body')).borderRadius==='12px' && getComputedStyle(document.querySelector('.steps-body .name')).color!=='rgb(24, 25, 28)'"));
+ await js("Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-modern-steps.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.documentElement.dataset.theme='white'");
  win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'s',turnId:'operation-titles'}});
  contextFixture={...contextFixture,window:100000,lastInputTokens:12000};
  await js("[...document.querySelectorAll('.sidebar .item')].find(e=>e.querySelector('.title')?.textContent.trim()==='General chat').click()");

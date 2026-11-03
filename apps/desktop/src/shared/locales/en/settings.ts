@@ -27,6 +27,7 @@ export const settings: Record<string, string> = {
   "暖砂阅读": "Warm sand",
   "柔和墨紫": "Soft violet",
   "深色": "Dark",
+  "现代极简": "Modern minimal",
   "记忆保存参数无效。": "Invalid memory save parameters.",
   "记忆不能超过 32 KB，请先精简内容。": "Memory cannot exceed 32 KB. Shorten it before saving.",
   "记忆不能包含空字符。": "Memory cannot contain NUL characters.",
