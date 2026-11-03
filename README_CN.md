@@ -131,6 +131,12 @@ scripts/                冒烟测试、打包、图标、一键安装脚本
 docs/                   设计文档；docs/agent-loop.md 改循环前必读
 ```
 
+## 应用托管的 Python 与 Node.js
+
+macOS（Apple Silicon / Intel）、Windows x64、Linux x64 会在后台准备应用自己的 Node.js 24.22.2（含 npm/npx）和 Python 3.12.16。首次准备需要联网访问 nodejs.org 和 python-build-standalone 的公开 GitHub Release；下载固定版本并校验 SHA256，准备完成后可离线复用。
+
+运行时、含 pip 的持久 Python 虚拟环境、npm 全局包及缓存位于 `~/.aiclaw/runtimes`。命令、技能和 stdio MCP 优先使用这套环境，并保留原有 PATH；不会修改系统安装或 shell 配置。准备期间应用仍可使用，未完成时执行相关工具需要已有系统环境。失败每 30 分钟及下次启动时重试，进度写入诊断日志。额外依赖仍需安装，原生扩展可能需要编译器。这套环境不替代下文的源码构建依赖。
+
 ## 开发
 
 需要 Go 1.27+ 与 Node 22+。

@@ -9,6 +9,7 @@ import type { PendingApproval, PendingUserInput } from "@aiclaw/agent-client";
 import { ConfigStore, type McpServer } from "./config.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
+import { ManagedRuntimes } from "./managed-runtimes.js";
 import { ConfigurationAssistant } from "./app-config.js";
 import { Scheduler } from "./scheduler.js";
 import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
@@ -52,8 +53,9 @@ function applyAppIcon(): void {
 
 const store = new ConfigStore();
 const skills = new SkillManager(store);
+const runtimes = new ManagedRuntimes({ root: join(store.homeDir, "runtimes"), report: message => sessions.emit("log", "app", `${message}\n`) });
 // SessionManager 要问技能：会话启动时把当前启用的技能目录下发给内核。
-const sessions = new SessionManager(store, skills);
+const sessions = new SessionManager(store, skills, runtimes);
 
 /** 定时任务开的会话归进侧边栏的这个内置分组。 */
 const SCHEDULED_GROUP = "__scheduled__";
@@ -739,6 +741,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createWindow();
     installAppMenu();
+    runtimes.start();
     void sessions.syncBrowserBridge();
     scheduler.start();
     app.on("activate", () => {
@@ -753,6 +756,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on("before-quit", () => {
     // 让 claw-agent 有机会落盘会话再退出。
     scheduler.stop();
+    runtimes.stop();
     void sessions.stop();
   });
 }

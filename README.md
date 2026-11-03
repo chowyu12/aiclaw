@@ -194,6 +194,12 @@ scripts/                Smoke tests, packaging, icons, one-line installer
 docs/                   Design docs; read docs/agent-loop.md before touching the loop
 ```
 
+## Managed Python and Node.js
+
+On macOS (Apple Silicon/Intel), Windows x64, and Linux x64, the desktop app prepares its own Node.js 24.22.2 (including npm/npx) and Python 3.12.16 environments in the background. The first preparation needs network access to nodejs.org and the public python-build-standalone GitHub release. Downloads use pinned SHA256 checksums; completed installations are reused offline.
+
+Runtimes, a persistent Python virtual environment with pip, npm global packages, and package caches live under `~/.aiclaw/runtimes`. Commands, skills, and stdio MCP servers inherit these paths ahead of the user's existing PATH. System installations and shell configuration are unchanged. The app remains usable during preparation; until it finishes, tools need an existing system runtime. Failed preparation retries every 30 minutes and on the next app launch; progress is recorded in diagnostics. Additional packages still need installation, and native extensions may require a compiler. These environments do not replace the build prerequisites below.
+
 ## Development
 
 Requires Go 1.27+ and Node 22+.

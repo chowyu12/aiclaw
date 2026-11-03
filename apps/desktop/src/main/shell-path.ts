@@ -85,7 +85,7 @@ export function mergePath(...parts: (string | string[] | undefined)[]): string {
 
 /** 登录 shell 的 PATH 在前（与终端一致），然后是应用自己的，最后是兜底目录。 */
 export async function toolPath(home: string): Promise<string> {
-  if (process.platform === "win32") return process.env.PATH ?? "";
+  if (process.platform === "win32") return process.env[Object.keys(process.env).find(key => key.toLowerCase() === "path") ?? "PATH"] ?? "";
   const login = await loginShellPath();
   return mergePath(login, process.env.PATH, commonBinDirs(home));
 }

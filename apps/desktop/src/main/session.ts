@@ -10,6 +10,7 @@ import { app, clipboard, shell } from "electron";
 import { BROWSER_CANDIDATES, browserIdForApplication } from "./browser-choice.js";
 import { resolveWorkspace } from "./workspace-defaults.js";
 import { toolPath } from "./shell-path.js";
+import type { ManagedRuntimes } from "./managed-runtimes.js";
 import { tr } from "../shared/i18n.js";
 import {
   ClawAgentClient,
@@ -160,7 +161,7 @@ export class SessionManager extends EventEmitter {
   /** 最近一次会话的工作区，诊断报告里要。 */
   private workspace = "";
 
-  constructor(store: ConfigStore, skills: SkillManager) {
+  constructor(store: ConfigStore, skills: SkillManager, private readonly runtimes?: ManagedRuntimes) {
     super();
     this.store = store;
     this.skills = skills;
@@ -202,11 +203,15 @@ export class SessionManager extends EventEmitter {
     // 模型 Key 不经这里：内核按会话的 providerId 到 --app-db 那个库里查。
     // PATH 换成终端里那样的：模型跑的命令、技能调的 CLI、stdio 的 MCP server 都从内核继承它。
     this.path ??= await toolPath(homedir());
+    const env: NodeJS.ProcessEnv = { ...process.env, AICLAW_LOCALE: this.store.readConfig().language };
+    // Windows 环境键不区分大小写，不能同时向子进程传 Path 和 PATH。
+    const pathKey = Object.keys(env).find(key => key.toLowerCase() === "path") ?? "PATH";
+    env[pathKey] = this.path;
     const client = new ClawAgentClient({
       command: this.agentBin,
       args: ["serve", `--data-home=${this.store.agentHome}`, `--app-db=${this.store.appDbPath}`],
       // 界面语言：内核给人看的提示、报错按它出（切换后由 setKernelLocale 再告诉它）。
-      env: { ...process.env, PATH: this.path, AICLAW_LOCALE: this.store.readConfig().language },
+      env: this.runtimes?.environment(env) ?? env,
     });
 
     client.on("notification", (n: AgentNotification) => {
