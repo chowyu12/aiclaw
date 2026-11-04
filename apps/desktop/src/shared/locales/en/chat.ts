@@ -1,5 +1,9 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "复制代码": "Copy code",
+  "命令输出": "Command output",
+  "终端": "Terminal",
+  "代码": "Code",
   "在系统 Shell 中执行（不使用沙箱）": "Run in system shell without sandbox",
   "运行命令": "Run",
   "停止中…": "Stopping…",

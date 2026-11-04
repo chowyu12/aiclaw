@@ -170,7 +170,7 @@ md.renderer.rules.fence = (tokens, index) => {
   const attr = lang ? ` data-lang="${md.utils.escapeHtml(lang)}"` : "";
   const lines = token.content.split("\n").map(line => line.trim()).filter(Boolean);
   const kind = /^(?:sh|bash|zsh|shell|console|terminal|powershell|pwsh|cmd)$/i.test(lang) || (!lang && lines.length > 0 && lines.every(isCommand)) ? "command-block" : "code-block";
-  return `<pre class="${kind}"${attr}><code>${md.utils.escapeHtml(token.content)}</code></pre>\n`;
+  return `<div class="code-card"><div class="code-block-mount"></div><pre class="${kind}"${attr}><code>${md.utils.escapeHtml(token.content)}</code></pre></div>\n`;
 };
 
 /**

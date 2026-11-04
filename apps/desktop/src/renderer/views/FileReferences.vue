@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
-import CommandAction from "./CommandAction.vue";
+import CodeBlock from "./CodeBlock.vue";
 import { fileLanguage, previewReference } from "../../shared/file-preview";
 import { actions } from "../store";
 import { t } from "../i18n";
@@ -8,16 +8,17 @@ import { t } from "../i18n";
 const props = defineProps<{ html: string; basePath?: string; sessionId?: string; runScope?: string }>();
 const menu = ref<HTMLElement>();
 const content = ref<HTMLElement>();
-const commandTargets = shallowRef<{node: HTMLElement; command: string; inline: boolean; key: string}[]>([]);
+const codeTargets = shallowRef<{node: HTMLElement; code: string; language: string; runnable: boolean; key: string}[]>([]);
 watch(() => [props.html, props.sessionId, props.runScope], async () => {
   await nextTick();
-  if (!props.sessionId || !props.runScope || !content.value) { commandTargets.value = []; return; }
-  commandTargets.value = [...content.value.querySelectorAll<HTMLElement>("pre.command-block, code.command-inline")].map((node, index) => {
-    const inline = !node.matches("pre");
-    const raw = (inline ? node.textContent : node.querySelector("code")?.textContent) ?? "";
-    const command = inline ? raw.replace(/^\$\s+/, "") : raw;
-    return {node, command, inline, key: JSON.stringify([props.sessionId, props.runScope, index, command])};
-  }).filter(item => item.command.trim() && !/^(console|terminal)$/i.test(item.node.getAttribute("data-lang") ?? ""));
+  codeTargets.value = [...content.value?.querySelectorAll<HTMLElement>(".code-card") ?? []].map((node, index) => {
+    const pre = node.querySelector<HTMLPreElement>(":scope > pre");
+    const code = pre?.querySelector("code")?.textContent ?? "";
+    const language = pre?.getAttribute("data-lang") ?? "";
+    return {node: node.querySelector<HTMLElement>(":scope > .code-block-mount")!, code, language,
+      runnable: !!props.sessionId && !!props.runScope && !!pre?.matches(".command-block") && !/^(console|terminal)$/i.test(language),
+      key: JSON.stringify([props.sessionId, props.runScope, "block", index, code])};
+  }).filter(item => item.node);
 }, {immediate:true, flush:"post"});
 const path = ref("");
 const position = ref({ top: "0px", left: "0px" });
@@ -70,8 +71,8 @@ onUnmounted(() => { window.removeEventListener("resize", close); document.remove
 <template>
   <div class="file-references">
     <div ref="content" class="file-reference-content" @click="activate" @keydown="onKey" v-html="html" />
-    <Teleport v-for="target in commandTargets" :key="target.key" :to="target.node">
-      <CommandAction :command="target.command" :session-id="sessionId!" :run-key="target.key" :inline="target.inline" />
+    <Teleport v-for="target in codeTargets" :key="target.key" :to="target.node">
+      <CodeBlock :code="target.code" :language="target.language" :runnable="target.runnable" :session-id="sessionId" :run-key="target.key" />
     </Teleport>
     <div ref="menu" popover="auto" class="file-open-menu" role="menu" :aria-label="t('打开方式')" :style="position" @keydown="menuKey">
       <button v-if="fileLanguage(path)" role="menuitem" @click="open(false)">{{ t('在 AIClaw 中预览') }}</button>
@@ -81,6 +82,8 @@ onUnmounted(() => { window.removeEventListener("resize", close); document.remove
 </template>
 
 <style scoped>
+.file-reference-content :deep(.code-card:has(> .code-block-mount > .code-panel) > pre) { display: none; }
+.file-reference-content :deep(.code-card) { min-width: 0; margin: 0 0 0.85em; }
 .file-open-menu { position: fixed; margin: 0; width: 204px; max-width: calc(100vw - 16px); padding: 5px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); color: var(--ink); box-shadow: 0 8px 28px #0002; }
 .file-open-menu button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; font: inherit; font-size: 13px; cursor: pointer; }
 .file-open-menu button:hover, .file-open-menu button:focus-visible { background: var(--hover); outline: none; }

@@ -1487,25 +1487,6 @@ const forking = ref(false);
   line-height: 1.55;
 }
 
-/* Terminal commands are visually distinct from source code and file references. */
-.prose :deep(code.command-inline) {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent);
-}
-.prose :deep(pre.command-block) {
-  position: relative;
-  padding-top: 40px;
-  border-left: 3px solid var(--accent);
-  background: var(--surface-2);
-}
-.prose :deep(pre.command-block::before) {
-  content: "›_";
-  display: block;
-  color: var(--accent);
-  font: 600 12px var(--mono);
-  margin-bottom: 7px;
-}
 
 .prose :deep(pre code) {
   padding: 0;
