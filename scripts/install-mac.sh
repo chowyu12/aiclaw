@@ -39,28 +39,28 @@ die() { say_err "✗ $*"; exit 1; }
 # 内联而不是 sed 读 $0：`curl … | bash` 时 $0 是 bash，读不到脚本自己。
 usage() {
   cat <<'USAGE'
-AIClaw · macOS 一键安装
+AIClaw · macOS installer
 
   curl -fsSL https://raw.githubusercontent.com/chowyu12/aiclaw/master/scripts/install-mac.sh | bash
 
-或者把脚本下下来再跑：
+Or download the script and run it locally:
 
-  ./install-mac.sh                     下载最新 Release 并安装
-  ./install-mac.sh -l                  用 ~/Downloads 里已经下好的包
-  ./install-mac.sh ~/某处/AIClaw.zip    指定安装包（给 .app 所在目录也行）
-  ./install-mac.sh -h                  看这段
+  ./install-mac.sh                     Download and install the latest release
+  ./install-mac.sh -l                  Use a package already in ~/Downloads
+  ./install-mac.sh ~/path/AIClaw.zip    Use a ZIP file or a directory containing the .app
+  ./install-mac.sh -h                  Show this help
 
-环境变量：
-  AICLAW_INSTALL_DIR   装到哪个目录（默认 /Applications，不可写时退回 ~/Applications）
-  AICLAW_NO_OPEN=1     装完不打开
+Environment variables:
+  AICLAW_INSTALL_DIR   Installation directory (default: /Applications; falls back to ~/Applications if not writable)
+  AICLAW_NO_OPEN=1     Do not launch the app after installation
 
-装完在「应用程序」里，直接双击就能开。
+After installation, open AIClaw from the installation directory.
 USAGE
 }
 
 # ---------- 环境检查 ----------
 
-[ "$(uname -s)" = "Darwin" ] || die "这个脚本只能在 macOS 上跑。"
+[ "$(uname -s)" = "Darwin" ] || die "This installer only supports macOS."
 
 # 包按 CPU 架构分两个。Rosetta 下的终端会把 Apple Silicon 报成 x86_64，
 # 那样装到的是 Intel 版——能跑，但慢；这里认出来并纠正。
@@ -71,7 +71,7 @@ fi
 case "$arch" in
   arm64) pkg_arch="arm64" ;;
   x86_64) pkg_arch="x64" ;;
-  *) die "没有 ${arch} 的包。" ;;
+  *) die "No package is available for architecture: ${arch}." ;;
 esac
 
 # ---------- 找安装包 ----------
@@ -97,25 +97,25 @@ download_zip() {
   local file="${APP_NAME}-${tag}-mac-${pkg_arch}.zip"
   local out="${TMPDIR:-/tmp}/${file}"
   local url="${RELEASES_URL}/download/${tag}/${file}"
-  say "下载 ${file}（一百多兆，会花一会儿）…"
+  say "Downloading ${file} (over 100 MB; this may take a while)..."
   # 到 GitHub 的下载在国内网络上常常中途断掉：断了就续传（-C -），最多重试 8 次。
   # 没有 --retry-all-errors 的话 curl 只重试少数几种错误，连接被重置不在其中。
   curl -fL --progress-bar --max-time 1800 -C - --retry 8 --retry-delay 3 --retry-all-errors \
     -o "$out" "$url" \
-    || die "下载失败：${url}
-网络到 GitHub 不稳定的话，可以用浏览器下载这个文件到 ~/Downloads，再跑：$0 -l
-这个版本也可能还没有 mac-${pkg_arch} 的包，到 ${RELEASES_URL} 看看。"
+    || die "Download failed: ${url}
+If your connection to GitHub is unstable, download this file to ~/Downloads in your browser, then run: $0 -l
+The mac-${pkg_arch} package may not be available for this release yet. Check ${RELEASES_URL}."
   # 没下完的文件解压时才报错，那时已经走了半天。这里立刻校验。
-  unzip -tq "$out" >/dev/null 2>&1 || die "下下来的不是完整的 zip，重试一次。"
+  unzip -tq "$out" >/dev/null 2>&1 || die "The downloaded ZIP file is incomplete or invalid. Please try again."
   printf '%s' "$out"
 }
 
 fetch_release() {
-  say "查最新版本…"
+  say "Checking for the latest release..."
   local tag
   tag=$(latest_tag)
-  [ -n "$tag" ] || die "查不到最新版本。网络不通，或者 GitHub API 限流了（可以用 -l 装已经下好的包）。"
-  say_ok "最新版本：${tag}"
+  [ -n "$tag" ] || die "Could not find the latest release. Check your network connection or GitHub API rate limit. Use -l to install a downloaded package."
+  say_ok "Latest release: ${tag}"
   download_zip "$tag"
 }
 
@@ -139,11 +139,11 @@ case "${1:-}" in
 esac
 
 if [ -z "$zip_path" ]; then
-  say_err "没找到安装包。"
+  say_err "No installation package found."
   cat >&2 <<TIPS
 
-在浏览器里打开下面这个页面，下载 ${APP_NAME}-<版本>-mac-${pkg_arch}.zip（会落到 ~/Downloads），
-然后重新跑一次这个脚本：
+Open the page below in your browser and download ${APP_NAME}-<version>-mac-${pkg_arch}.zip
+to ~/Downloads, then run this script again with -l:
 
   ${RELEASES_URL}
 TIPS
@@ -159,36 +159,36 @@ trap 'rm -rf "$work"' EXIT
 keep_source=0
 
 if [ -d "$zip_path" ]; then
-  say_ok "来源目录：$zip_path"
+  say_ok "Source directory: $zip_path"
   app_src=$(find "$zip_path" -maxdepth 3 -name "*.app" -type d | head -1)
-  [ -n "$app_src" ] || die "$zip_path 里没找到 .app。"
+  [ -n "$app_src" ] || die "No .app bundle found in $zip_path."
   keep_source=1
 else
-  [ -f "$zip_path" ] || die "找不到文件：$zip_path"
-  say_ok "安装包：$zip_path"
-  say "解压…"
+  [ -f "$zip_path" ] || die "File not found: $zip_path"
+  say_ok "Installation package: $zip_path"
+  say "Extracting..."
   # ditto 保留 .app 里的符号链接与资源分叉；unzip 也行，但 ditto 是系统自带里最稳的。
-  ditto -x -k "$zip_path" "$work" || die "解压失败，这个文件可能没下完。"
+  ditto -x -k "$zip_path" "$work" || die "Extraction failed. The download may be incomplete."
   app_src=$(find "$work" -maxdepth 3 -name "*.app" -type d | head -1)
-  [ -n "$app_src" ] || die "压缩包里没找到 .app，这不像是 ${APP_NAME} 的安装包。"
+  [ -n "$app_src" ] || die "No .app bundle found in the archive. This does not appear to be an ${APP_NAME} package."
 fi
 
-[ -x "$app_src/Contents/MacOS/${APP_NAME}" ] || die "包内容不完整（缺可执行文件）。"
+[ -x "$app_src/Contents/MacOS/${APP_NAME}" ] || die "The package is incomplete: the app executable is missing."
 
 # 用 PlistBuddy 而不是 defaults：defaults 只认绝对路径，给相对路径会说「域不存在」。
-version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_src/Contents/Info.plist" 2>/dev/null || echo "未知")
-say_ok "版本：${version}"
+version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_src/Contents/Info.plist" 2>/dev/null || echo "unknown")
+say_ok "Version: ${version}"
 
 # ---------- 装 ----------
 
 dest_dir="${AICLAW_INSTALL_DIR:-/Applications}"
 if [ ! -w "$dest_dir" ]; then
   if [ -n "${AICLAW_INSTALL_DIR:-}" ]; then
-    mkdir -p "$dest_dir" || die "建不出 ${dest_dir}"
+    mkdir -p "$dest_dir" || die "Could not create ${dest_dir}."
   else
     dest_dir="$HOME/Applications"
     mkdir -p "$dest_dir"
-    say "/Applications 不可写，改装到 ${dest_dir}"
+    say "/Applications is not writable. Installing to ${dest_dir} instead."
   fi
 fi
 dest="${dest_dir}/${APP_NAME}.app"
@@ -199,7 +199,7 @@ dest="${dest_dir}/${APP_NAME}.app"
 # 会误伤任何命令行里恰好含这个名字的进程——包括正在跑这个脚本的终端。
 quit_running() {
   pgrep -x "$APP_NAME" >/dev/null 2>&1 || return 0
-  say "先退掉正在运行的 ${APP_NAME}…"
+  say "Quitting the running ${APP_NAME} app..."
   osascript -e "tell application \"${APP_NAME}\" to quit" >/dev/null 2>&1 || true
   sleep 2
   local pid
@@ -211,7 +211,7 @@ quit_running() {
 
 quit_running
 
-say "安装到 ${dest}…"
+say "Installing to ${dest}..."
 rm -rf "$dest"
 if [ "$keep_source" = "1" ]; then
   cp -R "$app_src" "$dest"
@@ -223,12 +223,12 @@ fi
 # 跟着旧 Python 一起坏掉的版本，写全路径省得排查。
 /usr/bin/xattr -dr com.apple.quarantine "$dest" 2>/dev/null || true
 if /usr/bin/xattr -p com.apple.quarantine "$dest" >/dev/null 2>&1; then
-  say_err "隔离标记没能去掉，双击可能会被 Gatekeeper 拦。手动执行："
+  say_err "Could not remove the quarantine attribute. Gatekeeper may block the app. Run this command manually:"
   echo "  /usr/bin/xattr -dr com.apple.quarantine \"$dest\"" >&2
 fi
 
-say_ok "✓ 装好了：${dest}"
+say_ok "✓ Installed: ${dest}"
 if [ -z "${AICLAW_NO_OPEN:-}" ]; then
   open "$dest"
-  say "已经打开。第一次用到「模型服务」页添加一个端点、填 Key、写上模型名。"
+  say "AIClaw has been launched. To get started, add an endpoint, API key, and model name on the Model Services page."
 fi
