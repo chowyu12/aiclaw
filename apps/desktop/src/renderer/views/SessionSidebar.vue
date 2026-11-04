@@ -138,6 +138,11 @@ function selectedDirectory(bucket: Bucket): string | undefined {
   const selected = projectWorkspaces.value[bucket.id];
   return selected && bucket.directories?.includes(selected) ? selected : bucket.path || undefined;
 }
+function directoryLabel(directory: string, directories: string[]): string {
+  const name = (path: string) => path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
+  const label = name(directory);
+  return directories.filter(path => name(path) === label).length > 1 ? directory : label;
+}
 async function newCurrentProjectChat(): Promise<void> {
   const bucket = buckets.value.find(item => item.sessions.some(session => session.id === store.sessionId || descendants(session.id).some(child => child.session.id === store.sessionId)));
   if (bucket) await newWorkspaceChat(bucket); else await actions.newSession();
@@ -162,6 +167,8 @@ async function openWorkspaceMenu(bucket: Bucket, event: MouseEvent): Promise<voi
   menuPosition.value = { left: `${Math.max(8, rect.right - 192)}px`, top: `${Math.min(rect.bottom + 4, window.innerHeight - 140)}px` };
   workspaceMenu.value = bucket;
   await nextTick();
+  const height = menuElement.value?.getBoundingClientRect().height ?? 140;
+  menuPosition.value.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - height - 8))}px`;
   menuElement.value?.querySelector<HTMLButtonElement>("button")?.focus();
 }
 function closeWorkspaceMenu(): void {
@@ -463,12 +470,6 @@ function when(iso: string): string {
             </span>
             <span v-if="isCollapsed(bucket) && active(bucket)" class="running" :title="t(`有会话正在执行或在等你回答`)"></span>
         </header>
-        <div v-if="bucket.projectId && !isCollapsed(bucket)" class="project-directory">
-          <select v-if="bucket.directories?.length" :aria-label="t('新会话工作目录')" :value="selectedDirectory(bucket)" @change="projectWorkspaces[bucket.id] = ($event.target as HTMLSelectElement).value">
-            <option v-for="directory in bucket.directories" :key="directory" :value="directory">{{ directory }}</option>
-          </select>
-          <span v-else>{{ t('默认目录：~/aiclaw') }}</span>
-        </div>
         <div v-if="bucket.detail" class="bucket-detail" :title="bucket.path">{{ bucket.detail }}</div>
 
         <template v-for="session in visibleSessions(bucket)" :key="session.id">
@@ -558,6 +559,12 @@ function when(iso: string): string {
       <div class="workspace-menu-backdrop" @click="closeWorkspaceMenu()" />
       <div ref="menuElement" class="workspace-menu" :style="menuPosition" role="group" :aria-label="t('工作区更多操作')" @keydown.esc.prevent.stop="closeWorkspaceMenu()">
         <button @click="editProject(workspaceMenu)">{{ t('项目设置') }}</button>
+        <label v-if="workspaceMenu.projectId && (workspaceMenu.directories?.length ?? 0) > 1" class="project-directory">
+          {{ t('新会话工作目录') }}
+          <select :title="selectedDirectory(workspaceMenu)" :value="selectedDirectory(workspaceMenu)" @change="projectWorkspaces[workspaceMenu.id] = ($event.target as HTMLSelectElement).value">
+            <option v-for="directory in workspaceMenu.directories" :key="directory" :value="directory" :title="directory">{{ directoryLabel(directory, workspaceMenu.directories!) }}</option>
+          </select>
+        </label>
         <button v-if="workspaceMenu.projectId" @click="actions.deleteGroup(workspaceMenu.projectId); closeWorkspaceMenu()">{{ t('移除项目（保留会话和文件）') }}</button>
         <button v-if="workspaceMenu.path" @click="pinWorkspace(workspaceMenu)">{{ workspaceMenu.path && pinned.includes(workspaceMenu.path) ? t('取消置顶') : t('置顶') }}</button>
         <button v-if="workspaceMenu.path" @click="actions.revealWorkspace(workspaceMenu.path!); closeWorkspaceMenu()">{{ t('在 Finder 中显示') }}</button>
@@ -570,8 +577,8 @@ function when(iso: string): string {
 </template>
 
 <style scoped>
-.project-directory{padding:0 10px 8px;font-size:11px;color:var(--muted)}
-.project-directory select{width:100%;font-size:11px;min-width:0;padding:5px}
+.project-directory{display:block;padding:6px 10px 10px;font-size:11px;color:var(--muted)}
+.project-directory select{display:block;width:100%;margin-top:5px;font-size:11px;min-width:0;padding:5px}
 .project-move{max-width:80px;font-size:10px;padding:2px}
 
 .sidebar {
@@ -681,7 +688,7 @@ function when(iso: string): string {
 .bucket-head:hover .workspace-actions, .bucket-head:focus-within .workspace-actions, .workspace-actions.open { opacity: 1; pointer-events: auto; }
 .workspace-pin { color: var(--muted); font-size: 13px; }
 .workspace-menu-backdrop { position: fixed; inset: 0; z-index: 50; }
-.workspace-menu { position: fixed; z-index: 51; width: 192px; padding: 5px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-3); }
+.workspace-menu { position: fixed; z-index: 51; width: 192px; max-height: calc(100dvh - 16px); overflow-y: auto; padding: 5px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-3); }
 .workspace-menu button { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; text-align: left; cursor: pointer; }
 .workspace-menu button:hover, .workspace-menu button:focus-visible { background: var(--hover); }
 .workspace-menu button:disabled { opacity: .5; cursor: default; }

@@ -968,10 +968,15 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.project-editor').requestSubmit()");
  check('project with multiple directories is persisted and visible without chats',await wait("!document.querySelector('.project-editor') && !!document.querySelector('[data-bucket-id=\"p_fixture\"]')")&&groups.groups.find(p=>p.id==='p_fixture')?.directories.length===2);
  await win.reload();await wait("!!document.querySelector('[data-bucket-id=\"p_fixture\"]')");await openSessions();
- check('project directories survive renderer reload',await wait("document.querySelectorAll('[data-bucket-id=\"p_fixture\"] select option').length===2"));
+ await js("document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"工作区更多操作\"]').click()");await wait("!!document.querySelector('.workspace-menu .project-directory')");
+ check('project directories survive renderer reload',await wait("document.querySelectorAll('.workspace-menu .project-directory select option').length===2"));
+ check('multiple project directories use short labels while retaining exact paths',await js("(()=>{const select=document.querySelector('.workspace-menu .project-directory select');return select.options[0].textContent==='first'&&select.options[0].value==='/tmp/first'&&select.options[1].textContent==='second'&&select.title==='/tmp/first';})()"));
+ check('project sidebar does not display directory selectors',await js("!document.querySelector('.bucket .project-directory')"));
+ await js("document.querySelector('.workspace-menu-backdrop').click()");
  await js("(()=>{const select=document.querySelector('.project-move');select.value='p_fixture';select.dispatchEvent(new Event('change',{bubbles:true}))})()");
  check('moving chat changes project membership without moving files',await wait("document.querySelector('[data-bucket-id=\"p_fixture\"] .item')")&&sessionWorkspace==='/tmp/smoke');
- await js("(()=>{const select=document.querySelector('[data-bucket-id=\"p_fixture\"] .project-directory select');select.value='/tmp/second';select.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"在此工作区新建会话\"]').click()})()");
+ await js("document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"工作区更多操作\"]').click()");await wait("!!document.querySelector('.workspace-menu .project-directory')");
+ await js("(()=>{const select=document.querySelector('.workspace-menu .project-directory select');select.value='/tmp/second';select.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('.workspace-menu-backdrop').click();document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"在此工作区新建会话\"]').click()})()");
  check('project new chat uses the selected second directory and keeps project membership',await wait("document.querySelectorAll('[data-bucket-id=\"p_fixture\"] .item').length===2")&&startedWorkspaces.at(-1)==='/tmp/second');
 
 
@@ -1020,6 +1025,11 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.final-answer .code-panel[data-language=sh] .command-button.stop').click()");
  check('running shell card can be stopped',await wait("document.querySelector('.final-answer .code-panel[data-language=sh] .command-status')?.textContent.includes('已停止')")&&commandStops.length===1&&commandStops[0].sessionId==='s');
  check('inline command remains plain code after session restoration',await js("(()=>{const code=document.querySelector('.final-answer code.command-inline');return code?.textContent==='python3 sum.py'&&!code.querySelector('button')&&!document.querySelector('.final-answer .terminal-outputs');})()"));
+ groups.groups.push({id:'p_single',name:'Single directory project',directories:['/tmp/only']});
+ await win.reload();await openSessions();
+ check('single-directory project does not add a redundant directory selector',await wait("!!document.querySelector('[data-bucket-id=\"p_single\"]')")&&await js("!document.querySelector('[data-bucket-id=\"p_single\"] .project-directory')"));
+ await js("document.querySelector('[data-bucket-id=\"p_single\"] button[aria-label=\"在此工作区新建会话\"]').click()");
+ check('single-directory project still creates chats in its configured directory',await wait("document.querySelectorAll('[data-bucket-id=\"p_single\"] .item').length===1")&&startedWorkspaces.at(-1)==='/tmp/only');
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);
