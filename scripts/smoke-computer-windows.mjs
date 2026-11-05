@@ -138,6 +138,17 @@ try {
   await assert.rejects(call("paste",{app,text:"must not paste",format:"text"}),/fresh window screenshot/);
   await call("get_app_state",{app,include_ax:false});
   await assert.rejects(call("paste",{app,text:"must not paste",interaction_mode:"background"}),/Background action unsupported/);
+  // Exercise the shipped controller conversion and an actual CF_HTML consumer.
+  const browserFrame=(await query("Fixture HTML editor")).frame;
+  const browserScreen=value(await call("get_app_state",{app,include_ax:false}));
+  await call("click",{app,x:browserFrame.x-browserScreen.window_frame.x+30,y:browserFrame.y-browserScreen.window_frame.y+30});
+  await call("get_app_state",{app,include_ax:false});
+  await action("pressKey",{key:"ctrl+a"});
+  const richScreen=await host("get_app_state",{app});
+  await host("paste",{app,text:"**Windows 加粗 🌦️**",format:"md",observation_id:richScreen.text.match(/observation_id: ([\w-]+)/)[1],verify_after:false});
+  await action("click",{element_index:String((await query("Submit fixture")).index)},true);
+  receipt=JSON.parse(await readFile(join(temporary,"target.json"),"utf8"));
+  assert.match(receipt.html,/<(strong|b)\b[^>]*>Windows 加粗 🌦️<\/(strong|b)>/i);
   const stopped=value(await call("stop_app",{app})); assert.equal(stopped.verified,true);
   const installed=value(await call("find_apps",{text:"AIClaw Launch Fixture"}));
   const launcher=installed.apps.find(item=>item.launch_id); assert.ok(launcher);

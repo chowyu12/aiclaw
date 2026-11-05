@@ -5,6 +5,9 @@ import type { ComputerRequestParams, ComputerResult } from "@aiclaw/agent-client
 import { createComputerRuntime, type ComputerRuntime, type ComputerToolResult } from "./computer-runtime.js";
 import { ComputerWatches } from "./computer-watch.js";
 import { computerAppPolicy } from "./computer-policy.js";
+import MarkdownIt from "markdown-it/browser";
+
+const pasteMarkdown = new MarkdownIt({ html: false });
 
 const READS = new Set(["list_apps", "find_apps", "frontmost_window", "permission_status", "get_app_state", "query", "watch_start", "watch_next", "watch_stop", "app_policy"]);
 const ARGUMENTS: Record<string, string[]> = {
@@ -111,6 +114,14 @@ export class ComputerController {
     if (action === "get_app_state" && args.include_ax === undefined) args.include_ax = !targetedQueries;
     const native = session.runtime.tools.find(tool => tool.name === action);
     if (!native) throw Error(`AIClaw Computer Use does not support ${action} on ${process.platform}`);
+    // Portable services consume HTML. Keep conversion in the host, using the
+    // shipped parser, while macOS retains its native Markdown conversion.
+    const formats = (native.inputSchema.properties.format as { enum?: unknown[] } | undefined)?.enum;
+    if (action === "paste" && args.format === "md" && Array.isArray(formats) && !formats.includes("md") && formats.includes("html")) {
+      const rendered = pasteMarkdown.render(String(args.text));
+      if (rendered.length > 2_000_000) throw Error("Rendered Markdown exceeds the paste text limit");
+      args.text = rendered; args.format = "html";
+    }
     for (const key of Object.keys(args)) {
       if (!Object.hasOwn(native.inputSchema.properties, key)) throw Error(`AIClaw Computer Use does not support ${action}.${key}`);
     }

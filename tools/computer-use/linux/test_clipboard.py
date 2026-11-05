@@ -1,7 +1,8 @@
 import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
-from clipboard import Clipboard
+from clipboard import Clipboard, plain_html
+assert plain_html('<h1>标题 🌦️</h1><p><b>加粗</b> &amp; &lt;转义&gt;<script>secret</script><style>hidden</style></p>') == '标题 🌦️\n加粗 & <转义>\n'
 c=Clipboard()
 data={'UTF8_STRING':('UTF8_STRING',8,b'original'), 'text/html':('text/html',8,b'<b>original</b>'), 'application/x-aiclaw-test':('application/x-aiclaw-test',8,b'\x00\x01\xff')}
 g=c.generation(); assert c.replace_if_unchanged(data,g)

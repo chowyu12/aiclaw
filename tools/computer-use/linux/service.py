@@ -19,7 +19,7 @@ gi.require_version("Atspi", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
 from gi.repository import Atspi, GdkPixbuf, GLib, Gio
 from x11 import X11
-from clipboard import Clipboard
+from clipboard import Clipboard, plain_html
 
 PROTOCOL = "AIClawComputerUseIPC-1"
 SUPPORTED = {"list_apps", "find_apps", "permission_status", "frontmost_window", "get_app_state", "query", "set_value", "click", "perform_secondary_action", "select_text", "modify_app", "stop_app", "start_app", "press_key", "scroll", "drag", "type_text", "paste"}
@@ -83,10 +83,10 @@ class Service:
 
     def paste(self, values, target):
         value, fmt = values.get("text"), values.get("format", "text")
-        if not isinstance(value, str) or len(value) > 2_000_000 or fmt not in ("text", "html"):
+        if not isinstance(value, str) or len(value) > 2_000_000 or "\0" in value or fmt not in ("text", "html"):
             raise ValueError("X11 paste currently supports text and HTML, not Markdown")
         original, generation = self.clipboard.snapshot()
-        payload = {"UTF8_STRING": ("UTF8_STRING", 8, value.encode("utf-8"))}
+        payload = {"UTF8_STRING": ("UTF8_STRING", 8, (plain_html(value) if fmt == "html" else value).encode("utf-8"))}
         if fmt == "html": payload["text/html"] = ("text/html", 8, value.encode("utf-8"))
         generation = self.clipboard.replace_if_unchanged(payload, generation)
         if generation is None: raise RuntimeError("Clipboard changed before paste; no input was dispatched")
@@ -95,7 +95,10 @@ class Service:
             codes = [self.x.keycode(name) for name in ("Control_L", "v")]
             held = []
             try:
-                for code in codes: self.x.key(code, True); held.append(code)
+                for code in codes:
+                    self.global_focus(target)
+                    if self.clipboard.generation() != generation: raise RuntimeError("Clipboard changed before paste; no further keys dispatched")
+                    self.x.key(code, True); held.append(code)
             finally:
                 for code in reversed(held): self.x.key(code, False)
             delay(0.3)

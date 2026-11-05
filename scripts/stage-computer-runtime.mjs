@@ -3,6 +3,15 @@ import { createHash } from "node:crypto";
 import { cp, access, readFile, mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+export async function stageComputerHostDependencies({ repo, destination }) {
+  // The browser entry is a standalone Markdown parser with no transitive
+  // runtime imports. Ship only that entry, its package metadata and license.
+  const parser = join(destination,"node_modules/markdown-it");
+  await mkdir(join(parser,"dist/browser"),{recursive:true});
+  for (const name of ["package.json","LICENSE","dist/browser/markdown-it.esm.min.mjs"]) {
+    await cp(join(repo,"node_modules/markdown-it",name),join(parser,name));
+  }
+}
 export async function stageComputerRuntime({ repo, destination, platform, arch }) {
   if (platform !== "darwin") {
     const files = {linux:["service.py","x11.py","clipboard.py"],win32:["Service.ps1","Native.cs","Clipboard.cs"]}[platform];
@@ -24,5 +33,6 @@ export async function stageComputerRuntime({ repo, destination, platform, arch }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+  await stageComputerHostDependencies({repo,destination:join(repo,"apps/desktop")});
   await stageComputerRuntime({repo,destination:join(repo,"apps/desktop"),platform:process.platform,arch:process.arch});
 }

@@ -16,7 +16,7 @@ const image = "iVBORw0KGgo=";
 function result(text = "fixture window", pixels = false): ComputerToolResult {
   return { content: [{ type: "text", text }, ...(pixels ? [{ type: "image", data: image, mimeType: "image/png" }] : [])] };
 }
-function harness(options: { postFails?: boolean; transientPostFailure?: boolean; inputFails?: boolean; noImage?: boolean; missingField?: boolean; startFails?: boolean; noQuery?: boolean; launchUnverified?: boolean } = {}) {
+function harness(options: { postFails?: boolean; transientPostFailure?: boolean; inputFails?: boolean; noImage?: boolean; missingField?: boolean; startFails?: boolean; noQuery?: boolean; launchUnverified?: boolean; htmlPasteOnly?: boolean } = {}) {
   const calls: { action: string; args: any; connection: number }[] = [];
   let created = 0, closed = 0;
   const controller = new ComputerController(async () => {
@@ -26,6 +26,7 @@ function harness(options: { postFails?: boolean; transientPostFailure?: boolean;
       tools: specs.filter((spec: any) => !options.noQuery || spec.action !== "query").map((spec: any) => {
         const properties = { ...spec.schema.properties }; delete properties.observation_id;
         if (options.missingField) delete properties.x;
+        if (options.htmlPasteOnly && spec.action === "paste") properties.format = { enum: ["text", "html"] };
         return { name: spec.action, inputSchema: { properties, required: spec.schema.required?.filter((s: string) => s !== "observation_id") } };
       }),
       async call(action: string, args: any) {
@@ -50,6 +51,20 @@ function harness(options: { postFails?: boolean; transientPostFailure?: boolean;
   };
   return { controller, calls, call, observe, counts: () => ({ created, closed }) };
 }
+
+test("portable Markdown paste renders structural HTML and escapes embedded markup", async () => {
+  const h = harness({ htmlPasteOnly: true });
+  try {
+    const observation_id = await h.observe();
+    await h.call("paste", { app, observation_id, text: "# 标题 🌦️\n\n**加粗** & <script>alert(1)</script>\n\n|列|值|\n|-|-|\n|A|B|", format: "md", verify_after: false });
+    const sent = h.calls.at(-1)!.args;
+    assert.equal(sent.format, "html");
+    assert.match(sent.text, /<h1>标题 🌦️<\/h1>/);
+    assert.match(sent.text, /<strong>加粗<\/strong>/);
+    assert.match(sent.text, /<table>/);
+    assert.ok(!sent.text.includes("<script>"));
+  } finally { await h.controller.close(); }
+});
 
 test("service is lazy and discovery uses an isolated MCP connection", async () => {
   const h = harness(); assert.equal(h.counts().created, 0);

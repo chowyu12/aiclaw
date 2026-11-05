@@ -17,7 +17,7 @@ const children = [];
 const controller = new ComputerController();
 const call = (action, args = {}) => controller.perform({ sessionId: "linux-host-acceptance", turnId: "t1", action, arguments: args });
 const launch = async name => {
-  const child = spawn("/usr/bin/python3", [join(here, "fixture.py"), join(temporary, `${name}.json`), `AIClaw ${name} Fixture`], { stdio: ["ignore", "pipe", "inherit"], env: {...process.env, AICLAW_FIXTURE_CLIPBOARD_SEED: name === "Target" ? "1" : "0"} });
+  const child = spawn("/usr/bin/python3", [join(here, "fixture.py"), join(temporary, `${name}.json`), `AIClaw ${name} Fixture`], { stdio: ["ignore", "pipe", "inherit"], env: {...process.env, AICLAW_FIXTURE_CLIPBOARD_SEED: name === "Target" ? "1" : "0", AICLAW_FIXTURE_RICH: name === "Target" ? "1" : "0", WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"} });
   children.push(child);
   await Promise.race([once(child.stdout, "data"), pause(10_000).then(() => { throw Error("GTK fixture startup timed out"); })]);
   return String(child.pid);
@@ -52,6 +52,18 @@ try {
   await call("click", await query("Submit fixture"));
   assert.equal(JSON.parse(await readFile(join(temporary,"Target.json"),"utf8")).value,"Linux 粘贴 🌦️Linux 宿主 🌦️");
   assert.deepEqual(clipboardSnapshot(), originalClipboard);
+  const htmlQuery=await call("query",{app:target,text:"Fixture HTML editor",exact:true});
+  const htmlFrame=JSON.parse(htmlQuery.text.split("\n")[0]).matches[0].frame;
+  const htmlScreen=await call("get_app_state",{app:target});
+  const windowFrame=JSON.parse(htmlScreen.text.split("\n")[0]).window_frame;
+  await call("click",{app:target,x:htmlFrame.x-windowFrame.x+30,y:htmlFrame.y-windowFrame.y+30,observation_id:htmlScreen.text.match(/observation_id: ([\w-]+)/)[1],verify_after:false});
+  const selected=await call("get_app_state",{app:target});
+  await call("press_key",{app:target,key:"ctrl+a",observation_id:selected.text.match(/observation_id: ([\w-]+)/)[1],verify_after:false});
+  const pasteScreen=await call("get_app_state",{app:target});
+  await call("paste",{app:target,text:"**Linux 加粗 🌦️**",format:"md",observation_id:pasteScreen.text.match(/observation_id: ([\w-]+)/)[1],verify_after:false});
+  await call("click",await query("Submit fixture"));
+  assert.match(JSON.parse(await readFile(join(temporary,"Target.json"),"utf8")).html,/<(strong|b)\b[^>]*>Linux 加粗 🌦️<\/(strong|b)>/i);
+  assert.deepEqual(clipboardSnapshot(),originalClipboard);
   await call("modify_app", {app:sentinel, modification:"activate", verify_after:false});
   await pause(300); // Let GTK repaint the focus-out style before the baseline.
   const editable = await query("Fixture input");

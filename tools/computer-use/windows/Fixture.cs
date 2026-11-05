@@ -19,19 +19,22 @@ public class FixturePad : Panel {
 public static class FixtureProgram {
     [STAThread] public static void Main(string[] args) {
         Application.EnableVisualStyles();
-        var form = new Form { Text = args[1], StartPosition = FormStartPosition.Manual, Location = new Point(100, 100), ClientSize = new Size(420, 480), BackColor = args[1].Contains("Target") ? Color.FromArgb(204,51,68) : Color.FromArgb(51,85,204) };
+        var form = new Form { Text = args[1], StartPosition = FormStartPosition.Manual, Location = new Point(100, 100), ClientSize = new Size(420, 650), BackColor = args[1].Contains("Target") ? Color.FromArgb(204,51,68) : Color.FromArgb(51,85,204) };
         var input = new TextBox { Bounds = new Rectangle(20,20,370,28), AccessibleName = "Fixture input", Name = "fixture-input" };
         var button = new Button { Bounds = new Rectangle(20,64,180,30), Text = "Submit fixture", AccessibleName = "Submit fixture" };
         var toggle = new CheckBox { Bounds = new Rectangle(220,64,170,30), Text = "Fixture toggle", AccessibleName = "Fixture toggle" };
         var status = new Label { Bounds = new Rectangle(20,106,370,35), Text = "No input submitted" };
         var pad = new FixturePad { Bounds = new Rectangle(20,150,370,110), AccessibleName = "Fixture gesture pad" };
         var rich = new RichTextBox { Bounds = new Rectangle(20,290,370,140), AccessibleName = "Fixture rich editor", Name = "fixture-rich" };
+        var browser = new WebBrowser { Bounds = new Rectangle(20,450,370,160), AccessibleName = "Fixture HTML editor", AllowNavigation = false, ScriptErrorsSuppressed = true };
+        browser.DocumentText = "<!doctype html><html><body><div id='editor' contenteditable='true' style='height:130px'>HTML fixture</div></body></html>";
         button.Click += (sender, e) => {
             status.Text = "Submitted: " + input.Text;
-            var values = new Dictionary<string,object> { {"value", input.Text}, {"checked", toggle.Checked}, {"drags",pad.Drags}, {"scrolls",pad.Scrolls}, {"rich",rich.Text} };
+            var html = browser.Document == null ? null : browser.Document.GetElementById("editor");
+            var values = new Dictionary<string,object> { {"value", input.Text}, {"checked", toggle.Checked}, {"drags",pad.Drags}, {"scrolls",pad.Scrolls}, {"rich",rich.Text}, {"html",html == null ? "" : html.InnerHtml} };
             File.WriteAllText(args[0], new JavaScriptSerializer().Serialize(values), new UTF8Encoding(false));
         };
-        foreach (Control control in new Control[] { input, button, toggle, status, pad, rich }) form.Controls.Add(control);
+        foreach (Control control in new Control[] { input, button, toggle, status, pad, rich, browser }) form.Controls.Add(control);
         form.Shown += (sender, e) => { input.Focus(); File.WriteAllText(args[0]+".ready", "ready"); };
         Application.Run(form);
     }

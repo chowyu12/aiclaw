@@ -6,10 +6,28 @@ until another application takes ownership. No clipboard history is written.
 """
 import ctypes as C
 import ctypes.util
+from html.parser import HTMLParser
 import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
+
+
+def plain_html(value):
+    class Plain(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.parts = []; self.hidden = 0
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style"): self.hidden += 1
+            elif not self.hidden and tag == "br": self.parts.append("\n")
+        def handle_endtag(self, tag):
+            if tag in ("script", "style"): self.hidden = max(0, self.hidden - 1)
+            elif not self.hidden and tag in ("p", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr"): self.parts.append("\n")
+        def handle_data(self, data):
+            if not self.hidden: self.parts.append(data)
+    parser = Plain(); parser.feed(value); parser.close()
+    return "".join(parser.parts)
 
 
 class Target(C.Structure):

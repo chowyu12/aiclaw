@@ -5,8 +5,18 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { COMPUTER_APP_NAME, installComputerBundle } from "../apps/desktop/src/main/computer-install.ts";
 import { installPortableComputer, portableSources } from "../apps/desktop/src/main/computer-portable-install.ts";
-import { stageComputerRuntime } from "./stage-computer-runtime.mjs";
+import { stageComputerRuntime, stageComputerHostDependencies } from "./stage-computer-runtime.mjs";
 import { fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
+
+test("packaged host Markdown conversion runs without development dependencies", async () => {
+  const root = await mkdtemp(join(tmpdir(), "aiclaw-paste-parser-"));
+  try {
+    await stageComputerHostDependencies({ repo: fileURLToPath(new URL("../",import.meta.url)), destination: root });
+    const { default: MarkdownIt } = await import(pathToFileURL(join(root,"node_modules/markdown-it/dist/browser/markdown-it.esm.min.mjs")).href);
+    assert.match(new MarkdownIt({html:false}).render("**加粗 🌦️**"), /<strong>加粗 🌦️<\/strong>/);
+  } finally { await rm(root, {recursive:true,force:true}); }
+});
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "aiclaw-helper-install-"));

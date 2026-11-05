@@ -36,9 +36,27 @@ pad.connect("motion-notify-event", motion)
 pad.connect("scroll-event", scroll)
 editor = Gtk.TextView(); editor.set_size_request(340, 100)
 editor.get_accessible().set_name("Fixture rich editor")
+browser = None
+if os.environ.get("AICLAW_FIXTURE_RICH") == "1":
+    # This browser only renders the inline acceptance document, without network.
+    gi.require_version("WebKit2", "4.1")
+    from gi.repository import WebKit2
+    browser = WebKit2.WebView()
+    browser.get_settings().set_enable_javascript(True)
+    browser.set_size_request(340, 160)
+    browser.get_accessible().set_name("Fixture HTML editor")
+    browser.load_html("<!doctype html><html><body><div id='editor' contenteditable='true' style='height:130px'>HTML fixture</div></body></html>", "about:blank")
+    box.pack_start(browser, False, False, 0)
 def submit(_button):
     status.set_text("Submitted: " + entry.get_text())
-    Path(sys.argv[1]).write_text(json.dumps({"value": entry.get_text(), **counts}, ensure_ascii=False))
+    values = {"value": entry.get_text(), **counts}
+    def save(html=""):
+        Path(sys.argv[1]).write_text(json.dumps({**values, "html": html}, ensure_ascii=False))
+    if browser:
+        def evaluated(view, result, _data):
+            save(view.evaluate_javascript_finish(result).to_string())
+        browser.evaluate_javascript("document.getElementById('editor').innerHTML", -1, None, None, None, evaluated, None)
+    else: save()
 button.connect("clicked", submit)
 for widget in (entry, button, status, pad, editor): box.pack_start(widget, False, False, 0)
 window.show_all()
@@ -47,5 +65,9 @@ if os.environ.get("AICLAW_FIXTURE_CLIPBOARD_SEED") == "1":
     from clipboard import Clipboard
     clipboard = Clipboard()
     clipboard.replace_if_unchanged({"UTF8_STRING": ("UTF8_STRING", 8, b"original clipboard"), "application/x-aiclaw-test": ("application/x-aiclaw-test", 8, b"\x00\xfforiginal")}, clipboard.generation())
-GLib.idle_add(lambda: (print("READY", flush=True), False)[1])
+if browser:
+    def loaded(_view, event):
+        if event == WebKit2.LoadEvent.FINISHED: print("READY", flush=True)
+    browser.connect("load-changed", loaded)
+else: GLib.idle_add(lambda: (print("READY", flush=True), False)[1])
 Gtk.main()
