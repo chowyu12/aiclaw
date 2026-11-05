@@ -489,7 +489,7 @@ export interface SessionHistoryResult {
   items: Item[];
 }
 
-/** An app-scoped call to the bundled Open Computer Use service. */
+/** An app-scoped call to the bundled AIClaw Computer Use service. */
 export interface ComputerRequestParams {
   sessionId: string;
   turnId: string;

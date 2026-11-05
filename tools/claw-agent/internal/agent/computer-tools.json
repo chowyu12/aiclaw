@@ -30,7 +30,7 @@
         },
         "app": {
           "type": "string",
-          "description": "Exact app target from computer_list_apps: macOS bundle identifier; Windows/Linux PID as a string. Open Computer Use maintains the observed key window. Fuzzy names and whole-desktop input are not accepted."
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "element_index": {
           "type": "string",
@@ -42,17 +42,80 @@
         },
         "observation_id": {
           "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot or action result in this turn. Old observations and indexes cannot be reused."
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "key": {
+          "type": "string",
+          "description": "Optional modifier combination: shift, ctrl, alt, super (use + between modifiers)."
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Seconds to hold the mouse button before release."
         }
       },
       "additionalProperties": false
+    },
+    "platforms": [
+      "darwin"
+    ]
+  },
+  {
+    "name": "computer_query",
+    "action": "query",
+    "readOnly": true,
+    "platforms": [
+      "darwin"
+    ],
+    "description": "Fast targeted accessibility lookup on macOS (no full tree or screenshot). Prefer this to clicking through lists when the control text or role is known. The app must already run. Returned indexes authorize only matched element actions in this turn. A truncated empty search does not prove absence. For settable text fields use computer_set_value instead of trying to establish keyboard focus.",
+    "schema": {
+      "required": [
+        "app"
+      ],
+      "properties": {
+        "text": {
+          "description": "Match text in the control's title, description or value (up to 1000 UTF-16 code units). Case-insensitive substring unless exact is true. Long fields are bounded and reported as truncated.",
+          "type": "string"
+        },
+        "exact": {
+          "description": "Require a complete text match instead of a substring. Defaults to false. No substring retry.",
+          "type": "boolean"
+        },
+        "max_nodes": {
+          "type": "integer",
+          "description": "Node/queue cap for AX traversal. Defaults to 500; capped at 5000. Search has a 2-second cooperative deadline.",
+          "minimum": 1
+        },
+        "app": {
+          "type": "string",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        },
+        "limit": {
+          "minimum": 1,
+          "type": "integer",
+          "description": "Maximum matches to return. Defaults to 20; capped at 100."
+        },
+        "role": {
+          "description": "Native accessibility role, e.g. AXTextField for search boxes, AXTextArea for editors, AXButton for buttons. Use native AX role names, not localized role labels.",
+          "type": "string"
+        },
+        "window_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295,
+          "description": "macOS CGWindowID from a prior observation/query. Search this window explicitly; omit to use the current app window."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
     }
   },
   {
     "name": "computer_drag",
     "action": "drag",
     "readOnly": false,
-    "description": "Drag from one point to another using pixel coordinates. By default mouse events are posted directly to the target app and the system pointer does not move; that path cannot drive window-server drag sessions such as window moves, text selection, or Finder drag-and-drop. Those require OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS=1 in the server process environment, which may move the real pointer. The result reports which path was used. Use the latest observation_id and element_index. Verify the returned post-action state. If an error says the outcome is unknown, observe again before deciding whether to retry.",
+    "description": "Drag between screenshot pixel coordinates in the explicitly observed macOS window. Uses foreground event delivery and may move the system pointer. Verify the returned post-action state; never replay uncertain input.",
     "schema": {
       "type": "object",
       "properties": {
@@ -69,7 +132,7 @@
           "type": "number"
         },
         "app": {
-          "description": "Exact app target from computer_list_apps: macOS bundle identifier; Windows/Linux PID as a string. Open Computer Use maintains the observed key window. Fuzzy names and whole-desktop input are not accepted.",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
           "type": "string"
         },
         "to_x": {
@@ -78,7 +141,7 @@
         },
         "observation_id": {
           "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot or action result in this turn. Old observations and indexes cannot be reused."
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
         }
       },
       "required": [
@@ -90,13 +153,16 @@
         "observation_id"
       ],
       "additionalProperties": false
-    }
+    },
+    "platforms": [
+      "darwin"
+    ]
   },
   {
     "name": "computer_screenshot",
     "action": "get_app_state",
     "readOnly": true,
-    "description": "Observe the selected app key window via the independent Open Computer Use app. Call before actions in every turn. Returns screenshot, AX tree, and observation_id. App may be launched on macOS; inspect the returned window before acting.",
+    "description": "Observe the app window and get observation_id. macOS defaults to a fast screenshot without a full AX tree; use computer_query to find named controls. Set include_ax=true only when you need a complete accessibility tree. After an action the returned screenshot already verifies its result; do not immediately repeat this read unless it is incomplete or the UI changed.",
     "schema": {
       "required": [
         "app"
@@ -128,23 +194,31 @@
           "description": "Maximum accessibility tree depth to render. Defaults to 64."
         },
         "include_ax": {
-          "description": "Include accessibility tree, focus and selection. False skips collection and invalidates previous element indexes; read AX again before element actions.",
-          "type": "boolean",
-          "default": true
+          "description": "Include full accessibility tree. macOS defaults to false for speed; computer_query finds controls directly. Other platforms default to true.",
+          "type": "boolean"
         },
         "app": {
           "type": "string",
-          "description": "Exact app target from computer_list_apps: macOS bundle identifier; Windows/Linux PID as a string. Open Computer Use maintains the observed key window. Fuzzy names and whole-desktop input are not accepted."
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "max_tree_nodes": {
           "description": "Maximum accessibility tree nodes to render. Defaults to 1200.",
           "type": "integer",
           "minimum": 1
+        },
+        "window_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4294967295,
+          "description": "macOS CGWindowID from a prior observation/query. Search this window explicitly; omit to use the current app window."
         }
       },
       "additionalProperties": false,
       "type": "object"
-    }
+    },
+    "platforms": [
+      "darwin"
+    ]
   },
   {
     "name": "computer_list_apps",
@@ -155,7 +229,10 @@
       "additionalProperties": false,
       "properties": {},
       "type": "object"
-    }
+    },
+    "platforms": [
+      "darwin"
+    ]
   },
   {
     "name": "computer_secondary_action",
@@ -181,15 +258,18 @@
           "description": "Element identifier"
         },
         "app": {
-          "description": "Exact app target from computer_list_apps: macOS bundle identifier; Windows/Linux PID as a string. Open Computer Use maintains the observed key window. Fuzzy names and whole-desktop input are not accepted.",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
           "type": "string"
         },
         "observation_id": {
           "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot or action result in this turn. Old observations and indexes cannot be reused."
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
         }
       }
-    }
+    },
+    "platforms": [
+      "darwin"
+    ]
   },
   {
     "name": "computer_key",
@@ -206,7 +286,7 @@
       ],
       "properties": {
         "app": {
-          "description": "Exact app target from computer_list_apps: macOS bundle identifier; Windows/Linux PID as a string. Open Computer Use maintains the observed key window. Fuzzy names and whole-desktop input are not accepted.",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
           "type": "string"
         },
         "key": {
@@ -215,10 +295,19 @@
         },
         "observation_id": {
           "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot or action result in this turn. Old observations and indexes cannot be reused."
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "duration": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Seconds to hold the key before release."
         }
       }
-    }
+    },
+    "platforms": [
+      "darwin"
+    ]
   },
   {
     "name": "computer_scroll",
@@ -242,21 +331,31 @@
         },
         "app": {
           "type": "string",
-          "description": "Exact app target from computer_list_apps: macOS bundle identifier; Windows/Linux PID as a string. Open Computer Use maintains the observed key window. Fuzzy names and whole-desktop input are not accepted."
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "observation_id": {
           "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot or action result in this turn. Old observations and indexes cannot be reused."
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "x": {
+          "type": "number",
+          "description": "Screenshot pixel x for coordinate scroll; use with y instead of element_index."
+        },
+        "y": {
+          "type": "number",
+          "description": "Screenshot pixel y for coordinate scroll; use with x instead of element_index."
         }
       },
       "required": [
         "app",
-        "element_index",
         "direction",
         "observation_id"
       ],
       "type": "object"
-    }
+    },
+    "platforms": [
+      "darwin"
+    ]
   },
   {
     "name": "computer_set_value",
@@ -275,11 +374,16 @@
         },
         "app": {
           "type": "string",
-          "description": "Exact app target from computer_list_apps: macOS bundle identifier; Windows/Linux PID as a string. Open Computer Use maintains the observed key window. Fuzzy names and whole-desktop input are not accepted."
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "observation_id": {
           "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot or action result in this turn. Old observations and indexes cannot be reused."
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "autosubmit_search_fields": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true and the field is a search field, press Return after setting it. Defaults to false."
         }
       },
       "additionalProperties": false,
@@ -290,13 +394,16 @@
         "value",
         "observation_id"
       ]
-    }
+    },
+    "platforms": [
+      "darwin"
+    ]
   },
   {
     "name": "computer_type",
     "action": "type_text",
     "readOnly": false,
-    "description": "Type literal text into the currently focused editable element. Requires a focused editable field; when the AX tree exposes a settable text field, prefer computer_set_value with its element_index to set text without relying on keyboard focus. Use the latest observation_id. Verify the returned state; on an unknown outcome, observe again before deciding whether to retry.",
+    "description": "Insert literal text at the current editable focus. Prefer computer_query plus computer_set_value for a settable field; clicking a text field does not prove focus changed. macOS key_method=sky_key is an explicit background delivery option for the observed on-screen window. After a focus error, query a settable control instead of repeatedly clicking and typing. Use the latest observation_id; verify the result before submitting.",
     "schema": {
       "required": [
         "app",
@@ -308,7 +415,7 @@
       "properties": {
         "app": {
           "type": "string",
-          "description": "Exact app target from computer_list_apps: macOS bundle identifier; Windows/Linux PID as a string. Open Computer Use maintains the observed key window. Fuzzy names and whole-desktop input are not accepted."
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "text": {
           "type": "string",
@@ -316,9 +423,231 @@
         },
         "observation_id": {
           "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot or action result in this turn. Old observations and indexes cannot be reused."
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
         }
       }
+    },
+    "platforms": [
+      "darwin"
+    ]
+  },
+  {
+    "name": "computer_select_text",
+    "action": "select_text",
+    "readOnly": false,
+    "description": "Select exact Unicode text or place the caret before/after it on macOS. Use a current screenshot/query element index. Prefix/suffix disambiguate repeated text; ambiguous, changed or unverifiable text fails without keyboard fallback.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        },
+        "observation_id": {
+          "type": "string",
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "element_index": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "prefix": {
+          "type": "string"
+        },
+        "suffix": {
+          "type": "string"
+        },
+        "selection": {
+          "type": "string",
+          "enum": [
+            "text",
+            "cursor_before",
+            "cursor_after"
+          ]
+        }
+      },
+      "required": [
+        "app",
+        "observation_id",
+        "element_index",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "platforms": [
+      "darwin"
+    ]
+  },
+  {
+    "name": "computer_paste",
+    "action": "paste",
+    "readOnly": false,
+    "description": "Paste text, Markdown rendered as rich text, or HTML into the current focused field. Requires a screenshot observation. The native app temporarily uses the pasteboard, restores all previous formats after input, and preserves a newer user copy. Verify the returned app state; never replay an uncertain paste.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        },
+        "observation_id": {
+          "type": "string",
+          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 2000000
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "text",
+            "md",
+            "html"
+          ],
+          "default": "text"
+        }
+      },
+      "required": [
+        "app",
+        "observation_id",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "platforms": [
+      "darwin"
+    ]
+  },
+  {
+    "name": "computer_find_apps",
+    "action": "find_apps",
+    "readOnly": true,
+    "description": "Find installed or running macOS applications by name or bundle identifier. Returns exact IDs, paths and running state. Inventory may omit unindexed apps; discovery never launches apps.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 100
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "platforms": [
+      "darwin"
+    ]
+  },
+  {
+    "name": "computer_start_app",
+    "action": "start_app",
+    "readOnly": false,
+    "description": "Launch an exact macOS bundle identifier from discovery in the background, then observe its window. Does not require a previous observation. A running process alone does not prove the app is ready; inspect the returned snapshot.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "additionalProperties": false
+    },
+    "platforms": [
+      "darwin"
+    ]
+  },
+  {
+    "name": "computer_stop_app",
+    "action": "stop_app",
+    "readOnly": false,
+    "description": "Request normal quit of an exact macOS bundle identifier. Unsaved document dialogs may block exit; the result reports whether exit was verified. Never force terminates. Invalidates earlier observations.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "additionalProperties": false
+    },
+    "platforms": [
+      "darwin"
+    ]
+  },
+  {
+    "name": "computer_modify_app",
+    "action": "modify_app",
+    "readOnly": false,
+    "platforms": [
+      "darwin"
+    ],
+    "description": "Activate or deactivate an exact macOS application. This changes foreground focus and invalidates prior observations. No previous observation is required.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string",
+          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        },
+        "modification": {
+          "type": "string",
+          "enum": [
+            "activate",
+            "deactivate"
+          ]
+        }
+      },
+      "required": [
+        "app",
+        "modification"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "computer_frontmost_window",
+    "action": "frontmost_window",
+    "readOnly": true,
+    "platforms": [
+      "darwin"
+    ],
+    "description": "Read the current foreground application and frontmost window metadata. This does not authorize input; observe the intended app before interacting.",
+    "schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "computer_permissions",
+    "action": "permission_status",
+    "readOnly": true,
+    "platforms": [
+      "darwin"
+    ],
+    "description": "Read Accessibility and Screen Recording permission status of AIClaw Computer Use.app. Does not grant permissions.",
+    "schema": {
+      "type": "object",
+      "properties": {},
+      "required": [],
+      "additionalProperties": false
     }
   }
 ]

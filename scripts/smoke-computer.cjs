@@ -1,23 +1,27 @@
-/** Verify the actual bundled native MCP service, without screenshots or input. */
+/** Permission-free contract test of our independent native app. */
 const { app } = require("electron");
 const { readFileSync } = require("node:fs");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 app.setName("aiclaw-computer-smoke");
 app.setPath("userData", path.join(app.getPath("temp"), "aiclaw-computer-smoke"));
-const watchdog = setTimeout(() => { console.error("Computer Use smoke timed out"); app.exit(1); }, 45_000);
+const watchdog = setTimeout(() => { console.error("Native Computer Use smoke timed out"); app.exit(1); }, 45_000);
 app.whenReady().then(async () => {
-  const { ComputerMcpRuntime } = await import(pathToFileURL(path.join(__dirname, "..", "apps/desktop/dist/main/computer-runtime.js")));
-  const runtime = await ComputerMcpRuntime.create();
+  if (process.platform !== "darwin") { console.log("Native Computer Use is unavailable on this OS; no third-party fallback."); return; }
+  const { ComputerNativeRuntime } = await import(pathToFileURL(path.join(__dirname, "../apps/desktop/dist/main/computer-runtime.js")));
+  const runtime = await ComputerNativeRuntime.create();
   try {
     const specs = JSON.parse(readFileSync(path.join(__dirname, "../tools/claw-agent/internal/agent/computer-tools.json"), "utf8"));
     for (const spec of specs) {
-      const upstream = runtime.tools.find(tool => tool.name === spec.action);
-      if (!upstream) throw Error(`Service is missing ${spec.action}`);
+      const native = runtime.tools.find(tool => tool.name === spec.action);
+      if (!native) throw Error(`Native service is missing ${spec.action}`);
       for (const field of Object.keys(spec.schema.properties)) {
-        if (field !== "observation_id" && !upstream.inputSchema.properties[field]) throw Error(`Service is missing ${spec.action}.${field}`);
+        if (field !== "observation_id" && !native.inputSchema.properties[field]) throw Error(`Native service is missing ${spec.action}.${field}`);
       }
     }
-    console.log(`Open Computer Use 1.1.3: real native MCP handshake and ${specs.length} tool contracts verified (no desktop actions).`);
+    const status = await runtime.call("permission_status", {});
+    const permissions = JSON.parse(status.content[0].text);
+    if (typeof permissions.accessibilityTrusted !== "boolean" || typeof permissions.screenCaptureGranted !== "boolean") throw Error("Invalid native permission response");
+    console.log(`AIClaw native IPC handshake and ${specs.length} tool contracts verified (no screenshots or input). Permissions: AX=${permissions.accessibilityTrusted}, capture=${permissions.screenCaptureGranted}.`);
   } finally { await runtime.close(); }
 }).then(() => { clearTimeout(watchdog); app.quit(); }).catch(error => { console.error(error); clearTimeout(watchdog); app.exit(1); });

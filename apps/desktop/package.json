@@ -1,6 +1,6 @@
 {
   "name": "@aiclaw/desktop",
-  "version": "3.7.40",
+  "version": "3.7.41",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
@@ -16,8 +16,7 @@
   },
   "dependencies": {
     "@aiclaw/agent-client": "*",
-    "highlight.js": "11.12.0",
-    "open-computer-use": "1.1.3"
+    "highlight.js": "11.12.0"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

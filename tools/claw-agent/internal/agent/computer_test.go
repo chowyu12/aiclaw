@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -84,13 +85,17 @@ func TestComputerSchemaRejectsDesktopOverridesBeforeHostCall(t *testing.T) {
 	}
 }
 
-func TestComputerSchemasUseAppScopedOCUContract(t *testing.T) {
-	specs, err := computerToolSpecs()
+func TestComputerSchemasUseNativeAppContract(t *testing.T) {
+	specs, err := computerToolSpecs(runtime.GOOS)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(specs) != 9 {
-		t.Fatalf("expected 9 common native tools, got %d", len(specs))
+	expected := 0
+	if runtime.GOOS == "darwin" {
+		expected = 18
+	}
+	if len(specs) != expected {
+		t.Fatalf("unexpected native tool count, got %d", len(specs))
 	}
 	for _, spec := range specs {
 		if spec.Action == "get_window_state" || spec.Action == "list_windows" {
@@ -103,6 +108,33 @@ func TestComputerSchemasUseAppScopedOCUContract(t *testing.T) {
 			if err := validateComputerArgs(json.RawMessage(`{"app":"com.example.fixture","observation_id":"o1","element_token":"s00000001:1"}`), spec.Schema); err == nil {
 				t.Fatal("old driver token admitted")
 			}
+		}
+	}
+}
+
+func TestComputerQueryAndDeliveryOptionsAreMacOnly(t *testing.T) {
+	for _, platform := range []string{"darwin", "windows", "linux"} {
+		specs, err := computerToolSpecs(platform)
+		if err != nil {
+			t.Fatal(err)
+		}
+		query, native := false, false
+		for _, spec := range specs {
+			if spec.Action == "query" {
+				query = spec.ReadOnly
+			}
+			if spec.Action == "click" {
+				var schema struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				}
+				if err := json.Unmarshal(spec.Schema, &schema); err != nil {
+					t.Fatal(err)
+				}
+				_, native = schema.Properties["duration"]
+			}
+		}
+		if query != (platform == "darwin") || native != (platform == "darwin") {
+			t.Fatalf("wrong capabilities on %s: query=%v method=%v", platform, query, native)
 		}
 	}
 }

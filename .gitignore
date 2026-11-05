@@ -33,3 +33,6 @@ aiclaw.db
 /server.exe
 /main
 docs/swagger.yaml
+
+# Independent macOS Computer Use build
+/apps/desktop/computer-use/

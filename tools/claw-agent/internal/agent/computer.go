@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
@@ -13,7 +15,7 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
 
-// Allowlisted Open Computer Use 1.1.3 MCP tools. The host owns approvals,
+// Allowlisted AIClaw native Computer Use IPC tools. The host owns approvals,
 // per-turn observations and isolated connections; no arbitrary script or file output.
 //
 //go:embed computer-tools.json
@@ -25,19 +27,30 @@ type computerToolSpec struct {
 	ReadOnly    bool                    `json:"readOnly"`
 	Description string                  `json:"description"`
 	Schema      json.RawMessage         `json:"schema"`
+	Platforms   []string                `json:"platforms,omitempty"`
 }
 
-func computerToolSpecs() ([]computerToolSpec, error) {
+func computerToolSpecs(platform string) ([]computerToolSpec, error) {
 	var specs []computerToolSpec
-	err := json.Unmarshal(computerToolsJSON, &specs)
-	return specs, err
+	if err := json.Unmarshal(computerToolsJSON, &specs); err != nil {
+		return nil, err
+	}
+	result := make([]computerToolSpec, 0, len(specs))
+	for _, spec := range specs {
+		if len(spec.Platforms) > 0 && !slices.Contains(spec.Platforms, platform) {
+			continue
+		}
+
+		result = append(result, spec)
+	}
+	return result, nil
 }
 
 func (s *Session) registerComputerTools() error {
 	if !s.config.EnableComputerUse {
 		return nil
 	}
-	specs, err := computerToolSpecs()
+	specs, err := computerToolSpecs(runtime.GOOS)
 	if err != nil {
 		return err
 	}
@@ -59,7 +72,7 @@ func (s *Session) registerComputerTools() error {
 				request := protocol.ComputerRequestParams{SessionID: env.SessionID, TurnID: env.TurnID, Action: spec.Action, Arguments: raw}
 				if err := env.RequestApproval(ctx, effect, protocol.ApprovalExec,
 					i18n.D("屏幕操作 {action}", "action", string(spec.Action)), string(raw),
-					"Operate the explicitly selected application through Open Computer Use, outside the workspace.",
+					"Operate the explicitly selected application through AIClaw Computer Use, outside the workspace.",
 				); err != nil {
 					return "", err
 				}

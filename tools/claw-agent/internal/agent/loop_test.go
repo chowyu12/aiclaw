@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -718,6 +719,9 @@ func TestRememberIsGatedByApproval(t *testing.T) {
 
 func computerSession(t *testing.T, model *fakeModel, policy protocol.ApprovalPolicy) *Session {
 	t.Helper()
+	if runtime.GOOS != "darwin" {
+		t.Skip("native Computer Use currently requires macOS")
+	}
 	server := httptest.NewServer(http.HandlerFunc(model.handler))
 	t.Cleanup(server.Close)
 	session, err := New(context.Background(), "test", protocol.SessionStartParams{

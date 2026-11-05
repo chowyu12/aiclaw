@@ -54,31 +54,34 @@ jobs:
           xvfb-run --auto-servernum npm run smoke:desktop
 
   computer-contract:
-    name: Native computer contract (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
+    name: Independent macOS Computer Use
+    runs-on: macos-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run setup:electron
+      - run: npm run test:computer-native
+      - run: node scripts/build-computer-runtime.mjs --universal
       - run: npm run build -w @aiclaw/agent-client && npm run build:main -w @aiclaw/desktop
-      # No screenshots or input: verify the real platform's native MCP service.
+      # Permission-free real IPC handshake. Live input needs an interactive Mac.
       - run: npx --no-install electron scripts/smoke-computer.cjs
+      - run: npx --no-install electron scripts/smoke-computer-lifecycle.cjs
+      - run: tar -czf native-computer-runtime.tar.gz -C apps/desktop computer-use
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-computer-runtime
+          path: native-computer-runtime.tar.gz
+          if-no-files-found: error
 
   package:
     needs: [test, computer-contract]
-    # One Linux runner produces every package: the kernel builds with
-    # CGO_ENABLED=0 for any GOOS/GOARCH, @electron/packager cross-packages,
-    # and the Windows exe metadata is written with resedit (no wine).
+    # Linux cross-packages the host; the independently built universal macOS
+    # Computer Use app is transferred from the macOS contract job.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,6 +95,10 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-computer-runtime
+      - run: tar -xzf native-computer-runtime.tar.gz -C apps/desktop
       - name: Package all four targets
         # scripts/package-app.mjs takes the version from GITHUB_REF_NAME when
         # it is a v* tag, so the Release version always matches the tag.
@@ -168,6 +175,7 @@ jobs:
         with:
           path: release
           merge-multiple: true
+          pattern: aiclaw-*
       - name: Prepare notes and checksums
         # actions/checkout fetches the tag by commit SHA, which leaves a
         # lightweight tag behind and loses the annotation — the release then

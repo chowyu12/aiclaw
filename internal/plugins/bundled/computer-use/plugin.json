@@ -3,7 +3,7 @@
   "id": "aiclaw.computer-use",
   "name": "Computer Use",
   "version": "0.3.0",
-  "description": "通过独立的 Open Computer Use 应用观察、点击及输入，支持无障碍控件与截图。每轮先观察目标应用，动作后重新观察，并遵循当前会话的审批策略。macOS 需授予 Open Computer Use.app 辅助功能与屏幕录制权限。",
+  "description": "通过独立的 AIClaw Computer Use 应用观察、点击及输入，支持无障碍控件与截图。每轮先观察目标应用，动作后重新观察，并遵循当前会话的审批策略。仅支持 macOS 14.4+，需授予 AIClaw Computer Use.app 辅助功能与屏幕录制权限。",
   "author": "aiclaw",
   "permissions": [
     "computer.control",

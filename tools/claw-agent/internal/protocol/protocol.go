@@ -218,7 +218,7 @@ type BrowserResult struct {
 	Height      int    `json:"height,omitempty"`
 }
 
-// ComputerAction names an allowlisted Open Computer Use MCP tool, not a script.
+// ComputerAction names an allowlisted native Computer Use IPC operation, not a script.
 type ComputerAction string
 
 const (

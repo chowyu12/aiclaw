@@ -1,170 +1,139 @@
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createRequire } from "node:module";
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { createConnection, type Socket } from "node:net";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { setTimeout as pause } from "node:timers/promises";
+import { installComputerBundle, installedComputerBundle } from "./computer-install.js";
 const run = promisify(execFile);
-
-export const COMPUTER_USE_VERSION = "1.1.3";
-
-export function computerNamespace(executable: string): string {
-  // Upstream replaces an agent when its bundle path differs. Development,
-  // installed apps and package acceptance must never share that agent socket.
-  return `aiclaw-${createHash("sha256").update(`${COMPUTER_USE_VERSION}\0${executable}`).digest("hex").slice(0, 24)}`;
-}
+export const COMPUTER_USE_VERSION = "1";
+export const COMPUTER_PROTOCOL = "AIClawComputerUseIPC-1";
 export interface ComputerTool { name: string; inputSchema: { properties: Record<string, unknown>; required?: string[] } }
-export interface ComputerToolResult {
-  content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
-  isError?: boolean;
+export interface ComputerToolResult { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean }
+export interface ComputerRuntime { tools: ComputerTool[]; call(name: string, args: Record<string, unknown>): Promise<ComputerToolResult>; close(): Promise<void> }
+export function computerExecutable(bundle: string): string { return join(bundle, "Contents", "MacOS", "AIClawComputerUse"); }
+export function computerNamespace(bundle: string): string { return createHash("sha256").update(bundle).digest("hex").slice(0, 20); }
+export function computerSocket(bundle: string, identity = ""): string { return join(homedir(), ".aiclaw", "computer-use", `${computerNamespace(`${bundle}\0${identity}`)}.sock`); }
+export function computerBundle(): string {
+  return installedComputerBundle();
 }
-export interface ComputerRuntime {
-  tools: ComputerTool[];
-  call(name: string, args: Record<string, unknown>): Promise<ComputerToolResult>;
-  close(): Promise<void>;
-}
+export function bundledComputerBundle(): string { return resolve(dirname(fileURLToPath(import.meta.url)), "../../computer-use/AIClaw Computer Use.app"); }
+class NativeRequestError extends Error {}
 
-export function computerExecutable(root: string, platform = process.platform, arch = process.arch): string {
-  if (!["arm64", "x64"].includes(arch)) throw Error(`Unsupported computer architecture: ${arch}`);
-  if (platform === "darwin") return join(root, "dist", "Open Computer Use.app", "Contents", "MacOS", "OpenComputerUse");
-  if (platform === "linux" || platform === "win32") {
-    return join(root, "dist", platform === "win32" ? "windows" : "linux", arch === "x64" ? "amd64" : arch, platform === "win32" ? "open-computer-use.exe" : "open-computer-use");
-  }
-  throw Error(`Unsupported computer platform: ${platform}`);
-}
-
-/** A connection owns one upstream MCP session; the macOS proxy starts its signed
- * App through LaunchServices, so TCC grants belong to Open Computer Use.app.
- * No shell, global install, generated code, or arbitrary MCP tools are exposed.
+/** One authenticated Unix connection per chat/turn. The LaunchServices app owns
+ * TCC permissions and native state; Electron never loads a native driver.
  */
-export class ComputerMcpRuntime implements ComputerRuntime {
+export class ComputerNativeRuntime implements ComputerRuntime {
   tools: ComputerTool[] = [];
   private nextId = 1;
   private buffer = "";
-  private diagnostic = "";
   private failure?: Error;
-  private pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-
-  private readonly child: ChildProcessWithoutNullStreams;
-  private readonly cleanup: () => Promise<void>;
+  private readonly socket: Socket;
   private readonly timeoutMs: number;
-  private prepareObservation?: (args: Record<string, unknown>) => Promise<void>;
-
-  constructor(child: ChildProcessWithoutNullStreams, cleanup: () => Promise<void> = async () => {}, timeoutMs = 30_000, prepareObservation?: (args: Record<string, unknown>) => Promise<void>) {
-    this.prepareObservation = prepareObservation;
-    this.child = child; this.cleanup = cleanup; this.timeoutMs = timeoutMs;
-    child.stdout.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      this.buffer += chunk;
-      // Screenshots are bounded by the configured 1280px long edge.
-      if (this.buffer.length > 16 * 1024 * 1024) return this.fail(new Error("Computer Use response exceeds 16 MiB"));
+  private readonly expectedIdentity?: string;
+  private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  constructor(socket: Socket, timeoutMs = 30_000, expectedIdentity?: string) {
+    this.socket = socket; this.timeoutMs = timeoutMs; this.expectedIdentity = expectedIdentity;
+    socket.setEncoding("utf8");
+    socket.on("data", chunk => {
+      this.buffer += String(chunk);
+      if (this.buffer.length > 16 * 1024 * 1024) return this.fail(Error("Native Computer Use response exceeds 16 MiB"));
       let end: number;
       while ((end = this.buffer.indexOf("\n")) >= 0) {
         const line = this.buffer.slice(0, end); this.buffer = this.buffer.slice(end + 1);
         if (!line.trim()) continue;
         try {
           const frame = JSON.parse(line);
-          if (frame.jsonrpc !== "2.0") throw Error("Invalid Computer Use JSON-RPC response");
           const pending = this.pending.get(frame.id);
           if (!pending) continue;
-          if (("result" in frame) === ("error" in frame)) throw Error("Invalid Computer Use response envelope");
+          if (("result" in frame) === ("error" in frame)) throw Error("Invalid native Computer Use response");
           this.pending.delete(frame.id); clearTimeout(pending.timer);
-          if (frame.error) pending.reject(new Error(`Computer Use RPC ${frame.error.code}: ${frame.error.message}`));
+          if (frame.error) pending.reject(new NativeRequestError(String(frame.error.message)));
           else pending.resolve(frame.result);
-        } catch (error) { this.fail(error instanceof Error ? error : new Error(String(error))); }
+        } catch (error) { this.fail(error instanceof Error ? error : Error(String(error))); }
       }
     });
-    child.stderr.on("data", chunk => { this.diagnostic = (this.diagnostic + String(chunk)).slice(-2000); });
-    child.stdin.on("error", error => this.fail(error));
-    child.on("error", error => this.fail(error));
-    child.on("close", (code, signal) => this.fail(new Error(`Computer Use connection closed (${code ?? signal}). ${this.diagnostic}`)));
+    socket.on("error", error => this.fail(error));
+    socket.on("close", () => this.fail(Error("Native Computer Use connection closed; outcome may be unknown")));
   }
-
-  static async create(): Promise<ComputerMcpRuntime> {
-    const root = dirname(createRequire(import.meta.url).resolve("open-computer-use/package.json"));
-    const manifest = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-    if (manifest.version !== COMPUTER_USE_VERSION) throw Error(`Computer Use version mismatch: expected ${COMPUTER_USE_VERSION}, found ${manifest.version}`);
-    const directory = await mkdtemp(join(tmpdir(), "aiclaw-computer-"));
-    try {
-      const config = join(directory, "config.json");
-      await writeFile(config, "{}\n", { mode: 0o600 });
-      const executable = await realpath(computerExecutable(root));
-      // Own configuration: inherited OCU settings must not silently enable
-      // global pointer input, virtual displays or privileged locked-use services.
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("OPEN_COMPUTER_USE_")));
-      Object.assign(env, {
-        OPEN_COMPUTER_USE_CONFIG_FILE: config,
-        OPEN_COMPUTER_USE_AGENT_SOCKET_NAMESPACE: computerNamespace(executable),
-        OPEN_COMPUTER_USE_ALLOW_GLOBAL_POINTER_FALLBACKS: "0",
-        OPEN_COMPUTER_USE_ACTION_READ_BACK: "0",
-        OPEN_COMPUTER_USE_IMAGE_FORMAT: "png",
-        OPEN_COMPUTER_USE_IMAGE_MAX_DIMENSION: "1280",
-      });
-      const child = spawn(executable, ["mcp"], { stdio: ["pipe", "pipe", "pipe"], env, windowsHide: true });
-      const prepare = process.platform === "darwin" ? async (args: Record<string, unknown>) => {
-        const status = await run(executable, ["doctor", "--json"], { env, timeout: 10_000 });
-        const permissions = JSON.parse(status.stdout);
-        if (!permissions.accessibilityTrusted || (args.include_screenshot !== false && !permissions.screenCaptureGranted)) {
-          // No arguments opens only the upstream permission onboarding. Do not
-          // grant permissions, install locked-use components or replay the call.
-          await run(executable, [], { env, timeout: 10_000 });
-          throw Error("Open Computer Use.app needs Accessibility and Screen Recording. Its permission setup window is open; finish setup there, then observe again. No input was dispatched.");
-        }
-      } : undefined;
-      const runtime = new ComputerMcpRuntime(child, () => rm(directory, { recursive: true, force: true }), 30_000, prepare);
-      try { await runtime.initialize(); return runtime; }
-      catch (error) { await runtime.close(); throw error; }
-    } catch (error) { await rm(directory, { recursive: true, force: true }); throw error; }
+  static async create(): Promise<ComputerNativeRuntime> {
+    if (process.platform !== "darwin") throw Error("AIClaw's native Computer Use currently requires macOS 14.4 or later");
+    const source = await realpath(bundledComputerBundle()).catch(() => { throw Error("AIClaw Computer Use.app is missing; run make build-computer or reinstall AIClaw"); });
+    const bundle = await realpath(await installComputerBundle(source));
+    await stat(computerExecutable(bundle));
+    const identity = createHash("sha256").update(await readFile(computerExecutable(bundle))).digest("hex");
+    const path = computerSocket(bundle, identity);
+    const connect = () => new Promise<Socket>((resolve, reject) => {
+      const socket = createConnection(path); const timer = setTimeout(() => socket.destroy(Error("Computer Use connection timed out")), 1000);
+      socket.once("connect", () => { clearTimeout(timer); socket.removeListener("error", reject); resolve(socket); });
+      socket.once("error", error => { clearTimeout(timer); reject(error); });
+    });
+    let socket: Socket;
+    try { socket = await connect(); }
+    catch {
+      // Stable app identity; no daemon installation, unsigned dynamic helper or
+      // user MCP configuration. Different executable generations use distinct sockets at the stable user path.
+      await run("/usr/bin/open", ["-n", "-g", "-a", bundle, "--args", "--socket", path], { timeout: 10_000 });
+      let connected: Socket | undefined;
+      for (let attempt = 0; attempt < 50 && !connected; attempt++) {
+        try { connected = await connect(); } catch { await pause(100); }
+      }
+      if (!connected) throw Error("AIClaw Computer Use.app did not open its local IPC socket");
+      socket = connected;
+    }
+    const runtime = new ComputerNativeRuntime(socket, 30_000, identity);
+    try { await runtime.initialize(); return runtime; } catch (error) { await runtime.close(); throw error; }
   }
-
   async initialize(): Promise<void> {
-    const initialized = await this.request("initialize", { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "aiclaw", version: "1" } });
-    if (initialized?.serverInfo?.name !== "open-computer-use" || initialized.serverInfo.version !== COMPUTER_USE_VERSION || initialized.protocolVersion !== "2025-03-26") {
-      throw Error("Incompatible Open Computer Use service version or MCP protocol");
-    }
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
-    const manifest = await this.request("tools/list", {});
-    if (!Array.isArray(manifest?.tools)) throw Error("Computer Use returned no tool manifest");
-    this.tools = manifest.tools;
+    const response = await this.request("ComputerUseIPCHandshakeRequest", {});
+    if (response?.protocolVersion !== COMPUTER_PROTOCOL || response.serverVersion !== COMPUTER_USE_VERSION || !Array.isArray(response.tools)) throw Error("Incompatible AIClaw Computer Use app or IPC protocol");
+    if (this.expectedIdentity && response.processExecutableSHA256 !== this.expectedIdentity) throw Error("The resident Computer Use app does not match this build; reconnect to the current helper");
+    this.tools = response.tools;
   }
-
   async call(name: string, args: Record<string, unknown>): Promise<ComputerToolResult> {
-    if (name === "get_app_state" && this.prepareObservation) {
-      await this.prepareObservation(args);
-      if (args.include_screenshot !== false) this.prepareObservation = undefined;
+    const direct: Record<string, string> = {
+      list_apps: "ComputerUseIPCListAppsRequest", find_apps: "ComputerUseIPCFindAppsRequest",
+      start_app: "ComputerUseIPCAppStartRequest", stop_app: "ComputerUseIPCAppStopRequest",
+      modify_app: "ComputerUseIPCAppModifyRequest", frontmost_window: "ComputerUseIPCFrontmostWindowRequest",
+      get_app_state: "ComputerUseIPCAppGetSkyshotRequest", query: "ComputerUseIPCAppQueryRequest",
+      permission_status: "ComputerUseIPCPermissionStatusRequest",
+    };
+    const { app, element_index, x, y, ...rest } = args;
+    const point = element_index !== undefined ? { elementID: element_index } : x !== undefined ? { coordinate: [x, y] } : {};
+    const actions: Record<string, unknown> = {
+      click: { ...point, clickCount: rest.click_count, mouseButton: rest.mouse_button, key: rest.key, duration: rest.duration },
+      drag: { from: [rest.from_x, rest.from_y], to: [rest.to_x, rest.to_y] },
+      press_key: { key: rest.key, duration: rest.duration }, type_text: { text: rest.text },
+      scroll: { ...point, direction: rest.direction, pages: rest.pages },
+      set_value: { elementID: element_index, value: rest.value, autosubmitSearchFields: rest.autosubmit_search_fields },
+      select_text: { elementID: element_index, text: rest.text, prefix: rest.prefix, suffix: rest.suffix, selection: rest.selection === "cursor_before" ? "cursorBefore" : rest.selection === "cursor_after" ? "cursorAfter" : rest.selection },
+      perform_secondary_action: { elementID: element_index, action: rest.action }, paste: { text: rest.text, format: rest.format },
+    };
+    const actionNames: Record<string, string> = { press_key: "pressKey", type_text: "type", set_value: "setValue", select_text: "selectText", perform_secondary_action: "performSecondaryAction" };
+    if (!direct[name] && !Object.hasOwn(actions, name)) throw Error(`Unsupported native operation: ${name}`);
+    try {
+      return await this.request(direct[name] ?? "ComputerUseIPCAppPerformActionRequest", direct[name] ? args : { app, action: { [actionNames[name] ?? name]: actions[name] } }, name === "get_app_state" ? this.timeoutMs * 2 : this.timeoutMs);
+    } catch (error) {
+      if (error instanceof NativeRequestError) return { isError: true, content: [{ type: "text", text: error.message }] };
+      throw error;
     }
-    // Real application AX snapshots took 22-28s in the reported session. Give
-    // observation its own budget; keep input bounded and never replay it.
-    return this.request("tools/call", { name, arguments: args }, name === "get_app_state" ? this.timeoutMs * 2 : this.timeoutMs);
   }
-
-  private request(method: string, params: unknown, timeoutMs = this.timeoutMs): Promise<any> {
+  private request(requestType: string, request: unknown, timeoutMs = this.timeoutMs): Promise<any> {
     if (this.failure) return Promise.reject(this.failure);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.fail(new Error(`Computer Use ${method} timed out; outcome is unknown. Observe again; never automatically replay input.`)), timeoutMs);
+      const timer = setTimeout(() => this.fail(Error("Native Computer Use timed out; outcome is unknown. Observe again; never automatically replay input.")), timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n", error => { if (error) this.fail(error); });
+      this.socket.write(JSON.stringify({ id, requestType, request }) + "\n", error => { if (error) this.fail(error); });
     });
   }
-
   private fail(error: Error): void {
     this.failure ??= error;
     for (const pending of this.pending.values()) { clearTimeout(pending.timer); pending.reject(this.failure); }
-    this.pending.clear();
-    this.child.kill();
+    this.pending.clear(); this.socket.destroy();
   }
-
-  async close(): Promise<void> {
-    if (!this.failure) this.child.stdin.end(JSON.stringify({ jsonrpc: "2.0", method: "notifications/turn-ended" }) + "\n");
-    if (this.child.exitCode === null && this.child.signalCode === null) {
-      await new Promise<void>(resolve => {
-        const kill = setTimeout(() => { this.child.kill("SIGKILL"); resolve(); }, 1500);
-        this.child.once("close", () => { clearTimeout(kill); resolve(); });
-      });
-    }
-    this.fail(new Error("Computer Use session closed"));
-    await this.cleanup();
-  }
+  async close(): Promise<void> { this.fail(Error("Native Computer Use session closed")); }
 }

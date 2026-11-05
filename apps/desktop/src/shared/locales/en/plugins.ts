@@ -27,8 +27,8 @@ export const plugins: Record<string, string> = {
   "邮件": "Email",
   "微信": "WeChat",
   "企业微信": "WeCom",
-  "通过独立的 Open Computer Use 应用观察、点击及输入，支持无障碍控件与截图。每轮先观察目标应用，动作后重新观察，并遵循当前会话的审批策略。macOS 需授予 Open Computer Use.app 辅助功能与屏幕录制权限。":
-    "Use the independent Open Computer Use app to observe, click and type with accessibility controls and screenshots. Observe the target app at the start of each turn and verify after actions. Actions follow the current chat approval policy. On macOS, grant Open Computer Use.app Accessibility and Screen Recording permissions.",
+  "通过独立的 AIClaw Computer Use 应用观察、点击及输入，支持无障碍控件与截图。每轮先观察目标应用，动作后重新观察，并遵循当前会话的审批策略。仅支持 macOS 14.4+，需授予 AIClaw Computer Use.app 辅助功能与屏幕录制权限。":
+    "Use the independent AIClaw Computer Use app to observe, click and type with accessibility controls and screenshots. Observe the target app at the start of each turn and verify after actions. Actions follow the current chat approval policy. Requires macOS 14.4 or later. Grant AIClaw Computer Use.app Accessibility and Screen Recording permissions.",
   "让助手用你的邮箱收发邮件：列信、读信、存附件、发新信、回复。看信不问你；每次发信、回信都会先把收件人和内容摆出来请你确认。":
     "Lets the assistant send and receive email with your account: list and read messages, save attachments, send new mail, and reply. Reading doesn't ask; every send or reply shows you the recipients and content for confirmation first.",
   "通过 iLink 中继接入个人微信：扫码登录后，私聊消息会触发一次助手回答。中继为第三方服务，可用性与账号风险由使用者自行承担。":
@@ -88,8 +88,8 @@ export const plugins: Record<string, string> = {
   "（没有说明）": "(No description)",
   "启用后获得的权限": "Permissions granted when enabled",
   "不需要任何权限。": "Needs no permissions.",
-  "桌面操作由独立的 Open Computer Use 应用执行，范围不限于工作目录。AIClaw 的窗口与审批控件禁止操作。动作遵循当前会话的审批策略；macOS 请在「隐私与安全性」中给 Open Computer Use.app 授予辅助功能和屏幕录制权限。":
-    "Desktop actions run in the independent Open Computer Use app and can reach beyond the workspace. AIClaw windows and approval controls are blocked. Actions follow the current chat approval policy. On macOS, grant Open Computer Use.app Accessibility and Screen Recording in Privacy & Security.",
+  "桌面操作仅支持 macOS 14.4 及以上，由独立的 AIClaw Computer Use 应用执行，范围不限于工作目录。部分操作会切换前台并移动鼠标。AIClaw 的窗口与审批控件禁止操作，动作遵循当前会话的审批策略。请在「隐私与安全性」中给 AIClaw Computer Use.app 授予辅助功能和屏幕录制权限。":
+    "Desktop actions require macOS 14.4 or later and run in the independent AIClaw Computer Use app, beyond the workspace. Some actions bring the target app to the foreground and move the pointer. AIClaw windows and approval controls are blocked, and actions follow the current chat approval policy. Grant AIClaw Computer Use.app Accessibility and Screen Recording in Privacy & Security.",
   "启用后模型能": "Once enabled, the model can ",
   "看见并操作整个屏幕": "see and control the entire screen",
   "，不只是工作目录——包括别的应用、系统设置、以及本应用自己的窗口。除截屏外每个动作都会请你确认；最前面的应用是 AIClaw 自己时直接拒绝。macOS 还要在「隐私与安全性」里给屏幕录制与辅助功能授权，且模型得看得懂图。这是这里权限最大的一项，不用就关掉。":

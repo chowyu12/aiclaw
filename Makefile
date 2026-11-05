@@ -29,7 +29,7 @@ GO_SOURCES := $(shell find $(AGENT_DIR) $(ROOT)/internal $(ROOT)/pkg -name '*.go
 .PHONY: help deps build build-go build-client build-desktop dev dev-ui \
         test test-go test-renderer smoke smoke-desktop scenarios smoke-browser icon \
         package package-mac package-mac-intel package-win package-linux install-mac \
-        typecheck fmt fmt-check vet nocgo check doctor clean distclean
+        typecheck fmt fmt-check vet nocgo check doctor clean distclean build-computer test-computer-native
 
 help: ## 列出可用 target
 	@echo "AIClaw —— 可用命令："
@@ -66,7 +66,24 @@ build-go: $(AGENT_BIN) ## 编译 claw-agent
 $(AGENT_BIN): $(GO_SOURCES) go.mod $(AGENT_DIR)/internal/agent/computer-tools.json
 	CGO_ENABLED=0 go build -o $(AGENT_BIN) ./tools/claw-agent
 
-build-desktop: deps build-client ## 编译 Electron 主进程与渲染层
+test-computer-native: ## Verify native input and selection pure logic
+	npm run test:computer-native
+
+ifeq ($(shell uname -s),Darwin)
+# A stamp avoids spaces in Make's target parsing and unnecessary re-signing on
+# every make dev. Rebuild only when native code, tools or version actually changes.
+COMPUTER_STAMP := $(DESKTOP)/computer-use/.built
+build-computer: $(COMPUTER_STAMP) ## Build the independent macOS Computer Use app
+
+$(COMPUTER_STAMP): $(wildcard tools/computer-use/Sources/*.swift) scripts/build-computer-runtime.mjs $(AGENT_DIR)/internal/agent/computer-tools.json package.json
+	node scripts/build-computer-runtime.mjs
+	@touch $(COMPUTER_STAMP)
+else
+build-computer: ## Build the independent macOS Computer Use app
+	node scripts/build-computer-runtime.mjs
+endif
+
+build-desktop: deps build-client build-computer ## 编译 Electron 主进程与渲染层
 	cd $(DESKTOP) && npm run build
 
 # ---------- 起应用 ----------
@@ -79,7 +96,7 @@ dev: build ## 起整个应用，手动测功能
 	@echo
 	cd $(DESKTOP) && npx electron .
 
-dev-ui: deps build-go build-client ## 同 dev，但渲染层带热更（改 Vue 立即生效）
+dev-ui: deps build-go build-client build-computer ## 同 dev，但渲染层带热更（改 Vue 立即生效）
 	@cd $(DESKTOP) && npm run build:main && npm run build:preload
 	@set -e; \
 	cd $(DESKTOP); \
@@ -94,7 +111,7 @@ dev-ui: deps build-go build-client ## 同 dev，但渲染层带热更（改 Vue 
 
 # ---------- 验证 ----------
 
-check: fmt-check vet nocgo test typecheck smoke smoke-desktop ## 交付前全量预检
+check: fmt-check vet nocgo test typecheck test-computer-native smoke smoke-desktop ## 交付前全量预检
 	@echo
 	@echo "全部通过。"
 

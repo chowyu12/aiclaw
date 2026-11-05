@@ -1,36 +1,41 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createServer, createConnection } from "node:net";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { spawn } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { ComputerController } from "../apps/desktop/src/main/computer.ts";
-import { ComputerMcpRuntime, computerExecutable, computerNamespace, type ComputerToolResult } from "../apps/desktop/src/main/computer-runtime.ts";
-import { runtimeTarget, verifyIntegrity } from "./stage-computer-runtime.mjs";
+import { ComputerNativeRuntime, computerExecutable, computerNamespace, COMPUTER_PROTOCOL, computerSocket, type ComputerToolResult } from "../apps/desktop/src/main/computer-runtime.ts";
+import { stageComputerRuntime } from "./stage-computer-runtime.mjs";
 const specs = JSON.parse(readFileSync(new URL("../tools/claw-agent/internal/agent/computer-tools.json", import.meta.url), "utf8"));
 const app = process.platform === "darwin" ? "com.example.fixture" : "123";
 const image = "iVBORw0KGgo=";
 function result(text = "fixture window", pixels = false): ComputerToolResult {
   return { content: [{ type: "text", text }, ...(pixels ? [{ type: "image", data: image, mimeType: "image/png" }] : [])] };
 }
-function harness(options: { postFails?: boolean; inputFails?: boolean; noImage?: boolean; missingField?: boolean; startFails?: boolean } = {}) {
+function harness(options: { postFails?: boolean; transientPostFailure?: boolean; inputFails?: boolean; noImage?: boolean; missingField?: boolean; startFails?: boolean; noQuery?: boolean } = {}) {
   const calls: { action: string; args: any; connection: number }[] = [];
   let created = 0, closed = 0;
   const controller = new ComputerController(async () => {
     const connection = ++created; let read = 0;
     if (options.startFails && created === 1) throw Error("service startup failed");
     return {
-      tools: specs.map((spec: any) => {
+      tools: specs.filter((spec: any) => !options.noQuery || spec.action !== "query").map((spec: any) => {
         const properties = { ...spec.schema.properties }; delete properties.observation_id;
         if (options.missingField) delete properties.x;
         return { name: spec.action, inputSchema: { properties, required: spec.schema.required?.filter((s: string) => s !== "observation_id") } };
       }),
       async call(action: string, args: any) {
         calls.push({ action, args, connection });
+        if (action === "query") return result(JSON.stringify({ matches: [{ index: 1000001, role: "AXTextField", title: "Fixture input" }], truncated: false, window_id: 456 }));
         if (action === "get_app_state") {
           if (++read > 1 && options.postFails) throw Error("capture timeout");
+          if (read === 2 && options.transientPostFailure) return { ...result("Target app exposes no accessible windows"), isError: true };
           return result("fixture tree [1] input [2] Submit", !options.noImage && args.include_screenshot !== false);
         }
-        if (options.inputFails && action !== "list_apps") return { ...result("Accessibility permission pending for Open Computer Use.app"), isError: true };
+        if (options.inputFails && action !== "list_apps") return { ...result("Accessibility permission pending for AIClaw Computer Use.app"), isError: true };
         return result(action === "list_apps" ? "Fixture — com.example.fixture" : "input dispatched");
       },
       async close() { closed++; },
@@ -38,7 +43,7 @@ function harness(options: { postFails?: boolean; inputFails?: boolean; noImage?:
   });
   const call = (action: string, args: Record<string, unknown> = {}, sessionId = "chat", turnId = "turn") => controller.perform({ sessionId, turnId, action, arguments: args });
   const observe = async (session = "chat", turn = "turn", args = {}) => {
-    const state = await call("get_app_state", { app, ...args }, session, turn);
+    const state = await call("get_app_state", { app, include_ax: true, ...args }, session, turn);
     return state.text.match(/observation_id: ([\w-]+)/)![1]!;
   };
   return { controller, calls, call, observe, counts: () => ({ created, closed }) };
@@ -54,14 +59,14 @@ test("service is lazy and discovery uses an isolated MCP connection", async () =
 
 test("arbitrary tools, old Cua routing and extra fields are rejected before dispatch", async () => {
   const h = harness();
-  for (const action of ["run_script", "get_window_state", "list_windows", "launch_app", "query", "clipboard_read"]) await assert.rejects(h.call(action), /Unsupported computer operation/);
-  for (const key of ["session", "pid", "window_id", "element_token", "delivery_mode", "window_placement", "screenshot_out_file"]) await assert.rejects(h.call("get_app_state", { app, [key]: "override" }), /Unsupported computer argument/);
+  for (const action of ["run_script", "get_window_state", "list_windows", "launch_app", "clipboard_read"]) await assert.rejects(h.call(action), /Unsupported computer operation/);
+  for (const key of ["session", "pid", "element_token", "delivery_mode", "window_placement", "screenshot_out_file"]) await assert.rejects(h.call("get_app_state", { app, [key]: "override" }), /Unsupported computer argument/);
   assert.equal(h.counts().created, 0);
 });
 
 test("self application, helper and Electron cannot be observed or controlled", async () => {
   const h = harness();
-  for (const target of ["AIClaw", "com.github.chowyu12.aiclaw", "com.ifuryst.opencomputeruse", "Electron", "/Applications/AIClaw.app", "C:\\apps\\AIClaw.exe", String(process.pid)]) await assert.rejects(h.call("get_app_state", { app: target }), /Refusing/);
+  for (const target of ["AIClaw", "com.github.chowyu12.aiclaw", "com.github.chowyu12.aiclaw.computer-use", "Electron", "/Applications/AIClaw.app", "C:\\apps\\AIClaw.exe", String(process.pid)]) await assert.rejects(h.call("get_app_state", { app: target }), /Refusing/);
   assert.equal(h.counts().created, 0);
 });
 
@@ -74,6 +79,13 @@ test("each input requires the current turn, chat, app and observation", async ()
   }
   assert.equal(h.calls.filter(c => c.action === "click").length, 0);
   await h.controller.close();
+});
+
+test("switching the active app invalidates the previous native window context", async () => {
+  const h = harness(); const id = await h.observe();
+  await h.call("get_app_state", { app: process.platform === "darwin" ? "com.other.fixture" : "124" });
+  await assert.rejects(h.call("click", { app, observation_id: id, x: 1, y: 2 }), /Observe this app/);
+  assert.equal(h.calls.filter(c => c.action === "click").length, 0); await h.controller.close();
 });
 
 test("Unicode input preserves receipt and fresh observation, and invalidates the old ID", async () => {
@@ -92,7 +104,7 @@ test("tree-only observations allow semantic actions and refuse pixel input", asy
 });
 
 test("missing screenshots and omitted AX do not authorize guessed elements", async () => {
-  const h = harness({ noImage: true }); await assert.rejects(h.observe(), /Grant Accessibility and Screen Recording to Open Computer Use/); await h.controller.close();
+  const h = harness({ noImage: true }); await assert.rejects(h.observe(), /Grant Accessibility and Screen Recording to AIClaw Computer Use/); await h.controller.close();
   const other = harness(); const id = await other.observe("chat", "turn", { include_ax: false });
   await assert.rejects(other.call("click", { app, observation_id: id, element_index: "1" }), /accessibility observation/); await other.controller.close();
 });
@@ -101,7 +113,9 @@ test("input errors preserve native permissions diagnostics and never replay inpu
   const h = harness({ inputFails: true }); const id = await h.observe();
   await assert.rejects(h.call("click", { app, observation_id: id, element_index: "2" }), /Accessibility permission pending.*Outcome may be unknown/);
   await assert.rejects(h.call("click", { app, observation_id: id, element_index: "2" }), /Observe this app/);
-  assert.equal(h.calls.filter(c => c.action === "click").length, 1); assert.equal(h.counts().closed, 1);
+  assert.equal(h.calls.filter(c => c.action === "click").length, 1); assert.equal(h.counts().closed, 0);
+  await h.call("query", { app, role: "AXTextField" });
+  assert.equal(h.counts().created, 1); await h.controller.close();
 });
 
 test("post-action failure preserves dispatch receipt without fabricating success", async () => {
@@ -109,6 +123,15 @@ test("post-action failure preserves dispatch receipt without fabricating success
   const output = await h.call("click", { app, observation_id: id, element_index: "2" });
   assert.match(output.text, /input dispatched/); assert.match(output.text, /verification failed.*capture timeout/); assert.match(output.text, /Do not automatically replay/);
   assert.equal(h.calls.filter(c => c.action === "click").length, 1); assert.equal(h.counts().closed, 1);
+});
+
+test("transient window settling retries observation without replaying input", async () => {
+  const h = harness({ transientPostFailure: true }); const id = await h.observe();
+  const state = await h.call("click", { app, observation_id: id, element_index: "2" });
+  assert.ok(state.imageBase64); assert.match(state.text, /observation_id/);
+  assert.equal(h.calls.filter(c => c.action === "click").length, 1);
+  assert.equal(h.calls.filter(c => c.action === "get_app_state").length, 3);
+  assert.equal(h.counts().closed, 0); await h.controller.close();
 });
 
 test("late turn completion cannot close a newer turn and archived chats release state", async () => {
@@ -127,6 +150,73 @@ test("turn completion rejects queued input before it can reach the service", asy
   await assert.rejects(h.observe(), /turn has ended/);
 });
 
+test("query-capable services default to screenshot-only reads; other platforms keep AX", async () => {
+  const fast = harness(); const state = await fast.call("get_app_state", { app });
+  assert.equal(fast.calls[0]!.args.include_ax, false);
+  const id = state.text.match(/observation_id: ([\w-]+)/)![1]!;
+  await assert.rejects(fast.call("click", { app, observation_id: id, element_index: "1" }), /accessibility observation/);
+  await fast.controller.close();
+  const legacy = harness({ noQuery: true }); await legacy.call("get_app_state", { app });
+  assert.equal(legacy.calls[0]!.args.include_ax, true); await legacy.controller.close();
+});
+
+test("targeted query indexes authorize only matched semantic actions", async () => {
+  const h = harness(); const found = await h.call("query", { app, role: "AXTextField" });
+  const id = found.text.match(/observation_id: ([\w-]+)/)![1]!;
+  await assert.rejects(h.call("click", { app, observation_id: id, element_index: "999" }), /not returned by this query/);
+  await assert.rejects(h.call("press_key", { app, observation_id: id, key: "Return" }), /matched element actions only/);
+  await h.call("set_value", { app, observation_id: id, element_index: "1000001", value: "你好" });
+  assert.equal(h.calls.filter(call => call.action === "get_app_state").length, 1);
+  assert.equal(h.calls.at(-1)!.args.include_ax, false);
+  await assert.rejects(h.call("click", { app, observation_id: id, element_index: "1000001" }), /latest observation_id/);
+  await h.controller.close();
+});
+
+test("window-specific queries preserve native targeting and authorize text selection", async () => {
+  const h = harness();
+  for (const window_id of [0, -1, 1.5, 0x100000000, "456"]) await assert.rejects(h.call("query", { app, role: "AXTextField", window_id }), /window_id must/);
+  assert.equal(h.calls.length, 0);
+  const found = await h.call("query", { app, role: "AXTextField", window_id: 456 });
+  assert.equal(h.calls[0]!.args.window_id, 456);
+  assert.match(found.text, /"window_id":456/);
+  const id = found.text.match(/observation_id: ([\w-]+)/)![1]!;
+  await h.call("select_text", { app, observation_id: id, element_index: "1000001", text: "天气 🌦️", prefix: "北京", selection: "cursor_after" });
+  assert.deepEqual(h.calls.find(c => c.action === "select_text")!.args, { app, element_index: "1000001", text: "天气 🌦️", prefix: "北京", selection: "cursor_after" });
+  assert.equal(h.calls.at(-1)!.args.window_id, 456, "post-action screenshot must verify the queried window");
+  await assert.rejects(h.call("select_text", { app, observation_id: id, element_index: "1000001", text: "天气" }), /latest observation_id/);
+  await h.controller.close();
+});
+
+test("native paste requires observed focus and preserves its own receipt", async () => {
+  const h = harness();
+  const query = await h.call("query", { app, role: "AXTextField" });
+  const queryID = query.text.match(/observation_id: ([\w-]+)/)![1]!;
+  await assert.rejects(h.call("paste", { app, observation_id: queryID, text: "**北京**", format: "md" }), /matched element actions/);
+  const id = await h.observe();
+  const pasted = await h.call("paste", { app, observation_id: id, text: "**北京**", format: "md" });
+  assert.equal(h.calls.find(c => c.action === "paste")!.args.format, "md");
+  assert.match(pasted.text, /Post-action/); await h.controller.close();
+});
+
+test("lifecycle requests require explicit identities, then clear previous observations", async () => {
+  const h = harness(); const state = await h.call("start_app", { app });
+  const id = state.text.match(/observation_id: ([\w-]+)/)![1]!;
+  assert.match(state.text, /Post-action/);
+  await h.call("stop_app", { app });
+  await assert.rejects(h.call("click", { app, observation_id: id, element_index: "1" }), /Observe this app/);
+  await assert.rejects(h.call("start_app", { app: "com.github.chowyu12.aiclaw" }), /Refusing/);
+  await h.controller.close();
+});
+
+test("unchanged screenshots are reported without pretending dispatch proves progress", async () => {
+  const h = harness(); const id = await h.observe();
+  const state = await h.call("click", { app, observation_id: id, element_index: "2", key: "shift", duration: 0.1 });
+  assert.match(state.text, /Screenshot unchanged/);
+  assert.equal(h.calls.find(c => c.action === "click")!.args.key, "shift");
+  await assert.rejects(h.call("click", { app, observation_id: id, click_method: "sky_click" }), /Unsupported computer argument/);
+  await h.controller.close();
+});
+
 test("service startup failure is retryable only on an explicit later observation", async () => {
   const h = harness({ startFails: true }); await assert.rejects(h.observe(), /startup failed/); await h.observe(); assert.equal(h.counts().created, 2); await h.controller.close();
 });
@@ -136,64 +226,92 @@ test("runtime capabilities reject unsupported fields rather than silently droppi
   await assert.rejects(h.call("click", { app, observation_id: id, x: 1, y: 2 }), /does not support click.x/); await h.controller.close();
 });
 
-function peer(mode: string, timeout = 1000, prepare?: (args: Record<string, unknown>) => Promise<void>) {
-  return new ComputerMcpRuntime(spawn(process.execPath, [new URL("./fixtures/computer-mcp.cjs", import.meta.url).pathname, mode], { stdio: ["pipe", "pipe", "pipe"] }), undefined, timeout, prepare);
+async function peer(mode = "ok", timeout = 300) {
+  const directory = await mkdtemp(join(tmpdir(), "aiclaw-native-test-")); const path = join(directory, "ipc.sock");
+  const requests: any[] = []; const sockets = new Set<import("node:net").Socket>();
+  const server = createServer(socket => {
+    sockets.add(socket); socket.on("close", () => sockets.delete(socket)); let buffer = "";
+    socket.on("data", chunk => {
+      buffer += String(chunk); let end;
+      while ((end = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); const frame = JSON.parse(line); requests.push(frame);
+        if (mode === "malformed") { socket.write("bad JSON\n"); continue; }
+        if (frame.requestType === "ComputerUseIPCHandshakeRequest") {
+          socket.write(JSON.stringify({ id: frame.id, result: { protocolVersion: mode === "version" ? "other" : COMPUTER_PROTOCOL, serverVersion: "1", tools: [{ name: "list_apps", inputSchema: { properties: {} } }] } }) + "\n"); continue;
+        }
+        if (mode === "timeout") continue;
+        if (mode === "native-error") { socket.write(JSON.stringify({ id: frame.id, error: { message: "native validation refused" } }) + "\n"); continue; }
+        const reply = () => socket.write(JSON.stringify({ id: frame.id, result: result("native receipt") }) + "\n");
+        if (mode === "slow" && frame.requestType === "ComputerUseIPCAppGetSkyshotRequest") setTimeout(reply, timeout * 1.5);
+        else reply();
+      }
+    });
+  });
+  await new Promise<void>(resolve => server.listen(path, resolve));
+  const socket = createConnection(path); await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
+  const runtime = new ComputerNativeRuntime(socket, timeout);
+  return { runtime, requests, async close() { await runtime.close(); for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); } };
 }
 
-test("MCP handshake and PNG results travel through real stdio framing", async () => {
-  const runtime = peer("ok"); await runtime.initialize(); const result = await runtime.call("list_apps", {});
-  assert.equal(result.content[0]!.text, "fixture"); await runtime.close();
+test("real IPC framing maps the nine actions to typed native requests", async () => {
+  const h = await peer();
+  try {
+    await h.runtime.initialize();
+    await h.runtime.call("click", { app, element_index: "12", key: "shift", duration: 0.2 });
+    await h.runtime.call("scroll", { app, x: 10, y: 20, direction: "down", pages: 0.5 });
+    await h.runtime.call("select_text", { app, element_index: "12", text: "天气", selection: "cursor_after" });
+    await h.runtime.call("paste", { app, text: "**天气**", format: "md" });
+    await h.runtime.call("start_app", { app });
+    assert.deepEqual(h.requests[1].request, { app, action: { click: { elementID: "12", key: "shift", duration: 0.2 } } });
+    assert.deepEqual(h.requests[2].request.action.scroll, { coordinate: [10, 20], direction: "down", pages: 0.5 });
+    assert.equal(h.requests[3].request.action.selectText.selection, "cursorAfter");
+    assert.deepEqual(h.requests[4].request.action.paste, { text: "**天气**", format: "md" });
+    assert.equal(h.requests[5].requestType, "ComputerUseIPCAppStartRequest");
+    assert.equal(h.requests[1].jsonrpc, undefined, "The native service is not MCP");
+  } finally { await h.close(); }
 });
 
-test("wrong protocol/version and malformed responses fail instead of dispatching", async () => {
-  for (const mode of ["version", "malformed", "exit"]) { const runtime = peer(mode); await assert.rejects(runtime.initialize()); await runtime.close(); }
+test("wrong IPC version and malformed frames fail closed", async () => {
+  for (const mode of ["version", "malformed"]) {
+    const h = await peer(mode); try { await assert.rejects(h.runtime.initialize()); } finally { await h.close(); }
+  }
 });
 
-test("permission onboarding blocks observation until explicitly granted, then probes only once", async () => {
-  let probes = 0;
-  const blocked = peer("ok", 1000, async () => { probes++; throw Error("permission setup window is open"); });
-  await blocked.initialize(); await assert.rejects(blocked.call("get_app_state", {}), /permission setup/);
-  assert.equal(probes, 1); await blocked.close();
-  const ready = peer("ok", 1000, async () => { probes++; });
-  await ready.initialize(); await ready.call("get_app_state", {}); await ready.call("get_app_state", {});
-  assert.equal(probes, 2); await ready.close();
+test("native refusal is a healthy response; timeout poisons the connection without replay", async () => {
+  const refused = await peer("native-error");
+  try { await refused.runtime.initialize(); assert.equal((await refused.runtime.call("click", { app })).isError, true); assert.equal((await refused.runtime.call("query", { app })).isError, true); } finally { await refused.close(); }
+  const timed = await peer("timeout", 50);
+  try {
+    await timed.runtime.initialize(); await assert.rejects(timed.runtime.call("click", { app }), /outcome is unknown/);
+    await assert.rejects(timed.runtime.call("click", { app }), /outcome is unknown/);
+    assert.equal(timed.requests.filter(r => r.requestType === "ComputerUseIPCAppPerformActionRequest").length, 1);
+  } finally { await timed.close(); }
 });
 
-test("tree-only permission probes do not suppress a later screenshot permission check", async () => {
-  const observed: unknown[] = [];
-  const runtime = peer("ok", 1000, async args => { observed.push(args.include_screenshot); });
-  await runtime.initialize(); await runtime.call("get_app_state", { include_screenshot: false });
-  await runtime.call("get_app_state", {}); await runtime.call("get_app_state", {});
-  assert.deepEqual(observed, [false, undefined]); await runtime.close();
+test("observation has a separate deadline from input", async () => {
+  const h = await peer("slow", 100);
+  try { await h.runtime.initialize(); assert.equal((await h.runtime.call("get_app_state", { app })).content[0]!.text, "native receipt"); } finally { await h.close(); }
 });
 
-test("a timed-out input poisons the connection and cannot be replayed", async () => {
-  const runtime = peer("timeout", 1000); await runtime.initialize();
-  await assert.rejects(runtime.call("click", {}), /outcome is unknown/);
-  await assert.rejects(runtime.call("click", {}), /outcome is unknown/); await runtime.close();
+test("different native generations use separate socket endpoints", () => {
+  const dev = "/workspace/AIClaw Computer Use.app", installed = "/Applications/AIClaw.app/Contents/Resources/app/computer-use/AIClaw Computer Use.app";
+  assert.match(computerExecutable(dev), /Contents.*MacOS.*AIClawComputerUse$/);
+  assert.equal(computerNamespace(dev), computerNamespace(dev)); assert.notEqual(computerSocket(dev), computerSocket(installed));
 });
 
-test("a slow observation has a separate budget while input still times out", async () => {
-  const runtime = peer("slow-observation", 1000); await runtime.initialize();
-  const result = await runtime.call("get_app_state", {});
-  assert.equal(result.content[0]!.text, "slow observation");
-  await assert.rejects(runtime.call("click", {}), /outcome is unknown/);
-  await runtime.close();
-});
-
-test("cross-platform packaging paths and artifact integrity are pinned", () => {
-  assert.match(runtimeTarget("darwin", "arm64"), /Open Computer Use.app$/); assert.match(runtimeTarget("win32", "x64"), /windows.*amd64$/);
-  assert.match(computerExecutable("root", "linux", "x64"), /linux.*amd64.*open-computer-use$/);
-  assert.throws(() => runtimeTarget("aix", "x64"));
-  const bytes = Buffer.from("signed upstream archive"), integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
-  verifyIntegrity(bytes, integrity); assert.throws(() => verifyIntegrity(Buffer.from("changed"), integrity), /integrity mismatch/);
-  assert.throws(() => verifyIntegrity(bytes, ""), /SHA-512/);
-});
-
-test("development and packaged app services cannot replace each other's helper", () => {
-  const development = "/workspace/node_modules/open-computer-use/dist/Open Computer Use.app/Contents/MacOS/OpenComputerUse";
-  const packaged = "/Applications/AIClaw.app/Contents/Resources/app/node_modules/open-computer-use/dist/Open Computer Use.app/Contents/MacOS/OpenComputerUse";
-  assert.equal(computerNamespace(development), computerNamespace(development));
-  assert.notEqual(computerNamespace(development), computerNamespace(packaged));
-  assert.notEqual(computerNamespace(packaged), computerNamespace(`/release${packaged}`));
+test("packaging accepts only the built architecture and exact native binary identity", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "aiclaw-native-package-"));
+  try {
+    const root = join(directory, "apps/desktop/computer-use");
+    const binary = join(root, "AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse");
+    await mkdir(join(root, "AIClaw Computer Use.app/Contents/MacOS"), { recursive: true });
+    const bytes = Buffer.from("owned native artifact"); await writeFile(binary, bytes);
+    await writeFile(join(root, "AIClaw Computer Use.build.json"), JSON.stringify({ architectures: ["arm64"], executableSHA256: createHash("sha256").update(bytes).digest("hex"), protocolVersion: COMPUTER_PROTOCOL }));
+    const destination = join(directory, "staged");
+    await stageComputerRuntime({ repo: directory, destination, platform: "darwin", arch: "arm64" });
+    assert.deepEqual(await readFile(join(destination, "computer-use/AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse")), bytes);
+    await assert.rejects(stageComputerRuntime({ repo: directory, destination, platform: "darwin", arch: "x64" }), /architecture/);
+    await writeFile(binary, "tampered");
+    await assert.rejects(stageComputerRuntime({ repo: directory, destination, platform: "darwin", arch: "arm64" }), /build identity/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
