@@ -92,7 +92,7 @@ func TestComputerSchemasUseNativeAppContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := 0
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" || runtime.GOOS == "linux" {
 		expected = 22
 	}
 	if len(specs) != expected {
@@ -113,8 +113,8 @@ func TestComputerSchemasUseNativeAppContract(t *testing.T) {
 	}
 }
 
-func TestComputerQueryAndDeliveryOptionsAreMacOnly(t *testing.T) {
-	for _, platform := range []string{"darwin", "windows", "linux"} {
+func TestComputerQueryAndDeliveryOptionsAreRegisteredOnSupportedPlatforms(t *testing.T) {
+	for _, platform := range []string{"darwin", "windows", "linux", "freebsd"} {
 		specs, err := computerToolSpecs(platform)
 		if err != nil {
 			t.Fatal(err)
@@ -134,7 +134,8 @@ func TestComputerQueryAndDeliveryOptionsAreMacOnly(t *testing.T) {
 				_, native = schema.Properties["duration"]
 			}
 		}
-		if query != (platform == "darwin") || native != (platform == "darwin") {
+		supported := platform != "freebsd"
+		if query != supported || native != supported {
 			t.Fatalf("wrong capabilities on %s: query=%v method=%v", platform, query, native)
 		}
 	}

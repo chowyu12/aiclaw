@@ -2,8 +2,8 @@
   "schema_version": 1,
   "id": "aiclaw.computer-use",
   "name": "Computer Use",
-  "version": "0.3.0",
-  "description": "通过独立的 AIClaw Computer Use 应用观察、点击及输入，支持无障碍控件与截图。每轮先观察目标应用，动作后重新观察，并遵循当前会话的审批策略。仅支持 macOS 14.4+，需授予 AIClaw Computer Use.app 辅助功能与屏幕录制权限。",
+  "version": "0.4.0",
+  "description": "通过 AIClaw 自有执行层观察、点击及输入，支持无障碍控件与截图。每轮先观察目标应用，动作后重新观察，并遵循当前会话的审批策略。支持 macOS 14.4+、Windows 和 Linux X11；macOS 需授予辅助功能与屏幕录制权限，Linux 暂不支持 Wayland。",
   "author": "aiclaw",
   "permissions": [
     "computer.control",

@@ -80,7 +80,8 @@ try {
   assert.ok(Buffer.from(image.data,"base64").subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));
   const png=join(temporary,"window.png");await writeFile(png,Buffer.from(image.data,"base64"));
   await run(powershell,["-NoProfile","-NonInteractive","-EncodedCommand",encoded('Add-Type -AssemblyName System.Drawing; $image=[Drawing.Bitmap]::FromFile($env:AICLAW_FIXTURE_PNG); try {$red=0;for($y=0;$y -lt $image.Height;$y+=4){for($x=0;$x -lt $image.Width;$x+=4){$c=$image.GetPixel($x,$y);if($c.R -eq 204 -and $c.G -eq 51 -and $c.B -eq 68 -and $c.A -eq 255){$red++}}};if($red -lt 100){throw "Capture did not contain the occluded red target window"}} finally {$image.Dispose()}')],{env:{...process.env,AICLAW_FIXTURE_PNG:png},timeout:30_000});
-  const host=(action,args={})=>controller.perform({sessionId:"windows-host-acceptance",turnId:"t1",action,arguments:args});
+  let hostTurn="t1";
+  const host=(action,args={})=>controller.perform({sessionId:"windows-host-acceptance",turnId:hostTurn,action,arguments:args});
   const baselineResult=await host("watch_start",{app,interval_ms:500});
   const baseline=JSON.parse(baselineResult.text); assert.ok(baselineResult.imageBase64);
   const quiet=JSON.parse((await host("watch_next",{watch_id:baseline.watch_id,after_sequence:baseline.sequence,wait_ms:900})).text);
@@ -98,6 +99,7 @@ try {
   assert.ok(lines.some(line=>line.includes("Windows 观察更新 🌦️")));
   await setFromQuery(text);
   await controller.finishTurn("windows-host-acceptance","t1");
+  hostTurn="rich";
   assert.equal(value(await call("frontmost_window")).app,front);
   await call("get_app_state",{app,include_ax:false});
   await action("pressKey",{key:"End"});

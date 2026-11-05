@@ -46,7 +46,10 @@ if os.environ.get("AICLAW_FIXTURE_RICH") == "1":
     browser.set_size_request(340, 160)
     browser.get_accessible().set_name("Fixture HTML editor")
     browser.load_html("<!doctype html><html><body><div id='editor' contenteditable='true' style='height:130px'>HTML fixture</div></body></html>", "about:blank")
-    box.pack_start(browser, False, False, 0)
+    browser_box = Gtk.EventBox()
+    browser_box.get_accessible().set_name("Fixture browser container")
+    browser_box.add(browser)
+    box.pack_start(browser_box, False, False, 0)
 def submit(_button):
     status.set_text("Submitted: " + entry.get_text())
     values = {"value": entry.get_text(), **counts}

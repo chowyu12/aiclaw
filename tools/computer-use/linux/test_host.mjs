@@ -52,10 +52,11 @@ try {
   await call("click", await query("Submit fixture"));
   assert.equal(JSON.parse(await readFile(join(temporary,"Target.json"),"utf8")).value,"Linux 粘贴 🌦️Linux 宿主 🌦️");
   assert.deepEqual(clipboardSnapshot(), originalClipboard);
-  const htmlQuery=await call("query",{app:target,text:"Fixture HTML editor",exact:true});
+  const htmlQuery=await call("query",{app:target,text:"Fixture browser container",exact:true});
   const htmlFrame=JSON.parse(htmlQuery.text.split("\n")[0]).matches[0].frame;
   const htmlScreen=await call("get_app_state",{app:target});
   const windowFrame=JSON.parse(htmlScreen.text.split("\n")[0]).window_frame;
+  assert.ok(htmlFrame.width>0 && htmlFrame.height>0,"HTML editor must expose valid target geometry");
   await call("click",{app:target,x:htmlFrame.x-windowFrame.x+30,y:htmlFrame.y-windowFrame.y+30,observation_id:htmlScreen.text.match(/observation_id: ([\w-]+)/)[1],verify_after:false});
   const selected=await call("get_app_state",{app:target});
   await call("press_key",{app:target,key:"ctrl+a",observation_id:selected.text.match(/observation_id: ([\w-]+)/)[1],verify_after:false});
@@ -100,7 +101,7 @@ try {
   await launchCall("get_app_state",{app:launchReceipt.app});
   const stopped=await launchCall("stop_app",{app:launchReceipt.app,verify_after:false});
   assert.equal(JSON.parse(stopped.text.split("\n")[0]).verified,true);
-  console.log(JSON.stringify({ passed: true, backend: "x11-atspi", installed_runtime: true, host_controller: true, private_stdio: true, source_identity_handshake: true, background_receipt: true, window_png: true, unicode_paste_read_back:true, clipboard_all_formats_restored:true, clipboard_survived_runtime_eof:true, clipboard_provider_exited_after_new_copy:true, static_window_no_update: true, ax_delta_reconstructed: true, sampling_preserved_action_observation: true, finish_turn_cancelled_wait: true, discovered_desktop_launch:true, launched_pid_verified:true, launched_window_observed:true, normal_close_requested:true }));
+  console.log(JSON.stringify({ passed: true, backend: "x11-atspi", installed_runtime: true, host_controller: true, private_stdio: true, source_identity_handshake: true, background_receipt: true, window_png: true, unicode_paste_read_back:true, markdown_html_bold_consumed:true, clipboard_all_formats_restored:true, clipboard_survived_runtime_eof:true, clipboard_provider_exited_after_new_copy:true, static_window_no_update: true, ax_delta_reconstructed: true, sampling_preserved_action_observation: true, finish_turn_cancelled_wait: true, discovered_desktop_launch:true, launched_pid_verified:true, launched_window_observed:true, normal_close_requested:true }));
 } finally {
   await controller.close();
   for (const child of children) child.kill("SIGTERM");

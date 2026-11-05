@@ -9,6 +9,10 @@ on:
       - 'scripts/stage-computer-runtime.mjs'
       - 'scripts/test-computer*.ts'
       - 'scripts/smoke-computer-windows.mjs'
+      - 'scripts/smoke-packaged-computer.mjs'
+      - 'scripts/package-app.mjs'
+      - 'tools/claw-agent/internal/agent/computer*'
+      - 'internal/plugins/bundled/computer-use/**'
       - '.github/workflows/computer-platforms.yml'
   workflow_dispatch:
 permissions:
@@ -19,6 +23,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Agent registration, approval and cancellation
+        run: go test -race ./tools/claw-agent/internal/agent -run 'TestComputer|TestScreenshot' -count=1
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -34,11 +43,26 @@ jobs:
         if: always()
         shell: powershell
         run: powershell.exe -NoProfile -NonInteractive -STA -File tools/computer-use/windows/TestClipboard.ps1
+      - name: Build complete Windows package
+        shell: pwsh
+        run: |
+          npm run build -w @aiclaw/desktop
+          $env:CGO_ENABLED='0'
+          New-Item -ItemType Directory -Force build/bin/win32-x64
+          go build -o build/bin/win32-x64/claw-agent.exe ./tools/claw-agent
+          node scripts/package-app.mjs --platform=win32 --arch=x64
+      - name: Launch actual Windows package and verify shipped runtime
+        run: node scripts/smoke-packaged-computer.mjs release/AIClaw-win32-x64/AIClaw.exe
   linux-x11:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Agent registration, approval and cancellation
+        run: go test -race ./tools/claw-agent/internal/agent -run 'TestComputer|TestScreenshot' -count=1
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -67,3 +91,16 @@ jobs:
             -v "$PWD/package.json:/aiclaw/package.json:ro" \
             aiclaw-computer-test dbus-run-session -- xvfb-run -a sh -c \
             'openbox >/tmp/openbox.log 2>&1 & sleep 1; node /aiclaw/tests/linux/test_host.mjs'
+      - name: Build complete Linux package
+        run: |
+          npm run build -w @aiclaw/desktop
+          mkdir -p build/bin/linux-x64
+          CGO_ENABLED=0 go build -o build/bin/linux-x64/claw-agent ./tools/claw-agent
+          node scripts/package-app.mjs --platform=linux --arch=x64
+      - name: Launch actual Linux package and verify shipped runtime
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 libxtst6 libxcomposite1 libxfixes3 dbus-x11 xvfb openbox libnss3 libasound2t64 libgbm1
+          sudo chown root:root release/AIClaw-linux-x64/chrome-sandbox
+          sudo chmod 4755 release/AIClaw-linux-x64/chrome-sandbox
+          dbus-run-session -- xvfb-run -a sh -c 'openbox >/tmp/openbox-package.log 2>&1 & sleep 1; node scripts/smoke-packaged-computer.mjs release/AIClaw-linux-x64/AIClaw'

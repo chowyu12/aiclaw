@@ -719,8 +719,8 @@ func TestRememberIsGatedByApproval(t *testing.T) {
 
 func computerSession(t *testing.T, model *fakeModel, policy protocol.ApprovalPolicy, codeMode ...bool) *Session {
 	t.Helper()
-	if runtime.GOOS != "darwin" {
-		t.Skip("native Computer Use currently requires macOS")
+	if runtime.GOOS != "darwin" && runtime.GOOS != "windows" && runtime.GOOS != "linux" {
+		t.Skip("Computer Use requires macOS, Windows or Linux X11")
 	}
 	server := httptest.NewServer(http.HandlerFunc(model.handler))
 	t.Cleanup(server.Close)

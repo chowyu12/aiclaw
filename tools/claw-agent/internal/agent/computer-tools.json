@@ -30,7 +30,7 @@
         },
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "element_index": {
           "type": "string",
@@ -70,7 +70,9 @@
       "additionalProperties": false
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -78,9 +80,11 @@
     "action": "query",
     "readOnly": true,
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ],
-    "description": "Fast targeted accessibility lookup on macOS (no full tree or screenshot). Prefer this to clicking through lists when the control text or role is known. The app must already run. Returned indexes authorize only matched element actions in this turn. A truncated empty search does not prove absence. For settable text fields use computer_set_value instead of trying to establish keyboard focus.",
+    "description": "Fast targeted accessibility lookup (no full tree or screenshot). Prefer this to clicking through lists when the control text or role is known. The app must already run. Returned indexes authorize only matched element actions in this turn. A truncated empty search does not prove absence. For settable text fields use computer_set_value instead of trying to establish keyboard focus.",
     "schema": {
       "required": [
         "app"
@@ -101,7 +105,7 @@
         },
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "limit": {
           "minimum": 1,
@@ -109,14 +113,14 @@
           "description": "Maximum matches to return. Defaults to 20; capped at 100."
         },
         "role": {
-          "description": "Native accessibility role, e.g. AXTextField for search boxes, AXTextArea for editors, AXButton for buttons. Use native AX role names, not localized role labels.",
+          "description": "Native accessibility role from this platform: macOS AXTextField/AXTextArea/AXButton, Windows Edit/Button, or Linux text/push button. Use roles returned by observation, not localized labels.",
           "type": "string"
         },
         "window_id": {
           "type": "integer",
           "minimum": 1,
           "maximum": 4294967295,
-          "description": "macOS CGWindowID from a prior observation/query. Search this window explicitly; omit to use the current app window."
+          "description": "Native window_id from a prior observation/query. Search this window explicitly; omit to use the current app window."
         }
       },
       "additionalProperties": false,
@@ -127,7 +131,7 @@
     "name": "computer_drag",
     "action": "drag",
     "readOnly": false,
-    "description": "Drag between screenshot pixel coordinates in the explicitly observed macOS window. Uses foreground event delivery and may move the system pointer. Verify the returned post-action state; never replay uncertain input.",
+    "description": "Drag between screenshot pixel coordinates in the explicitly observed app window. Uses foreground event delivery and may move the system pointer. Verify the returned post-action state; never replay uncertain input.",
     "schema": {
       "type": "object",
       "properties": {
@@ -144,7 +148,7 @@
           "type": "number"
         },
         "app": {
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
           "type": "string"
         },
         "to_x": {
@@ -179,7 +183,9 @@
       "additionalProperties": false
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -223,7 +229,7 @@
         },
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "max_tree_nodes": {
           "description": "Maximum accessibility tree nodes to render. Defaults to 1200.",
@@ -234,14 +240,16 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 4294967295,
-          "description": "macOS CGWindowID from a prior observation/query. Search this window explicitly; omit to use the current app window."
+          "description": "Native window_id from a prior observation/query. Search this window explicitly; omit to use the current app window."
         }
       },
       "additionalProperties": false,
       "type": "object"
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -255,7 +263,9 @@
       "type": "object"
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -282,7 +292,7 @@
           "description": "Element identifier"
         },
         "app": {
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
           "type": "string"
         },
         "observation_id": {
@@ -304,7 +314,9 @@
       }
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -322,7 +334,7 @@
       ],
       "properties": {
         "app": {
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
           "type": "string"
         },
         "key": {
@@ -354,7 +366,9 @@
       }
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -379,7 +393,7 @@
         },
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "observation_id": {
           "type": "string",
@@ -414,7 +428,9 @@
       "type": "object"
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -434,7 +450,7 @@
         },
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "observation_id": {
           "type": "string",
@@ -468,7 +484,9 @@
       ]
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -487,7 +505,7 @@
       "properties": {
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "text": {
           "type": "string",
@@ -512,7 +530,9 @@
       }
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -525,7 +545,7 @@
       "properties": {
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "observation_id": {
           "type": "string",
@@ -573,7 +593,9 @@
       "additionalProperties": false
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -586,7 +608,7 @@
       "properties": {
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "observation_id": {
           "type": "string",
@@ -626,14 +648,16 @@
       "additionalProperties": false
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
     "name": "computer_find_apps",
     "action": "find_apps",
     "readOnly": true,
-    "description": "Find installed or running macOS applications by name or bundle identifier. Returns exact IDs, paths and running state. Inventory may omit unindexed apps; discovery never launches apps.",
+    "description": "Find installed or running applications by name or identifier. Returns exact IDs, paths and running state. Inventory may omit unindexed apps; discovery never launches apps.",
     "schema": {
       "type": "object",
       "properties": {
@@ -651,20 +675,22 @@
       "additionalProperties": false
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
     "name": "computer_start_app",
     "action": "start_app",
     "readOnly": false,
-    "description": "Launch an exact macOS bundle identifier from discovery in the background, then observe its window. Does not require a previous observation. A running process alone does not prove the app is ready; inspect the returned snapshot.",
+    "description": "Launch an exact macOS bundle ID or Windows/Linux launch_id from discovery, then observe its verified running window. Does not require a previous observation. A running process alone does not prove the app is ready; inspect the returned snapshot.",
     "schema": {
       "type": "object",
       "properties": {
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "verify_after": {
           "type": "boolean",
@@ -677,20 +703,22 @@
       "additionalProperties": false
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
     "name": "computer_stop_app",
     "action": "stop_app",
     "readOnly": false,
-    "description": "Request normal quit of an exact macOS bundle identifier. Unsaved document dialogs may block exit; the result reports whether exit was verified. Never force terminates. Invalidates earlier observations.",
+    "description": "Request normal quit of an exact macOS bundle ID or Windows/Linux PID. Unsaved document dialogs may block exit; the result reports whether exit was verified. Never force terminates. Invalidates earlier observations.",
     "schema": {
       "type": "object",
       "properties": {
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "verify_after": {
           "type": "boolean",
@@ -703,7 +731,9 @@
       "additionalProperties": false
     },
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ]
   },
   {
@@ -711,15 +741,17 @@
     "action": "modify_app",
     "readOnly": false,
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ],
-    "description": "Activate or deactivate an exact macOS application. This changes foreground focus and invalidates prior observations. No previous observation is required.",
+    "description": "Activate or deactivate an exact discovered application. This changes foreground focus and invalidates prior observations. No previous observation is required.",
     "schema": {
       "type": "object",
       "properties": {
         "app": {
           "type": "string",
-          "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
         },
         "modification": {
           "type": "string",
@@ -745,7 +777,9 @@
     "action": "frontmost_window",
     "readOnly": true,
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ],
     "description": "Read the current foreground application and frontmost window metadata. This does not authorize input; observe the intended app before interacting.",
     "schema": {
@@ -760,7 +794,9 @@
     "action": "permission_status",
     "readOnly": true,
     "platforms": [
-      "darwin"
+      "darwin",
+      "windows",
+      "linux"
     ],
     "description": "Read Accessibility and Screen Recording permission status of AIClaw Computer Use.app. Does not grant permissions.",
     "schema": {
