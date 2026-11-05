@@ -49,7 +49,13 @@ try {
   await call("modify_app",{app:sentinelApp,modification:"activate"});
   const front=value(await call("frontmost_window")).app; assert.equal(front,sentinelApp);
   const query=async text=>{
-    const result=value(await call("query",{app,text,exact:true}));
+    let result;
+    for(let attempt=0;attempt<30;attempt++) {
+      result=value(await call("query",{app,text,exact:true}));
+      if(result.matches.length) break;
+      await pause(100);
+    }
+    if(result.matches.length!==1) console.error("Fixture AX diagnostic:",JSON.stringify(await call("get_app_state",{app,include_ax:true,include_screenshot:false})));
     assert.equal(result.truncated,false); assert.equal(result.matches.length,1,JSON.stringify(result));
     return result.matches[0];
   };
