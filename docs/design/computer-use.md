@@ -109,7 +109,9 @@ Linux 原型源码位于 `tools/computer-use/linux/`，直接调用 X11/XTest/XC
 
 Linux 前台纯文本粘贴已在 GTK 控件回读中文与 emoji。剪贴板事务保存所有可读取的原始格式（最多 64 格式、合计 16 MiB，超限在输入前拒绝），通过 XFixes 代际和同一 GDK X 连接的 server grab 避免覆盖期间发生的新复制。真实测试验证 HTML 和自定义二进制格式恢复、过期代际拒绝覆盖。X11 剪贴板数据依赖所有者存活，因此连接 EOF 后关闭输入/截图连接并清除元素，只在需要时继续提供已恢复的剪贴板字节；独立控制管道告知宿主不要终止该提供者。下一次复制后自动退出，不写历史或磁盘。宿主真实测试已验证跨越正常子进程退出期限仍可读取全部原格式，并在新复制后退出。
 
-Linux 服务当前仅接受 text/HTML 粘贴格式；HTML 的真实富文本消费、Markdown 转换、完整参数对齐、安装/打包和 Agent 工具启用尚未验收。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland。Windows 的自有 Win32/UIA 执行层和双 WinForms 测试已加入独立 CI，已解决标准控件代理初始化问题，后台动作不干扰检查仍在验收。不能将这些原型测试作为第五阶段完成证明。
+Linux 服务当前仅接受 text/HTML 粘贴格式；HTML 的真实富文本消费、Markdown 转换、完整参数对齐、安装/打包和 Agent 工具启用尚未验收。截图已实现 `text_limit` 与 `max_tree_depth` 并明确标记截断；观察订阅请求完整的有界 AX 文本，避免数字索引位数变化改变文本截断位置而产生误报。正常关闭以进程出生标识和退出状态确认，不把窗口消失当成进程退出。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland。
+
+Windows 的自有 Win32/UIA 执行层和双 WinForms 测试已加入独立 CI。UIA 的旧版代理装载器需要检查调用栈，因此在独立编译的 MTA 线程中初始化，避开 PowerShell 动态帧。实测部分 UIA 写操作会激活目标，后台路径改为有超时的标准 Edit/Button 消息，并校验控件类、PID、同用户和所属顶层窗口；其它控件拒绝后台回退。标准 Edit 设值/选择、Button 点击及 CheckBox 切换、生效回读、前台/鼠标/剪贴板保持，以及遮挡下目标 PNG 已通过 [Windows/Linux 平台 CI](https://github.com/chowyu12/aiclaw/actions/runs/42046125360)。源码和 [Windows 实测回执](/Users/zhouyy/.codex/visualizations/2026/11/05/01a1aacb-6689-7b11-841f-9bcc35cb2d46/computer-use-roadmap/windows-native-summary.json) 均保留。同轮 CI 还验证 Windows 前台按键、中文/emoji 输入、拖动、滚动及正常退出。Windows 启动/粘贴、跨平台安装包接入和 Agent 工具启用仍在进行，不能作为第五阶段完成证明。
 
 ## 构建、打包与签名
 
@@ -125,7 +127,7 @@ CI 的 macOS job 构建并验证 universal helper，上传 tar artifact；Linux 
 
 - arm64/x86_64 universal 原生构建、签名完整性检查、真实 IPC 握手与 18 工具契约检查。
 - 固定用户目录安装：相同构建不重复写入，更新候选验证失败保留旧 App，并发安装和链接目标拒绝测试通过。
-- 352 项渲染/宿主测试、相关 Go 包测试、TypeScript 类型检查、Go 格式/vet/no-cgo 检查通过。
+- 本轮 364 项渲染/宿主测试通过，1 项非 macOS 启动测试在本机跳过并由 Linux CI 执行；TypeScript 类型检查通过。前序相关 Go race、格式/vet/no-cgo 检查通过。
 - 实际辅助功能与屏幕录制状态均为 true；应用发现、正常退出、重新启动与激活均以临时 AppKit fixture 验收。
 - 九类原生动作实际生效：点击、拖动、按键、Unicode 输入、坐标滚动、设值、UTF-16 文本选择、辅助动作和粘贴。
 - text、Markdown、HTML 粘贴在目标编辑器中验证；Markdown/HTML 加粗和中文编码正确，原剪贴板文本恢复。Markdown 标题、列表、表格、链接与转义另有原生转换测试。
