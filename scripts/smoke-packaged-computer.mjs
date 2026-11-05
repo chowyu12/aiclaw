@@ -47,7 +47,10 @@ try {
   });
   socket.addEventListener("close",()=>{for(const {reject} of pending.values()) reject(Error("Packaged inspector closed before verification"));pending.clear();});
   let readiness;
-  const watchdog=setTimeout(()=>{socket?.close();child?.kill();},60_000);
+  const watchdog=setTimeout(()=>{
+    for(const {reject} of pending.values()) reject(Error("Packaged verification timed out"));
+    pending.clear(); socket?.close(); child?.kill();
+  },60_000);
   watchdog.unref();
   try {
     for(let attempt=0;attempt<100;attempt++) {
