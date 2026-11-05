@@ -31,6 +31,7 @@ jobs:
       - name: Native Windows UIA and window capture acceptance
         run: node scripts/smoke-computer-windows.mjs
       - name: Native clipboard transactions
+        if: always()
         shell: powershell
         run: powershell.exe -NoProfile -NonInteractive -STA -File tools/computer-use/windows/TestClipboard.ps1
   linux-x11:
@@ -62,6 +63,7 @@ jobs:
             -v "$PWD/tools/computer-use/linux:/aiclaw/tests/linux:ro" \
             -v "$PWD/apps/desktop/computer-use/linux:/aiclaw/computer-use/linux:ro" \
             -v "$PWD/apps/desktop/dist/main:/aiclaw/dist/main:ro" \
+            -v "$PWD/apps/desktop/node_modules/markdown-it:/aiclaw/node_modules/markdown-it:ro" \
             -v "$PWD/package.json:/aiclaw/package.json:ro" \
             aiclaw-computer-test dbus-run-session -- xvfb-run -a sh -c \
             'openbox >/tmp/openbox.log 2>&1 & sleep 1; node /aiclaw/tests/linux/test_host.mjs'

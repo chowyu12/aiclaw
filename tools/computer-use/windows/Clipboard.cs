@@ -164,9 +164,12 @@ namespace AIClawComputerUse {
                             if (copy == IntPtr.Zero) throw new InvalidOperationException("Clipboard format cannot be retained; no paste dispatched");
                             original.Add(new Item { Format = formatID, Handle = copy });
                         }
-                        try { Publish(payload); generation = Native.GetClipboardSequenceNumber(); }
+                        try { Publish(payload); }
                         catch { Publish(original); throw; }
                     } finally { CloseClipboard(); }
+                    // Windows can advance the sequence when the write lock is
+                    // closed. Capture the published generation after closing.
+                    generation = Native.GetClipboardSequenceNumber();
                 });
             } catch { foreach (var item in original) Release(item); throw; }
             finally { foreach (var item in payload) Release(item); }
