@@ -218,11 +218,11 @@ type BrowserResult struct {
 	Height      int    `json:"height,omitempty"`
 }
 
-// ComputerAction names the pinned Cua Driver operation, not an OS input script.
+// ComputerAction names an allowlisted Open Computer Use MCP tool, not a script.
 type ComputerAction string
 
 const (
-	ComputerScreenshot ComputerAction = "get_window_state"
+	ComputerScreenshot ComputerAction = "get_app_state"
 	ComputerClick      ComputerAction = "click"
 )
 

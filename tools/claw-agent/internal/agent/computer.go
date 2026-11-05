@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"runtime"
 	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
@@ -14,67 +13,31 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
 
-// Window-scoped subset of Cua Driver 0.38.0's tool contract. The host also
-// enforces this boundary: no arbitrary driver tools, desktop scope or file output.
+// Allowlisted Open Computer Use 1.1.3 MCP tools. The host owns approvals,
+// per-turn observations and isolated connections; no arbitrary script or file output.
 //
 //go:embed computer-tools.json
 var computerToolsJSON []byte
 
 type computerToolSpec struct {
-	Name           string                  `json:"name"`
-	Action         protocol.ComputerAction `json:"action"`
-	ReadOnly       bool                    `json:"readOnly"`
-	Description    string                  `json:"description"`
-	Schema         json.RawMessage         `json:"schema"`
-	PlatformFields map[string][]string     `json:"platformFields,omitempty"`
+	Name        string                  `json:"name"`
+	Action      protocol.ComputerAction `json:"action"`
+	ReadOnly    bool                    `json:"readOnly"`
+	Description string                  `json:"description"`
+	Schema      json.RawMessage         `json:"schema"`
 }
 
-// Project optional native fields before exposing the schema to the model.
-// GOOS uses "windows", matching the platform names in the pinned contract.
-func computerToolSpecs(platform string) ([]computerToolSpec, error) {
+func computerToolSpecs() ([]computerToolSpec, error) {
 	var specs []computerToolSpec
-	if err := json.Unmarshal(computerToolsJSON, &specs); err != nil {
-		return nil, err
-	}
-	for i := range specs {
-		spec := &specs[i]
-		if len(spec.PlatformFields) == 0 {
-			continue
-		}
-		var schema struct {
-			Type                 string                     `json:"type"`
-			Properties           map[string]json.RawMessage `json:"properties"`
-			AdditionalProperties bool                       `json:"additionalProperties"`
-			Required             []string                   `json:"required,omitempty"`
-		}
-		if err := json.Unmarshal(spec.Schema, &schema); err != nil {
-			return nil, err
-		}
-		for field, platforms := range spec.PlatformFields {
-			supported := false
-			for _, candidate := range platforms {
-				if candidate == platform {
-					supported = true
-				}
-			}
-			if !supported {
-				delete(schema.Properties, field)
-			}
-		}
-		raw, err := json.Marshal(schema)
-		if err != nil {
-			return nil, err
-		}
-		spec.Schema = raw
-	}
-	return specs, nil
+	err := json.Unmarshal(computerToolsJSON, &specs)
+	return specs, err
 }
 
 func (s *Session) registerComputerTools() error {
 	if !s.config.EnableComputerUse {
 		return nil
 	}
-	specs, err := computerToolSpecs(runtime.GOOS)
+	specs, err := computerToolSpecs()
 	if err != nil {
 		return err
 	}
@@ -96,7 +59,7 @@ func (s *Session) registerComputerTools() error {
 				request := protocol.ComputerRequestParams{SessionID: env.SessionID, TurnID: env.TurnID, Action: spec.Action, Arguments: raw}
 				if err := env.RequestApproval(ctx, effect, protocol.ApprovalExec,
 					i18n.D("屏幕操作 {action}", "action", string(spec.Action)), string(raw),
-					"Operate the explicitly selected application window, outside the workspace.",
+					"Operate the explicitly selected application through Open Computer Use, outside the workspace.",
 				); err != nil {
 					return "", err
 				}
@@ -110,7 +73,7 @@ func (s *Session) registerComputerTools() error {
 }
 
 // Reject missing targets and unknown routing fields before requesting approval.
-// Detailed action semantics and platform support remain the driver's contract.
+// Detailed action semantics and platform support remain the service's contract.
 func validateComputerArgs(raw, schema json.RawMessage) error {
 	var args map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &args); err != nil || args == nil {
@@ -133,11 +96,11 @@ func validateComputerArgs(raw, schema json.RawMessage) error {
 			return fmt.Errorf("missing computer argument: %s", key)
 		}
 	}
-	for _, key := range []string{"pid", "window_id"} {
+	for _, key := range []string{"app", "observation_id"} {
 		if value, ok := args[key]; ok {
-			var n int64
-			if json.Unmarshal(value, &n) != nil || n <= 0 || n > 9007199254740991 {
-				return fmt.Errorf("%s must be a positive safe integer", key)
+			var text string
+			if json.Unmarshal(value, &text) != nil || strings.TrimSpace(text) == "" {
+				return fmt.Errorf("%s must be a non-empty string", key)
 			}
 		}
 	}

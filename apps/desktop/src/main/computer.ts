@@ -1,183 +1,155 @@
-import type { CuaDriverLike, ToolResult } from "@trycua/cua-driver";
+import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
 import type { ComputerRequestParams, ComputerResult } from "@aiclaw/agent-client";
+import { ComputerMcpRuntime, type ComputerRuntime, type ComputerToolResult } from "./computer-runtime.js";
 
-// Only native window operations are exposed. In particular, no arbitrary script,
-// desktop input, browser profile attachment, clipboard or driver configuration.
-const READS = new Set(["list_apps", "list_windows", "get_window_state"]);
-const INPUTS = new Set(["click", "double_click", "right_click", "type_text", "press_key", "hotkey", "scroll", "drag"]);
-const ACTIONS = new Set([...READS, ...INPUTS, "launch_app"]);
-const WINDOW_ARGS = ["pid", "window_id", "element_token", "delivery_mode"];
+const READS = new Set(["list_apps", "get_app_state"]);
 const ARGUMENTS: Record<string, string[]> = {
-  list_apps: [], list_windows: ["app", "pid", "on_screen_only"], launch_app: ["bundle_id", "name"],
-  get_window_state: ["pid", "window_id", "query", "max_elements", "max_depth", "timeout_ms", "include_screenshot"],
-  click: [...WINDOW_ARGS, "x", "y", "capture_id", "button", "count", "action"],
-  double_click: [...WINDOW_ARGS, "x", "y"], right_click: [...WINDOW_ARGS, "x", "y"],
-  type_text: [...WINDOW_ARGS, "text", "x", "y"], press_key: [...WINDOW_ARGS, "key", "modifiers"],
-  hotkey: [...WINDOW_ARGS, "keys"], scroll: [...WINDOW_ARGS, "x", "y", "direction", "amount", "by"],
-  drag: [...WINDOW_ARGS, "from_x", "from_y", "to_x", "to_y", "duration_ms"],
+  list_apps: [], get_app_state: ["app", "include_ax", "include_screenshot", "text_limit", "max_tree_nodes", "max_tree_depth"],
+  click: ["app", "element_index", "x", "y", "click_count", "mouse_button"],
+  drag: ["app", "from_x", "from_y", "to_x", "to_y"],
+  press_key: ["app", "key"], type_text: ["app", "text"],
+  scroll: ["app", "element_index", "direction", "pages"],
+  set_value: ["app", "element_index", "value"], perform_secondary_action: ["app", "element_index", "action"],
 };
 
-type Driver = Pick<CuaDriverLike, "callTool" | "shutdown" | "listToolsJson"> & { uniffiDestroy?: () => void };
-type DriverFactory = () => Promise<Driver>;
+type Observation = { id: string; pixels: boolean; ax: boolean };
+type Session = { runtime: ComputerRuntime; turn: string; observations: Map<string, Observation> };
 
-async function loadDriver(): Promise<Driver> {
-  // Never connect to an independently installed daemon: permissions, sessions and
-  // shutdown belong to this AIClaw process. Loading is lazy when the feature is used.
-  const { CuaDriver } = await import("@trycua/cua-driver");
-  return CuaDriver.create({ embedded: true, claudeCodeCompatibility: false });
+function observation(result: ComputerToolResult): ComputerResult {
+  if (!Array.isArray(result?.content)) throw Error("Open Computer Use returned an invalid result");
+  const text = result.content.filter(item => item.type === "text").map(item => item.text ?? "").join("\n");
+  if (result.isError) throw Error(text || "Open Computer Use refused the operation");
+  if (!text.trim()) throw Error("Open Computer Use returned an empty result; outcome is unknown");
+  const image = result.content.find(item => item.type === "image");
+  if (image && (image.mimeType !== "image/png" || !image.data)) throw Error("Open Computer Use returned an invalid PNG screenshot");
+  return { text, ...(image ? { imageBase64: image.data } : {}) };
 }
 
-function checked(result: ToolResult): ToolResult {
-  if (result.isError) throw new Error(`[${result.errorCode ?? "computer_error"}] ${resultText(result) || "Cua Driver refused the operation"}`);
-  if (!result.text.trim() && !result.structuredJson) throw new Error("Cua Driver returned an empty result; outcome is unknown");
-  return result;
-}
-
-function resultText(result: ToolResult): string {
-  // structuredJson preserves capture IDs, verification receipts and partial-tree
-  // flags even when the human-readable rendering leaves those fields out.
-  return [result.text, result.structuredJson].filter(Boolean).join("\n");
-}
-
-function observation(result: ToolResult): ComputerResult {
-  const image = result.images[0];
-  if (image && image.mimeType !== "image/png") throw new Error(`Unsupported computer screenshot format: ${image.mimeType}`);
-  return { text: resultText(result), ...(image ? { imageBase64: image.dataBase64 } : {}) };
-}
-
-/** Host-owned Cua runtime, with ordered operations and isolated per-chat sessions. */
+/** AIClaw owns approval and turn scope; the signed OCU app owns native execution,
+ * permissions, target-window snapshots and element indexes. Each chat gets an
+ * independent MCP connection; all desktop operations remain ordered.
+ */
 export class ComputerController {
-  private driver?: Promise<Driver>;
-  private nativeArguments = new Map<string, Set<string>>();
+  private sessions = new Map<string, Session>();
+  private turns = new Map<string, boolean>();
   private queue: Promise<unknown> = Promise.resolve();
-  private readonly snapshots = new Map<string, { id: string; pixels: boolean }>();
-
-  private readonly createDriver: DriverFactory;
-
-  constructor(createDriver: DriverFactory = loadDriver) { this.createDriver = createDriver; }
+  private readonly createRuntime: () => Promise<ComputerRuntime>;
+  constructor(createRuntime: () => Promise<ComputerRuntime> = () => ComputerMcpRuntime.create()) { this.createRuntime = createRuntime; }
 
   perform(request: ComputerRequestParams): Promise<ComputerResult> {
+    const key = JSON.stringify([request.sessionId, request.turnId]);
+    if (!this.turns.has(key)) this.turns.set(key, true);
     const operation = this.queue.then(() => this.execute(request));
     this.queue = operation.catch(() => {});
     return operation;
   }
 
   private async execute(request: ComputerRequestParams): Promise<ComputerResult> {
-    const action = request.action;
-    if (!ACTIONS.has(action)) throw new Error(`Unsupported computer operation: ${action}. Discover the app/window and use the window-scoped tools.`);
-    const args = request.arguments;
-    if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("Computer arguments must be an object");
+    const { action, sessionId, turnId } = request;
+    const key = JSON.stringify([sessionId, turnId]);
+    if (!this.turns.get(key)) throw Error("Computer Use turn has ended; no queued operation was dispatched");
+    if (!Object.hasOwn(ARGUMENTS, action)) throw Error(`Unsupported computer operation: ${action}`);
+    if (!sessionId || !turnId) throw Error("Computer session and turn are required");
+    const input = request.arguments;
+    if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Computer arguments must be an object");
+    const read = READS.has(action);
+    for (const key of Object.keys(input)) {
+      if (!ARGUMENTS[action]!.includes(key) && !(key === "observation_id" && !read)) throw Error(`Unsupported computer argument: ${key}`);
+    }
+    const args = { ...input }; delete args.observation_id;
+    const app = action === "list_apps" ? "" : this.target(args.app);
+    if (app) args.app = app;
+    let session = this.sessions.get(sessionId);
+    if (session && session.turn !== turnId) {
+      this.sessions.delete(sessionId); await session.runtime.close(); session = undefined;
+    }
+    // Do not start a service for an unobserved input, including after a crash.
+    if (!read) {
+      const latest = session?.observations.get(app);
+      if (!latest || input.observation_id !== latest.id) throw Error("Observe this app with computer_screenshot in this turn and use its latest observation_id");
+      if (args.element_index !== undefined && !latest.ax) throw Error("Element actions require an accessibility observation");
+      if ((args.x !== undefined || action === "drag") && !latest.pixels) throw Error("Coordinate actions require a fresh screenshot");
+    }
+    if (!session) {
+      const runtime = await this.createRuntime();
+      session = { runtime, turn: turnId, observations: new Map() };
+      this.sessions.set(sessionId, session);
+    }
+    if (!this.turns.get(key)) throw Error("Computer Use turn ended during startup; no operation was dispatched");
+    const native = session.runtime.tools.find(tool => tool.name === action);
+    if (!native) throw Error(`Open Computer Use does not support ${action} on ${process.platform}`);
     for (const key of Object.keys(args)) {
-      if (!ARGUMENTS[action]!.includes(key)) throw new Error(`Unsupported computer argument: ${key}`);
+      if (!Object.hasOwn(native.inputSchema.properties, key)) throw Error(`Open Computer Use does not support ${action}.${key}`);
     }
-    if (action === "launch_app" && ![args.bundle_id, args.name].some(value => typeof value === "string" && value.trim())) {
-      throw new Error("launch_app requires bundle_id or name");
+    for (const key of native.inputSchema.required ?? []) {
+      if (args[key] === undefined || args[key] === null) throw Error(`Missing computer argument: ${key}`);
     }
-    const targeted = !["list_apps", "list_windows", "launch_app"].includes(action);
-    if (targeted && (!Number.isSafeInteger(args.pid) || Number(args.pid) <= 0 || !Number.isSafeInteger(args.window_id) || Number(args.window_id) <= 0)) {
-      throw new Error("An exact positive pid and window_id from list_windows are required");
+    if (app) session.observations.delete(app);
+    let output: ComputerResult;
+    try { output = observation(await session.runtime.call(action, args)); }
+    catch (error) {
+      // A timed-out proxy can still have dispatched input. Drop the connection
+      // and every observation; reconnect only for an explicit later observation.
+      this.sessions.delete(sessionId); await session.runtime.close();
+      throw Error(`${String(error)}${read ? "" : ". Outcome may be unknown; observe again. Do not automatically repeat input or submission."}`);
     }
-    const session = request.sessionId;
-    if (!session) throw new Error("Computer session is missing");
-    const driver = await (this.driver ??= this.createDriver().then(async driver => {
-      try {
-        const manifest = JSON.parse(await driver.listToolsJson());
-        this.nativeArguments = new Map(manifest.tools.map((tool: { name: string; inputSchema: { properties: Record<string, unknown> } }) =>
-          [tool.name, new Set(Object.keys(tool.inputSchema.properties ?? {}))]));
-        return driver;
-      } catch (error) {
-        try { await driver.shutdown(); } finally { driver.uniffiDestroy?.(); }
-        throw error;
-      }
-    }).catch(error => { this.driver = undefined; throw error; }));
-    const nativeArguments = this.nativeArguments.get(action);
-    if (!nativeArguments) throw new Error(`Native runtime does not support ${action} on ${process.platform}`);
-    for (const field of Object.keys(args)) {
-      if (!nativeArguments.has(field)) throw new Error(`Native runtime does not support ${action}.${field} on ${process.platform}`);
-    }
-    const call = async (name: string, params: Record<string, unknown>) => checked(await driver.callTool(name, JSON.stringify({ ...params, session }), { signal: AbortSignal.timeout(name === "list_windows" ? 5_000 : 20_000) }));
-    const snapshotKey = `${session}:${args.pid}:${args.window_id}`;
-    if (INPUTS.has(action)) {
-      const snapshot = this.snapshots.get(snapshotKey);
-      if (!snapshot) throw new Error("Observe this exact window with computer_screenshot before acting");
-      if (args.element_token !== undefined && (typeof args.element_token !== "string" || !args.element_token.startsWith(`${snapshot.id}:`) || !/^s[0-9a-f]{8}:[0-9]+$/.test(args.element_token))) {
-        throw new Error("Element token does not belong to this window's latest observation; observe again");
-      }
-      if ((args.x !== undefined || args.from_x !== undefined) && !snapshot.pixels) {
-        throw new Error("Pixel actions require a fresh window screenshot");
-      }
-      // Resolve ownership independently of model-provided names. Unknown windows
-      // fail closed; a token can never redirect input into AIClaw's approval UI.
-      const windows = checked(await call("list_windows", { pid: args.pid }));
-      const data = JSON.parse(windows.structuredJson || windows.text);
-      const window = data.windows?.find((w: Record<string, unknown>) => w.window_id === args.window_id && w.pid === args.pid);
-      if (!window) throw new Error("Target window no longer exists; list windows and observe again");
-      if (args.pid === process.pid || /^(aiclaw|electron)(\.exe)?$/i.test(window.app_name ?? "")) {
-        throw new Error("Refusing to operate AIClaw's own windows or approval controls");
-      }
-      // Bind the token to the caller's exact window by requiring a snapshot made
-      // in this session. The driver itself validates token/capture freshness.
-      if (args.delivery_mode !== undefined && !["background", "foreground"].includes(String(args.delivery_mode))) {
-        throw new Error("Invalid delivery_mode");
-      }
-    }
-    if (INPUTS.has(action) || action === "get_window_state") this.snapshots.delete(snapshotKey);
-    let result: ToolResult;
-    try {
-      result = await call(action, args);
-    } catch (error) {
-      if (INPUTS.has(action)) {
-        throw new Error(`${String(error)}. The action may have been dispatched before failure. Observe again before deciding what to do; do not automatically repeat input or submission.`);
-      }
-      throw error;
-    }
-    const output = observation(result);
-    const remember = (state: ToolResult) => {
-      const data = JSON.parse(state.structuredJson || "{}");
-      if (data.pid !== args.pid || data.window_id !== args.window_id || !/^s[0-9a-f]{8}$/.test(data.snapshot_id ?? "")) {
-        throw new Error("Window observation has no matching identity or snapshot token");
-      }
-      this.snapshots.set(snapshotKey, { id: data.snapshot_id, pixels: state.images.length > 0 });
+    const remember = (state: ComputerResult, pixels: boolean, ax: boolean) => {
+      if (pixels && !state.imageBase64) throw Error("Open Computer Use returned no app screenshot. Grant Accessibility and Screen Recording to Open Computer Use.app, then observe again. Do not guess coordinates.");
+      const id = randomUUID(); session.observations.set(app, { id, pixels: !!state.imageBase64, ax });
+      state.text += `\nobservation_id: ${id}`;
     };
-    if (action === "get_window_state" && args.include_screenshot !== false && !output.imageBase64) {
-      throw new Error("Cua Driver returned no window screenshot; do not act on guessed coordinates");
-    }
-    if (action === "get_window_state") remember(result);
-    if (INPUTS.has(action)) {
+    if (action === "get_app_state") remember(output, args.include_screenshot !== false, args.include_ax !== false);
+    if (!read) {
       try {
-        const observed = await call("get_window_state", { pid: args.pid, window_id: args.window_id });
-        const state = observation(observed);
-        remember(observed);
-        output.text += `\nPost-action window observation (verify the intended change before continuing):\n${state.text}`;
+        const state = observation(await session.runtime.call("get_app_state", { app }));
+        remember(state, true, true);
+        output.text += `\nPost-action app observation (verify the intended change before continuing):\n${state.text}`;
         output.imageBase64 = state.imageBase64;
-        if (!state.imageBase64) output.text += "\nPost-action screenshot unavailable; use the tree cautiously and request a fresh observation.";
       } catch (error) {
-        // The input has already been dispatched. Keep its receipt and never
-        // replay it just because the subsequent observation failed.
-        output.text += `\nInput was dispatched, but post-action verification failed: ${String(error)}. Outcome is unknown; observe again. Do not automatically retry the input.`;
+        this.sessions.delete(sessionId); await session.runtime.close();
+        output.text += `\nInput was dispatched, but verification failed: ${String(error)}. Outcome is unknown; observe again. Do not automatically replay input.`;
       }
     }
     return output;
   }
 
-  async releaseSession(session: string): Promise<void> {
+  private target(value: unknown): string {
+    if (typeof value !== "string" || !value.trim()) throw Error("An explicit app identifier is required");
+    const app = value.trim();
+    if (app === String(process.pid)) throw Error("Refusing to operate AIClaw or its approval controls");
+    const leaf = basename(app.replaceAll("\\", "/")).toLowerCase();
+    if (/^(aiclaw|electron|opencomputeruse|open computer use)(\.app|\.exe)?$/.test(leaf) || /^(com\.github\.chowyu12\.aiclaw|com\.ifuryst\.opencomputeruse|com\.electron|com\.github\.electron)(\.|$)/i.test(app)) {
+      throw Error("Refusing to operate AIClaw, its helper or approval controls");
+    }
+    if (process.platform === "darwin" && !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(app)) throw Error("Use the exact bundle identifier from computer_list_apps; fuzzy names and paths are not accepted");
+    if (process.platform !== "darwin" && (!/^[1-9][0-9]*$/.test(app) || !Number.isSafeInteger(Number(app)))) throw Error("Use the exact app PID from computer_list_apps; fuzzy names and paths are not accepted");
+    return app;
+  }
+
+  async finishTurn(sessionId: string, turnId: string): Promise<void> {
+    const key = JSON.stringify([sessionId, turnId]);
+    if (this.turns.has(key)) this.turns.set(key, false);
     const operation = this.queue.then(async () => {
-      for (const key of this.snapshots.keys()) if (key.startsWith(`${session}:`)) this.snapshots.delete(key);
-      if (this.driver) await (await this.driver).callTool("end_session", JSON.stringify({ session }));
+      const session = this.sessions.get(sessionId);
+      if (session?.turn === turnId) { this.sessions.delete(sessionId); await session.runtime.close(); }
     });
-    this.queue = operation.catch(() => {});
-    await operation;
+    this.queue = operation.catch(() => {}); await operation;
+  }
+
+  async releaseSession(sessionId: string): Promise<void> {
+    const operation = this.queue.then(async () => {
+      const session = this.sessions.get(sessionId); this.sessions.delete(sessionId);
+      for (const key of this.turns.keys()) if (JSON.parse(key)[0] === sessionId) this.turns.delete(key);
+      await session?.runtime.close();
+    });
+    this.queue = operation.catch(() => {}); await operation;
   }
 
   async close(): Promise<void> {
     await this.queue;
-    const pending = this.driver;
-    this.driver = undefined;
-    this.snapshots.clear();
-    this.nativeArguments.clear();
-    if (pending) {
-      const driver = await pending;
-      try { await driver.shutdown(); } finally { driver.uniffiDestroy?.(); }
-    }
+    const sessions = [...this.sessions.values()]; this.sessions.clear();
+    await Promise.all(sessions.map(session => session.runtime.close()));
+    this.turns.clear();
   }
 }

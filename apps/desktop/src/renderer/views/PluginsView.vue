@@ -479,7 +479,7 @@ async function pollWeChat(): Promise<void> {
               </li>
             </ul>
             <p v-if="isComputerUse(plugin)" class="note warn">
-              {{ t("启用后模型能") }}<strong>{{ t("看见并操作整个屏幕") }}</strong>{{ t("，不只是工作目录——包括别的应用、系统设置、以及本应用自己的窗口。除截屏外每个动作都会请你确认；最前面的应用是 AIClaw 自己时直接拒绝。macOS 还要在「隐私与安全性」里给屏幕录制与辅助功能授权，且模型得看得懂图。这是这里权限最大的一项，不用就关掉。") }}
+              {{ t("桌面操作由独立的 Open Computer Use 应用执行，范围不限于工作目录。AIClaw 的窗口与审批控件禁止操作。动作遵循当前会话的审批策略；macOS 请在「隐私与安全性」中给 Open Computer Use.app 授予辅助功能和屏幕录制权限。") }}
             </p>
           </div>
 

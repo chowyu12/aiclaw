@@ -61,7 +61,9 @@ build-go: $(AGENT_BIN) ## 编译 claw-agent
 # CGO_ENABLED=0 是硬要求，不是优化：开了 cgo 就没法交叉编译（一台 Linux 上
 # 出四个平台的包），还要求每台构建机装好 C 工具链。两个 SQLite 库都是纯 Go
 # 实现，正是为此选的。make nocgo 守着这条。
-$(AGENT_BIN): $(GO_SOURCES) go.mod
+# Tool schemas are embedded into the Go binary; changing only JSON must rebuild
+# the kernel too, otherwise make dev advertises an older computer-use contract.
+$(AGENT_BIN): $(GO_SOURCES) go.mod $(AGENT_DIR)/internal/agent/computer-tools.json
 	CGO_ENABLED=0 go build -o $(AGENT_BIN) ./tools/claw-agent
 
 build-desktop: deps build-client ## 编译 Electron 主进程与渲染层

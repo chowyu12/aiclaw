@@ -21,7 +21,7 @@ func TestComputerRejectsIncompleteHostSuccess(t *testing.T) {
 		{"invalid image", protocol.ComputerResult{Text: "done", ImageBase64: "not base64"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			model := &fakeModel{script: []string{sseToolCalls([3]string{"c1", "computer_screenshot", `{"pid":123,"window_id":456}`}), sseText("cannot observe")}}
+			model := &fakeModel{script: []string{sseToolCalls([3]string{"c1", "computer_screenshot", `{"app":"com.example.fixture"}`}), sseText("cannot observe")}}
 			session := computerSession(t, model, protocol.ApprovalBypass)
 			emitter := &recordingEmitter{computerOK: true, computerResult: tc.result}
 			session.RunTurn(context.Background(), "t1", "observe", nil, nil, emitter)
@@ -40,7 +40,7 @@ func TestComputerRejectsIncompleteHostSuccess(t *testing.T) {
 
 func TestComputerInputObservationReachesModel(t *testing.T) {
 	image := []byte("post-action screenshot")
-	model := &fakeModel{script: []string{sseToolCalls([3]string{"c1", "computer_type", `{"pid":123,"window_id":456,"text":"北京天气"}`}), sseText("verified")}}
+	model := &fakeModel{script: []string{sseToolCalls([3]string{"c1", "computer_type", `{"app":"com.example.fixture","observation_id":"o1","text":"北京天气"}`}), sseText("verified")}}
 	session := computerSession(t, model, protocol.ApprovalBypass)
 	emitter := &recordingEmitter{computerOK: true, computerResult: protocol.ComputerResult{Text: "effect unverifiable; new window state", ImageBase64: base64.StdEncoding.EncodeToString(image)}}
 	session.RunTurn(context.Background(), "t1", "type", nil, nil, emitter)
@@ -57,12 +57,12 @@ func TestComputerInputObservationReachesModel(t *testing.T) {
 
 func TestComputerDiscoveryAndTreeOnlyObservationAreReadOnly(t *testing.T) {
 	model := &fakeModel{script: []string{
-		sseToolCalls([3]string{"c1", "computer_list_apps", `{}`}, [3]string{"c2", "computer_list_windows", `{"app":"Fixture"}`}, [3]string{"c3", "computer_screenshot", `{"pid":123,"window_id":456,"include_screenshot":false}`}), sseText("observed"),
+		sseToolCalls([3]string{"c1", "computer_list_apps", `{}`}, [3]string{"c3", "computer_screenshot", `{"app":"com.example.fixture","include_screenshot":false}`}), sseText("observed"),
 	}}
 	session := computerSession(t, model, protocol.ApprovalOnWrite)
 	emitter := &recordingEmitter{computerOK: true, computerResult: protocol.ComputerResult{Text: "tree or app inventory"}}
 	session.RunTurn(context.Background(), "t1", "inspect", nil, nil, emitter)
-	if len(emitter.approvals) != 0 || len(emitter.computer) != 3 {
+	if len(emitter.approvals) != 0 || len(emitter.computer) != 2 {
 		t.Fatalf("unexpected approval/dispatch: %+v %+v", emitter.approvals, emitter.computer)
 	}
 }
@@ -76,7 +76,7 @@ func TestComputerSchemaRejectsDesktopOverridesBeforeHostCall(t *testing.T) {
 		if spec.Name != "computer_click" {
 			continue
 		}
-		for _, args := range []string{`{"pid":0,"window_id":456}`, `{"pid":123,"window_id":-1}`, `{"pid":123}`, `{"pid":123,"window_id":456,"scope":"desktop"}`, `{"pid":123,"window_id":456,"session":"other"}`} {
+		for _, args := range []string{`{}`, `{"app":""}`, `{"app":123}`, `{"app":"com.example.fixture"}`, `{"app":"com.example.fixture","observation_id":null}`, `{"app":"com.example.fixture","observation_id":"o1","scope":"desktop"}`, `{"app":"com.example.fixture","observation_id":"o1","session":"other"}`} {
 			if validateComputerArgs(json.RawMessage(args), spec.Schema) == nil {
 				t.Fatalf("admitted %s", args)
 			}
@@ -84,36 +84,25 @@ func TestComputerSchemaRejectsDesktopOverridesBeforeHostCall(t *testing.T) {
 	}
 }
 
-func TestComputerSchemasFollowNativePlatformCapabilities(t *testing.T) {
-	for _, platform := range []string{"darwin", "windows", "linux"} {
-		t.Run(platform, func(t *testing.T) {
-			specs, err := computerToolSpecs(platform)
-			if err != nil {
+func TestComputerSchemasUseAppScopedOCUContract(t *testing.T) {
+	specs, err := computerToolSpecs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 9 {
+		t.Fatalf("expected 9 common native tools, got %d", len(specs))
+	}
+	for _, spec := range specs {
+		if spec.Action == "get_window_state" || spec.Action == "list_windows" {
+			t.Fatal("old driver tool exposed")
+		}
+		if spec.Name == "computer_click" {
+			if err := validateComputerArgs(json.RawMessage(`{"app":"com.example.fixture","observation_id":"o1","element_index":"1"}`), spec.Schema); err != nil {
 				t.Fatal(err)
 			}
-			for _, spec := range specs {
-				if spec.Name != "computer_click" {
-					continue
-				}
-				var schema struct {
-					Properties map[string]json.RawMessage `json:"properties"`
-				}
-				if err := json.Unmarshal(spec.Schema, &schema); err != nil {
-					t.Fatal(err)
-				}
-				_, hasAction := schema.Properties["action"]
-				if hasAction != (platform != "linux") {
-					t.Fatalf("%s click.action advertised=%t", platform, hasAction)
-				}
-				args := json.RawMessage(`{"pid":123,"window_id":456,"action":"show_menu"}`)
-				err = validateComputerArgs(args, spec.Schema)
-				if (err != nil) != (platform == "linux") {
-					t.Fatalf("%s accepted unsupported action: %v", platform, err)
-				}
-				if err := validateComputerArgs(json.RawMessage(`{"pid":123,"window_id":456,"element_token":"s00000001:1"}`), spec.Schema); err != nil {
-					t.Fatalf("common click rejected on %s: %v", platform, err)
-				}
+			if err := validateComputerArgs(json.RawMessage(`{"app":"com.example.fixture","observation_id":"o1","element_token":"s00000001:1"}`), spec.Schema); err == nil {
+				t.Fatal("old driver token admitted")
 			}
-		})
+		}
 	}
 }

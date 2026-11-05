@@ -489,7 +489,7 @@ export interface SessionHistoryResult {
   items: Item[];
 }
 
-/** A window-scoped call to the bundled Cua Driver. */
+/** An app-scoped call to the bundled Open Computer Use service. */
 export interface ComputerRequestParams {
   sessionId: string;
   turnId: string;

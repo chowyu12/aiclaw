@@ -70,7 +70,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci
       - run: npm run setup:electron
-      # No screenshots or input: verify the real platform's library and schemas.
+      - run: npm run build -w @aiclaw/agent-client && npm run build:main -w @aiclaw/desktop
+      # No screenshots or input: verify the real platform's native MCP service.
       - run: npx --no-install electron scripts/smoke-computer.cjs
 
   package:

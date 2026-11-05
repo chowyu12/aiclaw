@@ -2,200 +2,198 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import type { ToolResult } from "@trycua/cua-driver";
+import { spawn } from "node:child_process";
 import { ComputerController } from "../apps/desktop/src/main/computer.ts";
-import { driverTarget, verifyIntegrity } from "./stage-computer-driver.mjs";
-
-const computerSpecs = JSON.parse(readFileSync(new URL("../tools/claw-agent/internal/agent/computer-tools.json", import.meta.url), "utf8"));
-
-const target = { pid: 123, window_id: 456 };
-const snapshotID = "s00000001";
-const imageBase64 = "iVBORw0KGgo=";
-function result(text = "receipt", data?: unknown, image = false): ToolResult {
-  return { text, images: image ? [{ mimeType: "image/png", dataBase64: imageBase64 }] : [],
-    structuredJson: data ? JSON.stringify(data) : undefined, isError: false, degraded: false, rawJson: "{}" };
+import { ComputerMcpRuntime, computerExecutable, computerNamespace, type ComputerToolResult } from "../apps/desktop/src/main/computer-runtime.ts";
+import { runtimeTarget, verifyIntegrity } from "./stage-computer-runtime.mjs";
+const specs = JSON.parse(readFileSync(new URL("../tools/claw-agent/internal/agent/computer-tools.json", import.meta.url), "utf8"));
+const app = process.platform === "darwin" ? "com.example.fixture" : "123";
+const image = "iVBORw0KGgo=";
+function result(text = "fixture window", pixels = false): ComputerToolResult {
+  return { content: [{ type: "text", text }, ...(pixels ? [{ type: "image", data: image, mimeType: "image/png" }] : [])] };
 }
-function harness(options: { fail?: string; postFails?: boolean; self?: boolean; noImage?: boolean; factoryFails?: boolean; missingAction?: boolean } = {}) {
-  const calls: { action: string; args: Record<string, any> }[] = [];
-  let reads = 0, closed = 0, destroyed = 0, created = 0;
+function harness(options: { postFails?: boolean; inputFails?: boolean; noImage?: boolean; missingField?: boolean; startFails?: boolean } = {}) {
+  const calls: { action: string; args: any; connection: number }[] = [];
+  let created = 0, closed = 0;
   const controller = new ComputerController(async () => {
-    created++;
-    if (options.factoryFails && created === 1) throw Error("native library unavailable");
+    const connection = ++created; let read = 0;
+    if (options.startFails && created === 1) throw Error("service startup failed");
     return {
-      async listToolsJson() {
-        return JSON.stringify({ tools: computerSpecs.map((spec: any) => {
-          const properties = { ...spec.schema.properties };
-          if (options.missingAction && spec.action === "click") delete properties.action;
-          return { name: spec.action, inputSchema: { properties } };
-        }) });
-      },
-      async callTool(action: string, raw: string) {
-        const args = JSON.parse(raw); calls.push({ action, args });
-        if (options.fail === action) return { ...result("permission_missing: enable Accessibility for AIClaw"), isError: true, errorCode: "permission_missing" };
-        if (action === "list_windows") return result("windows", { windows: [{ ...target, pid: args.pid, app_name: options.self ? "AIClaw" : "Fixture" }] });
-        if (action === "get_window_state") {
-          reads++;
-          if (reads > 1 && options.postFails) throw Error("capture_timeout");
-          return result("window tree", { pid: args.pid, window_id: args.window_id, snapshot_id: reads === 1 ? snapshotID : "s00000002", capture_id: `capture-${reads}`, truncated: true }, !options.noImage);
+      tools: specs.map((spec: any) => {
+        const properties = { ...spec.schema.properties }; delete properties.observation_id;
+        if (options.missingField) delete properties.x;
+        return { name: spec.action, inputSchema: { properties, required: spec.schema.required?.filter((s: string) => s !== "observation_id") } };
+      }),
+      async call(action: string, args: any) {
+        calls.push({ action, args, connection });
+        if (action === "get_app_state") {
+          if (++read > 1 && options.postFails) throw Error("capture timeout");
+          return result("fixture tree [1] input [2] Submit", !options.noImage && args.include_screenshot !== false);
         }
-        return result("input dispatched; effect is unverifiable", { effect: "unverifiable" });
+        if (options.inputFails && action !== "list_apps") return { ...result("Accessibility permission pending for Open Computer Use.app"), isError: true };
+        return result(action === "list_apps" ? "Fixture — com.example.fixture" : "input dispatched");
       },
-      async shutdown() { closed++; }, uniffiDestroy() { destroyed++; },
+      async close() { closed++; },
     };
   });
-  const perform = (action: string, args: Record<string, unknown> = {}, sessionId = "chat-1") => controller.perform({ sessionId, turnId: "turn-1", action, arguments: args });
-  const observe = (session = "chat-1") => perform("get_window_state", target, session);
-  return { controller, calls, perform, observe, counts: () => ({ closed, destroyed, created }) };
+  const call = (action: string, args: Record<string, unknown> = {}, sessionId = "chat", turnId = "turn") => controller.perform({ sessionId, turnId, action, arguments: args });
+  const observe = async (session = "chat", turn = "turn", args = {}) => {
+    const state = await call("get_app_state", { app, ...args }, session, turn);
+    return state.text.match(/observation_id: ([\w-]+)/)![1]!;
+  };
+  return { controller, calls, call, observe, counts: () => ({ created, closed }) };
 }
 
-test("driver is lazy; discovery preserves structured output and host-owned session", async () => {
+test("service is lazy and discovery uses an isolated MCP connection", async () => {
+  const h = harness(); assert.equal(h.counts().created, 0);
+  await h.call("list_apps"); await h.call("list_apps", {}, "other");
+  assert.deepEqual(h.calls.map(c => c.connection), [1, 2]);
+  assert.deepEqual(h.calls[0]!.args, {});
+  await h.controller.close(); assert.equal(h.counts().closed, 2);
+});
+
+test("arbitrary tools, old Cua routing and extra fields are rejected before dispatch", async () => {
   const h = harness();
+  for (const action of ["run_script", "get_window_state", "list_windows", "launch_app", "query", "clipboard_read"]) await assert.rejects(h.call(action), /Unsupported computer operation/);
+  for (const key of ["session", "pid", "window_id", "element_token", "delivery_mode", "window_placement", "screenshot_out_file"]) await assert.rejects(h.call("get_app_state", { app, [key]: "override" }), /Unsupported computer argument/);
   assert.equal(h.counts().created, 0);
-  await h.perform("list_windows", { app: "Fixture" });
-  assert.deepEqual(h.calls[0], { action: "list_windows", args: { app: "Fixture", session: "chat-1" } });
+});
+
+test("self application, helper and Electron cannot be observed or controlled", async () => {
+  const h = harness();
+  for (const target of ["AIClaw", "com.github.chowyu12.aiclaw", "com.ifuryst.opencomputeruse", "Electron", "/Applications/AIClaw.app", "C:\\apps\\AIClaw.exe", String(process.pid)]) await assert.rejects(h.call("get_app_state", { app: target }), /Refusing/);
+  assert.equal(h.counts().created, 0);
+});
+
+test("each input requires the current turn, chat, app and observation", async () => {
+  const h = harness();
+  await assert.rejects(h.call("click", { app, observation_id: "forged", x: 1, y: 2 }), /Observe this app/);
+  const id = await h.observe();
+  for (const [session, turn, target] of [["other", "turn", app], ["chat", "turn2", app], ["chat", "turn", process.platform === "darwin" ? "com.other.app" : "124"]]) {
+    await assert.rejects(h.call("click", { app: target, observation_id: id, x: 1, y: 2 }, session, turn), /Observe this app/);
+  }
+  assert.equal(h.calls.filter(c => c.action === "click").length, 0);
   await h.controller.close();
-  assert.deepEqual(h.counts(), { closed: 1, destroyed: 1, created: 1 });
 });
 
-test("unknown tools and scope/session/file routing overrides never reach the driver", async () => {
-  const h = harness();
-  for (const action of ["run_script", "page", "clipboard_read", "screenshot"]) await assert.rejects(h.perform(action), /Unsupported computer operation/);
-  for (const key of ["scope", "target", "session", "screenshot_out_file", "debug_image_out", "from_zoom"]) {
-    await assert.rejects(h.perform("get_window_state", { ...target, [key]: "override" }), /Unsupported computer argument/);
-  }
-  assert.equal(h.calls.length, 0);
+test("Unicode input preserves receipt and fresh observation, and invalidates the old ID", async () => {
+  const h = harness(); const id = await h.observe(); const text = '北京天气 🌦️\n"你好"';
+  const output = await h.call("type_text", { app, observation_id: id, text });
+  assert.equal(h.calls[1]!.args.text, text); assert.equal(h.calls[1]!.args.observation_id, undefined);
+  assert.equal(output.imageBase64, image); assert.match(output.text, /input dispatched/); assert.match(output.text, /Post-action app observation/);
+  await assert.rejects(h.call("click", { app, observation_id: id, element_index: "2" }), /latest observation_id/);
+  await h.controller.close();
 });
 
-test("input requires exact valid target and a prior observation in the same chat", async () => {
-  const h = harness();
-  for (const args of [{}, { pid: 0, window_id: 456 }, { ...target, window_id: 1.5 }]) {
-    await assert.rejects(h.perform("click", args), /pid and window_id/);
-  }
-  await assert.rejects(h.perform("click", target), /Observe this exact window/);
-  await h.observe();
-  await assert.rejects(h.perform("click", target, "other-chat"), /Observe this exact window/);
-  await assert.rejects(h.perform("click", { ...target, window_id: 999 }), /Observe this exact window/);
+test("tree-only observations allow semantic actions and refuse pixel input", async () => {
+  const h = harness(); const id = await h.observe("chat", "turn", { include_screenshot: false });
+  await assert.rejects(h.call("click", { app, observation_id: id, x: 1, y: 2 }), /fresh screenshot/);
+  await h.call("click", { app, observation_id: id, element_index: "2" }); await h.controller.close();
 });
 
-test("Unicode text uses native type_text with exact window; returns receipt and fresh screenshot", async () => {
-  const h = harness(); await h.observe();
-  const text = '北京天气 🌦️\n"你好"';
-  const output = await h.perform("type_text", { ...target, element_token: `${snapshotID}:4`, text });
-  const input = h.calls.find(c => c.action === "type_text")!;
-  assert.equal(input.args.text, text);
-  assert.equal(input.args.pid, target.pid);
-  assert.equal(input.args.session, "chat-1");
-  assert.equal(output.imageBase64, imageBase64);
-  assert.match(output.text, /unverifiable/);
-  assert.match(output.text, /Post-action window observation/);
-  assert.match(output.text, /capture-2/);
-  assert.match(output.text, /truncated/);
-  await assert.rejects(h.perform("click", { ...target, element_token: `${snapshotID}:4` }), /latest observation/);
+test("missing screenshots and omitted AX do not authorize guessed elements", async () => {
+  const h = harness({ noImage: true }); await assert.rejects(h.observe(), /Grant Accessibility and Screen Recording to Open Computer Use/); await h.controller.close();
+  const other = harness(); const id = await other.observe("chat", "turn", { include_ax: false });
+  await assert.rejects(other.call("click", { app, observation_id: id, element_index: "1" }), /accessibility observation/); await other.controller.close();
 });
 
-test("cross-window or forged element tokens are refused before dispatch", async () => {
-  const h = harness(); await h.observe();
-  for (const token of ["s000000ff:1", `${snapshotID}:1.trailing`, "bad:1"]) {
-    await assert.rejects(h.perform("click", { ...target, element_token: token }), /latest observation/);
-  }
-  assert.equal(h.calls.filter(c => c.action === "click").length, 0);
+test("input errors preserve native permissions diagnostics and never replay input", async () => {
+  const h = harness({ inputFails: true }); const id = await h.observe();
+  await assert.rejects(h.call("click", { app, observation_id: id, element_index: "2" }), /Accessibility permission pending.*Outcome may be unknown/);
+  await assert.rejects(h.call("click", { app, observation_id: id, element_index: "2" }), /Observe this app/);
+  assert.equal(h.calls.filter(c => c.action === "click").length, 1); assert.equal(h.counts().closed, 1);
 });
 
-test("self-input refuses by process identity and independently resolved window name", async () => {
-  for (const self of [false, true]) {
-    const h = harness({ self });
-    const args = { ...target, pid: self ? target.pid : process.pid };
-    await h.perform("get_window_state", args);
-    await assert.rejects(h.perform("press_key", { ...args, key: "Return" }), /AIClaw's own windows/);
-    assert.equal(h.calls.filter(c => c.action === "press_key").length, 0);
-  }
+test("post-action failure preserves dispatch receipt without fabricating success", async () => {
+  const h = harness({ postFails: true }); const id = await h.observe();
+  const output = await h.call("click", { app, observation_id: id, element_index: "2" });
+  assert.match(output.text, /input dispatched/); assert.match(output.text, /verification failed.*capture timeout/); assert.match(output.text, /Do not automatically replay/);
+  assert.equal(h.calls.filter(c => c.action === "click").length, 1); assert.equal(h.counts().closed, 1);
 });
 
-test("upstream permission failure remains an error, never successful empty output", async () => {
-  const h = harness({ fail: "get_window_state" });
-  await assert.rejects(h.observe(), /permission_missing.*Accessibility/);
-  await assert.rejects(h.perform("click", target), /Observe this exact window/);
+test("late turn completion cannot close a newer turn and archived chats release state", async () => {
+  const h = harness(); await h.observe(); await h.observe("chat", "turn2");
+  assert.equal(h.counts().closed, 1); await h.controller.finishTurn("chat", "turn"); assert.equal(h.counts().closed, 1);
+  await h.controller.finishTurn("chat", "turn2"); assert.equal(h.counts().closed, 2);
+  await h.observe("chat", "turn3"); await h.controller.releaseSession("chat"); assert.equal(h.counts().closed, 3);
 });
 
-test("post-action capture failure keeps the receipt, invalidates the observation and never retries input", async () => {
-  const h = harness({ postFails: true }); await h.observe();
-  const output = await h.perform("press_key", { ...target, key: "Return" });
-  assert.match(output.text, /Input was dispatched.*verification failed/);
-  assert.match(output.text, /Do not automatically retry/);
-  assert.equal(h.calls.filter(c => c.action === "press_key").length, 1);
-  await assert.rejects(h.perform("press_key", { ...target, key: "Return" }), /Observe this exact window/);
+test("turn completion rejects queued input before it can reach the service", async () => {
+  const h = harness(); const id = await h.observe();
+  const pending = h.call("click", { app, observation_id: id, element_index: "2" });
+  const finished = h.controller.finishTurn("chat", "turn");
+  await assert.rejects(pending, /turn has ended/); await finished;
+  assert.equal(h.calls.filter(call => call.action === "click").length, 0);
+  await assert.rejects(h.observe(), /turn has ended/);
 });
 
-
-test("a failed new observation invalidates the previous cached snapshot", async () => {
-  const h = harness({ postFails: true }); await h.observe();
-  await assert.rejects(h.observe(), /capture_timeout/);
-  await assert.rejects(h.perform("press_key", { ...target, key: "Return" }), /Observe this exact window/);
+test("service startup failure is retryable only on an explicit later observation", async () => {
+  const h = harness({ startFails: true }); await assert.rejects(h.observe(), /startup failed/); await h.observe(); assert.equal(h.counts().created, 2); await h.controller.close();
 });
 
-test("background refusal does not automatically escalate to foreground or replay", async () => {
-  const h = harness({ fail: "type_text" }); await h.observe();
-  await assert.rejects(h.perform("type_text", { ...target, text: "hello" }), /permission_missing/);
-  assert.equal(h.calls.filter(c => c.action === "type_text").length, 1);
-  await assert.rejects(h.perform("type_text", { ...target, text: "hello" }), /Observe this exact window/);
+test("runtime capabilities reject unsupported fields rather than silently dropping them", async () => {
+  const h = harness({ missingField: true }); const id = await h.observe();
+  await assert.rejects(h.call("click", { app, observation_id: id, x: 1, y: 2 }), /does not support click.x/); await h.controller.close();
 });
 
-test("missing screenshot is an error; intentional tree-only read cannot ground pixel clicks", async () => {
-  const h = harness({ noImage: true });
-  await assert.rejects(h.observe(), /no window screenshot/);
-  await assert.rejects(h.perform("click", target), /Observe this exact window/);
-  await h.perform("get_window_state", { ...target, include_screenshot: false });
-  await assert.rejects(h.perform("click", { ...target, x: 1, y: 2 }), /require a fresh window screenshot/);
+function peer(mode: string, timeout = 1000, prepare?: (args: Record<string, unknown>) => Promise<void>) {
+  return new ComputerMcpRuntime(spawn(process.execPath, [new URL("./fixtures/computer-mcp.cjs", import.meta.url).pathname, mode], { stdio: ["pipe", "pipe", "pipe"] }), undefined, timeout, prepare);
+}
+
+test("MCP handshake and PNG results travel through real stdio framing", async () => {
+  const runtime = peer("ok"); await runtime.initialize(); const result = await runtime.call("list_apps", {});
+  assert.equal(result.content[0]!.text, "fixture"); await runtime.close();
 });
 
-test("release destroys the chat's snapshots; shutdown and handle disposal run once", async () => {
-  const h = harness(); await h.observe();
-  await h.controller.releaseSession("chat-1");
-  assert.equal(h.calls.at(-1)?.action, "end_session");
-  await assert.rejects(h.perform("click", target), /Observe this exact window/);
-  await h.controller.close(); await h.controller.close();
-  assert.equal(h.counts().closed, 1); assert.equal(h.counts().destroyed, 1);
+test("wrong protocol/version and malformed responses fail instead of dispatching", async () => {
+  for (const mode of ["version", "malformed", "exit"]) { const runtime = peer(mode); await assert.rejects(runtime.initialize()); await runtime.close(); }
 });
 
-test("failed runtime initialization can be retried without caching a rejected promise", async () => {
-  const h = harness({ factoryFails: true });
-  await assert.rejects(h.observe(), /native library unavailable/);
-  await h.observe();
-  assert.equal(h.counts().created, 2);
+test("permission onboarding blocks observation until explicitly granted, then probes only once", async () => {
+  let probes = 0;
+  const blocked = peer("ok", 1000, async () => { probes++; throw Error("permission setup window is open"); });
+  await blocked.initialize(); await assert.rejects(blocked.call("get_app_state", {}), /permission setup/);
+  assert.equal(probes, 1); await blocked.close();
+  const ready = peer("ok", 1000, async () => { probes++; });
+  await ready.initialize(); await ready.call("get_app_state", {}); await ready.call("get_app_state", {});
+  assert.equal(probes, 2); await ready.close();
 });
 
-test("host and agent expose the same pinned, window-scoped subset", async () => {
-  const specs = JSON.parse(readFileSync(new URL("../tools/claw-agent/internal/agent/computer-tools.json", import.meta.url), "utf8"));
-  for (const spec of specs) {
-    const h = harness();
-    if (!["list_apps", "list_windows", "launch_app"].includes(spec.action)) {
-      assert.ok(spec.schema.required.includes("pid")); assert.ok(spec.schema.required.includes("window_id"));
-    }
-    for (const property of Object.keys(spec.schema.properties)) {
-      // Check admission only; fixture driver accepts its action-specific inputs.
-      try { await h.perform(spec.action, { ...(!["list_apps", "list_windows", "launch_app"].includes(spec.action) ? target : {}), [property]: "fixture" }); }
-      catch (error) { assert.doesNotMatch(String(error), /Unsupported computer (operation|argument)/); }
-    }
-  }
+test("tree-only permission probes do not suppress a later screenshot permission check", async () => {
+  const observed: unknown[] = [];
+  const runtime = peer("ok", 1000, async args => { observed.push(args.include_screenshot); });
+  await runtime.initialize(); await runtime.call("get_app_state", { include_screenshot: false });
+  await runtime.call("get_app_state", {}); await runtime.call("get_app_state", {});
+  assert.deepEqual(observed, [false, undefined]); await runtime.close();
 });
 
-test("cross-package selects the target library and verifies exact SHA-512 bytes", () => {
-  assert.equal(driverTarget("darwin", "arm64"), "@trycua/cua-driver-darwin-arm64");
-  assert.equal(driverTarget("win32", "x64"), "@trycua/cua-driver-win32-x64-msvc");
-  assert.equal(driverTarget("linux", "x64"), "@trycua/cua-driver-linux-x64-gnu");
-  assert.throws(() => driverTarget("freebsd", "x64"), /Unsupported/);
-  const bytes = Buffer.from("native fixture");
-  const integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
-  verifyIntegrity(bytes, integrity);
-  assert.throws(() => verifyIntegrity(Buffer.from("changed"), integrity), /integrity mismatch/);
-  assert.throws(() => verifyIntegrity(bytes, ""), /Missing SHA-512/);
+test("a timed-out input poisons the connection and cannot be replayed", async () => {
+  const runtime = peer("timeout", 1000); await runtime.initialize();
+  await assert.rejects(runtime.call("click", {}), /outcome is unknown/);
+  await assert.rejects(runtime.call("click", {}), /outcome is unknown/); await runtime.close();
 });
 
+test("a slow observation has a separate budget while input still times out", async () => {
+  const runtime = peer("slow-observation", 1000); await runtime.initialize();
+  const result = await runtime.call("get_app_state", {});
+  assert.equal(result.content[0]!.text, "slow observation");
+  await assert.rejects(runtime.call("click", {}), /outcome is unknown/);
+  await runtime.close();
+});
 
-test("platform-unsupported fields are refused before native dispatch", async () => {
-  const h = harness({ missingAction: true }); await h.observe();
-  await assert.rejects(h.perform("click", { ...target, action: "show_menu" }), /Native runtime does not support click.action/);
-  assert.equal(h.calls.filter(c => c.action === "click").length, 0);
-  await h.perform("click", { ...target, element_token: `${snapshotID}:4` });
-  assert.equal(h.calls.filter(c => c.action === "click").length, 1);
+test("cross-platform packaging paths and artifact integrity are pinned", () => {
+  assert.match(runtimeTarget("darwin", "arm64"), /Open Computer Use.app$/); assert.match(runtimeTarget("win32", "x64"), /windows.*amd64$/);
+  assert.match(computerExecutable("root", "linux", "x64"), /linux.*amd64.*open-computer-use$/);
+  assert.throws(() => runtimeTarget("aix", "x64"));
+  const bytes = Buffer.from("signed upstream archive"), integrity = `sha512-${createHash("sha512").update(bytes).digest("base64")}`;
+  verifyIntegrity(bytes, integrity); assert.throws(() => verifyIntegrity(Buffer.from("changed"), integrity), /integrity mismatch/);
+  assert.throws(() => verifyIntegrity(bytes, ""), /SHA-512/);
+});
+
+test("development and packaged app services cannot replace each other's helper", () => {
+  const development = "/workspace/node_modules/open-computer-use/dist/Open Computer Use.app/Contents/MacOS/OpenComputerUse";
+  const packaged = "/Applications/AIClaw.app/Contents/Resources/app/node_modules/open-computer-use/dist/Open Computer Use.app/Contents/MacOS/OpenComputerUse";
+  assert.equal(computerNamespace(development), computerNamespace(development));
+  assert.notEqual(computerNamespace(development), computerNamespace(packaged));
+  assert.notEqual(computerNamespace(packaged), computerNamespace(`/release${packaged}`));
 });

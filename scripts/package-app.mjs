@@ -22,7 +22,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packager } from "@electron/packager";
-import { stageComputerDriver } from "./stage-computer-driver.mjs";
+import { stageComputerRuntime } from "./stage-computer-runtime.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const STAGING = join(REPO, "build", "app");
@@ -114,7 +114,7 @@ async function stage() {
     join(client, "package.json"),
   );
 
-  await stageComputerDriver({ repo: REPO, destination: STAGING, platform, arch });
+  await stageComputerRuntime({ repo: REPO, destination: STAGING, platform, arch });
 
   writeFileSync(
     join(STAGING, "package.json"),

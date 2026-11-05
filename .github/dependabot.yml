@@ -1,13 +1,13 @@
 version: 2
 updates:
-  # Updating the SDK also refreshes its exact-version native dependencies in
-  # package-lock.json. Keep upgrades reviewable; no automatic merge or release.
+  # The package contains signed/native runtimes for all targets. Keep upgrades
+  # reviewable and rerun the MCP contract checks; no automatic merge or release.
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: daily
     allow:
-      - dependency-name: "@trycua/cua-driver"
+      - dependency-name: "open-computer-use"
     open-pull-requests-limit: 1
     commit-message:
       prefix: "deps(computer)"

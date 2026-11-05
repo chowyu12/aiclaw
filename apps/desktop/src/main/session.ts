@@ -217,6 +217,7 @@ export class SessionManager extends EventEmitter {
     client.on("notification", (n: AgentNotification) => {
       if (n.method === "turn/started") this.browser.start(n.params.sessionId, n.params.turnId);
       if (n.method === "turn/completed") {
+        void this.computer.finishTurn(n.params.sessionId, n.params.turnId).catch(error => this.emit("log", "app", `Computer cleanup: ${String(error)}\n`));
         void this.browser.finish(n.params.sessionId, n.params.turnId).catch(error => this.emit("log", "app", `Browser cleanup: ${String(error)}\n`));
       }
       this.emit("event", n.method, n.params);
@@ -226,8 +227,7 @@ export class SessionManager extends EventEmitter {
     client.on("appConfig", (action) => this.emit("appConfig", action));
     // 模型要建、列、删定时任务：调度器在主进程，交给它。
     client.on("schedule", (action) => this.emit("schedule", action));
-    // 屏幕操作在宿主这边做：截屏要走应用自己的屏幕录制授权，输入要按平台
-    // 合成事件，而且只有宿主知道「最前面的应用是不是我自己」。
+    // 宿主控制审批与会话；独立 Open Computer Use app 持有原生权限并执行操作。
     // 浏览器窗口是宿主的：加载、点、填、截图都在这边做，内核只发请求。
     client.on("browser", async ({ request, respond, fail }) => {
       try {
