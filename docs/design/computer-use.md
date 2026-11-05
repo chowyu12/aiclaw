@@ -1,6 +1,6 @@
 # AIClaw 原生桌面控制
 
-AIClaw 当前产品工具在 **macOS 14.4 及以上**通过自有 Swift 应用 **AIClaw Computer Use.app** 执行桌面控制。Electron 宿主负责模型循环、审批与操作后的验证；独立原生进程负责应用发现、AX 元素、窗口截图和输入。Windows/Linux 自有执行层及用户目录安装同步已接入打包脚本并进行平台 CI；完整产品工具注册和安装包启动验收仍在开发。
+AIClaw 当前产品工具在 **macOS 14.4 及以上**通过自有 Swift 应用 **AIClaw Computer Use.app** 执行桌面控制。Electron 宿主负责模型循环、审批与操作后的验证；独立原生进程负责应用发现、AX 元素、窗口截图和输入。Windows/Linux 自有执行层、用户目录安装同步及 22 个产品工具注册已接入开发分支。Linux 当前支持 X11，Wayland 明确拒绝；完整安装包启动验收见下方验证状态。
 
 实现源码在 `tools/computer-use/Sources/`。本轮依据 Codex 已发布产物恢复出的接口形状重建桌面能力，调查证据和未实现能力见 [Codex 能力与证据盘点](codex-computer-use-evidence.md)。没有复制或加载 Codex 的私有运行时。
 
@@ -97,7 +97,7 @@ Finder 的路径导航、Safari 地址栏与页面的区分、TextEdit 文档/�
 2. 后台无干扰操作：严格 AX 语义模式真实双应用验收通过；全种类后台键鼠输入仍未实现，明确拒绝且不回退前台。
 3. 持续观察与增量更新：轮询订阅、增量、生命周期及真实窗口变化验收通过；逐帧/原生事件流尚未实现。
 4. 应用专用操作策略：Finder/Safari/TextEdit 策略、通用回退及按轮次注入已实现；并非所有应用的自动化工作流库。
-5. Windows/Linux 桌面控制：执行层开发与平台验证准备中，尚未启用工具。
+5. Windows/Linux 桌面控制：自有执行层、用户目录安装、产品工具注册、纯文本/HTML 粘贴及宿主 Markdown 转换已实现；Windows/Linux x64 原生与完整安装包验收通过。Linux Wayland 尚未实现。
 
 ### Windows/Linux 开发状态
 
@@ -109,15 +109,15 @@ Linux 原型源码位于 `tools/computer-use/linux/`，直接调用 X11/XTest/XC
 
 Linux 前台纯文本粘贴已在 GTK 控件回读中文与 emoji。剪贴板事务保存所有可读取的原始格式（最多 64 格式、合计 16 MiB，超限在输入前拒绝），通过 XFixes 代际和同一 GDK X 连接的 server grab 避免覆盖期间发生的新复制。真实测试验证 HTML 和自定义二进制格式恢复、过期代际拒绝覆盖。X11 剪贴板数据依赖所有者存活，因此连接 EOF 后关闭输入/截图连接并清除元素，只在需要时继续提供已恢复的剪贴板字节；独立控制管道告知宿主不要终止该提供者。下一次复制后自动退出，不写历史或磁盘。宿主真实测试已验证跨越正常子进程退出期限仍可读取全部原格式，并在新复制后退出。
 
-Linux 服务当前仅接受 text/HTML 粘贴格式；HTML 的真实富文本消费、Markdown 转换、完整参数对齐、完整安装包启动和 Agent 工具启用尚未验收。截图已实现 `text_limit` 与 `max_tree_depth` 并明确标记截断；观察订阅请求完整的有界 AX 文本，避免数字索引位数变化改变文本截断位置而产生误报。正常关闭以进程出生标识和退出状态确认，不把窗口消失当成进程退出。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland。
+Linux 服务原生接受 text/HTML，宿主使用随包的 Markdown 解析器将 Markdown 转为 HTML；禁用 Markdown 中的原始 HTML，避免将标签当作可执行内容。HTML 同时提供去标签并解码实体的纯文本回退。隔离桌面的真实 WebKit contenteditable 已验证 Markdown 加粗、中文与 emoji 消费，以及原始剪贴板格式恢复。产品工具已注册，Agent 注册、审批与取消在 Linux 实机测试通过；完整安装包已在本地 Linux arm64 隔离桌面启动并验证 renderer/preload、随包模块、用户安装目录及源码身份握手；该容器为 root 测试显式关闭 Chromium 沙箱，不据此证明生产沙箱路径。[Linux x64 CI](https://github.com/chowyu12/aiclaw/actions/runs/42130869993) 已用标准 Chromium 沙箱通过相同完整包启动检查。截图已实现 `text_limit` 与 `max_tree_depth` 并明确标记截断；观察订阅请求完整的有界 AX 文本，避免数字索引位数变化改变文本截断位置而产生误报。正常关闭以进程出生标识和退出状态确认，不把窗口消失当成进程退出。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland。
 
-Windows 的自有 Win32/UIA 执行层和双 WinForms 测试已加入独立 CI。UIA 的旧版代理装载器需要检查调用栈，因此在独立编译的 MTA 线程中初始化，避开 PowerShell 动态帧。实测部分 UIA 写操作会激活目标，后台路径改为有超时的标准 Edit/Button 消息，并校验控件类、PID、同用户和所属顶层窗口；其它控件拒绝后台回退。标准 Edit 设值/选择、Button 点击及 CheckBox 切换、生效回读、前台/鼠标/剪贴板保持，以及遮挡下目标 PNG 已通过 [Windows/Linux 平台 CI](https://github.com/chowyu12/aiclaw/actions/runs/42049914451)。源码和 [Windows 实测回执](/Users/zhouyy/.codex/visualizations/2026/11/05/01a1aacb-6689-7b11-841f-9bcc35cb2d46/computer-use-roadmap/windows-native-summary.json) 均保留。同轮 CI 还验证 Windows 前台按键、中文/emoji 输入、拖动、滚动及正常退出。Windows 从本连接发现的开始菜单快捷方式启动也已验收：快捷方式摘要变化和任意路径请求均被拒绝；通过实际启动 PID/出生标识确认窗口，无法确认时不重放。该启动调用在独立 STA 线程执行，UIA 客户端仍为 MTA。Windows 真实宿主还验证静止窗口去重和 AX 增量重建。Windows 粘贴、完整安装包启动和 Agent 工具启用仍在进行，不能作为第五阶段完成证明。
+Windows 的自有 Win32/UIA 执行层和双 WinForms 测试已加入独立 CI。UIA 的旧版代理装载器需要检查调用栈，因此在独立编译的 MTA 线程中初始化，避开 PowerShell 动态帧。实测部分 UIA 写操作会激活目标，后台路径改为有超时的标准 Edit/Button 消息，并校验控件类、PID、同用户和所属顶层窗口；其它控件拒绝后台回退。标准 Edit 设值/选择、Button 点击及 CheckBox 切换、生效回读、前台/鼠标/剪贴板保持，以及遮挡下目标 PNG 已通过 [Windows/Linux 平台 CI](https://github.com/chowyu12/aiclaw/actions/runs/42049914451)。源码和 [Windows 实测回执](/Users/zhouyy/.codex/visualizations/2026/11/05/01a1aacb-6689-7b11-841f-9bcc35cb2d46/computer-use-roadmap/windows-native-summary.json) 均保留。同轮 CI 还验证 Windows 前台按键、中文/emoji 输入、拖动、滚动及正常退出。Windows 从本连接发现的开始菜单快捷方式启动也已验收：快捷方式摘要变化和任意路径请求均被拒绝；通过实际启动 PID/出生标识确认窗口，无法确认时不重放。该启动调用在独立 STA 线程执行，UIA 客户端仍为 MTA。Windows 真实宿主还验证静止窗口去重和 AX 增量重建。Windows 已加入纯文本与 HTML 剪贴板事务：在独立 STA 所有者线程中保存原始格式，使用原生 handle 复制/释放，不反序列化剪贴板对象；最多保留 64 格式、16 MiB，无法保留的格式在输入前拒绝。按键前核对代际和所有者，恢复时保留期间的新复制。实现依据 [Win32 剪贴板操作](https://learn.microsoft.com/en-us/windows/win32/dataxchg/clipboard-operations)和 [OleDuplicateData](https://learn.microsoft.com/en-us/windows/win32/api/ole2/nf-ole2-oleduplicatedata) 的格式所有权规则。中文/emoji 粘贴回读、原始 HTML/二进制/位图恢复、新复制保护、取消和超限拒绝已通过 [Windows 原生 CI](https://github.com/chowyu12/aiclaw/actions/runs/42128349005)。最新平台原生验收还验证了宿主 Markdown 转换、真实 HTML 编辑器加粗消费及执行层退出后的剪贴板保留。产品工具注册、审批和取消已在 Windows Go race 测试通过；[Windows x64 完整包启动验收](https://github.com/chowyu12/aiclaw/actions/runs/42129143137)已通过 renderer/preload、随包模块、用户安装目录及源码身份握手。后续 [Windows/Linux 平台 CI](https://github.com/chowyu12/aiclaw/actions/runs/42130869993) 两平台均全绿，包含原生输入、宿主控制器与完整包启动。
 
 ## 构建、打包与签名
 
 `node scripts/build-computer-runtime.mjs --universal` 在 macOS 上编译 arm64/x86_64，合并 universal 可执行文件，生成 bundle、工具资源和 hash 元数据，并校验签名。`make build-computer` 可构建本机版本。运行时随应用放在 ASAR 外，首次使用不下载驱动。
 
-CI 的 macOS job 构建并验证 universal helper，上传 tar artifact；Linux 打包 job 接收该产物，为两个 macOS 架构交叉打包。Windows/Linux 打包脚本仅复制各平台固定的自有服务源码和动作清单，不包含 fixture 或测试脚本。Windows 使用系统 Windows PowerShell/UIA；Linux X11 使用系统 Python/PyGObject、GTK3/AT-SPI、XTest/XComposite/XFixes，系统依赖缺失时明确失败，不下载替代桌面驱动。
+CI 的 macOS job 构建并验证 universal helper，上传 tar artifact；Linux 打包 job 接收该产物，为两个 macOS 架构交叉打包。Windows/Linux 打包脚本仅复制各平台固定的自有服务源码和动作清单，不包含 fixture 或测试脚本。Windows 使用系统 Windows PowerShell/UIA；Linux X11 使用系统 Python/PyGObject、GTK3/AT-SPI、XTest/XComposite/XFixes，系统依赖缺失时明确失败，不下载替代桌面驱动。AT-SPI 需要总线启动器（Debian/Ubuntu 包 `at-spi2-core`），仅有 GI 接口库不足；启动时先验证/激活无障碍总线，避免 libatspi 在缺总线时触发 SIGTRAP。
 
 Windows/Linux 随应用启动同步到 `~/.aiclaw/computer-use/<linux|win32>/<源码与动作清单摘要>/`，首次调用也核验安装。先完整写入临时目录，再原子发布；同一代际复用，损坏或链接代际拒绝执行。文件边界参与安装摘要，协议另核对执行源码摘要。Unix 还检查目录所有者与写权限。不同版本使用独立目录，避免 Windows 活跃进程占用工作目录时替换失败，并保留并存旧宿主使用的旧代际。这些目录只包含运行时源码和清单，不存截图/剪贴板历史；旧代际暂不自动清理。平台 CI 已从实际用户安装目录启动进程并完成桌面操作。两平台还使用独立启动且窗口已就绪的 AIClaw 命名 fixture，实测从发现和显式 PID 控制入口拒绝 AIClaw 自身及 helper 可执行文件。
 
@@ -139,3 +139,11 @@ Windows/Linux 随应用启动同步到 `~/.aiclaw/computer-use/<linux|win32>/<�
 事件投递后的短暂窗口变化只重试只读观察，最多两次；输入本身不重放。开发构建采用时间戳依赖，未修改原生源、工具契约或版本时 `make dev` 不重复编译/签名。
 
 上述结果验证本机 macOS arm64 上的测试 App，不证明任意第三方 App 或实际 x64 输入效果。仍使用开发签名，未完成生产证书、公证及升级授权保持验收。本轮新增的是轮询观察/AX 文本增量和项目维护的应用策略；原生逐帧/AX 事件流、历史、音频、日历、短信和锁屏能力仍见证据报告的差距清单。
+
+### 2026-11-06 续接验收
+
+- `make check` 全量通过：Go race、格式/vet/no-cgo、TypeScript、369 项渲染/宿主测试（368 通过、1 项平台跳过）、19 项更新器测试、原生逻辑与内核/桌面冒烟。
+- Linux arm64 隔离桌面：宿主 Markdown → HTML → WebKit 加粗文本消费、中文/emoji 与原格式恢复通过；同平台 Agent 工具注册、审批、代码编排和取消测试通过。
+- 完整包验收脚本启动真实可执行文件，使用隔离用户目录，核对 renderer/preload、随包模块、用户目录运行时和源码身份握手；不是仅从源码目录 import 的测试。Windows/Linux x64 已纳入平台 CI。
+- Windows/Linux x64 完整包及原生验收在 [同一轮 CI](https://github.com/chowyu12/aiclaw/actions/runs/42130869993) 全部通过；Linux x64 使用标准 Chromium 沙箱。Linux arm64 完整包另在本地容器通过（root 测试显式关闭 Chromium 沙箱）。
+- Wayland portal 执行层和原生逐帧/AX 事件流仍未实现；当前分别为明确拒绝 Wayland、宿主周期采样。保留整体目标进行中，不宣称任意平台或与 Codex 私有实现全面等价。

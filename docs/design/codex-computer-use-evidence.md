@@ -123,16 +123,17 @@ REA 导出 `ComputerUseClient.ComputerUseIPCAction` 的 nominal descriptor：`0x
 
 用户确认范围为：**完整实现桌面控制，其余提供证据与差距清单**；随后明确放弃 Open Computer Use 执行层。最终代码使用自有 Swift **AIClaw Computer Use.app + Unix socket IPC**，不依赖 OCU、Codex helper、用户 MCP 配置或 Electron 内加载的驱动。此前基于 OCU 的短暂接入工作不是最终交付方案，也不构成 Codex 行为证据。
 
-当前实现支持 macOS 14.4 及以上，Windows/Linux 不注册桌面工具且无 fallback。详细执行与打包设计见 [AIClaw 原生桌面控制](computer-use.md)。
+当前开发分支支持 macOS 14.4+、Windows 与 Linux X11，分别使用自有 Swift、Win32/UIA、X11/AT-SPI 执行层；三平台注册 18 个原生工具和 4 个宿主工具，不加载第三方桌面驱动。Linux Wayland 尚未实现并明确拒绝。详细执行与打包设计见 [AIClaw 原生桌面控制](computer-use.md)。
 
 | 已实现能力 | 最终代码行为与证据边界 |
 | --- | --- |
-| 18 个工具与独立 IPC | 自有协议 `AIClawComputerUseIPC-1`，握手校验工具、版本及启动时可执行 SHA-256。请求命名参考恢复的 Codex 接口形状，**不宣称 wire 兼容或逐行还原** |
+| 18 个原生工具与独立 IPC | 自有协议 `AIClawComputerUseIPC-1`，握手校验工具、版本及启动时可执行 SHA-256（macOS）或绑定源码 SHA-256（Windows/Linux）。请求命名参考恢复的 Codex 接口形状，**不宣称 wire 兼容或逐行还原** |
 | 应用与窗口 | NSWorkspace 启动、正常退出、激活/隐藏；应用发现合并有时限的 Spotlight 索引及运行态，返回窗口候选；前台窗口读取。Spotlight 算法是项目选择，未证明等同 Codex |
 | 观察与查询 | ScreenCaptureKit 捕获所选窗口，PNG 长边最多 1280；可选 AX 树、显式窗口 ID、按文字/角色定向查询；query 仍是 AIClaw 扩展 |
 | 九种动作 | 点击、辅助操作、设值、文本选择、滚动、拖动、按键、输入、粘贴；补齐点击修饰键/按住时长、按键时长与坐标滚动 |
 | 文本与剪贴板 | 原生 UTF-16 选择范围校验、prefix/suffix 消歧；text/Markdown/HTML 粘贴、原剪贴板保存与并发复制保留；行为需 live 验收，不能仅凭工具名断言与 Codex 等价 |
-| 输入投递 | 公开 AX API 与前台 CoreGraphics/NSPasteboard。坐标与键盘操作先激活并核对目标，可能切换前台、焦点和指针；没有复刻尚未恢复的 Codex 私有后台投递 |
+| 输入投递 | 公开原生 API。严格后台模式支持已验收的语义动作，拒绝不支持的输入且不回退前台；坐标与键盘操作需要前台并核对目标，可能切换焦点和指针。未复刻尚未恢复的 Codex 私有投递 |
+| 宿主扩展 | 代码模式顺序编排、轮次内轮询观察、可重建 AX 行增量和 PNG 去重，以及 Finder/Safari/TextEdit 指引；均有独立测试，不能据此宣称与 Codex 私有实现等价 |
 | 会话与授权 | Go 审批、宿主最新 observation_id、每连接 AX 句柄和目标重新校验；原生全局队列覆盖整个异步操作，断连取消并丢弃待执行请求；同 UID peer、socket 0600、固定 `~/.aiclaw/computer-use/` 安装位置，可执行 hash 分端点 |
 | 权限与产物 | 独立应用拥有 AX/录屏授权；缺权限显示说明并提供系统设置入口，不自动 grant；universal 原生构建先在 macOS 产出，再供 Linux 打包 job 使用 |
 
@@ -142,8 +143,8 @@ REA 导出 `ComputerUseClient.ComputerUseIPCAction` 的 nominal descriptor：`0x
 
 | 范围 | 当前差距 |
 | --- | --- |
-| 私有投递、AX 差异与应用说明 | Codex 的 `disableDiff`、AX cache/refetch、`appSpecificInstructions` 有静态线索；实际策略和私有输入路径未知。AIClaw 使用完整/定向 AX 观察与公开前台投递，不提供等价声明 |
-| 持续捕获、事件流 | AppStartCapture/AppNextCaptureUpdate、EventStream Start/Status/Stop 尚未实现；操作后单次截图不等于连续增量订阅 |
+| 私有投递、AX 差异与应用说明 | Codex 的 `disableDiff`、AX cache/refetch、`appSpecificInstructions` 有静态线索；实际策略和私有输入路径未知。AIClaw 使用完整/定向 AX 观察、公开 API 严格后台语义动作和项目维护的应用指引，不提供私有实现等价声明 |
+| 持续捕获、事件流 | 已实现宿主周期采样、窗口订阅、AX 行增量与图像去重；尚未实现 Codex 原生 AppStartCapture/AppNextCaptureUpdate、EventStream 或逐帧/原生事件流，不能把轮询等同原生流 |
 | Skysight 与历史策略 | 观察历史、暂停/恢复、app/url policy、采样与清理服务未实现；实际存储和采样语义也未恢复 |
 | 音频 | Computer Use 的系统音频录制未接入；AIClaw 其他语音输入不计作等价实现 |
 | Calendar、Messages | 系统日历 CRUD、聊天/消息搜索读取、图片、统计、PrepareSend/CommitSend 原生接口未重建；未执行真实系统日历变更或消息发送 |
