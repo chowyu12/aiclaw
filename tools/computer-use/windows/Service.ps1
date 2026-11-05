@@ -300,7 +300,10 @@ function Perform($argsObject) {
         }
         if ($background) {
             Wait-Checked 0.05; $after=New-Object AIClawComputerUse.Native+Point; [void][AIClawComputerUse.Native]::GetCursorPos([ref]$after)
-            if ([AIClawComputerUse.Native]::GetForegroundWindow() -ne $foreground -or $after.X -ne $pointer.X -or $after.Y -ne $pointer.Y -or [AIClawComputerUse.Native]::GetClipboardSequenceNumber() -ne $clip) { throw 'Background action dispatched but foreground, pointer or clipboard changed; outcome unknown, do not replay' }
+            $afterForeground=[AIClawComputerUse.Native]::GetForegroundWindow(); $afterClip=[AIClawComputerUse.Native]::GetClipboardSequenceNumber()
+            if ($afterForeground -ne $foreground -or $after.X -ne $pointer.X -or $after.Y -ne $pointer.Y -or $afterClip -ne $clip) {
+                throw "Background action dispatched but foreground, pointer or clipboard changed; outcome unknown, do not replay (window $foreground -> $afterForeground; pointer $($pointer.X),$($pointer.Y) -> $($after.X),$($after.Y); clipboard $clip -> $afterClip)"
+            }
         }
         return Text 'Action dispatched; verify the intended application result. Previous element IDs are invalid.'
     } finally { Clear-Observation }
