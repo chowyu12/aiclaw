@@ -16,7 +16,7 @@ const image = "iVBORw0KGgo=";
 function result(text = "fixture window", pixels = false): ComputerToolResult {
   return { content: [{ type: "text", text }, ...(pixels ? [{ type: "image", data: image, mimeType: "image/png" }] : [])] };
 }
-function harness(options: { postFails?: boolean; transientPostFailure?: boolean; inputFails?: boolean; noImage?: boolean; missingField?: boolean; startFails?: boolean; noQuery?: boolean } = {}) {
+function harness(options: { postFails?: boolean; transientPostFailure?: boolean; inputFails?: boolean; noImage?: boolean; missingField?: boolean; startFails?: boolean; noQuery?: boolean; launchUnverified?: boolean } = {}) {
   const calls: { action: string; args: any; connection: number }[] = [];
   let created = 0, closed = 0;
   const controller = new ComputerController(async () => {
@@ -37,6 +37,7 @@ function harness(options: { postFails?: boolean; transientPostFailure?: boolean;
           return result("fixture tree [1] input [2] Submit", !options.noImage && args.include_screenshot !== false);
         }
         if (options.inputFails && action !== "list_apps") return { ...result("Accessibility permission pending for AIClaw Computer Use.app"), isError: true };
+        if (action === "start_app" && process.platform !== "darwin") return result(JSON.stringify({ app, verified: !options.launchUnverified, launch_requested: true }));
         return result(action === "list_apps" ? "Fixture — com.example.fixture" : "input dispatched");
       },
       async close() { closed++; },
@@ -207,6 +208,20 @@ test("lifecycle requests require explicit identities, then clear previous observ
   await assert.rejects(h.call("click", { app, observation_id: id, element_index: "1" }), /Observe this app/);
   await assert.rejects(h.call("start_app", { app: "com.github.chowyu12.aiclaw" }), /Refusing/);
   await h.controller.close();
+});
+
+test("portable launch observes only a verified running PID and never replays uncertain launch", { skip: process.platform === "darwin" }, async () => {
+  const h = harness();
+  await h.call("start_app", {app:"launch:fixture.desktop"});
+  assert.equal(h.calls.find(item=>item.action==="get_app_state")!.args.app,app);
+  await assert.rejects(h.call("query",{app:"launch:fixture.desktop",text:"input"}), /PID/);
+  await assert.rejects(h.call("start_app",{app:"launch:../../fixture.desktop"}), /PID/);
+  await h.controller.close();
+  const uncertain = harness({launchUnverified:true});
+  const receipt = await uncertain.call("start_app",{app:"launch:fixture.desktop"});
+  assert.match(receipt.text,/not verified/);
+  assert.deepEqual(uncertain.calls.map(item=>item.action),["start_app"]);
+  await uncertain.controller.close();
 });
 
 test("unchanged screenshots are reported without pretending dispatch proves progress", async () => {

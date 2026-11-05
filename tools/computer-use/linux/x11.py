@@ -54,6 +54,7 @@ class X11:
             return fn
         p, u, i, ul = C.c_void_p, C.c_uint, C.c_int, C.c_ulong
         bind(self.x, "XOpenDisplay", p, [C.c_char_p])
+        bind(self.x, "XCloseDisplay", i, [p])
         bind(self.x, "XDefaultRootWindow", ul, [p])
         bind(self.x, "XDefaultScreen", i, [p])
         bind(self.x, "XInternAtom", ul, [p, C.c_char_p, i])

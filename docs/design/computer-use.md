@@ -105,7 +105,11 @@ Linux 原型源码位于 `tools/computer-use/linux/`，直接调用 X11/XTest/XC
 
 隔离 D-Bus/Xvfb + GTK 双应用原生测试已经验证发现、后台设值/选择/点击、按键回读、Unicode 插入、拖动、滚动及窗口 PNG。截图通过 XComposite 为目标客户端窗口申请独立 backing storage，不裁剪根屏幕；前台蓝色测试窗口遮挡目标时，捕获的红色目标像素已验证。该路径参考 X11 API 及 [WebRTC 原生窗口捕获实现的接口使用方式](https://webrtc.googlesource.com/src/+/3f4d30b1938020da1e24e0df155af4da4d0a2b1a/modules/desktop_capture/linux/x11/window_capturer_x11.cc)，不是加载其驱动。
 
-编译后的宿主控制器到真实 Linux 子进程的联调已验证源码身份握手、后台提交回执、PNG、静止帧去重、AX 增量重建，以及轮次结束取消等待。Linux 的完整参数对齐、粘贴与启动、安装/打包和 Agent 工具启用尚未完成。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland；Windows 原生执行层也尚未实现，不能将这些原型测试作为第五阶段完成证明。
+编译后的宿主控制器到真实 Linux 子进程的联调已验证源码身份握手、后台提交回执、PNG、静止帧去重、AX 增量重建，以及轮次结束取消等待。启动只接受当前连接发现的 `.desktop` 入口，重新核对文件 hash，并用实际启动回调的 PID 和进程出生标识确认新窗口；不能确认时返回未知，不重放启动。
+
+Linux 前台纯文本粘贴已在 GTK 控件回读中文与 emoji。剪贴板事务保存所有可读取的原始格式（最多 64 格式、合计 16 MiB，超限在输入前拒绝），通过 XFixes 代际和同一 GDK X 连接的 server grab 避免覆盖期间发生的新复制。真实测试验证 HTML 和自定义二进制格式恢复、过期代际拒绝覆盖。X11 剪贴板数据依赖所有者存活，因此连接 EOF 后关闭输入/截图连接并清除元素，只在需要时继续提供已恢复的剪贴板字节；独立控制管道告知宿主不要终止该提供者。下一次复制后自动退出，不写历史或磁盘。宿主真实测试已验证跨越正常子进程退出期限仍可读取全部原格式，并在新复制后退出。
+
+Linux 服务当前仅接受 text/HTML 粘贴格式；HTML 的真实富文本消费、Markdown 转换、完整参数对齐、安装/打包和 Agent 工具启用尚未验收。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland。Windows 的自有 Win32/UIA 执行层和双 WinForms 测试已加入独立 CI，已解决标准控件代理初始化问题，后台动作不干扰检查仍在验收。不能将这些原型测试作为第五阶段完成证明。
 
 ## 构建、打包与签名
 

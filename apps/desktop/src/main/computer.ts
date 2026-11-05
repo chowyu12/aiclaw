@@ -83,7 +83,7 @@ export class ComputerController {
     if (action === "query" && ![args.text, args.role].some(value => typeof value === "string" && value.trim())) throw Error("computer_query requires text or role");
     if (args.window_id !== undefined && (!Number.isSafeInteger(args.window_id) || Number(args.window_id) < 1 || Number(args.window_id) > 0xffffffff)) throw Error("window_id must be an integer from 1 to 4294967295");
     if (action === "paste" && (typeof args.text !== "string" || args.text.length > 2_000_000 || !["text", "md", "html"].includes(String(args.format ?? "text")))) throw Error("paste requires text up to 2000000 characters and format text, md or html");
-    const app = ["list_apps", "find_apps", "frontmost_window", "permission_status"].includes(action) ? "" : this.target(args.app);
+    let app = ["list_apps", "find_apps", "frontmost_window", "permission_status"].includes(action) ? "" : this.target(args.app, action === "start_app");
     if (app) args.app = app;
     if (action === "app_policy") return { text: JSON.stringify(computerAppPolicy(app)) };
     if (action === "watch_start") return this.watches.start(sessionId, turnId, args, () => this.turns.get(key) === true);
@@ -129,6 +129,15 @@ export class ComputerController {
       if (!(error instanceof ComputerToolError)) { this.sessions.delete(sessionId); await session.runtime.close(); }
       throw Error(`${String(error)}${read ? "" : ". Outcome may be unknown; query the intended semantic control again with computer_query, or take a fresh screenshot. Do not automatically repeat input or submission."}`);
     }
+    let launchUnverified = false;
+    if (action === "start_app" && process.platform !== "darwin") {
+      try {
+        const receipt = JSON.parse(output.text);
+        if (receipt.verified === true && typeof receipt.app === "string" && /^[1-9][0-9]*$/.test(receipt.app)) app = this.target(receipt.app);
+        else launchUnverified = true;
+      } catch { launchUnverified = true; }
+      if (launchUnverified) output.text += "\nLaunch was requested but its running window is not verified. Discover the app and observe it explicitly; do not replay launch automatically.";
+    }
     const remember = (state: ComputerResult, pixels: boolean, ax: boolean) => {
       if (pixels && !state.imageBase64) throw Error("AIClaw Computer Use returned no app screenshot. Grant Accessibility and Screen Recording to AIClaw Computer Use.app, then observe again. Do not guess coordinates.");
       let windowID: number | undefined;
@@ -148,7 +157,7 @@ export class ComputerController {
     if (!read && input.verify_after === false) {
       output.text += "\nPost-action screenshot deferred. Dispatch is not proof of completion. Old observations and indexes are invalid; query or observe again before the next input, and verify the intended effect at decision points and completion.";
     }
-    if (!read && action !== "stop_app" && input.verify_after !== false) {
+    if (!read && action !== "stop_app" && input.verify_after !== false && !launchUnverified) {
       try {
         let state: ComputerResult;
         for (let attempt = 0; ; attempt++) {
@@ -182,9 +191,10 @@ export class ComputerController {
     return output;
   }
 
-  private target(value: unknown): string {
+  private target(value: unknown, launching = false): string {
     if (typeof value !== "string" || !value.trim()) throw Error("An explicit app identifier is required");
     const app = value.trim();
+    if (launching && process.platform !== "darwin" && /^launch:[a-z0-9_.-]+$/i.test(app)) return app;
     if (app === String(process.pid)) throw Error("Refusing to operate AIClaw or its approval controls");
     const leaf = basename(app.replaceAll("\\", "/")).toLowerCase();
     if (/^(aiclaw|electron|aiclawcomputeruse|aiclaw computer use)(\.app|\.exe)?$/.test(leaf) || /^(com\.github\.chowyu12\.aiclaw|com\.github\.chowyu12\.aiclaw\.computer-use|com\.electron|com\.github\.electron)(\.|$)/i.test(app)) {

@@ -25,3 +25,34 @@ jobs:
       - run: npm run build:main -w @aiclaw/desktop
       - name: Native Windows UIA and window capture acceptance
         run: node scripts/smoke-computer-windows.mjs
+  linux-x11:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @aiclaw/agent-client
+      - run: npm run build:main -w @aiclaw/desktop
+      - name: Controller contracts
+        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer.ts scripts/test-computer-watch.ts
+      - run: docker build -f tools/computer-use/linux/Dockerfile.test -t aiclaw-computer-test .
+      - name: Native X11 and clipboard acceptance
+        run: |
+          docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD/tools/computer-use/linux:/computer-use:ro" \
+            -v "$PWD/tools/claw-agent/internal/agent/computer-tools.json:/Tools.json:ro" \
+            aiclaw-computer-test dbus-run-session -- xvfb-run -a sh -c \
+            'openbox >/tmp/openbox.log 2>&1 & sleep 1; /usr/bin/python3 /computer-use/test_clipboard.py && /usr/bin/python3 /computer-use/test_native.py /Tools.json'
+      - name: Host workflow and clipboard lifetime acceptance
+        run: |
+          docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+            -v "$PWD/tools/computer-use/linux:/aiclaw/computer-use/linux:ro" \
+            -v "$PWD/tools/claw-agent/internal/agent/computer-tools.json:/aiclaw/computer-use/Tools.json:ro" \
+            -v "$PWD/apps/desktop/dist/main:/aiclaw/dist/main:ro" \
+            -v "$PWD/package.json:/aiclaw/package.json:ro" \
+            aiclaw-computer-test dbus-run-session -- xvfb-run -a sh -c \
+            'openbox >/tmp/openbox.log 2>&1 & sleep 1; node /aiclaw/computer-use/linux/test_host.mjs'

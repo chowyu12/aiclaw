@@ -5,6 +5,7 @@ import sys
 import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
+import os
 
 GLib.set_prgname("aiclaw-linux-fixture")
 window = Gtk.Window(title=sys.argv[2] if len(sys.argv) > 2 else "AIClaw Linux Fixture")
@@ -42,5 +43,9 @@ button.connect("clicked", submit)
 for widget in (entry, button, status, pad, editor): box.pack_start(widget, False, False, 0)
 window.show_all()
 entry.grab_focus()
+if os.environ.get("AICLAW_FIXTURE_CLIPBOARD_SEED") == "1":
+    from clipboard import Clipboard
+    clipboard = Clipboard()
+    clipboard.replace_if_unchanged({"UTF8_STRING": ("UTF8_STRING", 8, b"original clipboard"), "application/x-aiclaw-test": ("application/x-aiclaw-test", 8, b"\x00\xfforiginal")}, clipboard.generation())
 GLib.idle_add(lambda: (print("READY", flush=True), False)[1])
 Gtk.main()

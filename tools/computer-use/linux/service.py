@@ -17,11 +17,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gi
 gi.require_version("Atspi", "2.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Atspi, GdkPixbuf, GLib
+from gi.repository import Atspi, GdkPixbuf, GLib, Gio
 from x11 import X11
+from clipboard import Clipboard
 
 PROTOCOL = "AIClawComputerUseIPC-1"
-SUPPORTED = {"list_apps", "find_apps", "permission_status", "frontmost_window", "get_app_state", "query", "set_value", "click", "perform_secondary_action", "select_text", "modify_app", "stop_app", "press_key", "scroll", "drag", "type_text"}
+SUPPORTED = {"list_apps", "find_apps", "permission_status", "frontmost_window", "get_app_state", "query", "set_value", "click", "perform_secondary_action", "select_text", "modify_app", "stop_app", "start_app", "press_key", "scroll", "drag", "type_text", "paste"}
 CANCELLED = threading.Event()
 
 
@@ -64,6 +65,7 @@ class Service:
         if os.environ.get("XDG_SESSION_TYPE") == "wayland":
             raise RuntimeError("Wayland needs an explicit portal-backed desktop session; this service supports X11 only")
         self.x = X11()
+        self.clipboard = Clipboard()
         Atspi.init()
         Atspi.set_timeout(1000, 2000)
         self.tools = []
@@ -73,12 +75,81 @@ class Service:
                 for field in ("observation_id", "verify_after"):
                     schema["properties"].pop(field, None)
                 schema["required"] = [field for field in schema.get("required", []) if field != "observation_id"]
+                if spec["action"] == "paste": schema["properties"]["format"]["enum"] = ["text", "html"]
                 self.tools.append({"name": spec["action"], "inputSchema": schema})
         self.target = None; self.elements = {}; self.counter = 0; self.image_size = None
-        self.source_hash = hashlib.sha256(Path(__file__).read_bytes() + Path(__file__).with_name("x11.py").read_bytes()).hexdigest()
+        self.launches = {}
+        self.source_hash = hashlib.sha256(b"".join(Path(__file__).with_name(name).read_bytes() for name in ("service.py", "x11.py", "clipboard.py"))).hexdigest()
+
+    def paste(self, values, target):
+        value, fmt = values.get("text"), values.get("format", "text")
+        if not isinstance(value, str) or len(value) > 2_000_000 or fmt not in ("text", "html"):
+            raise ValueError("X11 paste currently supports text and HTML, not Markdown")
+        original, generation = self.clipboard.snapshot()
+        payload = {"UTF8_STRING": ("UTF8_STRING", 8, value.encode("utf-8"))}
+        if fmt == "html": payload["text/html"] = ("text/html", 8, value.encode("utf-8"))
+        generation = self.clipboard.replace_if_unchanged(payload, generation)
+        if generation is None: raise RuntimeError("Clipboard changed before paste; no input was dispatched")
+        try:
+            self.global_focus(target)
+            codes = [self.x.keycode(name) for name in ("Control_L", "v")]
+            held = []
+            try:
+                for code in codes: self.x.key(code, True); held.append(code)
+            finally:
+                for code in reversed(held): self.x.key(code, False)
+            delay(0.3)
+        finally:
+            self.clipboard.replace_if_unchanged(original, generation, restored=True)
 
     def invalidate(self):
         self.target = None; self.elements.clear(); self.image_size = None
+
+    def installed_apps(self, needle):
+        result = []
+        for info in Gio.AppInfo.get_all():
+            identifier = info.get_id()
+            if not isinstance(info, Gio.DesktopAppInfo) or not identifier or not info.should_show(): continue
+            name = info.get_display_name() or identifier
+            if needle and needle not in name.casefold() and needle not in identifier.casefold(): continue
+            filename = info.get_filename()
+            if not filename: continue
+            try: digest = hashlib.sha256(Path(filename).read_bytes()).hexdigest()
+            except OSError: continue
+            key = "launch:" + identifier
+            self.launches[key] = (info, filename, digest)
+            result.append({"id": key, "launch_id": key, "display_name": name, "is_running": False, "desktop_file": filename, "windows": []})
+        return result
+
+    def launch(self, args):
+        key = args.get("app")
+        if key not in self.launches: raise RuntimeError("Use an exact launch_id discovered on this connection; arbitrary names, paths or commands are not accepted")
+        info, filename, expected = self.launches[key]
+        if hashlib.sha256(Path(filename).read_bytes()).hexdigest() != expected: raise RuntimeError("The discovered desktop entry changed; discover it again before launch")
+        executable = Path(info.get_executable() or "").name.casefold()
+        if executable in ("aiclaw", "electron", "claw-agent", "aiclawcomputeruse"): raise RuntimeError("Refusing to launch AIClaw or its helper/approval controls")
+        self.invalidate(); launched = {}
+        def collect(_info, child_pid, _data):
+            try: launched[child_pid] = Path(f"/proc/{child_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+            except OSError: pass
+        flags = GLib.SpawnFlags.SEARCH_PATH | GLib.SpawnFlags.STDOUT_TO_DEV_NULL | GLib.SpawnFlags.STDERR_TO_DEV_NULL
+        if not info.launch_uris_as_manager([], None, flags, None, None, collect, None): raise RuntimeError("Desktop application launch was refused")
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            pump()
+            candidates = set()
+            for window in self.x.windows():
+                child_pid = window["pid"]
+                if child_pid not in launched: continue
+                try:
+                    birth = Path(f"/proc/{child_pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
+                    if birth == launched[child_pid]: candidates.add(child_pid)
+                except OSError: pass
+            if len(candidates) == 1:
+                child_pid = next(iter(candidates))
+                return text({"app": str(child_pid), "launch_id": key, "verified": True, "launch_requested": True})
+            delay(0.05)
+        return text({"launch_id": key, "verified": False, "launch_requested": True})
 
     def application(self, pid):
         desktop = Atspi.get_desktop(0)
@@ -331,12 +402,13 @@ class Service:
         if background and (operation not in ("click", "setValue", "selectText", "performSecondaryAction") or (operation == "click" and ("elementID" not in values or values.get("clickCount", 1) != 1 or values.get("mouseButton", "left") != "left" or values.get("key") or values.get("duration", 0))) or values.get("autosubmitSearchFields")):
             raise RuntimeError("Background action is not supported; no foreground fallback or global input was sent")
         active, pointer = self.x.active(), self.x.pointer()
+        clipboard_generation = self.clipboard.generation() if background else None
         try:
             if operation in ("setValue", "selectText", "performSecondaryAction") or (operation == "click" and "elementID" in values and values.get("clickCount", 1) == 1 and not values.get("key") and not values.get("duration") and values.get("mouseButton", "left") == "left"):
                 if self.semantic(operation, values, target):
                     delay(0.05)
-                    if background and (self.x.active() != active or self.x.pointer() != pointer):
-                        raise RuntimeError("Background action was dispatched but foreground/pointer changed; outcome is unknown")
+                    if background and (self.x.active() != active or self.x.pointer() != pointer or self.clipboard.generation() != clipboard_generation):
+                        raise RuntimeError("Background action was dispatched but foreground, pointer or clipboard changed; outcome is unknown")
                     return text("Semantic action dispatched; read-back verified where available. Old element IDs are invalid.")
                 if background or operation != "click":
                     raise RuntimeError("The semantic action is unavailable; no global input was sent")
@@ -388,6 +460,7 @@ class Service:
                         delay(0.01)
                 finally: self.x.button(1, False)
             elif operation == "type": self.insert_text(values.get("text"), target)
+            elif operation == "paste": self.paste(values, target)
             else:
                 raise RuntimeError(f"Action {operation} has no validated X11 implementation; no fallback was used")
             return text("X11 input dispatched. Verify the intended effect; old element IDs are invalid.")
@@ -398,7 +471,7 @@ class Service:
         if kind == "ComputerUseIPCHandshakeRequest":
             return {"protocolVersion": PROTOCOL, "serverVersion": "1", "serviceSourceSHA256": self.source_hash, "tools": self.tools}
         if kind == "ComputerUseIPCPermissionStatusRequest":
-            return text({"backend": "x11-atspi", "session_type": "x11", "accessibilityTrusted": bool(Atspi.get_desktop(0)), "screenCaptureGranted": True, "requires_xcomposite": True, "wayland_supported": False})
+            return text({"backend": "x11-atspi", "service_pid": os.getpid(), "session_type": "x11", "accessibilityTrusted": bool(Atspi.get_desktop(0)), "screenCaptureGranted": True, "requires_xcomposite": True, "wayland_supported": False})
         if kind in ("ComputerUseIPCListAppsRequest", "ComputerUseIPCFindAppsRequest"):
             apps = {}; needle = args.get("text", "").casefold()
             for window in self.x.windows():
@@ -408,8 +481,11 @@ class Service:
                 if needle and needle not in name.casefold() and needle not in window["title"].casefold(): continue
                 record = apps.setdefault(str(pid), {"id": str(pid), "pid": pid, "display_name": name, "is_running": True, "windows": []})
                 record["windows"].append(window)
+            installed = self.installed_apps(needle)
+            records = list(apps.values()) + installed
             limit = integer(args.get("limit"), 100, 1, 100)
-            return text({"apps": list(apps.values())[:limit], "truncated": len(apps) > limit, "discovery_scope": "running_applications"})
+            return text({"apps": records[:limit], "truncated": len(records) > limit, "discovery_scope": "running_and_desktop_entries"})
+        if kind == "ComputerUseIPCAppStartRequest": return self.launch(args)
         if kind == "ComputerUseIPCFrontmostWindowRequest":
             window = self.x.active(); pid = self.x.owner(window) if window else 0
             return text({"app": str(pid), "pid": pid, "window_id": window} if pid else {"window": None})
@@ -448,6 +524,18 @@ def main():
         try: response = {"id": frame["id"], "result": service.dispatch(frame["requestType"], frame.get("request", {}))}
         except Exception as error: response = {"id": frame.get("id"), "error": {"message": str(error)}}
         print(json.dumps(response, ensure_ascii=False), flush=True)
+    # X11 selections are served by their owner. Retain only restored bytes after
+    # EOF, without accepting requests or dispatching input, until the next copy.
+    service.invalidate()
+    service.x.x.XCloseDisplay(service.x.display)
+    Atspi.exit()
+    if service.clipboard.owns_restored():
+        control = os.environ.get("AICLAW_COMPUTER_CONTROL_FD")
+        if control == "3":
+            try: os.write(3, b'{"event":"clipboard-retained"}\n')
+            finally: os.close(3)
+        while service.clipboard.owns_restored():
+            pump(); time.sleep(0.02)
 
 
 if __name__ == "__main__":
