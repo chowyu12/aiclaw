@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -92,7 +93,7 @@ func TestComputerSchemasUseNativeAppContract(t *testing.T) {
 	}
 	expected := 0
 	if runtime.GOOS == "darwin" {
-		expected = 18
+		expected = 22
 	}
 	if len(specs) != expected {
 		t.Fatalf("unexpected native tool count, got %d", len(specs))
@@ -136,5 +137,75 @@ func TestComputerQueryAndDeliveryOptionsAreMacOnly(t *testing.T) {
 		if query != (platform == "darwin") || native != (platform == "darwin") {
 			t.Fatalf("wrong capabilities on %s: query=%v method=%v", platform, query, native)
 		}
+	}
+}
+
+func TestComputerWorkflowInsideOneExec(t *testing.T) {
+	for _, tc := range []struct {
+		name                                string
+		approve, hostOK, verificationFailed bool
+		wantCalls, wantApprovals            int
+	}{
+		{"sequential workflow", true, true, false, 5, 2},
+		{"denied input stops", false, true, false, 1, 1},
+		{"host error stops", true, false, false, 1, 0},
+		{"unknown verification stops", true, true, true, 1, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := `const app="com.example.fixture";
+    const first=await tools.computer_query({app,text:"Input"});
+    if (!first.includes("observation_id: o1")) throw Error("missing observation");
+    await tools.computer_set_value({app,element_index:"1",observation_id:"o1",value:"hello",verify_after:false});
+    await tools.computer_query({app,text:"Submit"});
+    await tools.computer_click({app,element_index:"1",observation_id:"o1",verify_after:false});
+    text(await tools.computer_screenshot({app}));`
+			raw, err := json.Marshal(map[string]string{"title": "Fill and submit fixture", "code": code})
+			if err != nil {
+				t.Fatal(err)
+			}
+			model := &fakeModel{script: []string{sseToolCalls([3]string{"workflow", "exec", string(raw)}), sseText("finished")}}
+			session := computerSession(t, model, protocol.ApprovalOnWrite, true)
+			if !slices.Contains(session.FoldedTools(), "computer_query") || slices.Contains(session.Tools(), "computer_query") {
+				t.Fatal("desktop tools must be folded into exec")
+			}
+			emitter := &recordingEmitter{approve: tc.approve, computerOK: tc.hostOK, computerResult: protocol.ComputerResult{Text: "observation_id: o1", ImageBase64: base64.StdEncoding.EncodeToString([]byte("fixture")), VerificationFailed: tc.verificationFailed}}
+			session.RunTurn(context.Background(), "t1", "Fill and submit", nil, nil, emitter)
+			if model.calls != 2 || len(emitter.computer) != tc.wantCalls || len(emitter.approvals) != tc.wantApprovals {
+				t.Fatalf("model calls=%d dispatches=%d approvals=%d", model.calls, len(emitter.computer), len(emitter.approvals))
+			}
+		})
+	}
+}
+
+type cancellingComputerWorkflowEmitter struct {
+	*recordingEmitter
+	cancel context.CancelFunc
+}
+
+func (e *cancellingComputerWorkflowEmitter) RequestComputer(ctx context.Context, params protocol.ComputerRequestParams) (protocol.ComputerResult, error) {
+	result, err := e.recordingEmitter.RequestComputer(ctx, params)
+	if params.Action == "set_value" {
+		e.cancel()
+		return protocol.ComputerResult{}, ctx.Err()
+	}
+	return result, err
+}
+
+func TestComputerWorkflowCancellationDoesNotDispatchNextAction(t *testing.T) {
+	code := `await tools.computer_query({app:"com.example.fixture",text:"Input"});
+ await tools.computer_set_value({app:"com.example.fixture",element_index:"1",observation_id:"o1",value:"hello",verify_after:false});
+ await tools.computer_click({app:"com.example.fixture",element_index:"1",observation_id:"o1"});`
+	raw, err := json.Marshal(map[string]string{"title": "Fill fixture", "code": code})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model := &fakeModel{script: []string{sseToolCalls([3]string{"workflow", "exec", string(raw)}), sseText("stopped")}}
+	session := computerSession(t, model, protocol.ApprovalOnWrite, true)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	emitter := &cancellingComputerWorkflowEmitter{recordingEmitter: &recordingEmitter{approve: true, computerOK: true, computerResult: protocol.ComputerResult{Text: "observation_id: o1"}}, cancel: cancel}
+	session.RunTurn(ctx, "t1", "Fill fixture", nil, nil, emitter)
+	if len(emitter.computer) != 2 || emitter.computer[1].Action != "set_value" {
+		t.Fatalf("cancelled script continued: %+v", emitter.computer)
 	}
 }

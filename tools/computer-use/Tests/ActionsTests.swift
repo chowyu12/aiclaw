@@ -36,6 +36,19 @@ struct ActionsTests {
         try expectFailure("empty source") { _ = try actionSelectionRange(text: "", target: "a") }
         try expectFailure("unknown selection mode") { _ = try actionSelectionRange(text: "abc", target: "b", selection: "guess") }
         let paste = try actionKey("super+v")
+        try require(actionBackgroundMode(nil, operation: "type", input: [:]) == false, "foreground remains the default")
+        for operation in ["setValue", "selectText", "performSecondaryAction"] {
+            try require(actionBackgroundMode("background", operation: operation, input: [:]), "semantic background mode")
+        }
+        try require(actionBackgroundMode("background", operation: "click", input: ["elementID": "1"]), "semantic background click")
+        for operation in ["pressKey", "type", "paste", "scroll", "drag"] {
+            try expectFailure("global background input refused") { _ = try actionBackgroundMode("background", operation: operation, input: [:]) }
+        }
+        for input: [String: Any] in [["coordinate": [1, 2]], ["elementID": "1", "key": "shift"], ["elementID": "1", "duration": 1], ["elementID": "1", "clickCount": 2]] {
+            try expectFailure("background click cannot fall back") { _ = try actionBackgroundMode("background", operation: "click", input: input) }
+        }
+        try expectFailure("background autosubmit refused before changing value") { _ = try actionBackgroundMode("background", operation: "setValue", input: ["autosubmitSearchFields": true]) }
+        try expectFailure("unknown interaction mode") { _ = try actionBackgroundMode("guess", operation: "click", input: [:]) }
         try require(paste.0 == 9 && paste.1 == .maskCommand, "Command-V mapping")
         let chord = try actionKey("ctrl+alt+shift+Return")
         try require(chord.0 == 36 && chord.1 == [.maskControl, .maskAlternate, .maskShift], "modifier chord mapping")

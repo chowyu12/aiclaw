@@ -129,9 +129,8 @@ func TestLoopInsideOneScriptIsOneToolCallForTheModel(t *testing.T) {
 	}
 }
 
-func TestSkillsAndComputerToolsStayOutsideCodeMode(t *testing.T) {
-	// 代码模式在技能与 computer use 之前装：读技能、点屏幕不需要写脚本，
-	// 把它们也收进去只会让最常用的两件事多绕一层。
+func TestSkillsStayOutsideCodeMode(t *testing.T) {
+	// 技能读取保留独立入口，桌面工具则在代码模式之前注册。
 	session := newTestSession(t, &fakeModel{}, protocol.ApprovalOnWrite)
 	session.config.CodeMode = true
 	session.installCodeMode()

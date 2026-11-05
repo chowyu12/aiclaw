@@ -262,11 +262,13 @@ test("real IPC framing maps the nine actions to typed native requests", async ()
     await h.runtime.call("select_text", { app, element_index: "12", text: "天气", selection: "cursor_after" });
     await h.runtime.call("paste", { app, text: "**天气**", format: "md" });
     await h.runtime.call("start_app", { app });
+    await h.runtime.call("set_value", { app, element_index: "12", value: "后台", interaction_mode: "background" });
     assert.deepEqual(h.requests[1].request, { app, action: { click: { elementID: "12", key: "shift", duration: 0.2 } } });
     assert.deepEqual(h.requests[2].request.action.scroll, { coordinate: [10, 20], direction: "down", pages: 0.5 });
     assert.equal(h.requests[3].request.action.selectText.selection, "cursorAfter");
     assert.deepEqual(h.requests[4].request.action.paste, { text: "**天气**", format: "md" });
     assert.equal(h.requests[5].requestType, "ComputerUseIPCAppStartRequest");
+    assert.deepEqual(h.requests[6].request, { app, interactionMode: "background", action: { setValue: { elementID: "12", value: "后台" } } });
     assert.equal(h.requests[1].jsonrpc, undefined, "The native service is not MCP");
   } finally { await h.close(); }
 });
@@ -314,4 +316,59 @@ test("packaging accepts only the built architecture and exact native binary iden
     await writeFile(binary, "tampered");
     await assert.rejects(stageComputerRuntime({ repo: directory, destination, platform: "darwin", arch: "arm64" }), /build identity/);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("deterministic intermediate actions defer captures and require fresh queries", async () => {
+  const h = harness();
+  const query = async () => {
+    const state = await h.call("query", { app, text: "Fixture" });
+    return state.text.match(/observation_id: ([\w-]+)/)![1]!;
+  };
+  const first = await query();
+  const filled = await h.call("set_value", { app, observation_id: first, element_index: "1000001", value: "hello", verify_after: false });
+  assert.equal(filled.imageBase64, undefined);
+  assert.match(filled.text, /screenshot deferred/);
+  await assert.rejects(h.call("click", { app, observation_id: first, element_index: "1000001", verify_after: false }), /latest observation_id/);
+  const second = await query();
+  await h.call("click", { app, observation_id: second, element_index: "1000001", verify_after: false });
+  assert.deepEqual(h.calls.map(call => call.action), ["query", "set_value", "query", "click"]);
+  assert.ok(h.calls.every(call => !("verify_after" in call.args)));
+  const final = await h.call("get_app_state", { app });
+  assert.equal(final.imageBase64, image);
+  await h.controller.close();
+});
+
+test("verification flags are typed and failed captures stop scripted continuation", async () => {
+  const h = harness({ postFails: true });
+  const id = await h.observe();
+  await assert.rejects(h.call("click", { app, observation_id: id, x: 1, y: 1, verify_after: "false" }), /must be a boolean/);
+  const state = await h.call("click", { app, observation_id: id, x: 1, y: 1 });
+  assert.equal(state.verificationFailed, true);
+  await h.controller.close();
+});
+
+test("application strategies match exact identities and provide bounded guidance", async () => {
+  const { computerAppPolicy } = await import("../apps/desktop/src/main/computer-policy.ts");
+  for (const [id, expected] of [["com.apple.finder", "finder"], ["com.apple.Safari", "safari"], ["com.apple.TextEdit", "textedit"]]) {
+    const policy = computerAppPolicy(id!);
+    assert.equal(policy.policy_id, expected); assert.equal(policy.guidance_only, true);
+    assert.ok(policy.instructions.length > 4); assert.ok(policy.sources.every(source => source.startsWith("https://support.apple.com/")));
+    assert.ok(policy.unsupported_background.includes("keyboard"));
+  }
+  assert.equal(computerAppPolicy("com.apple.Safari.attacker").policy_id, "generic");
+  assert.equal(computerAppPolicy("Safari").policy_id, "generic");
+});
+
+test("policy lookup does not launch a runtime and instructions attach once per turn", { skip: process.platform !== "darwin" }, async () => {
+  const h = harness();
+  const policy = JSON.parse((await h.call("app_policy", { app: "com.apple.Safari" })).text);
+  assert.equal(policy.policy_id, "safari"); assert.equal(h.counts().created, 0);
+  const first = await h.call("query", { app: "com.apple.Safari", text: "address" });
+  assert.match(first.text, /app_specific_instructions:.*safari/);
+  assert.ok(first.text.match(/observation_id: ([\w-]+)/));
+  const next = await h.call("query", { app: "com.apple.Safari", text: "address" });
+  assert.doesNotMatch(next.text, /app_specific_instructions/);
+  const otherTurn = await h.call("query", { app: "com.apple.Safari", text: "address" }, "chat", "next-turn");
+  assert.match(otherTurn.text, /app_specific_instructions/);
+  await h.controller.close();
 });

@@ -21,6 +21,11 @@ import (
 //go:embed computer-tools.json
 var computerToolsJSON []byte
 
+// Host policies and subscriptions are separate from the native app's action manifest.
+//
+//go:embed computer-host-tools.json
+var computerHostToolsJSON []byte
+
 type computerToolSpec struct {
 	Name        string                  `json:"name"`
 	Action      protocol.ComputerAction `json:"action"`
@@ -35,6 +40,11 @@ func computerToolSpecs(platform string) ([]computerToolSpec, error) {
 	if err := json.Unmarshal(computerToolsJSON, &specs); err != nil {
 		return nil, err
 	}
+	var hostSpecs []computerToolSpec
+	if err := json.Unmarshal(computerHostToolsJSON, &hostSpecs); err != nil {
+		return nil, err
+	}
+	specs = append(specs, hostSpecs...)
 	result := make([]computerToolSpec, 0, len(specs))
 	for _, spec := range specs {
 		if len(spec.Platforms) > 0 && !slices.Contains(spec.Platforms, platform) {
@@ -144,6 +154,9 @@ func (s *Session) runComputerAction(ctx context.Context, env *tools.Env, request
 			return "", fmt.Errorf("computer host returned invalid screenshot data")
 		}
 		env.Attach(image)
+	}
+	if result.VerificationFailed {
+		return "", fmt.Errorf("%s", result.Text)
 	}
 	return result.Text, nil
 }

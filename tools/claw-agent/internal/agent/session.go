@@ -301,10 +301,12 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	if err := session.registerOutputTool(); err != nil {
 		return nil, err
 	}
+	if err := session.registerComputerTools(); err != nil {
+		return nil, err
+	}
 
-	// 代码模式在技能与 computer use **之前**装：它要把注册表里已有的工具
-	// 全部收进 exec，而 load_skill / computer_* 是之后才注册的——那几个
-	// 留在外面是对的，模型读技能、点屏幕不需要写脚本。
+	// 桌面工具先注册，让确定的多步操作可在同一段 exec 中执行。
+	// 技能读取和向用户提问仍保留独立入口。
 	if config.CodeMode {
 		if count := session.installCodeMode(); count > 0 {
 			session.mcpStatus[i18n.D("代码模式")] = i18n.D(
@@ -326,9 +328,6 @@ func New(ctx context.Context, id string, config protocol.SessionStartParams, key
 	// 技能、记忆、computer use 都在系统提示词之前装好：提示词要列出它们。
 	session.loadSkills(config.SkillDirs)
 	session.loadMemory(config)
-	if err := session.registerComputerTools(); err != nil {
-		return nil, err
-	}
 	// 向用户提问同样留在 exec 外面：在脚本里停下来等人没有意义。
 	if err := session.registerAskTool(); err != nil {
 		return nil, err
@@ -948,6 +947,9 @@ func buildSystemPrompt(
 		builder.WriteString(
 			"Ordinary commands don't need confirmation; commands that delete, escalate privileges or change system settings, as well as calls to external tools, ask the user for confirmation first.\n",
 		)
+	}
+	if config.EnableComputerUse {
+		builder.WriteString("Computer Use: execute deterministic steps sequentially with await, never Promise.all for desktop state. Read computer_app_policy for app-specific guidance and background capability limits. computer_watch_start/next/stop provide turn-scoped polling updates without action authority; explicitly query/observe before input. In code mode combine query, matched element action, and fresh query in one exec. Set verify_after=false for intermediate actions to avoid automatic screenshots; every action invalidates prior observations. Query returns JSON on its first line and observation_id on a following line; read both and stop if matches are missing, ambiguous or truncated. Use computer_screenshot at visual decision points and completion. Stop on errors, denied approval or uncertain results; never replay input automatically. Return to the model when visual judgment is needed.\n")
 	}
 	if registry.Len() > 0 {
 		fmt.Fprintf(&builder, "Available tools: %s.\n", strings.Join(registry.Names(), ", "))

@@ -3,9 +3,13 @@ import { basename } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import type { ComputerRequestParams, ComputerResult } from "@aiclaw/agent-client";
 import { ComputerNativeRuntime, type ComputerRuntime, type ComputerToolResult } from "./computer-runtime.js";
+import { ComputerWatches } from "./computer-watch.js";
+import { computerAppPolicy } from "./computer-policy.js";
 
-const READS = new Set(["list_apps", "find_apps", "frontmost_window", "permission_status", "get_app_state", "query"]);
+const READS = new Set(["list_apps", "find_apps", "frontmost_window", "permission_status", "get_app_state", "query", "watch_start", "watch_next", "watch_stop", "app_policy"]);
 const ARGUMENTS: Record<string, string[]> = {
+  app_policy: ["app"],
+  watch_start: ["app", "window_id", "interval_ms"], watch_next: ["watch_id", "after_sequence", "wait_ms"], watch_stop: ["watch_id"],
   find_apps: ["text", "limit"], start_app: ["app"], stop_app: ["app"], modify_app: ["app", "modification"], frontmost_window: [], permission_status: [],
   query: ["app", "text", "role", "exact", "limit", "max_nodes", "window_id"],
   select_text: ["app", "element_index", "text", "prefix", "suffix", "selection"],
@@ -23,7 +27,7 @@ class ComputerToolError extends Error {}
 function screenshotHash(state: ComputerResult): string | undefined {
   return state.imageBase64 ? createHash("sha256").update(state.imageBase64).digest("hex") : undefined;
 }
-type Session = { runtime: ComputerRuntime; turn: string; observations: Map<string, Observation> };
+type Session = { runtime: ComputerRuntime; turn: string; observations: Map<string, Observation>; policies: Set<string> };
 
 function observation(result: ComputerToolResult): ComputerResult {
   if (!Array.isArray(result?.content)) throw Error("AIClaw Computer Use returned an invalid result");
@@ -44,11 +48,14 @@ export class ComputerController {
   private turns = new Map<string, boolean>();
   private queue: Promise<unknown> = Promise.resolve();
   private readonly createRuntime: () => Promise<ComputerRuntime>;
-  constructor(createRuntime: () => Promise<ComputerRuntime> = () => ComputerNativeRuntime.create()) { this.createRuntime = createRuntime; }
+  private readonly watches: ComputerWatches;
+  constructor(createRuntime: () => Promise<ComputerRuntime> = () => ComputerNativeRuntime.create()) { this.createRuntime = createRuntime; this.watches = new ComputerWatches(createRuntime); }
 
   perform(request: ComputerRequestParams): Promise<ComputerResult> {
     const key = JSON.stringify([request.sessionId, request.turnId]);
     if (!this.turns.has(key)) this.turns.set(key, true);
+    // Waiting for a sampled change must not block desktop actions or stop requests.
+    if (request.action === "watch_next") return this.execute(request);
     const operation = this.queue.then(() => this.execute(request));
     this.queue = operation.catch(() => {});
     return operation;
@@ -63,22 +70,29 @@ export class ComputerController {
     const input = request.arguments;
     if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Computer arguments must be an object");
     const read = READS.has(action);
+    const lifecycle = ["start_app", "stop_app", "modify_app"].includes(action);
+    const hostArguments = read ? [] : lifecycle ? ["observation_id", "verify_after"] : ["observation_id", "verify_after", "interaction_mode"];
     for (const key of Object.keys(input)) {
-      if (!ARGUMENTS[action]!.includes(key) && !(key === "observation_id" && !read)) throw Error(`Unsupported computer argument: ${key}`);
+      if (!ARGUMENTS[action]!.includes(key) && !hostArguments.includes(key)) throw Error(`Unsupported computer argument: ${key}`);
     }
-    const args = { ...input }; delete args.observation_id;
+    if (input.verify_after !== undefined && typeof input.verify_after !== "boolean") throw Error("verify_after must be a boolean");
+    if (input.interaction_mode !== undefined && !["foreground", "background"].includes(String(input.interaction_mode))) throw Error("interaction_mode must be foreground or background");
+    const args = { ...input }; delete args.observation_id; delete args.verify_after;
+    if (action === "watch_next") return this.watches.next(sessionId, turnId, args);
+    if (action === "watch_stop") return this.watches.stop(sessionId, turnId, args);
     if (action === "query" && ![args.text, args.role].some(value => typeof value === "string" && value.trim())) throw Error("computer_query requires text or role");
     if (args.window_id !== undefined && (!Number.isSafeInteger(args.window_id) || Number(args.window_id) < 1 || Number(args.window_id) > 0xffffffff)) throw Error("window_id must be an integer from 1 to 4294967295");
     if (action === "paste" && (typeof args.text !== "string" || args.text.length > 2_000_000 || !["text", "md", "html"].includes(String(args.format ?? "text")))) throw Error("paste requires text up to 2000000 characters and format text, md or html");
     const app = ["list_apps", "find_apps", "frontmost_window", "permission_status"].includes(action) ? "" : this.target(args.app);
     if (app) args.app = app;
+    if (action === "app_policy") return { text: JSON.stringify(computerAppPolicy(app)) };
+    if (action === "watch_start") return this.watches.start(sessionId, turnId, args, () => this.turns.get(key) === true);
     let session = this.sessions.get(sessionId);
     if (session && session.turn !== turnId) {
       this.sessions.delete(sessionId); await session.runtime.close(); session = undefined;
     }
     // Do not start a service for an unobserved input, including after a crash.
     const previous = session?.observations.get(app);
-    const lifecycle = ["start_app", "stop_app", "modify_app"].includes(action);
     if (!read && !lifecycle) {
       const latest = session?.observations.get(app);
       if (!latest || input.observation_id !== latest.id) throw Error("Observe this app with computer_screenshot or computer_query in this turn and use its latest observation_id");
@@ -89,7 +103,7 @@ export class ComputerController {
     }
     if (!session) {
       const runtime = await this.createRuntime();
-      session = { runtime, turn: turnId, observations: new Map() };
+      session = { runtime, turn: turnId, observations: new Map(), policies: new Set() };
       this.sessions.set(sessionId, session);
     }
     if (!this.turns.get(key)) throw Error("Computer Use turn ended during startup; no operation was dispatched");
@@ -131,7 +145,10 @@ export class ComputerController {
       output.text += `\nobservation_id: ${id}\nUse only indexes returned by this query. Truncated searches do not establish that missing controls are absent.`;
     }
     if (action === "get_app_state") remember(output, args.include_screenshot !== false, args.include_ax !== false);
-    if (!read && action !== "stop_app") {
+    if (!read && input.verify_after === false) {
+      output.text += "\nPost-action screenshot deferred. Dispatch is not proof of completion. Old observations and indexes are invalid; query or observe again before the next input, and verify the intended effect at decision points and completion.";
+    }
+    if (!read && action !== "stop_app" && input.verify_after !== false) {
       try {
         let state: ComputerResult;
         for (let attempt = 0; ; attempt++) {
@@ -154,7 +171,13 @@ export class ComputerController {
         session.observations.delete(app);
         if (!(error instanceof ComputerToolError)) { this.sessions.delete(sessionId); await session.runtime.close(); }
         output.text += `\nInput was dispatched, but verification failed: ${String(error)}. Outcome is unknown; observe again. Do not automatically replay input.`;
+        output.verificationFailed = true;
       }
+    }
+    if (["query", "get_app_state"].includes(action) && !session.policies.has(app)) {
+      session.policies.add(app);
+      const policy = computerAppPolicy(app);
+      if (policy.policy_id !== "generic") output.text += `\napp_specific_instructions: ${JSON.stringify(policy)}`;
     }
     return output;
   }
@@ -175,6 +198,7 @@ export class ComputerController {
   async finishTurn(sessionId: string, turnId: string): Promise<void> {
     const key = JSON.stringify([sessionId, turnId]);
     if (this.turns.has(key)) this.turns.set(key, false);
+    await this.watches.stop(sessionId, turnId);
     const operation = this.queue.then(async () => {
       const session = this.sessions.get(sessionId);
       if (session?.turn === turnId) { this.sessions.delete(sessionId); await session.runtime.close(); }
@@ -183,6 +207,8 @@ export class ComputerController {
   }
 
   async releaseSession(sessionId: string): Promise<void> {
+    for (const key of this.turns.keys()) if (JSON.parse(key)[0] === sessionId) this.turns.set(key, false);
+    await this.watches.releaseSession(sessionId);
     const operation = this.queue.then(async () => {
       const session = this.sessions.get(sessionId); this.sessions.delete(sessionId);
       for (const key of this.turns.keys()) if (JSON.parse(key)[0] === sessionId) this.turns.delete(key);
@@ -192,6 +218,8 @@ export class ComputerController {
   }
 
   async close(): Promise<void> {
+    for (const key of this.turns.keys()) this.turns.set(key, false);
+    await this.watches.close();
     await this.queue;
     const sessions = [...this.sessions.values()]; this.sessions.clear();
     await Promise.all(sessions.map(session => session.runtime.close()));

@@ -1,0 +1,107 @@
+[
+  {
+    "name": "computer_watch_start",
+    "action": "watch_start",
+    "readOnly": true,
+    "platforms": [
+      "darwin"
+    ],
+    "description": "Start a turn-scoped, in-memory polling observation of one explicit app window. Returns initial screenshot and semantic AX baseline without actionable element IDs. Replaces this turn's prior subscription. Samples at the stated interval (not a native frame/event stream), coalesces changes, and expires after 60s without a consumer. Stop when finished. Query/observe separately before any input.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string"
+        },
+        "window_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "interval_ms": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 5000,
+          "default": 1000
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "computer_watch_next",
+    "action": "watch_next",
+    "readOnly": true,
+    "platforms": [
+      "darwin"
+    ],
+    "description": "Wait for a window change since after_sequence. Returns changed=false on timeout; changed updates include an AX line splice or reset baseline and PNG only if pixels changed. Coalesced/skipped sequences are explicitly reported. Subscription snapshots never authorize input; use fresh computer_query/screenshot for actions. Failures stop the subscription and never replay input.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "watch_id": {
+          "type": "string"
+        },
+        "after_sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "wait_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000,
+          "default": 5000
+        }
+      },
+      "required": [
+        "watch_id",
+        "after_sequence"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "computer_watch_stop",
+    "action": "watch_stop",
+    "readOnly": true,
+    "platforms": [
+      "darwin"
+    ],
+    "description": "Stop the current chat/turn window subscription and cancel capture. All subscriptions also close on turn/session end. Does not grant or alter system permissions.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "watch_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "watch_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "computer_app_policy",
+    "action": "app_policy",
+    "readOnly": true,
+    "platforms": [
+      "darwin"
+    ],
+    "description": "Read AIClaw-maintained application-specific operating guidance and background capability limits for an exact app identifier. Built-in Finder/Safari/TextEdit strategies fall back to generic discovery for other apps. This is guidance, not permission or proof that a UI control exists. Does not launch an app or create an actionable observation.",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "app": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "app"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

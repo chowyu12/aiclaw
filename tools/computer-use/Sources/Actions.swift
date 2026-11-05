@@ -98,6 +98,27 @@ func actionSelectionRange(text: String, target: String, prefix: String? = nil, s
     return CFRange(location: range.location, length: range.length)
 }
 
+// Strict background mode has no global-input fallback. Keep this preflight pure
+// so unsupported requests are rejected before any accessibility action.
+func actionBackgroundMode(_ raw: Any?, operation: String, input: [String: Any]) throws -> Bool {
+    let mode = raw ?? "foreground"
+    guard let mode = mode as? String, ["foreground", "background"].contains(mode) else { throw ComputerError("interactionMode must be foreground or background") }
+    guard mode == "background" else { return false }
+    switch operation {
+    case "click":
+        guard input["elementID"] is String, input["coordinate"] == nil,
+              try actionNumber(input, "clickCount", default: 1) == 1,
+              try actionNumber(input, "duration", default: 0) == 0,
+              (input["mouseButton"] as? String ?? "left") == "left",
+              (input["key"] as? String ?? "").isEmpty else { throw ComputerError("Background click requires a single unmodified semantic left click; no global input was sent") }
+    case "setValue":
+        guard input["autosubmitSearchFields"] as? Bool != true else { throw ComputerError("Background setValue cannot autosubmit; no input was sent") }
+    case "selectText", "performSecondaryAction": break
+    default: throw ComputerError("Background \(operation) is not supported; no foreground fallback or global input was sent")
+    }
+    return true
+}
+
 @MainActor
 extension ComputerSession {
     private func actionElement(_ args: [String: Any], target: ComputerTarget) throws -> AXUIElement {
@@ -160,7 +181,7 @@ extension ComputerSession {
         up.post(tap: .cghidEventTap)
     }
 
-    private func actionClick(_ args: [String: Any], target: ComputerTarget, observed: ComputerTarget) async throws -> String {
+    private func actionClick(_ args: [String: Any], target: ComputerTarget, observed: ComputerTarget, background: Bool) async throws -> String {
         let count = try actionNumber(args, "clickCount", default: 1)
         let duration = try actionNumber(args, "duration", default: 0)
         guard count >= 1, count <= 3, count.rounded() == count, duration >= 0, duration <= 10 else { throw ComputerError("clickCount must be 1–3 and duration 0–10 seconds") }
@@ -180,6 +201,7 @@ extension ComputerSession {
             if result == .success { return "Click dispatched via AXPress" }
             guard result == .actionUnsupported else { throw ComputerError("AXPress failed (\(result.rawValue)); outcome may be unknown. Observe again; input was not replayed.") }
         }
+        guard !background else { throw ComputerError("Background AXPress is unsupported by this control; no foreground fallback or global input was sent") }
         let point = try element.map(actionElementCenter) ?? actionPoint(args["coordinate"], target: target, observed: observed)
         guard target.frame.contains(point) else { throw ComputerError("Target point is outside the observed window") }
         try await actionActivate(target)
@@ -274,6 +296,7 @@ extension ComputerSession {
             "pressKey": ["key", "duration"], "type": ["text"], "paste": ["text", "format"],
         ]
         guard let allowed = fields[operation], Set(input.keys).isSubset(of: allowed) else { throw ComputerError("Unsupported action or action argument") }
+        let background = try actionBackgroundMode(args["interactionMode"], operation: operation, input: input)
         for key in ["elementID", "mouseButton", "key", "prefix", "suffix", "selection", "format"] where input[key] != nil {
             guard input[key] is String else { throw ComputerError("\(key) must be a string") }
         }
@@ -282,9 +305,12 @@ extension ComputerSession {
         }
         if input["elementID"] != nil, input["coordinate"] != nil { throw ComputerError("Choose an elementID or coordinate, not both") }
         defer { invalidate() }
+        let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let pointer = CGEvent(source: nil)?.location
+        let clipboardGeneration = background ? NSPasteboard.general.changeCount : nil
         var receipt = "\(operation) dispatched"
         switch operation {
-        case "click": receipt = try await actionClick(input, target: current, observed: observed)
+        case "click": receipt = try await actionClick(input, target: current, observed: observed, background: background)
         case "performSecondaryAction":
             let element = try actionElement(input, target: current), name = try actionString(input, "action")
             var available: CFArray?
@@ -365,6 +391,15 @@ extension ComputerSession {
             up.post(tap: .cghidEventTap)
             receipt += " via foreground global mouse input; the real pointer may move"
         default: throw ComputerError("Unsupported action: \(operation)")
+        }
+        if background {
+            try await Task.sleep(nanoseconds: 50_000_000)
+            guard NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
+                  CGEvent(source: nil)?.location == pointer,
+                  NSPasteboard.general.changeCount == clipboardGeneration else {
+                throw ComputerError("Background action was dispatched but foreground, pointer or clipboard changed. Outcome is unknown; do not replay or restore focus automatically")
+            }
+            receipt += " in strict AX background mode; foreground, pointer and clipboard unchanged at read-back"
         }
         return nativeText("\(receipt). Dispatch is not proof of the intended application result; observe again before continuing. Previous element IDs are invalid.")
     }

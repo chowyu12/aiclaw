@@ -53,6 +53,18 @@
           "minimum": 0,
           "maximum": 10,
           "description": "Seconds to hold the mouse button before release."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       },
       "additionalProperties": false
@@ -142,6 +154,18 @@
         "observation_id": {
           "type": "string",
           "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       },
       "required": [
@@ -264,6 +288,18 @@
         "observation_id": {
           "type": "string",
           "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       }
     },
@@ -302,6 +338,18 @@
           "minimum": 0,
           "maximum": 10,
           "description": "Seconds to hold the key before release."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       }
     },
@@ -344,6 +392,18 @@
         "y": {
           "type": "number",
           "description": "Screenshot pixel y for coordinate scroll; use with x instead of element_index."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       },
       "required": [
@@ -384,6 +444,18 @@
           "type": "boolean",
           "default": false,
           "description": "If true and the field is a search field, press Return after setting it. Defaults to false."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       },
       "additionalProperties": false,
@@ -424,6 +496,18 @@
         "observation_id": {
           "type": "string",
           "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       }
     },
@@ -466,6 +550,18 @@
             "cursor_before",
             "cursor_after"
           ]
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       },
       "required": [
@@ -508,6 +604,18 @@
             "html"
           ],
           "default": "text"
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        },
+        "interaction_mode": {
+          "type": "string",
+          "enum": [
+            "foreground",
+            "background"
+          ],
+          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
         }
       },
       "required": [
@@ -557,6 +665,10 @@
         "app": {
           "type": "string",
           "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
         }
       },
       "required": [
@@ -579,6 +691,10 @@
         "app": {
           "type": "string",
           "description": "Exact macOS bundle identifier from computer_find_apps/computer_list_apps. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
         }
       },
       "required": [
@@ -611,6 +727,10 @@
             "activate",
             "deactivate"
           ]
+        },
+        "verify_after": {
+          "type": "boolean",
+          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
         }
       },
       "required": [

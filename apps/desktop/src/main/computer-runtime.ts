@@ -115,7 +115,7 @@ export class ComputerNativeRuntime implements ComputerRuntime {
     const actionNames: Record<string, string> = { press_key: "pressKey", type_text: "type", set_value: "setValue", select_text: "selectText", perform_secondary_action: "performSecondaryAction" };
     if (!direct[name] && !Object.hasOwn(actions, name)) throw Error(`Unsupported native operation: ${name}`);
     try {
-      return await this.request(direct[name] ?? "ComputerUseIPCAppPerformActionRequest", direct[name] ? args : { app, action: { [actionNames[name] ?? name]: actions[name] } }, name === "get_app_state" ? this.timeoutMs * 2 : this.timeoutMs);
+      return await this.request(direct[name] ?? "ComputerUseIPCAppPerformActionRequest", direct[name] ? args : { app, interactionMode: rest.interaction_mode, action: { [actionNames[name] ?? name]: actions[name] } }, name === "get_app_state" ? this.timeoutMs * 2 : this.timeoutMs);
     } catch (error) {
       if (error instanceof NativeRequestError) return { isError: true, content: [{ type: "text", text: error.message }] };
       throw error;

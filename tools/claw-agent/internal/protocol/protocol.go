@@ -234,6 +234,7 @@ type ComputerRequestParams struct {
 }
 
 type ComputerResult struct {
+	VerificationFailed bool `json:"verificationFailed,omitempty"`
 	/** 给模型看的一句话。 */
 	Text string `json:"text"`
 	/** 窗口观察或动作后确认的 PNG，base64。 */

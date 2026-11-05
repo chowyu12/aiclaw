@@ -63,7 +63,7 @@ build-go: $(AGENT_BIN) ## 编译 claw-agent
 # 实现，正是为此选的。make nocgo 守着这条。
 # Tool schemas are embedded into the Go binary; changing only JSON must rebuild
 # the kernel too, otherwise make dev advertises an older computer-use contract.
-$(AGENT_BIN): $(GO_SOURCES) go.mod $(AGENT_DIR)/internal/agent/computer-tools.json
+$(AGENT_BIN): $(GO_SOURCES) go.mod $(AGENT_DIR)/internal/agent/computer-tools.json $(AGENT_DIR)/internal/agent/computer-host-tools.json
 	CGO_ENABLED=0 go build -o $(AGENT_BIN) ./tools/claw-agent
 
 test-computer-native: ## Verify native input and selection pure logic

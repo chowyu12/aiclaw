@@ -498,6 +498,8 @@ export interface ComputerRequestParams {
 }
 
 export interface ComputerResult {
+  /** Input was dispatched but post-action observation failed; stop scripted actions. */
+  verificationFailed?: boolean;
   /** 给模型看的一句话。 */
   text: string;
   /** Window observation or post-action screenshot, PNG base64. */

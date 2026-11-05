@@ -16,7 +16,7 @@ app.whenReady().then(async () => {
       const native = runtime.tools.find(tool => tool.name === spec.action);
       if (!native) throw Error(`Native service is missing ${spec.action}`);
       for (const field of Object.keys(spec.schema.properties)) {
-        if (field !== "observation_id" && !native.inputSchema.properties[field]) throw Error(`Native service is missing ${spec.action}.${field}`);
+        if (!["observation_id", "verify_after"].includes(field) && !native.inputSchema.properties[field]) throw Error(`Native service is missing ${spec.action}.${field}`);
       }
     }
     const status = await runtime.call("permission_status", {});

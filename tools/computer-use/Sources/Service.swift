@@ -130,7 +130,7 @@ private final class DesktopService: NSObject, NSApplicationDelegate {
         return specs.compactMap { spec in
             if let platforms = spec["platforms"] as? [String], !platforms.contains("darwin") { return nil }
             guard let name = spec["action"] as? String, var schema = spec["schema"] as? [String: Any] else { return nil }
-            if var properties = schema["properties"] as? [String: Any] { properties.removeValue(forKey: "observation_id"); schema["properties"] = properties }
+            if var properties = schema["properties"] as? [String: Any] { properties.removeValue(forKey: "observation_id"); properties.removeValue(forKey: "verify_after"); schema["properties"] = properties }
             if let required = schema["required"] as? [String] { schema["required"] = required.filter { $0 != "observation_id" } }
             return ["name": name, "inputSchema": schema]
         }

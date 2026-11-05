@@ -717,7 +717,7 @@ func TestRememberIsGatedByApproval(t *testing.T) {
 
 // ---------- computer use ----------
 
-func computerSession(t *testing.T, model *fakeModel, policy protocol.ApprovalPolicy) *Session {
+func computerSession(t *testing.T, model *fakeModel, policy protocol.ApprovalPolicy, codeMode ...bool) *Session {
 	t.Helper()
 	if runtime.GOOS != "darwin" {
 		t.Skip("native Computer Use currently requires macOS")
@@ -729,6 +729,7 @@ func computerSession(t *testing.T, model *fakeModel, policy protocol.ApprovalPol
 		Workdir:           t.TempDir(),
 		ApprovalPolicy:    policy,
 		EnableComputerUse: true,
+		CodeMode:          len(codeMode) > 0 && codeMode[0],
 	}, StaticKey("sk-test"))
 	if err != nil {
 		t.Fatal(err)
