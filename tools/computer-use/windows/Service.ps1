@@ -184,9 +184,9 @@ function Activate($targetObject) {
 function Key-Codes([string]$key) {
     $names=@{ctrl=17;control=17;alt=18;shift=16;super=91;Return=13;Enter=13;Tab=9;Space=32;Backspace=8;Delete=46;Escape=27;Left=37;Up=38;Right=39;Down=40;Home=36;End=35;PageUp=33;PageDown=34}
     foreach ($part in $key.Split('+')) {
-        if ($names.ContainsKey($part)) { [ushort]$names[$part] }
-        elseif ($part -match '^[a-zA-Z0-9]$') { if ($part -cmatch '^[A-Z]$') { [ushort]16 }; [ushort][char]$part.ToUpperInvariant() }
-        elseif ($part -match '^F([1-9]|1[0-9]|2[0-4])$') { [ushort](111+[int]$Matches[1]) }
+        if ($names.ContainsKey($part)) { [uint16]$names[$part] }
+        elseif ($part -match '^[a-zA-Z0-9]$') { if ($part -cmatch '^[A-Z]$') { [uint16]16 }; [uint16][char]$part.ToUpperInvariant() }
+        elseif ($part -match '^F([1-9]|1[0-9]|2[0-4])$') { [uint16](111+[int]$Matches[1]) }
         else { throw 'Unknown keyboard key or modifier' }
     }
 }
@@ -315,7 +315,7 @@ function Perform($argsObject) {
                 }
                 'type' {
                     $value=Value $values 'text'; if ($value -isnot [string] -or $value.Length -gt 2000000) { throw 'Type needs bounded text' }
-                    foreach ($unit in $value.ToCharArray()) { Check-Focus $targetObject; [AIClawComputerUse.Native]::Unicode([ushort]$unit,$true); [AIClawComputerUse.Native]::Unicode([ushort]$unit,$false) }
+                    foreach ($unit in $value.ToCharArray()) { Check-Focus $targetObject; [AIClawComputerUse.Native]::Unicode([uint16]$unit,$true); [AIClawComputerUse.Native]::Unicode([uint16]$unit,$false) }
                 }
                 'scroll' {
                     $direction=Value $values 'direction'; $pages=Number (Value $values 'pages') 1 0.01 100
