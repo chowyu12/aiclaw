@@ -33,6 +33,5 @@ export async function stageComputerRuntime({ repo, destination, platform, arch }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  await stageComputerHostDependencies({repo,destination:join(repo,"apps/desktop")});
   await stageComputerRuntime({repo,destination:join(repo,"apps/desktop"),platform:process.platform,arch:process.arch});
 }
