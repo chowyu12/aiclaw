@@ -46,6 +46,8 @@ namespace AIClawComputerUse {
         [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
         [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetTokenInformation(IntPtr token, int kind, IntPtr buffer, int length, out int returned);
         static readonly ConcurrentQueue<string> Frames = new ConcurrentQueue<string>();
+        static string SelfSID() { using (var identity = WindowsIdentity.GetCurrent()) { return identity.User.Value; } }
+        static readonly string UserSID = SelfSID();
         public static volatile bool ParentEnded;
         public static void BeginInput() {
             var thread = new Thread(() => {
@@ -70,7 +72,7 @@ namespace AIClawComputerUse {
                 if (length <= 0 || length > 65536) return false;
                 buffer = Marshal.AllocHGlobal(length);
                 if (!GetTokenInformation(token, 1, buffer, length, out length)) return false;
-                return new SecurityIdentifier(Marshal.ReadIntPtr(buffer)).Equals(WindowsIdentity.GetCurrent().User);
+                return new SecurityIdentifier(Marshal.ReadIntPtr(buffer)).Value == UserSID;
             } finally {
                 if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
                 if (token != IntPtr.Zero) CloseHandle(token);
@@ -115,7 +117,7 @@ namespace AIClawComputerUse {
             if (!GetWindowRect(new IntPtr(window), out rect)) throw new InvalidOperationException("Window is no longer available");
             int width = rect.Right - rect.Left, height = rect.Bottom - rect.Top;
             if (width <= 0 || height <= 0 || (long)width * height > 64000000) throw new InvalidOperationException("Window capture dimensions are unsupported");
-            using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb)) {
+            using (var bitmap = new Bitmap(width, height, PixelFormat.Format32bppRgb)) {
                 using (var graphics = Graphics.FromImage(bitmap)) {
                     IntPtr dc = graphics.GetHdc();
                     try { if (!PrintWindow(new IntPtr(window), dc, 2)) throw new InvalidOperationException("Target-only PrintWindow capture failed; no desktop-screen fallback was used"); }

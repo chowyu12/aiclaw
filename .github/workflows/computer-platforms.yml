@@ -1,0 +1,27 @@
+name: Computer Use Platforms
+on:
+  push:
+    branches: [zhouyy_onestask_computer_use_roadmap]
+    paths:
+      - 'tools/computer-use/**'
+      - 'apps/desktop/src/main/computer*.ts'
+      - 'scripts/smoke-computer-windows.mjs'
+      - '.github/workflows/computer-platforms.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-native:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build -w @aiclaw/agent-client
+      - run: npm run build:main -w @aiclaw/desktop
+      - name: Native Windows UIA and window capture acceptance
+        run: node scripts/smoke-computer-windows.mjs
