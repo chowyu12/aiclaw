@@ -88,7 +88,7 @@ try {
   await launchCall("get_app_state",{app:launchReceipt.app});
   const stopped=await launchCall("stop_app",{app:launchReceipt.app,verify_after:false});
   assert.equal(JSON.parse(stopped.text.split("\n")[0]).verified,true);
-  console.log(JSON.stringify({ passed: true, backend: "x11-atspi", host_controller: true, private_stdio: true, source_identity_handshake: true, background_receipt: true, window_png: true, unicode_paste_read_back:true, clipboard_all_formats_restored:true, clipboard_survived_runtime_eof:true, clipboard_provider_exited_after_new_copy:true, static_window_no_update: true, ax_delta_reconstructed: true, sampling_preserved_action_observation: true, finish_turn_cancelled_wait: true, discovered_desktop_launch:true, launched_pid_verified:true, launched_window_observed:true, normal_close_requested:true }));
+  console.log(JSON.stringify({ passed: true, backend: "x11-atspi", installed_runtime: true, host_controller: true, private_stdio: true, source_identity_handshake: true, background_receipt: true, window_png: true, unicode_paste_read_back:true, clipboard_all_formats_restored:true, clipboard_survived_runtime_eof:true, clipboard_provider_exited_after_new_copy:true, static_window_no_update: true, ax_delta_reconstructed: true, sampling_preserved_action_observation: true, finish_turn_cancelled_wait: true, discovered_desktop_launch:true, launched_pid_verified:true, launched_window_observed:true, normal_close_requested:true }));
 } finally {
   await controller.close();
   for (const child of children) child.kill("SIGTERM");

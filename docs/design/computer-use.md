@@ -1,6 +1,6 @@
 # AIClaw 原生桌面控制
 
-AIClaw 当前产品工具在 **macOS 14.4 及以上**通过自有 Swift 应用 **AIClaw Computer Use.app** 执行桌面控制。Electron 宿主负责模型循环、审批与操作后的验证；独立原生进程负责应用发现、AX 元素、窗口截图和输入。Windows/Linux 执行层仍在开发、尚未注册产品工具或接入发布包。
+AIClaw 当前产品工具在 **macOS 14.4 及以上**通过自有 Swift 应用 **AIClaw Computer Use.app** 执行桌面控制。Electron 宿主负责模型循环、审批与操作后的验证；独立原生进程负责应用发现、AX 元素、窗口截图和输入。Windows/Linux 自有执行层及用户目录安装同步已接入打包脚本并进行平台 CI；完整产品工具注册和安装包启动验收仍在开发。
 
 实现源码在 `tools/computer-use/Sources/`。本轮依据 Codex 已发布产物恢复出的接口形状重建桌面能力，调查证据和未实现能力见 [Codex 能力与证据盘点](codex-computer-use-evidence.md)。没有复制或加载 Codex 的私有运行时。
 
@@ -109,15 +109,17 @@ Linux 原型源码位于 `tools/computer-use/linux/`，直接调用 X11/XTest/XC
 
 Linux 前台纯文本粘贴已在 GTK 控件回读中文与 emoji。剪贴板事务保存所有可读取的原始格式（最多 64 格式、合计 16 MiB，超限在输入前拒绝），通过 XFixes 代际和同一 GDK X 连接的 server grab 避免覆盖期间发生的新复制。真实测试验证 HTML 和自定义二进制格式恢复、过期代际拒绝覆盖。X11 剪贴板数据依赖所有者存活，因此连接 EOF 后关闭输入/截图连接并清除元素，只在需要时继续提供已恢复的剪贴板字节；独立控制管道告知宿主不要终止该提供者。下一次复制后自动退出，不写历史或磁盘。宿主真实测试已验证跨越正常子进程退出期限仍可读取全部原格式，并在新复制后退出。
 
-Linux 服务当前仅接受 text/HTML 粘贴格式；HTML 的真实富文本消费、Markdown 转换、完整参数对齐、安装/打包和 Agent 工具启用尚未验收。截图已实现 `text_limit` 与 `max_tree_depth` 并明确标记截断；观察订阅请求完整的有界 AX 文本，避免数字索引位数变化改变文本截断位置而产生误报。正常关闭以进程出生标识和退出状态确认，不把窗口消失当成进程退出。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland。
+Linux 服务当前仅接受 text/HTML 粘贴格式；HTML 的真实富文本消费、Markdown 转换、完整参数对齐、完整安装包启动和 Agent 工具启用尚未验收。截图已实现 `text_limit` 与 `max_tree_depth` 并明确标记截断；观察订阅请求完整的有界 AX 文本，避免数字索引位数变化改变文本截断位置而产生误报。正常关闭以进程出生标识和退出状态确认，不把窗口消失当成进程退出。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland。
 
-Windows 的自有 Win32/UIA 执行层和双 WinForms 测试已加入独立 CI。UIA 的旧版代理装载器需要检查调用栈，因此在独立编译的 MTA 线程中初始化，避开 PowerShell 动态帧。实测部分 UIA 写操作会激活目标，后台路径改为有超时的标准 Edit/Button 消息，并校验控件类、PID、同用户和所属顶层窗口；其它控件拒绝后台回退。标准 Edit 设值/选择、Button 点击及 CheckBox 切换、生效回读、前台/鼠标/剪贴板保持，以及遮挡下目标 PNG 已通过 [Windows/Linux 平台 CI](https://github.com/chowyu12/aiclaw/actions/runs/42046125360)。源码和 [Windows 实测回执](/Users/zhouyy/.codex/visualizations/2026/11/05/01a1aacb-6689-7b11-841f-9bcc35cb2d46/computer-use-roadmap/windows-native-summary.json) 均保留。同轮 CI 还验证 Windows 前台按键、中文/emoji 输入、拖动、滚动及正常退出。Windows 启动/粘贴、跨平台安装包接入和 Agent 工具启用仍在进行，不能作为第五阶段完成证明。
+Windows 的自有 Win32/UIA 执行层和双 WinForms 测试已加入独立 CI。UIA 的旧版代理装载器需要检查调用栈，因此在独立编译的 MTA 线程中初始化，避开 PowerShell 动态帧。实测部分 UIA 写操作会激活目标，后台路径改为有超时的标准 Edit/Button 消息，并校验控件类、PID、同用户和所属顶层窗口；其它控件拒绝后台回退。标准 Edit 设值/选择、Button 点击及 CheckBox 切换、生效回读、前台/鼠标/剪贴板保持，以及遮挡下目标 PNG 已通过 [Windows/Linux 平台 CI](https://github.com/chowyu12/aiclaw/actions/runs/42048933163)。源码和 [Windows 实测回执](/Users/zhouyy/.codex/visualizations/2026/11/05/01a1aacb-6689-7b11-841f-9bcc35cb2d46/computer-use-roadmap/windows-native-summary.json) 均保留。同轮 CI 还验证 Windows 前台按键、中文/emoji 输入、拖动、滚动及正常退出。Windows 从本连接发现的开始菜单快捷方式启动也已验收：快捷方式摘要变化和任意路径请求均被拒绝；通过实际启动 PID/出生标识确认窗口，无法确认时不重放。该启动调用在独立 STA 线程执行，UIA 客户端仍为 MTA。Windows 真实宿主还验证静止窗口去重和 AX 增量重建。Windows 粘贴、完整安装包启动和 Agent 工具启用仍在进行，不能作为第五阶段完成证明。
 
 ## 构建、打包与签名
 
 `node scripts/build-computer-runtime.mjs --universal` 在 macOS 上编译 arm64/x86_64，合并 universal 可执行文件，生成 bundle、工具资源和 hash 元数据，并校验签名。`make build-computer` 可构建本机版本。运行时随应用放在 ASAR 外，首次使用不下载驱动。
 
-CI 的 macOS job 构建并验证 universal helper，上传 tar artifact；Linux 打包 job 接收该产物，为两个 macOS 架构交叉打包。Windows/Linux 包不附带原生桌面替代实现。
+CI 的 macOS job 构建并验证 universal helper，上传 tar artifact；Linux 打包 job 接收该产物，为两个 macOS 架构交叉打包。Windows/Linux 打包脚本仅复制各平台固定的自有服务源码和动作清单，不包含 fixture 或测试脚本。Windows 使用系统 Windows PowerShell/UIA；Linux X11 使用系统 Python/PyGObject、GTK3/AT-SPI、XTest/XComposite/XFixes，系统依赖缺失时明确失败，不下载替代桌面驱动。
+
+Windows/Linux 随应用启动同步到 `~/.aiclaw/computer-use/<linux|win32>/<源码与动作清单摘要>/`，首次调用也核验安装。先完整写入临时目录，再原子发布；同一代际复用，损坏或链接代际拒绝执行。文件边界参与安装摘要，协议另核对执行源码摘要。Unix 还检查目录所有者与写权限。不同版本使用独立目录，避免 Windows 活跃进程占用工作目录时替换失败，并保留并存旧宿主使用的旧代际。这些目录只包含运行时源码和清单，不存截图/剪贴板历史；旧代际暂不自动清理。平台 CI 已从实际用户安装目录启动进程并完成桌面操作。
 
 当前验证使用 **ad-hoc 开发签名**。构建脚本支持 `COMPUTER_USE_SIGN_IDENTITY`，但尚未配置生产证书或完成公证。不能据此保证更新后的权限持续有效；生产交付需要稳定签名身份与单独的安装、升级验收。
 

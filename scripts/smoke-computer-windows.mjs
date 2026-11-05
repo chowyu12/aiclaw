@@ -129,7 +129,7 @@ try {
   assert.equal(started.verified,true); launchedPID=Number(started.app);
   await call("get_app_state",{app:started.app});
   assert.equal(value(await call("stop_app",{app:started.app})).verified,true); launchedPID=undefined;
-  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,host_controller:true,static_window_no_update:true,ax_delta_reconstructed:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true,discovered_shortcut_launch:true,changed_shortcut_refused:true,arbitrary_launch_path_refused:true,launched_pid_verified:true,launched_window_observed:true}));
+  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,self_targets_refused:true,host_controller:true,static_window_no_update:true,ax_delta_reconstructed:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true,discovered_shortcut_launch:true,changed_shortcut_refused:true,arbitrary_launch_path_refused:true,launched_pid_verified:true,launched_window_observed:true}));
 } finally {
   await runtime?.close();
   await controller.close();

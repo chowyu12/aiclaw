@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import select
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -16,8 +17,11 @@ from gi.repository import GdkPixbuf
 here = Path(__file__).resolve().parent
 manifest = sys.argv[1]
 with tempfile.TemporaryDirectory(prefix="aiclaw-linux-acceptance-") as temp:
+    forbidden_binary = Path(temp, "aiclaw")
+    shutil.copyfile(sys.executable, forbidden_binary); forbidden_binary.chmod(0o700)
     target = subprocess.Popen([sys.executable, str(here / "fixture.py"), f"{temp}/receipt.json", "AIClaw Target Fixture"], stdout=subprocess.PIPE)
     sentinel = subprocess.Popen([sys.executable, str(here / "fixture.py"), f"{temp}/sentinel.json", "AIClaw Sentinel Fixture"], stdout=subprocess.PIPE)
+    forbidden = subprocess.Popen([str(forbidden_binary), str(here / "fixture.py"), f"{temp}/approval.json", "AIClaw Approval Fixture"], stdout=subprocess.PIPE)
     service = subprocess.Popen([sys.executable, str(here / "service.py"), manifest], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     sequence = 0
     def call(kind, request=None):
@@ -39,10 +43,14 @@ with tempfile.TemporaryDirectory(prefix="aiclaw-linux-acceptance-") as temp:
     def action(name, values, background=False):
         return call("ComputerUseIPCAppPerformActionRequest", {"app": str(target.pid), "interactionMode": "background" if background else "foreground", "action": {name: values}})
     try:
-        for fixture in (target, sentinel):
+        for fixture in (target, sentinel, forbidden):
             assert select.select([fixture.stdout], [], [], 10)[0] and fixture.stdout.readline() == b"READY\n"
         handshake = call("ComputerUseIPCHandshakeRequest")
         assert handshake["protocolVersion"] == "AIClawComputerUseIPC-1"
+        assert not payload(call("ComputerUseIPCFindAppsRequest", {"text": "AIClaw Approval Fixture"}))["apps"]
+        try: call("ComputerUseIPCAppGetSkyshotRequest", {"app": str(forbidden.pid)})
+        except RuntimeError as error: assert "unique target window" in str(error)
+        else: raise AssertionError("An AIClaw executable must not become an input target")
         for attempt in range(30):
             discovery = payload(call("ComputerUseIPCFindAppsRequest", {"text": "AIClaw Target Fixture"}))
             if any(item["id"] == str(target.pid) for item in discovery["apps"]): break
@@ -94,10 +102,10 @@ with tempfile.TemporaryDirectory(prefix="aiclaw-linux-acceptance-") as temp:
         receipt = json.loads(Path(f"{temp}/receipt.json").read_text())
         assert receipt["value"] == value + addition, receipt
         assert receipt["drags"] > 0 and receipt["scrolls"] > 0, receipt
-        print(json.dumps({"passed": True, "backend": "x11-atspi", "native_ipc": True, "discovery": True, "background_value": value, "selection": True, "click_receipt": True, "foreground_unchanged": True, "pointer_unchanged": True, "window_only_png": True, "occluded_target_color_verified": True, "unicode_insertion": True, "key_read_back": True, **receipt}, ensure_ascii=False))
+        print(json.dumps({"passed": True, "backend": "x11-atspi", "native_ipc": True, "self_targets_refused": True, "discovery": True, "background_value": value, "selection": True, "click_receipt": True, "foreground_unchanged": True, "pointer_unchanged": True, "window_only_png": True, "occluded_target_color_verified": True, "unicode_insertion": True, "key_read_back": True, **receipt}, ensure_ascii=False))
     finally:
         service.stdin.close()
         try: service.wait(timeout=4)
         except subprocess.TimeoutExpired: service.terminate(); service.wait(timeout=4)
-        for fixture in (target, sentinel):
+        for fixture in (target, sentinel, forbidden):
             fixture.terminate(); fixture.wait(timeout=4)
