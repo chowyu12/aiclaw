@@ -19,8 +19,11 @@ app.whenReady().then(async () => {
     for (const spec of specs) {
       const upstream = manifest.tools.find(tool => tool.name === spec.action);
       if (!upstream) throw Error(`Native runtime is missing ${spec.action}`);
+      const platform = process.platform === "win32" ? "windows" : process.platform;
       for (const field of Object.keys(spec.schema.properties)) {
-        if (!upstream.inputSchema.properties[field]) throw Error(`Native runtime is missing ${spec.action}.${field}`);
+        const platforms = spec.platformFields?.[field];
+        if (platforms && !platforms.includes(platform)) continue;
+        if (!upstream.inputSchema.properties[field]) throw Error(`Native runtime is missing ${spec.action}.${field} on ${platform}`);
       }
     }
     console.log(`Cua Driver 0.38.0: Electron loaded the real native library; ${specs.length} tool contracts verified (no desktop actions).`);

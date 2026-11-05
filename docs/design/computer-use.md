@@ -71,6 +71,13 @@ For each upgrade:
 5. Update the pinned version references in the native smoke and documentation,
    then ship the reviewed upgrade in a normal AIClaw release.
 
+Optional platform-specific parameters are declared in each tool's `platformFields`
+metadata. The kernel projects the model-facing schema for its OS before tool
+registration (for example, `click.action` is available on macOS/Windows but not
+Linux in 0.38.0). The host independently checks arguments against the loaded
+native runtime's tool manifest before dispatch. Native contract checks run on
+Linux, macOS and Windows and gate release packaging.
+
 When upgrading the SDK, review the window-scoped subset in
 `tools/claw-agent/internal/agent/computer-tools.json` and the host allowlist
 together. `scripts/smoke-computer.cjs` loads the real native SDK inside Electron

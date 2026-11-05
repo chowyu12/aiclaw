@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
@@ -20,19 +21,61 @@ import (
 var computerToolsJSON []byte
 
 type computerToolSpec struct {
-	Name        string                  `json:"name"`
-	Action      protocol.ComputerAction `json:"action"`
-	ReadOnly    bool                    `json:"readOnly"`
-	Description string                  `json:"description"`
-	Schema      json.RawMessage         `json:"schema"`
+	Name           string                  `json:"name"`
+	Action         protocol.ComputerAction `json:"action"`
+	ReadOnly       bool                    `json:"readOnly"`
+	Description    string                  `json:"description"`
+	Schema         json.RawMessage         `json:"schema"`
+	PlatformFields map[string][]string     `json:"platformFields,omitempty"`
+}
+
+// Project optional native fields before exposing the schema to the model.
+// GOOS uses "windows", matching the platform names in the pinned contract.
+func computerToolSpecs(platform string) ([]computerToolSpec, error) {
+	var specs []computerToolSpec
+	if err := json.Unmarshal(computerToolsJSON, &specs); err != nil {
+		return nil, err
+	}
+	for i := range specs {
+		spec := &specs[i]
+		if len(spec.PlatformFields) == 0 {
+			continue
+		}
+		var schema struct {
+			Type                 string                     `json:"type"`
+			Properties           map[string]json.RawMessage `json:"properties"`
+			AdditionalProperties bool                       `json:"additionalProperties"`
+			Required             []string                   `json:"required,omitempty"`
+		}
+		if err := json.Unmarshal(spec.Schema, &schema); err != nil {
+			return nil, err
+		}
+		for field, platforms := range spec.PlatformFields {
+			supported := false
+			for _, candidate := range platforms {
+				if candidate == platform {
+					supported = true
+				}
+			}
+			if !supported {
+				delete(schema.Properties, field)
+			}
+		}
+		raw, err := json.Marshal(schema)
+		if err != nil {
+			return nil, err
+		}
+		spec.Schema = raw
+	}
+	return specs, nil
 }
 
 func (s *Session) registerComputerTools() error {
 	if !s.config.EnableComputerUse {
 		return nil
 	}
-	var specs []computerToolSpec
-	if err := json.Unmarshal(computerToolsJSON, &specs); err != nil {
+	specs, err := computerToolSpecs(runtime.GOOS)
+	if err != nil {
 		return err
 	}
 	for _, spec := range specs {

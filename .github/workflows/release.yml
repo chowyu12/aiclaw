@@ -53,8 +53,28 @@ jobs:
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
           xvfb-run --auto-servernum npm run smoke:desktop
 
+  computer-contract:
+    name: Native computer contract (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm run setup:electron
+      # No screenshots or input: verify the real platform's library and schemas.
+      - run: npx --no-install electron scripts/smoke-computer.cjs
+
   package:
-    needs: test
+    needs: [test, computer-contract]
     # One Linux runner produces every package: the kernel builds with
     # CGO_ENABLED=0 for any GOOS/GOARCH, @electron/packager cross-packages,
     # and the Windows exe metadata is written with resedit (no wine).

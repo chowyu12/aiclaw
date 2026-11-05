@@ -35,6 +35,7 @@ app.whenReady().then(async () => {
         if (name === "get_window_state" && result.structuredJson) latest = JSON.parse(result.structuredJson);
         return result;
       },
+      listToolsJson: () => native.listToolsJson(),
       shutdown: () => native.shutdown(), uniffiDestroy: () => native.uniffiDestroy?.(),
     };
   });

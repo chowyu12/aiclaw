@@ -109,7 +109,7 @@
     "name": "computer_click",
     "action": "click",
     "readOnly": false,
-    "description": "Click a control using element_token and an AX action advertised by the fresh window snapshot. For editable fields prefer computer_type directly. Use x,y for controls that cannot be operated through AX, with capture_id from that observation. Defaults to background delivery. Foreground must be explicitly requested only when background is unsupported. Never guess coordinates or click AIClaw.",
+    "description": "Click a control using element_token from the fresh window snapshot. On macOS/Windows, action selects an advertised accessibility action; Linux uses the control default. For editable fields prefer computer_type directly. Use x,y for controls that cannot be operated through AX, with capture_id from that observation. Defaults to background delivery. Foreground must be explicitly requested only when background is unsupported. Never guess coordinates or click AIClaw.",
     "schema": {
       "type": "object",
       "properties": {
@@ -170,6 +170,12 @@
       "required": [
         "pid",
         "window_id"
+      ]
+    },
+    "platformFields": {
+      "action": [
+        "darwin",
+        "windows"
       ]
     }
   },

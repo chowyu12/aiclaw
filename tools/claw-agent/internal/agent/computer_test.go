@@ -83,3 +83,37 @@ func TestComputerSchemaRejectsDesktopOverridesBeforeHostCall(t *testing.T) {
 		}
 	}
 }
+
+func TestComputerSchemasFollowNativePlatformCapabilities(t *testing.T) {
+	for _, platform := range []string{"darwin", "windows", "linux"} {
+		t.Run(platform, func(t *testing.T) {
+			specs, err := computerToolSpecs(platform)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, spec := range specs {
+				if spec.Name != "computer_click" {
+					continue
+				}
+				var schema struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				}
+				if err := json.Unmarshal(spec.Schema, &schema); err != nil {
+					t.Fatal(err)
+				}
+				_, hasAction := schema.Properties["action"]
+				if hasAction != (platform != "linux") {
+					t.Fatalf("%s click.action advertised=%t", platform, hasAction)
+				}
+				args := json.RawMessage(`{"pid":123,"window_id":456,"action":"show_menu"}`)
+				err = validateComputerArgs(args, spec.Schema)
+				if (err != nil) != (platform == "linux") {
+					t.Fatalf("%s accepted unsupported action: %v", platform, err)
+				}
+				if err := validateComputerArgs(json.RawMessage(`{"pid":123,"window_id":456,"element_token":"s00000001:1"}`), spec.Schema); err != nil {
+					t.Fatalf("common click rejected on %s: %v", platform, err)
+				}
+			}
+		})
+	}
+}

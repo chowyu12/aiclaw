@@ -17,7 +17,7 @@ const ARGUMENTS: Record<string, string[]> = {
   drag: [...WINDOW_ARGS, "from_x", "from_y", "to_x", "to_y", "duration_ms"],
 };
 
-type Driver = Pick<CuaDriverLike, "callTool" | "shutdown"> & { uniffiDestroy?: () => void };
+type Driver = Pick<CuaDriverLike, "callTool" | "shutdown" | "listToolsJson"> & { uniffiDestroy?: () => void };
 type DriverFactory = () => Promise<Driver>;
 
 async function loadDriver(): Promise<Driver> {
@@ -48,6 +48,7 @@ function observation(result: ToolResult): ComputerResult {
 /** Host-owned Cua runtime, with ordered operations and isolated per-chat sessions. */
 export class ComputerController {
   private driver?: Promise<Driver>;
+  private nativeArguments = new Map<string, Set<string>>();
   private queue: Promise<unknown> = Promise.resolve();
   private readonly snapshots = new Map<string, { id: string; pixels: boolean }>();
 
@@ -78,7 +79,22 @@ export class ComputerController {
     }
     const session = request.sessionId;
     if (!session) throw new Error("Computer session is missing");
-    const driver = await (this.driver ??= this.createDriver().catch(error => { this.driver = undefined; throw error; }));
+    const driver = await (this.driver ??= this.createDriver().then(async driver => {
+      try {
+        const manifest = JSON.parse(await driver.listToolsJson());
+        this.nativeArguments = new Map(manifest.tools.map((tool: { name: string; inputSchema: { properties: Record<string, unknown> } }) =>
+          [tool.name, new Set(Object.keys(tool.inputSchema.properties ?? {}))]));
+        return driver;
+      } catch (error) {
+        try { await driver.shutdown(); } finally { driver.uniffiDestroy?.(); }
+        throw error;
+      }
+    }).catch(error => { this.driver = undefined; throw error; }));
+    const nativeArguments = this.nativeArguments.get(action);
+    if (!nativeArguments) throw new Error(`Native runtime does not support ${action} on ${process.platform}`);
+    for (const field of Object.keys(args)) {
+      if (!nativeArguments.has(field)) throw new Error(`Native runtime does not support ${action}.${field} on ${process.platform}`);
+    }
     const call = async (name: string, params: Record<string, unknown>) => checked(await driver.callTool(name, JSON.stringify({ ...params, session }), { signal: AbortSignal.timeout(name === "list_windows" ? 5_000 : 20_000) }));
     const snapshotKey = `${session}:${args.pid}:${args.window_id}`;
     if (INPUTS.has(action)) {
@@ -158,6 +174,7 @@ export class ComputerController {
     const pending = this.driver;
     this.driver = undefined;
     this.snapshots.clear();
+    this.nativeArguments.clear();
     if (pending) {
       const driver = await pending;
       try { await driver.shutdown(); } finally { driver.uniffiDestroy?.(); }

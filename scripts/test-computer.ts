@@ -6,6 +6,8 @@ import type { ToolResult } from "@trycua/cua-driver";
 import { ComputerController } from "../apps/desktop/src/main/computer.ts";
 import { driverTarget, verifyIntegrity } from "./stage-computer-driver.mjs";
 
+const computerSpecs = JSON.parse(readFileSync(new URL("../tools/claw-agent/internal/agent/computer-tools.json", import.meta.url), "utf8"));
+
 const target = { pid: 123, window_id: 456 };
 const snapshotID = "s00000001";
 const imageBase64 = "iVBORw0KGgo=";
@@ -13,13 +15,20 @@ function result(text = "receipt", data?: unknown, image = false): ToolResult {
   return { text, images: image ? [{ mimeType: "image/png", dataBase64: imageBase64 }] : [],
     structuredJson: data ? JSON.stringify(data) : undefined, isError: false, degraded: false, rawJson: "{}" };
 }
-function harness(options: { fail?: string; postFails?: boolean; self?: boolean; noImage?: boolean; factoryFails?: boolean } = {}) {
+function harness(options: { fail?: string; postFails?: boolean; self?: boolean; noImage?: boolean; factoryFails?: boolean; missingAction?: boolean } = {}) {
   const calls: { action: string; args: Record<string, any> }[] = [];
   let reads = 0, closed = 0, destroyed = 0, created = 0;
   const controller = new ComputerController(async () => {
     created++;
     if (options.factoryFails && created === 1) throw Error("native library unavailable");
     return {
+      async listToolsJson() {
+        return JSON.stringify({ tools: computerSpecs.map((spec: any) => {
+          const properties = { ...spec.schema.properties };
+          if (options.missingAction && spec.action === "click") delete properties.action;
+          return { name: spec.action, inputSchema: { properties } };
+        }) });
+      },
       async callTool(action: string, raw: string) {
         const args = JSON.parse(raw); calls.push({ action, args });
         if (options.fail === action) return { ...result("permission_missing: enable Accessibility for AIClaw"), isError: true, errorCode: "permission_missing" };
@@ -180,4 +189,13 @@ test("cross-package selects the target library and verifies exact SHA-512 bytes"
   verifyIntegrity(bytes, integrity);
   assert.throws(() => verifyIntegrity(Buffer.from("changed"), integrity), /integrity mismatch/);
   assert.throws(() => verifyIntegrity(bytes, ""), /Missing SHA-512/);
+});
+
+
+test("platform-unsupported fields are refused before native dispatch", async () => {
+  const h = harness({ missingAction: true }); await h.observe();
+  await assert.rejects(h.perform("click", { ...target, action: "show_menu" }), /Native runtime does not support click.action/);
+  assert.equal(h.calls.filter(c => c.action === "click").length, 0);
+  await h.perform("click", { ...target, element_token: `${snapshotID}:4` });
+  assert.equal(h.calls.filter(c => c.action === "click").length, 1);
 });
