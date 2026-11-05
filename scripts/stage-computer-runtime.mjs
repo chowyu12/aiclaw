@@ -5,7 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 export async function stageComputerRuntime({ repo, destination, platform, arch }) {
   if (platform !== "darwin") {
-    const files = {linux:["service.py","x11.py","clipboard.py"],win32:["Service.ps1","Native.cs"]}[platform];
+    const files = {linux:["service.py","x11.py","clipboard.py"],win32:["Service.ps1","Native.cs","Clipboard.cs"]}[platform];
     if (!files) throw Error(`Unsupported Computer Use platform: ${platform}`);
     const directory = join(destination,"computer-use",platform);
     await mkdir(directory,{recursive:true});

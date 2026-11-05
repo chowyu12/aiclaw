@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 export const portableSources = {
   linux: ["service.py", "x11.py", "clipboard.py"],
-  win32: ["Service.ps1", "Native.cs"],
+  win32: ["Service.ps1", "Native.cs", "Clipboard.cs"],
 } as const;
 export type PortablePlatform = keyof typeof portableSources;
 

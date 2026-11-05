@@ -117,6 +117,27 @@ try {
     await pause(50);
   }
   assert.equal(receipt.value,text+addition); assert.ok(receipt.drags>0); assert.ok(receipt.scrolls>0);
+  const clipboard=async source=>run(powershell,["-NoProfile","-NonInteractive","-STA","-EncodedCommand",encoded('Add-Type -AssemblyName System.Windows.Forms; '+source)],{timeout:30_000});
+  await clipboard('[Windows.Forms.Clipboard]::SetText("AIClaw original clipboard")');
+  // Focus the Edit explicitly with a coordinate click, rather than assuming a
+  // previous semantic action moved keyboard focus.
+  const inputFrame=(await query("Fixture input")).frame;
+  const inputScreen=value(await call("get_app_state",{app,include_ax:false}));
+  await call("click",{app,x:inputFrame.x-inputScreen.window_frame.x+10,y:inputFrame.y-inputScreen.window_frame.y+10});
+  await call("get_app_state",{app,include_ax:false});
+  await action("pressKey",{key:"ctrl+a"});
+  await call("get_app_state",{app,include_ax:false});
+  const pasted="Windows 粘贴 🌦️";
+  const pasteReceipt=value(await call("paste",{app,text:pasted,format:"text"}));
+  assert.equal(pasteReceipt.dispatched,true); assert.equal(pasteReceipt.clipboard_restored,true);
+  assert.equal((await clipboard('[Console]::Write([Windows.Forms.Clipboard]::GetText())')).stdout,"AIClaw original clipboard");
+  await action("click",{element_index:String((await query("Submit fixture")).index)},true);
+  receipt=JSON.parse(await readFile(join(temporary,"target.json"),"utf8"));
+  assert.equal(receipt.value,pasted);
+  await query("Fixture input");
+  await assert.rejects(call("paste",{app,text:"must not paste",format:"text"}),/fresh window screenshot/);
+  await call("get_app_state",{app,include_ax:false});
+  await assert.rejects(call("paste",{app,text:"must not paste",interaction_mode:"background"}),/Background action unsupported/);
   const stopped=value(await call("stop_app",{app})); assert.equal(stopped.verified,true);
   const installed=value(await call("find_apps",{text:"AIClaw Launch Fixture"}));
   const launcher=installed.apps.find(item=>item.launch_id); assert.ok(launcher);
@@ -129,7 +150,7 @@ try {
   assert.equal(started.verified,true); launchedPID=Number(started.app);
   await call("get_app_state",{app:started.app});
   assert.equal(value(await call("stop_app",{app:started.app})).verified,true); launchedPID=undefined;
-  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,self_targets_refused:true,host_controller:true,static_window_no_update:true,ax_delta_reconstructed:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true,discovered_shortcut_launch:true,changed_shortcut_refused:true,arbitrary_launch_path_refused:true,launched_pid_verified:true,launched_window_observed:true}));
+  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,self_targets_refused:true,host_controller:true,static_window_no_update:true,ax_delta_reconstructed:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,unicode_paste_read_back:true,clipboard_text_restored:true,query_only_paste_refused:true,background_paste_refused:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true,discovered_shortcut_launch:true,changed_shortcut_refused:true,arbitrary_launch_path_refused:true,launched_pid_verified:true,launched_window_observed:true}));
 } finally {
   await runtime?.close();
   await controller.close();

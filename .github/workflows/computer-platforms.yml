@@ -30,6 +30,9 @@ jobs:
         run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer-install.ts scripts/test-computer.ts scripts/test-computer-watch.ts
       - name: Native Windows UIA and window capture acceptance
         run: node scripts/smoke-computer-windows.mjs
+      - name: Native clipboard transactions
+        shell: powershell
+        run: powershell.exe -NoProfile -NonInteractive -STA -File tools/computer-use/windows/TestClipboard.ps1
   linux-x11:
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -7,7 +7,7 @@ $script:servicePath = if ($PSCommandPath) { $PSCommandPath } else { $env:AICLAW_
 $script:serviceRoot = Split-Path -Parent $script:servicePath
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, UIAutomationClientsideProviders, System.Drawing, System.Windows.Forms
 $proxyAssembly=[AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq 'UIAutomationClientsideProviders' } | Select-Object -First 1
-Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $script:serviceRoot 'Native.cs'))) -ReferencedAssemblies @('System.dll','System.Drawing.dll','System.Windows.Forms.dll',[System.Windows.Automation.AutomationElement].Assembly.Location)
+Add-Type -Path @((Join-Path $script:serviceRoot 'Native.cs'),(Join-Path $script:serviceRoot 'Clipboard.cs')) -ReferencedAssemblies @('System.dll','System.Drawing.dll','System.Windows.Forms.dll',[System.Windows.Automation.AutomationElement].Assembly.Location)
 [AIClawComputerUse.Native]::InitializeAutomation($proxyAssembly.GetName())
 [void][AIClawComputerUse.Native]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $script:target = $null
@@ -17,14 +17,15 @@ $script:counter = 0
 $script:imageSize = $null
 $script:truncated = $false
 $script:parentPid = [int]$env:AICLAW_COMPUTER_PARENT_PID
-[byte[]]$source = [IO.File]::ReadAllBytes($script:servicePath) + [IO.File]::ReadAllBytes((Join-Path $script:serviceRoot 'Native.cs'))
+[byte[]]$source = [IO.File]::ReadAllBytes($script:servicePath) + [IO.File]::ReadAllBytes((Join-Path $script:serviceRoot 'Native.cs')) + [IO.File]::ReadAllBytes((Join-Path $script:serviceRoot 'Clipboard.cs'))
 $sha = [Security.Cryptography.SHA256]::Create()
 $script:sourceHash = -join ($sha.ComputeHash($source) | ForEach-Object { $_.ToString('x2') }); $sha.Dispose()
 $specs = Get-Content -Raw -LiteralPath $Manifest | ConvertFrom-Json
-$supported = @('list_apps','find_apps','permission_status','frontmost_window','get_app_state','query','click','set_value','select_text','perform_secondary_action','press_key','type_text','scroll','drag','stop_app','modify_app','start_app')
+$supported = @('list_apps','find_apps','permission_status','frontmost_window','get_app_state','query','click','set_value','select_text','perform_secondary_action','press_key','type_text','scroll','drag','stop_app','modify_app','start_app','paste')
 $tools = @($specs | Where-Object { $supported -contains $_.action } | ForEach-Object {
     $_.schema.properties.PSObject.Properties.Remove('observation_id')
     $_.schema.properties.PSObject.Properties.Remove('verify_after')
+    if ($_.action -eq 'paste') { $_.schema.properties.format.enum=@('text','html') }
     if ($null -ne $_.schema.PSObject.Properties['required']) { $_.schema.required = @($_.schema.required | Where-Object { $_ -ne 'observation_id' }) }
     else { Add-Member -InputObject $_.schema -MemberType NoteProperty -Name required -Value @() }
     @{name=$_.action;inputSchema=$_.schema}
@@ -346,6 +347,7 @@ function Perform($argsObject) {
             }
         }
         if (-not $semantic) {
+            if ($operation -eq 'paste' -and $null -eq $script:imageSize) { throw 'Paste needs a fresh window screenshot, not only a query' }
             Activate $targetObject
             switch ($operation) {
                 'click' {
@@ -364,6 +366,17 @@ function Perform($argsObject) {
                 'type' {
                     $value=Value $values 'text'; if ($value -isnot [string] -or $value.Length -gt 2000000) { throw 'Type needs bounded text' }
                     foreach ($unit in $value.ToCharArray()) { Check-Focus $targetObject; [AIClawComputerUse.Native]::Unicode([uint16]$unit,$true); [AIClawComputerUse.Native]::Unicode([uint16]$unit,$false) }
+                }
+                'paste' {
+                    $transaction=New-Object AIClawComputerUse.ClipboardTransaction -ArgumentList @((Value $values 'text'),(Value $values 'format' 'text'))
+                    try {
+                        $held=@()
+                        try {
+                            foreach ($code in @(17,86)) { Check-Focus $targetObject; $transaction.VerifyCurrent(); [AIClawComputerUse.Native]::Key($code,$true); $held += $code }
+                        } finally { [array]::Reverse($held); foreach ($code in $held) { [AIClawComputerUse.Native]::Key($code,$false) } }
+                        Wait-Checked 0.3
+                    } finally { $transaction.Dispose() }
+                    return Text @{action='paste';dispatched=$true;clipboard_restored=$transaction.Restored;newer_copy_preserved=$transaction.NewerCopyPreserved}
                 }
                 'scroll' {
                     $direction=Value $values 'direction'; $pages=Number (Value $values 'pages') 1 0.01 100
@@ -438,3 +451,4 @@ while (-not [AIClawComputerUse.Native]::ParentEnded) {
     catch { $response=@{id=$(if ($frame) {$frame.id} else {$null});error=@{message=$_.Exception.Message}} }
     [Console]::WriteLine((ConvertTo-Json -InputObject $response -Depth 40 -Compress))
 }
+[AIClawComputerUse.ClipboardTransaction]::Shutdown()
