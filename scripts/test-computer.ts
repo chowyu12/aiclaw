@@ -243,7 +243,8 @@ test("runtime capabilities reject unsupported fields rather than silently droppi
 });
 
 async function peer(mode = "ok", timeout = 300, sourceIdentity?: string) {
-  const directory = await mkdtemp(join(tmpdir(), "aiclaw-native-test-")); const path = join(directory, "ipc.sock");
+  const directory = await mkdtemp(join(tmpdir(), "aiclaw-native-test-"));
+  const path = process.platform === "win32" ? String.raw`\\.\pipe\aiclaw-native-${createHash("sha256").update(directory).digest("hex")}` : join(directory, "ipc.sock");
   const requests: any[] = []; const sockets = new Set<import("node:net").Socket>();
   const server = createServer(socket => {
     sockets.add(socket); socket.on("close", () => sockets.delete(socket)); let buffer = "";
@@ -263,7 +264,7 @@ async function peer(mode = "ok", timeout = 300, sourceIdentity?: string) {
       }
     });
   });
-  await new Promise<void>(resolve => server.listen(path, resolve));
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(path, resolve); });
   const socket = createConnection(path); await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
   const runtime = sourceIdentity ? new ComputerPortableRuntime(socket, sourceIdentity) : new ComputerNativeRuntime(socket, timeout);
   return { runtime, requests, async close() { await runtime.close(); for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); } };
