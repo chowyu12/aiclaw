@@ -51,6 +51,11 @@ function Number($value, [double]$default, [double]$low, [double]$high) {
     return [double]$value
 }
 function Frame($rect) { return @{x=$rect.Left;y=$rect.Top;width=$rect.Right-$rect.Left;height=$rect.Bottom-$rect.Top} }
+function File-Hash([string]$path) {
+    $sha=[Security.Cryptography.SHA256]::Create(); $stream=[IO.File]::OpenRead($path)
+    try { return -join ($sha.ComputeHash($stream) | ForEach-Object { $_.ToString('x2') }) }
+    finally { $stream.Dispose(); $sha.Dispose() }
+}
 function Installed-Apps([string]$needle) {
     $shell=New-Object -ComObject WScript.Shell
     try {
@@ -64,7 +69,7 @@ function Installed-Apps([string]$needle) {
                     $shortcut=$shell.CreateShortcut($file.FullName)
                     $executable=[IO.Path]::GetFileName($shortcut.TargetPath)
                     if (-not $executable -or $executable -match '^(aiclaw|electron|claw-agent|aiclawcomputeruse)(\.exe)?$') { continue }
-                    $hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+                    $hash=File-Hash $file.FullName
                     $sha=[Security.Cryptography.SHA256]::Create()
                     try { $pathHash=-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($file.FullName)) | ForEach-Object { $_.ToString('x2') }) } finally { $sha.Dispose() }
                     $name=[regex]::Replace($file.BaseName,'[^a-zA-Z0-9_.-]','_')
@@ -80,7 +85,7 @@ function Start-App($argsObject) {
     $id=Value $argsObject 'app'
     if ($id -isnot [string] -or -not $script:launches.ContainsKey($id)) { throw 'Use an exact launch_id discovered on this connection; arbitrary commands and paths are not accepted' }
     $entry=$script:launches[$id]
-    if ((Get-FileHash -LiteralPath $entry.path -Algorithm SHA256).Hash -ne $entry.hash) { throw 'The discovered shortcut changed; discover it again before launch' }
+    if ((File-Hash $entry.path) -ne $entry.hash) { throw 'The discovered shortcut changed; discover it again before launch' }
     Clear-Observation; Check-Cancel
     $launched=[AIClawComputerUse.Native]::StartShortcut($entry.path)
     if ($null -ne $launched) {

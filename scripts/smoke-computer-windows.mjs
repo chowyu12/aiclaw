@@ -16,6 +16,8 @@ const temporary = await mkdtemp(join(tmpdir(), "aiclaw-windows-acceptance-"));
 const children = []; let runtime, shortcutFolder, launchedPID;
 const encoded = source => Buffer.from(source, "utf16le").toString("base64");
 const { ComputerPortableRuntime } = await import(new URL("../apps/desktop/dist/main/computer-portable-runtime.js", import.meta.url));
+const { ComputerController } = await import(new URL("../apps/desktop/dist/main/computer.js", import.meta.url));
+const controller = new ComputerController();
 const { stageComputerRuntime } = await import("./stage-computer-runtime.mjs");
 const value = result => JSON.parse(result.content.find(item => item.type === "text").text.split("\n")[0]);
 try {
@@ -70,8 +72,27 @@ try {
   assert.ok(Buffer.from(image.data,"base64").subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));
   const png=join(temporary,"window.png");await writeFile(png,Buffer.from(image.data,"base64"));
   await run(powershell,["-NoProfile","-NonInteractive","-EncodedCommand",encoded('Add-Type -AssemblyName System.Drawing; $image=[Drawing.Bitmap]::FromFile($env:AICLAW_FIXTURE_PNG); try {$red=0;for($y=0;$y -lt $image.Height;$y+=4){for($x=0;$x -lt $image.Width;$x+=4){$c=$image.GetPixel($x,$y);if($c.R -eq 204 -and $c.G -eq 51 -and $c.B -eq 68 -and $c.A -eq 255){$red++}}};if($red -lt 100){throw "Capture did not contain the occluded red target window"}} finally {$image.Dispose()}')],{env:{...process.env,AICLAW_FIXTURE_PNG:png},timeout:30_000});
+  const host=(action,args={})=>controller.perform({sessionId:"windows-host-acceptance",turnId:"t1",action,arguments:args});
+  const baselineResult=await host("watch_start",{app,interval_ms:500});
+  const baseline=JSON.parse(baselineResult.text); assert.ok(baselineResult.imageBase64);
+  const quiet=JSON.parse((await host("watch_next",{watch_id:baseline.watch_id,after_sequence:baseline.sequence,wait_ms:900})).text);
+  assert.equal(quiet.changed,false);
+  const setFromQuery=async value=>{
+    const queried=await host("query",{app,text:"Fixture input",exact:true});
+    const matches=JSON.parse(queried.text.split("\n")[0]).matches; assert.equal(matches.length,1);
+    const observation_id=queried.text.match(/observation_id: ([\w-]+)/)[1];
+    await host("set_value",{app,element_index:String(matches[0].index),observation_id,value,interaction_mode:"background",verify_after:false});
+  };
+  await setFromQuery("Windows 观察更新 🌦️");
+  const update=JSON.parse((await host("watch_next",{watch_id:baseline.watch_id,after_sequence:baseline.sequence,wait_ms:5000})).text);
+  assert.equal(update.changed,true); assert.equal(update.reset,false);
+  const lines=[...baseline.ax.lines]; lines.splice(update.ax.start,update.ax.delete_count,...update.ax.lines);
+  assert.ok(lines.some(line=>line.includes("Windows 观察更新 🌦️")));
+  await setFromQuery(text);
+  await controller.finishTurn("windows-host-acceptance","t1");
+  assert.equal(value(await call("frontmost_window")).app,front);
   await call("get_app_state",{app,include_ax:false});
-  await action("pressKey",{key:"Right"});
+  await action("pressKey",{key:"End"});
   await call("get_app_state",{app,include_ax:false});
   const addition=" +输入 🌤️";
   await action("type",{text:addition});
@@ -100,9 +121,10 @@ try {
   assert.equal(started.verified,true); launchedPID=Number(started.app);
   await call("get_app_state",{app:started.app});
   assert.equal(value(await call("stop_app",{app:started.app})).verified,true); launchedPID=undefined;
-  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true,discovered_shortcut_launch:true,changed_shortcut_refused:true,arbitrary_launch_path_refused:true,launched_pid_verified:true,launched_window_observed:true}));
+  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,host_controller:true,static_window_no_update:true,ax_delta_reconstructed:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true,discovered_shortcut_launch:true,changed_shortcut_refused:true,arbitrary_launch_path_refused:true,launched_pid_verified:true,launched_window_observed:true}));
 } finally {
   await runtime?.close();
+  await controller.close();
   for(const child of children) { if(child.exitCode===null&&child.signalCode===null) child.kill(); }
   if(launchedPID) {try {process.kill(launchedPID);} catch {}}
   if(shortcutFolder) await rm(shortcutFolder,{recursive:true,force:true,maxRetries:10,retryDelay:200});
