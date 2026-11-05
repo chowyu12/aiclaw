@@ -7,7 +7,7 @@ on:
       - 'apps/desktop/src/main/computer*.ts'
       - 'apps/desktop/src/main/index.ts'
       - 'scripts/stage-computer-runtime.mjs'
-      - 'scripts/test-computer-install.ts'
+      - 'scripts/test-computer*.ts'
       - 'scripts/smoke-computer-windows.mjs'
       - '.github/workflows/computer-platforms.yml'
   workflow_dispatch:
