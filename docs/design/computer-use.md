@@ -146,4 +146,20 @@ Windows/Linux 随应用启动同步到 `~/.aiclaw/computer-use/<linux|win32>/<�
 - Linux arm64 隔离桌面：宿主 Markdown → HTML → WebKit 加粗文本消费、中文/emoji 与原格式恢复通过；同平台 Agent 工具注册、审批、代码编排和取消测试通过。
 - 完整包验收脚本启动真实可执行文件，使用隔离用户目录，核对 renderer/preload、随包模块、用户目录运行时和源码身份握手；不是仅从源码目录 import 的测试。Windows/Linux x64 已在[最新平台 CI](https://github.com/chowyu12/aiclaw/actions/runs/42131183162)全部通过；还验证在任何桌面工具调用前，应用启动就已完成用户目录同步。
 - Windows/Linux x64 完整包及原生验收在 [同一轮 CI](https://github.com/chowyu12/aiclaw/actions/runs/42130869993) 全部通过；Linux x64 使用标准 Chromium 沙箱。Linux arm64 完整包另在本地容器通过（root 测试显式关闭 Chromium 沙箱）。
-- Wayland portal 执行层和原生逐帧/AX 事件流仍未实现；当前分别为明确拒绝 Wayland、宿主周期采样。保留整体目标进行中，不宣称任意平台或与 Codex 私有实现全面等价。
+- Wayland portal 执行层和原生逐帧/AX 事件流仍未实现；当前分别为明确拒绝 Wayland、宿主周期采样。这是已声明的能力边界，不宣称任意平台或与 Codex 私有实现全面等价。
+
+### 原目标逐项验收
+
+本轮目标为五阶段实现、审批/取消/目标校验、Windows 粘贴、Linux 富文本/Markdown、产品工具注册、完整包验收，以及明确 Wayland 能力边界。这里按这些要求验收；原生逐帧流和 Wayland portal 保留在能力差距清单，不作为已实现能力。
+
+| 原目标 | 实现与验收证据 | 明确边界 |
+| --- | --- | --- |
+| 连续执行编排 | `TestComputerWorkflowInsideOneExec` 验证查询→设值→查询→点击→截图；审批拒绝、宿主错误、未知验证结果和取消均截断后续动作。Go race 及两平台 CI 通过 | 每个输入继续经过原 handler 和审批，桌面动作保持顺序 |
+| 后台无干扰 | 已有 AppKit 双应用回执验证语义设值/选择/辅助动作/点击生效，同时前台、指针和剪贴板不变；Windows/Linux CI 验证对应原生语义路径 | 不支持的后台键鼠、坐标、粘贴请求在输入前拒绝，不回退前台 |
+| 持续观察与增量更新 | 宿主订阅、AX splice 重建、PNG 去重、跨聊天隔离、取消与空闲回收；AppKit 既有实测和两平台最新真实窗口测试通过 | 周期采样，不是逐帧流；订阅结果不授予输入权限 |
+| 应用专用操作策略 | Finder/Safari/TextEdit 精确标识匹配、通用回退、按轮次注入、策略查询不启动执行层，当前契约测试通过 | 策略是指引，不是固定选择器或所有第三方应用的自动化工作流库 |
+| Windows/Linux 桌面控制及续接项 | 自有执行层、中文/emoji、Markdown/HTML、剪贴板保护、22 个 Agent 工具及审批/取消、完整包启动和启动自动同步均在平台 CI 通过 | Linux 当前为 X11；Wayland 在任何 X11/AT-SPI 初始化前明确拒绝；缺总线返回可读错误 |
+
+本次收尾重新通过 Go race、46 项宿主/安装/观察契约（45 通过、1 项平台跳过）及 Linux 原生实测。新增 Wayland 回归将会话标记为 Wayland 并故意提供无效 D-Bus 地址，确认首先返回 X11-only 错误，不进入原生初始化；另测缺 AT-SPI 总线时返回明确错误而非 SIGTRAP。
+
+本次 macOS 实测复跑在权限预检处停止，未派发任何 fixture 输入。系统当前未给此构建完整授权，因此不声称本次重新验证了 macOS 真实输入。`tools/computer-use/Sources/`、`computer-watch.ts` 和 `computer-policy.ts` 相对已有实测回执对应的 `cf729e65` 未变更；这三部分沿用前文已核对的真实回执，并结合本次重新通过的宿主/race 回归和 Windows/Linux 实测。生产签名、公证和升级后授权保持仍属于另行交付条件。

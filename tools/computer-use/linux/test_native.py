@@ -16,8 +16,11 @@ from gi.repository import GdkPixbuf
 
 here = Path(__file__).resolve().parent
 manifest = sys.argv[1]
+wayland = subprocess.run([sys.executable, str(here / "service.py"), manifest], input="", capture_output=True, text=True, timeout=10, env={**os.environ, "XDG_SESSION_TYPE": "wayland", "DBUS_SESSION_BUS_ADDRESS": "unix:path=/aiclaw-nonexistent-bus"})
+assert wayland.returncode == 1 and "this service supports X11 only" in wayland.stderr and "Requires an AT-SPI accessibility bus" not in wayland.stderr, (wayland.returncode, wayland.stderr)
 missing_bus = subprocess.run([sys.executable, str(here / "service.py"), manifest], input="", capture_output=True, text=True, timeout=10, env={**os.environ, "DBUS_SESSION_BUS_ADDRESS": "unix:path=/aiclaw-nonexistent-bus"})
 assert missing_bus.returncode == 1 and "Requires an AT-SPI accessibility bus" in missing_bus.stderr, (missing_bus.returncode, missing_bus.stderr)
+print("Wayland refused before native initialization; missing AT-SPI bus refused without SIGTRAP", flush=True)
 with tempfile.TemporaryDirectory(prefix="aiclaw-linux-acceptance-") as temp:
     forbidden_binary = Path(temp, "aiclaw")
     shutil.copyfile(sys.executable, forbidden_binary); forbidden_binary.chmod(0o700)
