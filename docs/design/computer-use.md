@@ -144,6 +144,6 @@ Windows/Linux 随应用启动同步到 `~/.aiclaw/computer-use/<linux|win32>/<�
 
 - `make check` 全量通过：Go race、格式/vet/no-cgo、TypeScript、369 项渲染/宿主测试（368 通过、1 项平台跳过）、19 项更新器测试、原生逻辑与内核/桌面冒烟。
 - Linux arm64 隔离桌面：宿主 Markdown → HTML → WebKit 加粗文本消费、中文/emoji 与原格式恢复通过；同平台 Agent 工具注册、审批、代码编排和取消测试通过。
-- 完整包验收脚本启动真实可执行文件，使用隔离用户目录，核对 renderer/preload、随包模块、用户目录运行时和源码身份握手；不是仅从源码目录 import 的测试。Windows/Linux x64 已纳入平台 CI。
+- 完整包验收脚本启动真实可执行文件，使用隔离用户目录，核对 renderer/preload、随包模块、用户目录运行时和源码身份握手；不是仅从源码目录 import 的测试。Windows/Linux x64 已在[最新平台 CI](https://github.com/chowyu12/aiclaw/actions/runs/42131183162)全部通过；还验证在任何桌面工具调用前，应用启动就已完成用户目录同步。
 - Windows/Linux x64 完整包及原生验收在 [同一轮 CI](https://github.com/chowyu12/aiclaw/actions/runs/42130869993) 全部通过；Linux x64 使用标准 Chromium 沙箱。Linux arm64 完整包另在本地容器通过（root 测试显式关闭 Chromium 沙箱）。
 - Wayland portal 执行层和原生逐帧/AX 事件流仍未实现；当前分别为明确拒绝 Wayland、宿主周期采样。保留整体目标进行中，不宣称任意平台或与 Codex 私有实现全面等价。
