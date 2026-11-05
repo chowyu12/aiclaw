@@ -68,6 +68,18 @@ try {
       await pause(100);
     }
     assert.equal(readiness,true,"Packaged renderer and preload must load");
+    let installedBeforeTool=false;
+    for(let attempt=0;attempt<100;attempt++) {
+      installedBeforeTool=await evaluate(`(()=>{
+        const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
+        const fs=require('node:fs'),path=require('node:path');
+        const root=path.join(require('node:os').homedir(),'.aiclaw/computer-use',process.platform);
+        return fs.existsSync(root)&&fs.readdirSync(root).some(name=>/^[a-f0-9]{64}$/.test(name)&&fs.existsSync(path.join(root,name,'Tools.json')));
+      })()`);
+      if(installedBeforeTool) break;
+      await pause(100);
+    }
+    assert.equal(installedBeforeTool,true,"Startup must synchronize the runtime before any Computer Use tool call");
     const receipt=await evaluate(`(async()=>{
       const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
       const {createComputerRuntime}=require(process.resourcesPath+'/app/dist/main/computer-runtime.js');
@@ -81,7 +93,7 @@ try {
     })()`);
     assert.equal(receipt.tools,18);
     assert.ok(receipt.status.runtime_directory?.startsWith(join(home,".aiclaw/computer-use")),"Packaged runtime must execute from the isolated user installation");
-    console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,user_runtime_installed:true,source_identity_handshake:true,...receipt}));
+    console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,startup_installed_before_tool:true,user_runtime_installed:true,source_identity_handshake:true,...receipt}));
   } finally {clearTimeout(watchdog);}
 } catch(error) {
   throw Error(`${String(error)}\nPackaged stderr:\n${stderr}`);
