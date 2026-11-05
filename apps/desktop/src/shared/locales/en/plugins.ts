@@ -27,8 +27,8 @@ export const plugins: Record<string, string> = {
   "邮件": "Email",
   "微信": "WeChat",
   "企业微信": "WeCom",
-  "截屏观察当前屏幕，并合成鼠标与键盘输入。启用后模型能看见并操作整个屏幕——不只是工作目录；除截屏外每个动作都会请你确认。":
-    "Takes screenshots to observe the screen and synthesizes mouse and keyboard input. Once enabled, the model can see and control the entire screen — not just the working directory. Every action except screenshots asks for your confirmation.",
+  "使用内置 Cua Driver 按应用和窗口观察、点击及输入，支持无障碍控件与截图。默认尝试后台操作，动作后重新观察；不支持的后台操作会明确报错。操作范围不限于工作目录，并遵循当前会话的审批策略。macOS 需授予 AIClaw 辅助功能与屏幕录制权限。":
+    "Use the bundled Cua Driver to inspect, click and type in specific applications and windows, using accessibility controls and screenshots. Background delivery is attempted by default, with a fresh observation after each action; unsupported background operations return an explicit error. Actions can operate outside the workspace and follow the current chat approval policy. On macOS, grant AIClaw Accessibility and Screen Recording permissions.",
   "让助手用你的邮箱收发邮件：列信、读信、存附件、发新信、回复。看信不问你；每次发信、回信都会先把收件人和内容摆出来请你确认。":
     "Lets the assistant send and receive email with your account: list and read messages, save attachments, send new mail, and reply. Reading doesn't ask; every send or reply shows you the recipients and content for confirmation first.",
   "通过 iLink 中继接入个人微信：扫码登录后，私聊消息会触发一次助手回答。中继为第三方服务，可用性与账号风险由使用者自行承担。":

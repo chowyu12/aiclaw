@@ -11,8 +11,8 @@
  * 这是 npm workspaces 仓库，`apps/desktop/node_modules/@aiclaw/agent-client`
  * 是一条指向 `packages/agent-client` 的软链，而整棵 node_modules 里还躺着
  * electron、vite、typescript 这些**只在构建时用**的几百兆依赖。直接打包要么
- * 把软链打断，要么把构建工具链一起塞进安装包。staging 目录里只放三样：
- * 编译产物、一个没有 dependencies 的 package.json、agent-client 的 dist。
+ * 把软链打断，要么把构建工具链一起塞进安装包。staging 目录里只放运行期文件：
+ * 编译产物、package.json、agent-client、原生桌面驱动及其绑定依赖。
  *
  * Go 二进制走 extraResource 放进 Resources/，主进程按 process.resourcesPath
  * 去找（session.ts 的 resolveBin）。
@@ -22,6 +22,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packager } from "@electron/packager";
+import { stageComputerDriver } from "./stage-computer-driver.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const STAGING = join(REPO, "build", "app");
@@ -84,7 +85,7 @@ function binName(name) {
   return platform === "win32" ? `${name}.exe` : name;
 }
 
-function stage() {
+async function stage() {
   rmSync(STAGING, { recursive: true, force: true });
   mkdirSync(STAGING, { recursive: true });
 
@@ -113,6 +114,8 @@ function stage() {
     join(client, "package.json"),
   );
 
+  await stageComputerDriver({ repo: REPO, destination: STAGING, platform, arch });
+
   writeFileSync(
     join(STAGING, "package.json"),
     `${JSON.stringify(
@@ -127,7 +130,7 @@ function stage() {
         // Windows 打包必须有 author：packager 拿它填 exe 的 CompanyName，
         // 缺了会在推断阶段直接失败（与图标那一步无关，先于它发生）。
         author: "chowyu12",
-        // 没有 dependencies：运行期要的东西都已经在 dist 与上面那份 agent-client 里。
+        // 没有 dependencies：运行期依赖已经由 staging 显式放入。
         // 留着 dependencies 会让 packager 去装一遍构建期依赖。
       },
       null,
@@ -193,7 +196,7 @@ function stampWindowsExe() {
 }
 
 async function main() {
-  stage();
+  await stage();
 
   const icon = join(REPO, "apps", "desktop", "assets", "icon.icns");
   if (platform === "darwin" && !existsSync(icon)) {
@@ -222,7 +225,7 @@ async function main() {
     // 包全删掉，而 staging 的 package.json 故意没有 dependencies——结果是我们
     // 刚放进去的 @aiclaw/agent-client 被剪掉，打出来的包一启动就退出、
     // **什么都不打印**（ESM 解析失败发生在主脚本加载前）。
-    // staging 里只有我们自己放的那一个包，本来也没有要剪的东西。
+    // staging 里只有显式放入的运行期依赖，没有要剪的构建工具。
     prune: false,
     // 不打 asar：主进程要按 process.resourcesPath 找并**执行** Go 二进制，
     // 而 extraResource 本来就在 asar 外面；关掉 asar 让排障时能直接看目录。

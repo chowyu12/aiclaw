@@ -1,6 +1,6 @@
 {
   "name": "@aiclaw/desktop",
-  "version": "3.7.37",
+  "version": "3.7.38",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@aiclaw/agent-client": "*",
+    "@trycua/cua-driver": "0.38.0",
     "highlight.js": "11.12.0"
   },
   "devDependencies": {

@@ -218,42 +218,27 @@ type BrowserResult struct {
 	Height      int    `json:"height,omitempty"`
 }
 
-// ComputerAction 是一次屏幕操作。
+// ComputerAction names the pinned Cua Driver operation, not an OS input script.
 type ComputerAction string
 
 const (
-	ComputerScreenshot  ComputerAction = "screenshot"
-	ComputerClick       ComputerAction = "click"
-	ComputerDoubleClick ComputerAction = "doubleClick"
-	ComputerRightClick  ComputerAction = "rightClick"
-	ComputerMove        ComputerAction = "move"
-	ComputerType        ComputerAction = "type"
-	ComputerKey         ComputerAction = "key"
-	ComputerScroll      ComputerAction = "scroll"
+	ComputerScreenshot ComputerAction = "get_window_state"
+	ComputerClick      ComputerAction = "click"
 )
 
 type ComputerRequestParams struct {
-	SessionID string         `json:"sessionId"`
-	TurnID    string         `json:"turnId"`
-	Action    ComputerAction `json:"action"`
-	/** 点击 / 移动 / 滚动的坐标，单位是逻辑像素，原点左上。 */
-	X int `json:"x,omitempty"`
-	Y int `json:"y,omitempty"`
-	/** 滚动量；正数向下 / 向右。 */
-	DX int `json:"dx,omitempty"`
-	DY int `json:"dy,omitempty"`
-	/** type 的文本。 */
-	Text string `json:"text,omitempty"`
-	/** key 的按键组合，例如 "cmd+s"、"Return"。 */
-	Keys string `json:"keys,omitempty"`
+	SessionID string          `json:"sessionId"`
+	TurnID    string          `json:"turnId"`
+	Action    ComputerAction  `json:"action"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 type ComputerResult struct {
 	/** 给模型看的一句话。 */
 	Text string `json:"text"`
-	/** 截屏时的 PNG，base64。其余动作为空。 */
+	/** 窗口观察或动作后确认的 PNG，base64。 */
 	ImageBase64 string `json:"imageBase64,omitempty"`
-	/** 屏幕逻辑尺寸，截屏时带上——模型要靠它把图上的位置换算成点击坐标。 */
+	/** 截图像素尺寸；坐标转换交给驱动。 */
 	Width  int `json:"width,omitempty"`
 	Height int `json:"height,omitempty"`
 }

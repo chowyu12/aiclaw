@@ -3,7 +3,7 @@
  *
  * 单独成文件是为了能在 node 里直接 import 测：`store.ts` 顶上 `import { reactive }
  * from "vue"` 与一串无后缀的相对 import，在 electron / vite 之外跑不起来。
- * 同样的拆法见 `config-defaults.ts`、`turns.ts` 与 `computer-keys.ts`。
+ * 同样的拆法见 `config-defaults.ts`、`turns.ts` 与 `computer.ts`。
  */
 
 /** 一个能选的模型：服务 + 模型名。 */

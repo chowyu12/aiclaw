@@ -489,33 +489,20 @@ export interface SessionHistoryResult {
   items: Item[];
 }
 
-/** 一次屏幕操作。坐标是逻辑像素，原点左上。 */
+/** A window-scoped call to the bundled Cua Driver. */
 export interface ComputerRequestParams {
   sessionId: string;
   turnId: string;
-  action:
-    | "screenshot"
-    | "click"
-    | "doubleClick"
-    | "rightClick"
-    | "move"
-    | "type"
-    | "key"
-    | "scroll";
-  x?: number;
-  y?: number;
-  dx?: number;
-  dy?: number;
-  text?: string;
-  keys?: string;
+  action: string;
+  arguments: Record<string, unknown>;
 }
 
 export interface ComputerResult {
   /** 给模型看的一句话。 */
   text: string;
-  /** 截屏时的 PNG，base64。 */
+  /** Window observation or post-action screenshot, PNG base64. */
   imageBase64?: string;
-  /** 屏幕逻辑尺寸；模型要靠它把图上的位置换算成点击坐标。 */
+  /** Screenshot pixel dimensions; the driver handles coordinate mapping. */
   width?: number;
   height?: number;
 }

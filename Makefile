@@ -103,7 +103,7 @@ test-go: ## Go 单元与集成测试（内核 + 插件系统 + 存储层）
 
 # 这组用例里一大半是安全用例，别只当成格式测试：
 #   - Markdown 渲染器的输入是模型输出，而模型输出会被它读到的文件和命令结果影响；
-#   - computer use 的自身进程名表是自点审批的防护。
+#   - computer use 的窗口身份、快照与错误回传是桌面操作的边界。
 test-renderer: ## 纯函数测试（Markdown 渲染与转义、配置归一化、版本比较……）
 	npm run test:renderer
 	npm run test:updater

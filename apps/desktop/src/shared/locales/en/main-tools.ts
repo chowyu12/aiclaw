@@ -87,7 +87,7 @@ export const mainTools: Record<string, string> = {
   "浏览器扩展没连上：确认 Chrome / Edge 里装了「AIClaw 浏览器助手」并填了配对码（设置 → 浏览器）。":
     "The browser extension isn't connected: make sure the AIClaw browser extension (“AIClaw 浏览器助手”) is installed in Chrome / Edge and the pairing code is entered (Settings → Browser).",
 
-  // ---------- computer use（main/computer.ts、computer-keys.ts） ----------
+  // ---------- computer use（main/computer.ts、computer.ts） ----------
   "当前最前面的应用是 AIClaw 自己（{app}），已拒绝这次屏幕操作。computer use 用来驱动别的应用；点自己的窗口意味着可能在点审批弹窗。请先切到你要操作的那个应用。":
     "The frontmost app is AIClaw itself ({app}), so this screen action was refused. Computer use is for driving other apps; clicking AIClaw's own window could mean clicking an approval dialog. Switch to the app you want to operate first.",
   "没有屏幕录制权限，截不了屏。到「系统设置 → 隐私与安全性 → 屏幕录制」里勾上 AIClaw，然后重启应用。":

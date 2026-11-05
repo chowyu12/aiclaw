@@ -17,7 +17,7 @@ const NO_ROLES: RoleConfig = {
  *
  * 单独成文件是为了能在 node 里直接 import 测：`config.ts` 顶上 `import { app }
  * from "electron"`，在 electron 之外 import 它会直接抛。同样的拆法见
- * `errors.ts` 与 `computer-keys.ts`。
+ * `errors.ts` 与 `computer.ts`。
  */
 
 export const DEFAULT_CONFIG: AppConfig = {

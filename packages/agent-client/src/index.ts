@@ -5,6 +5,7 @@ export { MODEL_ROLES } from "./protocol.js";
 export type { PendingAppConfigAction, PendingApproval, PendingUserInput, PendingScheduleAction, ClientEvents } from "./client.js";
 export type {
   AppConfigRequest, AppConfigResult,
+  ComputerRequestParams, ComputerResult,
   EmailTestResult,
   ThreadRef,
   ScheduleRequestParams,

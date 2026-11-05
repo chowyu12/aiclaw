@@ -89,7 +89,7 @@ type Server struct {
 
 	// 向宿主发出的请求，等它回。
 	outboundID      atomic.Int64
-	outboundPending map[int64]chan json.RawMessage
+	outboundPending map[int64]chan frame
 	outboundMu      sync.Mutex
 
 	shutdown chan struct{}
@@ -120,7 +120,7 @@ func New(options Options, out io.Writer) (*Server, error) {
 		options:         options,
 		out:             out,
 		sessions:        map[string]*agent.Session{},
-		outboundPending: map[int64]chan json.RawMessage{},
+		outboundPending: map[int64]chan frame{},
 		shutdown:        make(chan struct{}),
 		db:              db,
 	}
@@ -1169,21 +1169,24 @@ func (s *Server) handleProvider(ctx context.Context, f frame) {
 
 func (s *Server) requestHost(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	id := s.outboundID.Add(1)
-	ch := make(chan json.RawMessage, 1)
+	paramsRaw, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+	ch := make(chan frame, 1)
 	s.outboundMu.Lock()
 	s.outboundPending[id] = ch
 	s.outboundMu.Unlock()
 
 	idRaw, _ := json.Marshal(id)
-	paramsRaw, err := json.Marshal(params)
-	if err != nil {
-		return nil, err
-	}
 	s.write(frame{JSONRPC: "2.0", ID: idRaw, Method: method, Params: paramsRaw})
 
 	select {
 	case result := <-ch:
-		return result, nil
+		if result.Error != nil {
+			return nil, fmt.Errorf("host %s (%d): %s", method, result.Error.Code, result.Error.Message)
+		}
+		return result.Result, nil
 	case <-ctx.Done():
 		s.outboundMu.Lock()
 		delete(s.outboundPending, id)
@@ -1206,12 +1209,7 @@ func (s *Server) resolveOutbound(f frame) {
 	if !ok {
 		return
 	}
-	if f.Error != nil {
-		// 宿主回了错误：当作拒绝，别让轮次卡死。
-		ch <- json.RawMessage(`{"approved":false}`)
-		return
-	}
-	ch <- f.Result
+	ch <- f
 }
 
 // emitter 把 agent 的事件翻成协议帧。

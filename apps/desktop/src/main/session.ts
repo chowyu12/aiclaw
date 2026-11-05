@@ -377,7 +377,7 @@ export class SessionManager extends EventEmitter {
     try {
       await client?.stop();
     } finally {
-      await this.browser.close();
+      await Promise.all([this.browser.close(), this.computer.close()]);
     }
   }
 
@@ -596,7 +596,10 @@ export class SessionManager extends EventEmitter {
 
   async archiveSession(sessionId: string, archived: boolean): Promise<string[]> {
     const ids = await this.requireClient().sessionArchive(sessionId, archived);
-    if (archived) ids.forEach(id => this.desktopSessions.delete(id));
+    if (archived) {
+      ids.forEach(id => this.desktopSessions.delete(id));
+      await Promise.all(ids.map(id => this.computer.releaseSession(id)));
+    }
     return ids;
   }
 
@@ -608,6 +611,7 @@ export class SessionManager extends EventEmitter {
   async deleteSession(sessionId: string): Promise<string[]> {
     const ids = await this.requireClient().sessionDelete(sessionId);
     ids.forEach(id => this.desktopSessions.delete(id));
+    await Promise.all(ids.map(id => this.computer.releaseSession(id)));
     return ids;
   }
 
