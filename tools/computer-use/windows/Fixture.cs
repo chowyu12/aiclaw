@@ -32,7 +32,7 @@ public static class FixtureProgram {
             File.WriteAllText(args[0], new JavaScriptSerializer().Serialize(values), new UTF8Encoding(false));
         };
         foreach (Control control in new Control[] { input, button, toggle, status, pad, rich }) form.Controls.Add(control);
-        form.Shown += (sender, e) => input.Focus();
+        form.Shown += (sender, e) => { input.Focus(); File.WriteAllText(args[0]+".ready", "ready"); };
         Application.Run(form);
     }
 }

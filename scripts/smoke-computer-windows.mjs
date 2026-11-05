@@ -1,7 +1,7 @@
 /** Windows-only real native acceptance. Only temporary WinForms apps receive input. */
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
@@ -27,6 +27,12 @@ try {
   shortcutFolder=shortcut.stdout.trim();
   const target = spawn(fixture,[join(temporary,"target.json"),"AIClaw Target Fixture"],{stdio:"ignore"}); children.push(target);
   const sentinel = spawn(fixture,[join(temporary,"sentinel.json"),"AIClaw Sentinel Fixture"],{stdio:"ignore"}); children.push(sentinel);
+  const forbiddenExe=join(temporary,"AIClaw.exe"); await copyFile(fixture,forbiddenExe);
+  const forbidden=spawn(forbiddenExe,[join(temporary,"approval.json"),"AIClaw Approval Fixture"],{stdio:"ignore"}); children.push(forbidden);
+  for(let attempt=0;attempt<50;attempt++) {
+    try {await readFile(join(temporary,"approval.json.ready"));break;} catch {await pause(100);}
+  }
+  assert.equal(await readFile(join(temporary,"approval.json.ready"),"utf8"),"ready");
   await stageComputerRuntime({repo,destination:join(repo,"apps/desktop"),platform:"win32",arch:process.arch});
   runtime = await ComputerPortableRuntime.create();
   const call = async (action,args={}) => {
@@ -36,6 +42,8 @@ try {
   };
   const permissions=value(await call("permission_status"));
   assert.ok(permissions.runtime_directory.startsWith(join(homedir(),".aiclaw/computer-use/win32")));
+  assert.equal(value(await call("find_apps",{text:"AIClaw Approval Fixture"})).apps.length,0);
+  await assert.rejects(call("get_app_state",{app:String(forbidden.pid)}),/missing or ambiguous/);
   const app=String(target.pid), sentinelApp=String(sentinel.pid);
   let inventory;
   for(let attempt=0;attempt<50;attempt++) {

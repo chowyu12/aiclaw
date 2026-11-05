@@ -123,6 +123,9 @@ class X11:
                 try:
                     if os.stat(f"/proc/{owner}").st_uid != os.getuid():
                         continue
+                    executable = os.path.basename(os.readlink(f"/proc/{owner}/exe")).removesuffix(" (deleted)").casefold()
+                    if executable in ("aiclaw", "electron", "claw-agent", "aiclawcomputeruse"):
+                        continue
                     result.append({"window_id": window, "pid": owner, "title": self.property(window, "_NET_WM_NAME") or "", "frame": self.frame(window)})
                 except (OSError, RuntimeError):
                     continue

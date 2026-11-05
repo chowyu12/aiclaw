@@ -119,8 +119,11 @@ namespace AIClawComputerUse {
                 if (title.Length == 0 || !GetWindowRect(window, out rect) || rect.Right <= rect.Left || rect.Bottom <= rect.Top) return true;
                 try {
                     using (var process = Process.GetProcessById((int)owner)) {
+                        var executable = process.MainModule.FileName;
+                        var name = Path.GetFileNameWithoutExtension(executable).ToLowerInvariant();
+                        if (name == "aiclaw" || name == "electron" || name == "claw-agent" || name == "aiclawcomputeruse") return true;
                         result.Add(new Window { ID = window.ToInt64(), PID = (int)owner, Title = title.ToString(), Name = process.ProcessName,
-                            Executable = process.MainModule.FileName, Birth = process.StartTime.ToUniversalTime().Ticks.ToString(), Frame = rect });
+                            Executable = executable, Birth = process.StartTime.ToUniversalTime().Ticks.ToString(), Frame = rect });
                     }
                 } catch (InvalidOperationException) { } catch (System.ComponentModel.Win32Exception) { }
                 return true;
