@@ -480,7 +480,7 @@ class Service:
         if kind == "ComputerUseIPCHandshakeRequest":
             return {"protocolVersion": PROTOCOL, "serverVersion": "1", "serviceSourceSHA256": self.source_hash, "tools": self.tools}
         if kind == "ComputerUseIPCPermissionStatusRequest":
-            return text({"backend": "x11-atspi", "service_pid": os.getpid(), "session_type": "x11", "accessibilityTrusted": bool(Atspi.get_desktop(0)), "screenCaptureGranted": True, "requires_xcomposite": True, "wayland_supported": False})
+            return text({"backend": "x11-atspi", "service_pid": os.getpid(), "runtime_directory": str(Path(__file__).resolve().parent), "session_type": "x11", "accessibilityTrusted": bool(Atspi.get_desktop(0)), "screenCaptureGranted": True, "requires_xcomposite": True, "wayland_supported": False})
         if kind in ("ComputerUseIPCListAppsRequest", "ComputerUseIPCFindAppsRequest"):
             apps = {}; needle = args.get("text", "").casefold()
             for window in self.x.windows():

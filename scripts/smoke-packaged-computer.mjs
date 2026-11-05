@@ -34,7 +34,11 @@ try {
   }
   assert.ok(endpoint,`Packaged app did not open its local inspector: ${stderr}`);
   socket=new WebSocket(endpoint);
-  await new Promise((resolve,reject)=>{socket.addEventListener("open",resolve,{once:true});socket.addEventListener("error",reject,{once:true});});
+  await new Promise((resolve,reject)=>{
+    const timeout=setTimeout(()=>reject(Error(`Packaged inspector connection timed out: ${stderr}`)),5000);
+    socket.addEventListener("open",()=>{clearTimeout(timeout);resolve();},{once:true});
+    socket.addEventListener("error",error=>{clearTimeout(timeout);reject(error);},{once:true});
+  });
   socket.addEventListener("message",event=>{
     const message=JSON.parse(String(event.data)), waiter=pending.get(message.id);
     if(!waiter) return; pending.delete(message.id);
@@ -74,6 +78,8 @@ try {
     assert.ok(receipt.status.runtime_directory?.startsWith(join(home,".aiclaw/computer-use")),"Packaged runtime must execute from the isolated user installation");
     console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,user_runtime_installed:true,source_identity_handshake:true,...receipt}));
   } finally {clearTimeout(watchdog);}
+} catch(error) {
+  throw Error(`${String(error)}\nPackaged stderr:\n${stderr}`);
 } finally {
   socket?.close();
   if(child && child.exitCode===null) {child.kill();await pause(1000);}

@@ -2,7 +2,8 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { Duplex } from "node:stream";
 import type { Readable } from "node:stream";
-import { ComputerNativeRuntime, COMPUTER_PROTOCOL } from "./computer-runtime.js";
+import { ComputerNativeRuntime, COMPUTER_PROTOCOL, type ComputerToolResult } from "./computer-runtime.js";
+import { setTimeout as pause } from "node:timers/promises";
 import { syncPortableComputerRuntime } from "./computer-portable-install.js";
 
 /** A private child process per connection, using the same framed action protocol.
@@ -10,6 +11,7 @@ import { syncPortableComputerRuntime } from "./computer-portable-install.js";
  */
 export class ComputerPortableRuntime extends ComputerNativeRuntime {
   private readonly sourceIdentity: string;
+  private processDiagnostic = () => "";
   constructor(transport: Duplex, sourceIdentity: string) { super(transport); this.sourceIdentity = sourceIdentity; }
   static async create(): Promise<ComputerPortableRuntime> {
     const { directory, sourceIdentity: identity } = await syncPortableComputerRuntime();
@@ -45,10 +47,18 @@ export class ComputerPortableRuntime extends ComputerNativeRuntime {
       }
     });
     const runtime = new ComputerPortableRuntime(transport, identity);
+    runtime.processDiagnostic = () => `exit=${child.exitCode}, signal=${child.signalCode}${stderr ? `\n${stderr.trim().split("\n").slice(-4).join("\n")}` : ""}`;
     try { await runtime.initialize(); return runtime; }
     catch (error) {
       await runtime.close();
       throw Error(`Desktop service could not initialize. ${windows ? "Requires Windows PowerShell and UI Automation." : "Requires X11, system Python with PyGObject/AT-SPI, XComposite and XTest."} ${String(error)}${stderr ? `\n${stderr.trim().split("\n").slice(-2).join("\n")}` : ""}`);
+    }
+  }
+  override async call(action: string, args: Record<string, unknown>): Promise<ComputerToolResult> {
+    try { return await super.call(action, args); }
+    catch (error) {
+      await pause(10); // Let the process exit event supply its status, without replay.
+      throw Error(`${String(error)}\nDesktop service: ${this.processDiagnostic()}`);
     }
   }
   override async initialize(): Promise<void> {
