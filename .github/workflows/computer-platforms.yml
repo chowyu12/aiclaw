@@ -5,6 +5,9 @@ on:
     paths:
       - 'tools/computer-use/**'
       - 'apps/desktop/src/main/computer*.ts'
+      - 'apps/desktop/src/main/index.ts'
+      - 'scripts/stage-computer-runtime.mjs'
+      - 'scripts/test-computer-install.ts'
       - 'scripts/smoke-computer-windows.mjs'
       - '.github/workflows/computer-platforms.yml'
   workflow_dispatch:
@@ -23,6 +26,8 @@ jobs:
       - run: npm ci
       - run: npm run build -w @aiclaw/agent-client
       - run: npm run build:main -w @aiclaw/desktop
+      - name: Installer and controller contracts
+        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer-install.ts scripts/test-computer.ts scripts/test-computer-watch.ts
       - name: Native Windows UIA and window capture acceptance
         run: node scripts/smoke-computer-windows.mjs
   linux-x11:
@@ -37,8 +42,9 @@ jobs:
       - run: npm ci
       - run: npm run build -w @aiclaw/agent-client
       - run: npm run build:main -w @aiclaw/desktop
+      - run: node scripts/stage-computer-runtime.mjs
       - name: Controller contracts
-        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer.ts scripts/test-computer-watch.ts
+        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer-install.ts scripts/test-computer.ts scripts/test-computer-watch.ts
       - run: docker build -f tools/computer-use/linux/Dockerfile.test -t aiclaw-computer-test .
       - name: Native X11 and clipboard acceptance
         run: |
@@ -50,9 +56,9 @@ jobs:
       - name: Host workflow and clipboard lifetime acceptance
         run: |
           docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
-            -v "$PWD/tools/computer-use/linux:/aiclaw/computer-use/linux:ro" \
-            -v "$PWD/tools/claw-agent/internal/agent/computer-tools.json:/aiclaw/computer-use/Tools.json:ro" \
+            -v "$PWD/tools/computer-use/linux:/aiclaw/tests/linux:ro" \
+            -v "$PWD/apps/desktop/computer-use/linux:/aiclaw/computer-use/linux:ro" \
             -v "$PWD/apps/desktop/dist/main:/aiclaw/dist/main:ro" \
             -v "$PWD/package.json:/aiclaw/package.json:ro" \
             aiclaw-computer-test dbus-run-session -- xvfb-run -a sh -c \
-            'openbox >/tmp/openbox.log 2>&1 & sleep 1; node /aiclaw/computer-use/linux/test_host.mjs'
+            'openbox >/tmp/openbox.log 2>&1 & sleep 1; node /aiclaw/tests/linux/test_host.mjs'

@@ -2,8 +2,8 @@
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, readFile, rm, mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdtemp, readFile, readlink, rm, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir, homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as pause } from "node:timers/promises";
@@ -32,6 +32,7 @@ try {
   }
   assert.ok(inventory.apps.some(item => item.id === target));
   const servicePID = JSON.parse((await call("permission_status")).text).service_pid;
+  assert.ok((await readlink(`/proc/${servicePID}/cwd`)).startsWith(join(homedir(),".aiclaw/computer-use/linux")));
   await call("modify_app", { app: sentinel, modification: "activate", verify_after: false });
   const foreground = JSON.parse((await call("frontmost_window")).text).app;
   assert.equal(foreground, sentinel);

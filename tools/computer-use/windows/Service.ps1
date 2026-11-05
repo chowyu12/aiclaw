@@ -346,7 +346,7 @@ function Perform($argsObject) {
 function Dispatch([string]$kind, $argsObject) {
     switch ($kind) {
         'ComputerUseIPCHandshakeRequest' { return @{protocolVersion='AIClawComputerUseIPC-1';serverVersion='1';serviceSourceSHA256=$script:sourceHash;tools=$tools} }
-        'ComputerUseIPCPermissionStatusRequest' { return Text @{backend='windows-uia';accessibilityTrusted=$true;screenCaptureGranted=$true;uipi_restrictions=$true} }
+        'ComputerUseIPCPermissionStatusRequest' { return Text @{backend='windows-uia';service_pid=$PID;runtime_directory=$script:serviceRoot;accessibilityTrusted=$true;screenCaptureGranted=$true;uipi_restrictions=$true} }
         { $_ -in @('ComputerUseIPCListAppsRequest','ComputerUseIPCFindAppsRequest') } {
             $apps=@{}; $needle=Value $argsObject 'text' ''
             foreach ($window in [AIClawComputerUse.Native]::Windows(0)) {

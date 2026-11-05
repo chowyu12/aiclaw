@@ -4,6 +4,9 @@ import { mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { COMPUTER_APP_NAME, installComputerBundle } from "../apps/desktop/src/main/computer-install.ts";
+import { installPortableComputer, portableSources } from "../apps/desktop/src/main/computer-portable-install.ts";
+import { stageComputerRuntime } from "./stage-computer-runtime.mjs";
+import { fileURLToPath } from "node:url";
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "aiclaw-helper-install-"));
@@ -66,4 +69,46 @@ test("concurrent hosts share the stable install and linked targets are refused",
     const linked = join(h.root, "linked-parent"); await symlink(h.directory, linked);
     await assert.rejects(installComputerBundle(h.source, linked, async () => {}), /owned directory/);
   } finally { await h.close(); }
+});
+
+test("portable packages stage only shipped service sources and the action manifest", async () => {
+  const root = await mkdtemp(join(tmpdir(),"aiclaw-portable-stage-"));
+  const repo = fileURLToPath(new URL("../",import.meta.url));
+  try {
+    for(const platform of ["linux","win32"] as const) {
+      await stageComputerRuntime({repo,destination:root,platform,arch:process.arch});
+      const installed=await installPortableComputer(join(root,"computer-use",platform),platform,root);
+      for(const name of portableSources[platform]) assert.ok((await readFile(join(installed.directory,name))).length>0);
+      assert.equal(JSON.parse(await readFile(join(installed.directory,"Tools.json"),"utf8")).length,18);
+      await assert.rejects(readFile(join(installed.directory,"Fixture.cs")),/ENOENT/);
+      await assert.rejects(readFile(join(installed.directory,"test_host.mjs")),/ENOENT/);
+    }
+  } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test("portable generations synchronize atomically, preserve live old versions and reject corruption", async () => {
+  const root=await mkdtemp(join(tmpdir(),"aiclaw-portable-install-")), source=join(root,"bundled");
+  await mkdir(source);
+  for(const name of [...portableSources.linux,"Tools.json"]) await writeFile(join(source,name),name);
+  try {
+    const [first,concurrent]=await Promise.all([installPortableComputer(source,"linux",root),installPortableComputer(source,"linux",root)]);
+    assert.equal(first.directory,concurrent.directory);
+    const timestamp=(await stat(first.directory)).mtimeMs;
+    assert.equal((await installPortableComputer(source,"linux",root)).directory,first.directory);
+    assert.equal((await stat(first.directory)).mtimeMs,timestamp);
+    await writeFile(join(source,"Tools.json"),"new contract");
+    const next=await installPortableComputer(source,"linux",root);
+    assert.notEqual(next.directory,first.directory); assert.equal(next.sourceIdentity,first.sourceIdentity);
+    assert.equal(await readFile(join(first.directory,"Tools.json"),"utf8"),"Tools.json");
+    await writeFile(join(next.directory,"service.py"),"tampered");
+    await assert.rejects(installPortableComputer(source,"linux",root),/damaged/);
+    await rm(join(next.directory,"service.py"));
+    await assert.rejects(installPortableComputer(source,"linux",root),/damaged/);
+    await rm(next.directory,{recursive:true});
+    await symlink(first.directory,next.directory,process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(installPortableComputer(source,"linux",root),/linked/);
+    await rm(join(root,".aiclaw/computer-use/linux"),{recursive:true});
+    await symlink(source,join(root,".aiclaw/computer-use/linux"),process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(installPortableComputer(source,"linux",root),/owned directory/);
+  } finally {await rm(root,{recursive:true,force:true});}
 });

@@ -79,8 +79,8 @@ $(COMPUTER_STAMP): $(wildcard tools/computer-use/Sources/*.swift) scripts/build-
 	node scripts/build-computer-runtime.mjs
 	@touch $(COMPUTER_STAMP)
 else
-build-computer: ## Build the independent macOS Computer Use app
-	node scripts/build-computer-runtime.mjs
+build-computer: ## Stage the independent Windows/Linux Computer Use service
+	node scripts/stage-computer-runtime.mjs
 endif
 
 build-desktop: deps build-client build-computer ## 编译 Electron 主进程与渲染层

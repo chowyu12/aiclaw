@@ -1,12 +1,9 @@
 /** Windows-only real native acceptance. Only temporary WinForms apps receive input. */
 import assert from "node:assert/strict";
 import { spawn, execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { once } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { Duplex } from "node:stream";
 import { setTimeout as pause } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -18,26 +15,23 @@ const powershell = join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0
 const temporary = await mkdtemp(join(tmpdir(), "aiclaw-windows-acceptance-"));
 const children = []; let runtime;
 const encoded = source => Buffer.from(source, "utf16le").toString("base64");
-const environment = { ...process.env, AICLAW_COMPUTER_SERVICE: join(directory,"Service.ps1"), AICLAW_COMPUTER_MANIFEST: join(repo,"tools/claw-agent/internal/agent/computer-tools.json"), AICLAW_COMPUTER_PARENT_PID: String(process.pid) };
 const { ComputerPortableRuntime } = await import(new URL("../apps/desktop/dist/main/computer-portable-runtime.js", import.meta.url));
+const { stageComputerRuntime } = await import("./stage-computer-runtime.mjs");
 const value = result => JSON.parse(result.content.find(item => item.type === "text").text.split("\n")[0]);
 try {
   const fixture = join(temporary,"AIClawFixture.exe");
   await run(powershell,["-NoProfile","-NonInteractive","-EncodedCommand",encoded('Add-Type -TypeDefinition ([IO.File]::ReadAllText($env:AICLAW_FIXTURE_SOURCE)) -ReferencedAssemblies System.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Web.Extensions.dll -OutputAssembly $env:AICLAW_FIXTURE_EXE -OutputType WindowsApplication')],{env:{...process.env,AICLAW_FIXTURE_SOURCE:join(directory,"Fixture.cs"),AICLAW_FIXTURE_EXE:fixture},timeout:60_000});
   const target = spawn(fixture,[join(temporary,"target.json"),"AIClaw Target Fixture"],{stdio:"ignore"}); children.push(target);
   const sentinel = spawn(fixture,[join(temporary,"sentinel.json"),"AIClaw Sentinel Fixture"],{stdio:"ignore"}); children.push(sentinel);
-  const service = spawn(powershell,["-NoProfile","-NonInteractive","-MTA","-EncodedCommand",encoded('& ([scriptblock]::Create([IO.File]::ReadAllText($env:AICLAW_COMPUTER_SERVICE))) -Manifest $env:AICLAW_COMPUTER_MANIFEST')],{env:environment,stdio:["pipe","pipe","pipe"],windowsHide:true}); children.push(service);
-  service.stderr.on("data",chunk=>process.stderr.write(chunk));
-  const transport = Duplex.from({readable:service.stdout,writable:service.stdin});
-  service.once("error",error=>transport.destroy(error)); service.once("exit",code=>transport.destroy(code ? Error(`Service exited (${code})`) : undefined));
-  const sources = await Promise.all([readFile(join(directory,"Service.ps1")),readFile(join(directory,"Native.cs"))]);
-  runtime = new ComputerPortableRuntime(transport,createHash("sha256").update(sources[0]).update(sources[1]).digest("hex"));
-  await runtime.initialize();
+  await stageComputerRuntime({repo,destination:join(repo,"apps/desktop"),platform:"win32",arch:process.arch});
+  runtime = await ComputerPortableRuntime.create();
   const call = async (action,args={}) => {
     const response=await runtime.call(action,args);
     if(response.isError) throw Error(response.content.map(item=>item.text??"").join("\n"));
     return response;
   };
+  const permissions=value(await call("permission_status"));
+  assert.ok(permissions.runtime_directory.startsWith(join(homedir(),".aiclaw/computer-use/win32")));
   const app=String(target.pid), sentinelApp=String(sentinel.pid);
   let inventory;
   for(let attempt=0;attempt<50;attempt++) {
@@ -93,10 +87,9 @@ try {
   }
   assert.equal(receipt.value,text+addition); assert.ok(receipt.drags>0); assert.ok(receipt.scrolls>0);
   const stopped=value(await call("stop_app",{app})); assert.equal(stopped.verified,true);
-  console.log(JSON.stringify({passed:true,backend:"windows-uia",source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true}));
+  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true}));
 } finally {
   await runtime?.close();
-  if(children[2]?.exitCode===null&&children[2]?.signalCode===null) await Promise.race([once(children[2],"exit"),pause(1000)]);
   for(const child of children) { if(child.exitCode===null&&child.signalCode===null) child.kill(); }
   await rm(temporary,{recursive:true,force:true,maxRetries:10,retryDelay:200});
 }
