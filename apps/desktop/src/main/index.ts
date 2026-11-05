@@ -13,6 +13,8 @@ import { ConfigStore, type McpServer } from "./config.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
 import { ManagedRuntimes } from "./managed-runtimes.js";
+import { installComputerBundle } from "./computer-install.js";
+import { bundledComputerBundle } from "./computer-runtime.js";
 import { ConfigurationAssistant } from "./app-config.js";
 import { Scheduler } from "./scheduler.js";
 import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
@@ -767,6 +769,11 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     createWindow();
     installAppMenu();
+    if (process.platform === "darwin") {
+      void installComputerBundle(bundledComputerBundle())
+        .then(path => logApp(`Computer Use 已同步：${path}`))
+        .catch(error => logApp(`Computer Use 同步失败：${String(error)}`));
+    }
     runtimes.start();
     void sessions.syncBrowserBridge();
     scheduler.start();

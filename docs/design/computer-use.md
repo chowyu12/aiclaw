@@ -16,7 +16,7 @@ flowchart LR
 
 ## 进程、身份与 IPC
 
-安装包携带 helper，首次使用先校验签名并复制到固定用户目录 `~/.aiclaw/computer-use/AIClaw Computer Use.app`；开发与正式安装均从这个位置运行。相同产物不重复复制；更新使用安装锁、同目录暂存与原子替换，校验失败保留旧 App。宿主通过 LaunchServices 启动该 helper，再直接连接其 Unix socket；不经过 CLI 代理或用户 MCP 配置。原生框架不加载到 Electron 内。
+安装包携带 helper，每次启动 AIClaw 时在后台校验签名并同步到固定用户目录 `~/.aiclaw/computer-use/AIClaw Computer Use.app`，无需先调用桌面控制工具；开发与正式安装均从这个位置运行。相同产物不重复复制；更新使用安装锁、同目录暂存与原子替换，校验失败保留旧 App 并记录应用日志，首次使用时仍会重试安装。同步本身不启动 helper 或请求系统权限。宿主通过 LaunchServices 启动该 helper，再直接连接其 Unix socket；不经过 CLI 代理或用户 MCP 配置。原生框架不加载到 Electron 内。
 
 协议是 **`AIClawComputerUseIPC-1`**。请求使用 `{id, requestType, request}`，响应为 `{id, result}` 或 `{id, error}`。请求名称参考恢复出的 Codex 接口，**不与 `CodexComputerUseIPC-5` wire 兼容**。握手返回版本、工具清单和进程启动时捕获的自身可执行文件 SHA-256；宿主拒绝版本或可执行身份不匹配的驻留进程。
 

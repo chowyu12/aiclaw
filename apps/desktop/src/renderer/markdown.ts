@@ -188,14 +188,18 @@ md.renderer.rules.code_inline = (tokens, index, _options, env) => {
   const text = tokens[index]!.content;
   if (!looksLikePath(text)) return `<code${isCommand(text) ? ' class="command-inline"' : ""}>${md.utils.escapeHtml(text)}</code>`;
   if (env?.files instanceof Set) env.files.add(text);
-  return fileCard(text);
+  return fileCard(text, tokens[index]!.meta?.fileInline === true || tokens.some((token, i) => i !== index && token.content.trim().length > 0));
 };
 
 // Local Markdown links use the same host-validated file action as inline paths.
 md.core.ruler.after("inline", "local-file-cards", state => {
-  for (const token of state.tokens) {
+  for (const [blockIndex, token] of state.tokens.entries()) {
     const children = token.children;
     if (!children) continue;
+    const tableCell = ["th_open", "td_open"].includes(state.tokens[blockIndex - 1]?.type ?? "");
+    if (tableCell) for (const child of children) {
+      if (child.type === "code_inline") child.meta = { ...child.meta, fileInline: true };
+    }
     for (let i = 0; i < children.length; i++) {
       if (children[i]!.type !== "link_open") continue;
       const href = String(children[i]!.attrGet("href") ?? "");
@@ -206,7 +210,7 @@ md.core.ruler.after("inline", "local-file-cards", state => {
       try { path = decodeURIComponent(href); } catch { /* Keep literal paths with percent signs. */ }
       if (state.env?.files instanceof Set) state.env.files.add(path);
       const card = new state.Token("html_inline", "", 0);
-      card.content = fileCard(path);
+      card.content = fileCard(path, tableCell || children.some((child, index) => (index < i || index > end) && child.content.trim().length > 0));
       children.splice(i, end - i + 1, card);
     }
   }

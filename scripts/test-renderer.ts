@@ -491,6 +491,24 @@ test("回复里的文件路径显示文件卡片，保留打开路径但不显�
   assert.equal(link.window.document.querySelector(".file-format")?.textContent, "Word");
 });
 
+test("句中和括号内的文件引用保持行内，独立文件保留完整卡片", () => {
+  for (const reference of ["`/Applications/AIClaw Computer Use.app`", "[AIClaw Computer Use.app](/Applications/AIClaw%20Computer%20Use.app)"]) {
+    const source = `代理运行状态（${reference}），之前已经拉起。`;
+    const doc = new JSDOM(renderMarkdown(source)).window.document;
+    const card = doc.querySelector(".file-card")!;
+    assert.equal(card.getAttribute("data-file-inline"), "true");
+    assert.equal(card.getAttribute("data-file-path"), "/Applications/AIClaw Computer Use.app");
+    assert.ok(card.querySelector(".file-ref"));
+    assert.equal(card.querySelector(".file-open-trigger")?.getAttribute("aria-haspopup"), "menu");
+    assert.match(doc.querySelector("p")!.textContent!, /代理运行状态（.*），之前已经拉起。/);
+    assert.deepEqual(referencedFiles(source), ["/Applications/AIClaw Computer Use.app"]);
+    const standalone = new JSDOM(renderMarkdown(reference)).window.document;
+    assert.equal(standalone.querySelector(".file-card")?.hasAttribute("data-file-inline"), false);
+    const table = new JSDOM(renderMarkdown(`| 应用 |\n| --- |\n| ${reference} |`)).window.document;
+    assert.equal(table.querySelector("td .file-card")?.getAttribute("data-file-inline"), "true");
+  }
+});
+
 test("生成文件卡片将文件名和路径作为数据转义，不允许注入额外控件", async () => {
   const { fileCard } = await import("../apps/desktop/src/renderer/file-card.ts");
   const path = 'reports/<img src=x onerror=alert(1)>".docx';

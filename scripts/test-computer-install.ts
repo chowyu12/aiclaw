@@ -32,6 +32,17 @@ test("stable installation is idempotent and replaces a complete verified generat
   } finally { await h.close(); }
 });
 
+test("resource-only updates synchronize even when the executable is unchanged", { skip: !process.getuid }, async () => {
+  const h = await fixture();
+  try {
+    const target = await installComputerBundle(h.source, h.directory, async () => {});
+    await writeFile(join(h.source, "Contents/_CodeSignature/CodeResources"), "new-version-resources");
+    await installComputerBundle(h.source, h.directory, async () => {});
+    assert.equal(await readFile(h.binary(target), "utf8"), "native-one");
+    assert.equal(await readFile(join(target, "Contents/_CodeSignature/CodeResources"), "utf8"), "new-version-resources");
+  } finally { await h.close(); }
+});
+
 test("invalid updates leave the installed app intact and release the install lock", { skip: !process.getuid }, async () => {
   const h = await fixture();
   try {
