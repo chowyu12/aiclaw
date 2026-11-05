@@ -13,7 +13,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const directory = join(repo, "tools/computer-use/windows");
 const powershell = join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
 const temporary = await mkdtemp(join(tmpdir(), "aiclaw-windows-acceptance-"));
-const children = []; let runtime;
+const children = []; let runtime, shortcutFolder, launchedPID;
 const encoded = source => Buffer.from(source, "utf16le").toString("base64");
 const { ComputerPortableRuntime } = await import(new URL("../apps/desktop/dist/main/computer-portable-runtime.js", import.meta.url));
 const { stageComputerRuntime } = await import("./stage-computer-runtime.mjs");
@@ -21,6 +21,8 @@ const value = result => JSON.parse(result.content.find(item => item.type === "te
 try {
   const fixture = join(temporary,"AIClawFixture.exe");
   await run(powershell,["-NoProfile","-NonInteractive","-EncodedCommand",encoded('Add-Type -TypeDefinition ([IO.File]::ReadAllText($env:AICLAW_FIXTURE_SOURCE)) -ReferencedAssemblies System.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Web.Extensions.dll -OutputAssembly $env:AICLAW_FIXTURE_EXE -OutputType WindowsApplication')],{env:{...process.env,AICLAW_FIXTURE_SOURCE:join(directory,"Fixture.cs"),AICLAW_FIXTURE_EXE:fixture},timeout:60_000});
+  const shortcut=await run(powershell,["-NoProfile","-NonInteractive","-EncodedCommand",encoded('[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); $folder=Join-Path ([Environment]::GetFolderPath("Programs")) ("AIClaw Acceptance "+[Guid]::NewGuid()); [void](New-Item -ItemType Directory -Path $folder); $shell=New-Object -ComObject WScript.Shell; $link=$shell.CreateShortcut((Join-Path $folder "AIClaw Launch Fixture.lnk")); $link.TargetPath=$env:AICLAW_FIXTURE_EXE; $link.Arguments=\'"\'+$env:AICLAW_LAUNCH_RECEIPT+\'" "AIClaw Launch Fixture"\'; $link.WorkingDirectory=[IO.Path]::GetDirectoryName($env:AICLAW_FIXTURE_EXE); $link.Save(); [Console]::Write($folder)')],{env:{...process.env,AICLAW_FIXTURE_EXE:fixture,AICLAW_LAUNCH_RECEIPT:join(temporary,"launched.json")},timeout:30_000});
+  shortcutFolder=shortcut.stdout.trim();
   const target = spawn(fixture,[join(temporary,"target.json"),"AIClaw Target Fixture"],{stdio:"ignore"}); children.push(target);
   const sentinel = spawn(fixture,[join(temporary,"sentinel.json"),"AIClaw Sentinel Fixture"],{stdio:"ignore"}); children.push(sentinel);
   await stageComputerRuntime({repo,destination:join(repo,"apps/desktop"),platform:"win32",arch:process.arch});
@@ -87,9 +89,22 @@ try {
   }
   assert.equal(receipt.value,text+addition); assert.ok(receipt.drags>0); assert.ok(receipt.scrolls>0);
   const stopped=value(await call("stop_app",{app})); assert.equal(stopped.verified,true);
-  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true}));
+  const installed=value(await call("find_apps",{text:"AIClaw Launch Fixture"}));
+  const launcher=installed.apps.find(item=>item.launch_id); assert.ok(launcher);
+  await assert.rejects(call("start_app",{app:fixture}),/exact launch_id/);
+  const linkPath=join(shortcutFolder,"AIClaw Launch Fixture.lnk"), linkBytes=await readFile(linkPath);
+  await writeFile(linkPath,Buffer.concat([linkBytes,Buffer.from([0])]));
+  await assert.rejects(call("start_app",{app:launcher.launch_id}),/shortcut changed/);
+  await writeFile(linkPath,linkBytes);
+  const started=value(await call("start_app",{app:launcher.launch_id}));
+  assert.equal(started.verified,true); launchedPID=Number(started.app);
+  await call("get_app_state",{app:started.app});
+  assert.equal(value(await call("stop_app",{app:started.app})).verified,true); launchedPID=undefined;
+  console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true,discovered_shortcut_launch:true,changed_shortcut_refused:true,arbitrary_launch_path_refused:true,launched_pid_verified:true,launched_window_observed:true}));
 } finally {
   await runtime?.close();
   for(const child of children) { if(child.exitCode===null&&child.signalCode===null) child.kill(); }
+  if(launchedPID) {try {process.kill(launchedPID);} catch {}}
+  if(shortcutFolder) await rm(shortcutFolder,{recursive:true,force:true,maxRetries:10,retryDelay:200});
   await rm(temporary,{recursive:true,force:true,maxRetries:10,retryDelay:200});
 }

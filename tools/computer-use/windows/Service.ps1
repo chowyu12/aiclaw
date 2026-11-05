@@ -12,6 +12,7 @@ Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $script:serviceRoot 
 [void][AIClawComputerUse.Native]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $script:target = $null
 $script:elements = @{}
+$script:launches = @{}
 $script:counter = 0
 $script:imageSize = $null
 $script:truncated = $false
@@ -20,7 +21,7 @@ $script:parentPid = [int]$env:AICLAW_COMPUTER_PARENT_PID
 $sha = [Security.Cryptography.SHA256]::Create()
 $script:sourceHash = -join ($sha.ComputeHash($source) | ForEach-Object { $_.ToString('x2') }); $sha.Dispose()
 $specs = Get-Content -Raw -LiteralPath $Manifest | ConvertFrom-Json
-$supported = @('list_apps','find_apps','permission_status','frontmost_window','get_app_state','query','click','set_value','select_text','perform_secondary_action','press_key','type_text','scroll','drag','stop_app','modify_app')
+$supported = @('list_apps','find_apps','permission_status','frontmost_window','get_app_state','query','click','set_value','select_text','perform_secondary_action','press_key','type_text','scroll','drag','stop_app','modify_app','start_app')
 $tools = @($specs | Where-Object { $supported -contains $_.action } | ForEach-Object {
     $_.schema.properties.PSObject.Properties.Remove('observation_id')
     $_.schema.properties.PSObject.Properties.Remove('verify_after')
@@ -50,6 +51,48 @@ function Number($value, [double]$default, [double]$low, [double]$high) {
     return [double]$value
 }
 function Frame($rect) { return @{x=$rect.Left;y=$rect.Top;width=$rect.Right-$rect.Left;height=$rect.Bottom-$rect.Top} }
+function Installed-Apps([string]$needle) {
+    $shell=New-Object -ComObject WScript.Shell
+    try {
+        foreach ($folder in @([Environment]::GetFolderPath('Programs'),[Environment]::GetFolderPath('CommonPrograms'))) {
+            if (-not $folder) { continue }
+            foreach ($file in Get-ChildItem -LiteralPath $folder -Filter '*.lnk' -Recurse -File -ErrorAction SilentlyContinue) {
+                Check-Cancel
+                if (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -or ($needle -and $file.BaseName.IndexOf($needle,[StringComparison]::OrdinalIgnoreCase) -lt 0)) { continue }
+                $shortcut=$null
+                try {
+                    $shortcut=$shell.CreateShortcut($file.FullName)
+                    $executable=[IO.Path]::GetFileName($shortcut.TargetPath)
+                    if (-not $executable -or $executable -match '^(aiclaw|electron|claw-agent|aiclawcomputeruse)(\.exe)?$') { continue }
+                    $hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+                    $sha=[Security.Cryptography.SHA256]::Create()
+                    try { $pathHash=-join ($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($file.FullName)) | ForEach-Object { $_.ToString('x2') }) } finally { $sha.Dispose() }
+                    $name=[regex]::Replace($file.BaseName,'[^a-zA-Z0-9_.-]','_')
+                    $id='launch:win32.'+$name+'.'+$pathHash.Substring(0,24)
+                    $script:launches[$id]=@{path=$file.FullName;hash=$hash}
+                    @{id=$id;launch_id=$id;display_name=$file.BaseName;is_running=$false;windows=@()}
+                } finally { if ($null -ne $shortcut) { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shortcut) } }
+            }
+        }
+    } finally { [void][Runtime.InteropServices.Marshal]::FinalReleaseComObject($shell) }
+}
+function Start-App($argsObject) {
+    $id=Value $argsObject 'app'
+    if ($id -isnot [string] -or -not $script:launches.ContainsKey($id)) { throw 'Use an exact launch_id discovered on this connection; arbitrary commands and paths are not accepted' }
+    $entry=$script:launches[$id]
+    if ((Get-FileHash -LiteralPath $entry.path -Algorithm SHA256).Hash -ne $entry.hash) { throw 'The discovered shortcut changed; discover it again before launch' }
+    Clear-Observation; Check-Cancel
+    $launched=[AIClawComputerUse.Native]::StartShortcut($entry.path)
+    if ($null -ne $launched) {
+        $deadline=[DateTime]::UtcNow.AddSeconds(3)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            $windows=@([AIClawComputerUse.Native]::Windows($launched.PID) | Where-Object { $_.Birth -eq $launched.Birth })
+            if ($windows.Count -gt 0) { return Text @{app=[string]$launched.PID;launch_id=$id;verified=$true;launch_requested=$true} }
+            Wait-Checked 0.05
+        }
+    }
+    return Text @{launch_id=$id;verified=$false;launch_requested=$true}
+}
 function Resolve-Target($argsObject) {
     $app=Value $argsObject 'app'
     if ($app -isnot [string] -or $app -notmatch '^[1-9][0-9]*$') { throw 'Use the exact running PID from application discovery' }
@@ -356,8 +399,11 @@ function Dispatch([string]$kind, $argsObject) {
                 if (-not $apps.ContainsKey($key)) { $apps[$key]=@{id=$key;pid=$window.PID;display_name=$window.Name;path=$window.Executable;is_running=$true;windows=@()} }
                 $apps[$key].windows += @{window_id=$window.ID;title=$window.Title;frame=(Frame $window.Frame)}
             }
-            return Text @{apps=@($apps.Values);discovery_scope='running_applications';truncated=$false}
+            $records=@($apps.Values)+@(Installed-Apps $needle)
+            $limit=[int](Number (Value $argsObject 'limit') 100 1 100)
+            return Text @{apps=@($records | Select-Object -First $limit);discovery_scope='running_and_start_menu_shortcuts';truncated=($records.Count -gt $limit)}
         }
+        'ComputerUseIPCAppStartRequest' { return Start-App $argsObject }
         'ComputerUseIPCFrontmostWindowRequest' { $window=[AIClawComputerUse.Native]::GetForegroundWindow(); return Text @{app=[string][AIClawComputerUse.Native]::WindowPID($window.ToInt64());window_id=$window.ToInt64()} }
         'ComputerUseIPCAppGetSkyshotRequest' { return Observe $argsObject $false }
         'ComputerUseIPCAppQueryRequest' { return Observe $argsObject $true }

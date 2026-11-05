@@ -25,6 +25,21 @@ namespace AIClawComputerUse {
             thread.Start(); thread.Join();
             if (failure != null) throw new InvalidOperationException("UI Automation proxy initialization failed", failure);
         }
+        public class Launch { public int PID; public string Birth; }
+        public static Launch StartShortcut(string path) {
+            Launch result = null; Exception failure = null;
+            var thread = new Thread(() => {
+                try {
+                    using (var process = Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true, ErrorDialog = false })) {
+                        if (process != null && !process.HasExited) result = new Launch { PID = process.Id, Birth = process.StartTime.ToUniversalTime().Ticks.ToString() };
+                    }
+                } catch (Exception error) { failure = error; }
+            });
+            thread.SetApartmentState(ApartmentState.STA); thread.IsBackground = true; thread.Start();
+            if (!thread.Join(3000)) throw new InvalidOperationException("Launch timed out; outcome unknown, discover again rather than replay");
+            if (failure != null) throw new InvalidOperationException("Application launch failed; do not replay", failure);
+            return result;
+        }
         [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
         [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
