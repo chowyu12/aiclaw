@@ -17,7 +17,7 @@ const evaluate = expression => new Promise((resolve,reject) => {
   socket.send(JSON.stringify({id,method:"Runtime.evaluate",params:{expression,awaitPromise:true,returnByValue:true}}));
 });
 try {
-  child=spawn(executable,["--inspect=127.0.0.1:0",`--user-data-dir=${join(home,"profile")}`],{
+  child=spawn(executable,["--inspect=127.0.0.1:0",`--user-data-dir=${join(home,"profile")}`,...(process.env.AICLAW_TEST_NO_SANDBOX === "1" ? ["--no-sandbox"] : [])],{
     stdio:["ignore","ignore","pipe"],env:{...process.env,HOME:home,USERPROFILE:home,APPDATA:join(home,"AppData/Roaming"),LOCALAPPDATA:join(home,"AppData/Local")},
   });
   child.on("error",error=>{stderr+=String(error);});

@@ -151,6 +151,7 @@ try {
   await action("click",{element_index:String((await query("Submit fixture")).index)},true);
   receipt=JSON.parse(await readFile(join(temporary,"target.json"),"utf8"));
   assert.match(receipt.html,/<(strong|b)\b[^>]*>Windows 加粗 🌦️<\/(strong|b)>/i);
+  assert.equal((await clipboard('[Console]::Write([Windows.Forms.Clipboard]::GetText())')).stdout,"AIClaw original clipboard");
   const stopped=value(await call("stop_app",{app})); assert.equal(stopped.verified,true);
   const installed=value(await call("find_apps",{text:"AIClaw Launch Fixture"}));
   const launcher=installed.apps.find(item=>item.launch_id); assert.ok(launcher);
@@ -163,6 +164,8 @@ try {
   assert.equal(started.verified,true); launchedPID=Number(started.app);
   await call("get_app_state",{app:started.app});
   assert.equal(value(await call("stop_app",{app:started.app})).verified,true); launchedPID=undefined;
+  await runtime.close(); await controller.close(); await pause(3500);
+  assert.equal((await clipboard('[Console]::Write([Windows.Forms.Clipboard]::GetText())')).stdout,"AIClaw original clipboard");
   console.log(JSON.stringify({passed:true,backend:"windows-uia",installed_runtime:true,self_targets_refused:true,host_controller:true,static_window_no_update:true,ax_delta_reconstructed:true,source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,unicode_paste_read_back:true,clipboard_text_restored:true,query_only_paste_refused:true,background_paste_refused:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true,discovered_shortcut_launch:true,changed_shortcut_refused:true,arbitrary_launch_path_refused:true,launched_pid_verified:true,launched_window_observed:true}));
 } finally {
   await runtime?.close();
