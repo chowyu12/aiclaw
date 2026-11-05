@@ -222,10 +222,28 @@ function Perform($argsObject) {
                 if ($value -isnot [string] -or $value.Length -gt 2000000 -or (Value $values 'autosubmitSearchFields' $false)) { throw 'Set value needs bounded text without implicit autosubmit' }
                 $pattern=Pattern $node ([System.Windows.Automation.ValuePattern]::Pattern)
                 if (-not $pattern -or $pattern.Current.IsReadOnly) { throw 'Control has no writable ValuePattern' }
-                $pattern.SetValue($value)
+                if ($background) { [AIClawComputerUse.Native]::BackgroundSetValue($node.Current.NativeWindowHandle,$targetObject.window.ID,$targetObject.window.PID,$value) }
+                else { $pattern.SetValue($value) }
                 if ($pattern.Current.Value -ne $value) { throw 'Set value read-back differs; do not replay' }
                 $semantic=$true
             } elseif ($operation -eq 'selectText') {
+                if ($background) {
+                    $pattern=Pattern $node ([System.Windows.Automation.ValuePattern]::Pattern)
+                    if (-not $pattern) { throw 'Background selection requires a standard Edit with ValuePattern' }
+                    $value=$pattern.Current.Value; $needle=Value $values 'text'
+                    if ($needle -isnot [string] -or -not $needle -or $value.Length -gt 2000000) { throw 'Selection needs non-empty bounded text' }
+                    $offset=0; $candidates=@()
+                    while ($offset -le $value.Length) {
+                        Check-Cancel; $start=$value.IndexOf($needle,$offset,[StringComparison]::Ordinal)
+                        if ($start -lt 0) { break }; $end=$start+$needle.Length
+                        if (((Value $values 'prefix') -eq $null -or $value.Substring(0,$start).EndsWith($values.prefix,[StringComparison]::Ordinal)) -and ((Value $values 'suffix') -eq $null -or $value.Substring($end).StartsWith($values.suffix,[StringComparison]::Ordinal))) { $candidates += ,@($start,$end) }
+                        if ($candidates.Count -gt 1) { break }; $offset=$start+1
+                    }
+                    if ($candidates.Count -ne 1) { throw 'Selection is absent or ambiguous' }
+                    $start=$candidates[0][0]; $end=$candidates[0][1]; $selection=Value $values 'selection' 'text'
+                    if ($selection -eq 'cursorBefore') { $end=$start } elseif ($selection -eq 'cursorAfter') { $start=$end } elseif ($selection -ne 'text') { throw 'Unknown selection mode' }
+                    [AIClawComputerUse.Native]::BackgroundSelect($node.Current.NativeWindowHandle,$targetObject.window.ID,$targetObject.window.PID,$start,$end)
+                } else {
                 $pattern=Pattern $node ([System.Windows.Automation.TextPattern]::Pattern)
                 if (-not $pattern) { throw 'Control exposes no TextPattern selection' }
                 $needle=Value $values 'text'; if ($needle -isnot [string] -or -not $needle) { throw 'Selection needs non-empty text' }
@@ -247,6 +265,7 @@ function Perform($argsObject) {
                 elseif ($selection -ne 'text') { throw 'Unknown selection mode' }
                 $selected.Select(); $readback=@($pattern.GetSelection())
                 if ($readback.Count -ne 1 -or $selected.CompareEndpoints([System.Windows.Automation.TextPatternRangeEndpoint]::Start,$readback[0],[System.Windows.Automation.TextPatternRangeEndpoint]::Start) -ne 0 -or $selected.CompareEndpoints([System.Windows.Automation.TextPatternRangeEndpoint]::End,$readback[0],[System.Windows.Automation.TextPatternRangeEndpoint]::End) -ne 0) { throw 'Selection could not be verified; do not replay' }
+                }
                 $semantic=$true
             } else {
                 $requested=Value $values 'action' 'invoke'

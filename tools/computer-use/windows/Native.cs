@@ -48,6 +48,8 @@ namespace AIClawComputerUse {
         [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
         [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
         [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window, uint flags);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr window, StringBuilder name, int count);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessageTimeout(IntPtr window, uint message, IntPtr w, IntPtr l, uint flags, uint timeout, out UIntPtr result);
         [DllImport("user32.dll", SetLastError = true)] static extern uint SendInput(uint count, Input[] input, int size);
         [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
         [DllImport("user32.dll", SetLastError = true)] public static extern bool PostMessage(IntPtr window, uint message, IntPtr w, IntPtr l);
@@ -111,6 +113,35 @@ namespace AIClawComputerUse {
             EnumWindows(callback, IntPtr.Zero); GC.KeepAlive(callback); return result.ToArray();
         }
         public static int WindowPID(long window) { uint pid; GetWindowThreadProcessId(new IntPtr(window), out pid); return (int)pid; }
+        static IntPtr EditControl(int handle, long root, int pid) {
+            var window = new IntPtr(handle); var name = new StringBuilder(256);
+            GetClassName(window, name, name.Capacity);
+            if (WindowPID(handle) != pid || !SameUser(pid) || GetAncestor(window, 2).ToInt64() != root ||
+                !(name.ToString() == "Edit" || name.ToString().StartsWith("WindowsForms10.EDIT.", StringComparison.Ordinal)))
+                throw new InvalidOperationException("Strict background text supports only an observed standard Win32 Edit control; no focus-changing UIA fallback");
+            return window;
+        }
+        static UIntPtr Message(IntPtr window, uint message, IntPtr w, IntPtr l) {
+            UIntPtr result;
+            if (SendMessageTimeout(window, message, w, l, 2, 1000, out result) == IntPtr.Zero)
+                throw new InvalidOperationException("Control message failed or timed out; outcome unknown, do not replay");
+            return result;
+        }
+        public static void BackgroundSetValue(int handle, long root, int pid, string value) {
+            var window = EditControl(handle, root, pid);
+            var pointer = Marshal.StringToHGlobalUni(value);
+            try { if (Message(window, 0x000c, IntPtr.Zero, pointer).ToUInt64() == 0) throw new InvalidOperationException("Edit rejected the value"); }
+            finally { Marshal.FreeHGlobal(pointer); }
+        }
+        public static void BackgroundSelect(int handle, long root, int pid, int start, int end) {
+            var window = EditControl(handle, root, pid); var selected = Marshal.AllocHGlobal(8);
+            try {
+                Message(window, 0x00b1, new IntPtr(start), new IntPtr(end));
+                Message(window, 0x00b0, selected, IntPtr.Add(selected, 4));
+                if (Marshal.ReadInt32(selected) != start || Marshal.ReadInt32(selected, 4) != end)
+                    throw new InvalidOperationException("Selection read-back differs; do not replay");
+            } finally { Marshal.FreeHGlobal(selected); }
+        }
         public static bool SameRect(Rect a, Rect b) { return a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom; }
         public static bool PointBelongsTo(long window, int x, int y) { return GetAncestor(WindowFromPoint(new Point { X = x, Y = y }), 2).ToInt64() == window; }
         static void Emit(Input input) {
