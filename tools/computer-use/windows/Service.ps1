@@ -6,9 +6,9 @@ Set-StrictMode -Version 2
 $script:servicePath = if ($PSCommandPath) { $PSCommandPath } else { $env:AICLAW_COMPUTER_SERVICE }
 $script:serviceRoot = Split-Path -Parent $script:servicePath
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, UIAutomationClientsideProviders, System.Drawing, System.Windows.Forms
-$providers=[UIAutomationClientsideProviders.UIAutomationClientSideProviders]::ClientSideProviderDescriptionTable
-[System.Windows.Automation.ClientSettings]::RegisterClientSideProviders($providers)
-Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $script:serviceRoot 'Native.cs'))) -ReferencedAssemblies System.dll,System.Drawing.dll,System.Windows.Forms.dll
+$proxyAssembly=[AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq 'UIAutomationClientsideProviders' } | Select-Object -First 1
+Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $script:serviceRoot 'Native.cs'))) -ReferencedAssemblies @('System.dll','System.Drawing.dll','System.Windows.Forms.dll',[System.Windows.Automation.AutomationElement].Assembly.Location)
+[AIClawComputerUse.Native]::InitializeAutomation($proxyAssembly.GetName())
 [void][AIClawComputerUse.Native]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $script:target = $null
 $script:elements = @{}

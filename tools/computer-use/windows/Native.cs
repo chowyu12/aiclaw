@@ -13,6 +13,12 @@ using System.Threading;
 
 namespace AIClawComputerUse {
     public static class Native {
+        // The legacy managed UIA proxy loader walks reflected stack frames.
+        // Initialize through compiled code so it encounters this typed frame
+        // before PowerShell's DynamicMethod frames (whose ReflectedType is null).
+        public static void InitializeAutomation(System.Reflection.AssemblyName assembly) {
+            System.Windows.Automation.ClientSettings.RegisterClientSideProviderAssembly(assembly);
+        }
         [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
         [StructLayout(LayoutKind.Sequential)] struct Mouse { public int X, Y; public uint Data, Flags, Time; public UIntPtr Extra; }
