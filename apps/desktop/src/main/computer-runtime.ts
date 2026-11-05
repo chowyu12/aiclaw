@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { setTimeout as pause } from "node:timers/promises";
+import type { Duplex } from "node:stream";
 import { installComputerBundle, installedComputerBundle } from "./computer-install.js";
 const run = promisify(execFile);
 export const COMPUTER_USE_VERSION = "1";
@@ -31,11 +32,11 @@ export class ComputerNativeRuntime implements ComputerRuntime {
   private nextId = 1;
   private buffer = "";
   private failure?: Error;
-  private readonly socket: Socket;
+  private readonly socket: Duplex;
   private readonly timeoutMs: number;
   private readonly expectedIdentity?: string;
   private pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
-  constructor(socket: Socket, timeoutMs = 30_000, expectedIdentity?: string) {
+  constructor(socket: Duplex, timeoutMs = 30_000, expectedIdentity?: string) {
     this.socket = socket; this.timeoutMs = timeoutMs; this.expectedIdentity = expectedIdentity;
     socket.setEncoding("utf8");
     socket.on("data", chunk => {
@@ -121,7 +122,7 @@ export class ComputerNativeRuntime implements ComputerRuntime {
       throw error;
     }
   }
-  private request(requestType: string, request: unknown, timeoutMs = this.timeoutMs): Promise<any> {
+  protected request(requestType: string, request: unknown, timeoutMs = this.timeoutMs): Promise<any> {
     if (this.failure) return Promise.reject(this.failure);
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -136,4 +137,10 @@ export class ComputerNativeRuntime implements ComputerRuntime {
     this.pending.clear(); this.socket.destroy();
   }
   async close(): Promise<void> { this.fail(Error("Native Computer Use session closed")); }
+}
+
+export async function createComputerRuntime(): Promise<ComputerRuntime> {
+  if (process.platform === "darwin") return ComputerNativeRuntime.create();
+  const { ComputerPortableRuntime } = await import("./computer-portable-runtime.js");
+  return ComputerPortableRuntime.create();
 }

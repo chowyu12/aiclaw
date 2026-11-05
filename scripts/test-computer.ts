@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ComputerController } from "../apps/desktop/src/main/computer.ts";
 import { ComputerNativeRuntime, computerExecutable, computerNamespace, COMPUTER_PROTOCOL, computerSocket, type ComputerToolResult } from "../apps/desktop/src/main/computer-runtime.ts";
+import { ComputerPortableRuntime } from "../apps/desktop/src/main/computer-portable-runtime.ts";
 import { stageComputerRuntime } from "./stage-computer-runtime.mjs";
 const specs = JSON.parse(readFileSync(new URL("../tools/claw-agent/internal/agent/computer-tools.json", import.meta.url), "utf8"));
 const app = process.platform === "darwin" ? "com.example.fixture" : "123";
@@ -226,7 +227,7 @@ test("runtime capabilities reject unsupported fields rather than silently droppi
   await assert.rejects(h.call("click", { app, observation_id: id, x: 1, y: 2 }), /does not support click.x/); await h.controller.close();
 });
 
-async function peer(mode = "ok", timeout = 300) {
+async function peer(mode = "ok", timeout = 300, sourceIdentity?: string) {
   const directory = await mkdtemp(join(tmpdir(), "aiclaw-native-test-")); const path = join(directory, "ipc.sock");
   const requests: any[] = []; const sockets = new Set<import("node:net").Socket>();
   const server = createServer(socket => {
@@ -237,7 +238,7 @@ async function peer(mode = "ok", timeout = 300) {
         const line = buffer.slice(0, end); buffer = buffer.slice(end + 1); const frame = JSON.parse(line); requests.push(frame);
         if (mode === "malformed") { socket.write("bad JSON\n"); continue; }
         if (frame.requestType === "ComputerUseIPCHandshakeRequest") {
-          socket.write(JSON.stringify({ id: frame.id, result: { protocolVersion: mode === "version" ? "other" : COMPUTER_PROTOCOL, serverVersion: "1", tools: [{ name: "list_apps", inputSchema: { properties: {} } }] } }) + "\n"); continue;
+          socket.write(JSON.stringify({ id: frame.id, result: { protocolVersion: mode === "version" ? "other" : COMPUTER_PROTOCOL, serverVersion: "1", serviceSourceSHA256: "portable-source", tools: [{ name: "list_apps", inputSchema: { properties: {} } }] } }) + "\n"); continue;
         }
         if (mode === "timeout") continue;
         if (mode === "native-error") { socket.write(JSON.stringify({ id: frame.id, error: { message: "native validation refused" } }) + "\n"); continue; }
@@ -249,7 +250,7 @@ async function peer(mode = "ok", timeout = 300) {
   });
   await new Promise<void>(resolve => server.listen(path, resolve));
   const socket = createConnection(path); await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
-  const runtime = new ComputerNativeRuntime(socket, timeout);
+  const runtime = sourceIdentity ? new ComputerPortableRuntime(socket, sourceIdentity) : new ComputerNativeRuntime(socket, timeout);
   return { runtime, requests, async close() { await runtime.close(); for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); } };
 }
 
@@ -371,4 +372,15 @@ test("policy lookup does not launch a runtime and instructions attach once per t
   const otherTurn = await h.call("query", { app: "com.apple.Safari", text: "address" }, "chat", "next-turn");
   assert.match(otherTurn.text, /app_specific_instructions/);
   await h.controller.close();
+});
+
+test("portable IPC verifies its loaded service source before exposing tools", async () => {
+  const valid = await peer("ok", 300, "portable-source");
+  try { await valid.runtime.initialize(); assert.equal((await valid.runtime.call("list_apps", {})).content[0]!.text, "native receipt"); }
+  finally { await valid.close(); }
+  for (const [mode, identity] of [["ok", "wrong-source"], ["version", "portable-source"]]) {
+    const refused = await peer(mode, 300, identity);
+    try { await assert.rejects(refused.runtime.initialize(), /identity or protocol/); assert.equal(refused.runtime.tools.length, 0); }
+    finally { await refused.close(); }
+  }
 });

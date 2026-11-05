@@ -57,7 +57,7 @@ export class ComputerWatches {
       try {
         const next = snapshot(await watch.runtime.call("get_app_state", { app: watch.app, window_id: watch.current.metadata.window_id, include_ax: true, include_screenshot: true }), watch.app, watch.current.sequence + 1);
         if (watch.stopped) return;
-        if (next.metadata.pid !== watch.current.metadata.pid || next.metadata.window_id !== watch.current.metadata.window_id) throw Error("Observed process or window changed; restart the subscription explicitly");
+        if (next.metadata.pid !== watch.current.metadata.pid || next.metadata.window_id !== watch.current.metadata.window_id || next.metadata.process_start_time !== watch.current.metadata.process_start_time) throw Error("Observed process or window changed; restart the subscription explicitly");
         if (next.hash !== watch.current.hash || JSON.stringify(next.metadata) !== JSON.stringify(watch.current.metadata) || JSON.stringify(next.lines) !== JSON.stringify(watch.current.lines)) {
           watch.previous = watch.current; watch.current = next; this.signal(watch);
         }

@@ -1,6 +1,6 @@
 # AIClaw 原生桌面控制
 
-AIClaw 在 **macOS 14.4 及以上**通过自有 Swift 应用 **AIClaw Computer Use.app** 执行桌面控制。Electron 宿主负责模型循环、审批与操作后的验证；独立原生进程负责应用发现、AX 元素、窗口截图和输入。Windows、Linux 不注册这些工具，也没有替代驱动。
+AIClaw 当前产品工具在 **macOS 14.4 及以上**通过自有 Swift 应用 **AIClaw Computer Use.app** 执行桌面控制。Electron 宿主负责模型循环、审批与操作后的验证；独立原生进程负责应用发现、AX 元素、窗口截图和输入。Windows/Linux 执行层仍在开发、尚未注册产品工具或接入发布包。
 
 实现源码在 `tools/computer-use/Sources/`。本轮依据 Codex 已发布产物恢复出的接口形状重建桌面能力，调查证据和未实现能力见 [Codex 能力与证据盘点](codex-computer-use-evidence.md)。没有复制或加载 Codex 的私有运行时。
 
@@ -98,6 +98,14 @@ Finder 的路径导航、Safari 地址栏与页面的区分、TextEdit 文档/�
 3. 持续观察与增量更新：轮询订阅、增量、生命周期及真实窗口变化验收通过；逐帧/原生事件流尚未实现。
 4. 应用专用操作策略：Finder/Safari/TextEdit 策略、通用回退及按轮次注入已实现；并非所有应用的自动化工作流库。
 5. Windows/Linux 桌面控制：执行层开发与平台验证准备中，尚未启用工具。
+
+### Windows/Linux 开发状态
+
+Linux 原型源码位于 `tools/computer-use/linux/`，直接调用 X11/XTest/XComposite 和 AT-SPI，使用系统 Python/PyGObject，不下载第三方桌面控制服务。每个连接由宿主启动一个私有 stdio 子进程，协议握手核对服务与绑定源码的 SHA-256；EOF 取消排队操作，停止后关闭连接。目标限定当前用户的明确 PID 和窗口，复核进程启动标识、AT-SPI 元素身份和几何。
+
+隔离 D-Bus/Xvfb + GTK 双应用原生测试已经验证发现、后台设值/选择/点击、按键回读、Unicode 插入、拖动、滚动及窗口 PNG。截图通过 XComposite 为目标客户端窗口申请独立 backing storage，不裁剪根屏幕；前台蓝色测试窗口遮挡目标时，捕获的红色目标像素已验证。该路径参考 X11 API 及 [WebRTC 原生窗口捕获实现的接口使用方式](https://webrtc.googlesource.com/src/+/3f4d30b1938020da1e24e0df155af4da4d0a2b1a/modules/desktop_capture/linux/x11/window_capturer_x11.cc)，不是加载其驱动。
+
+编译后的宿主控制器到真实 Linux 子进程的联调已验证源码身份握手、后台提交回执、PNG、静止帧去重、AX 增量重建，以及轮次结束取消等待。Linux 的完整参数对齐、粘贴与启动、安装/打包和 Agent 工具启用尚未完成。Wayland 需要 portal 会话，当前 X11 原型明确拒绝 Wayland；Windows 原生执行层也尚未实现，不能将这些原型测试作为第五阶段完成证明。
 
 ## 构建、打包与签名
 

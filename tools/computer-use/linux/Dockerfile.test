@@ -1,0 +1,9 @@
+FROM debian:bookworm-slim
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    python3 python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 xvfb xauth dbus-x11 \
+    openbox xcompmgr libxtst6 libxcomposite1 fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+ENV NO_AT_BRIDGE=0 GTK_MODULES=atk-bridge
+WORKDIR /computer-use
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends at-spi2-core nodejs \
+    && rm -rf /var/lib/apt/lists/*

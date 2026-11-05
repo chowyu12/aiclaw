@@ -8,9 +8,9 @@ const specs = JSON.parse(readFileSync(new URL("../tools/claw-agent/internal/agen
 const app = process.platform === "darwin" ? "com.example.fixture" : "123";
 const flush = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 function harness() {
-  let value = "before", image = "aW1hZ2U=", pid = 123, handle = 1, closed = 0, created = 0, failure = false;
+  let value = "before", image = "aW1hZ2U=", pid = 123, birth = 1, handle = 1, closed = 0, created = 0, failure = false;
   const calls: { connection: number; action: string; args: any }[] = [];
-  const read = (): ComputerToolResult => failure ? { isError: true, content: [{ type: "text", text: "window closed" }] } : { content: [{ type: "text", text: JSON.stringify({ app, pid, window_id: 456, truncated: false }) + `\n[${handle++}] AXWindow fixture\n  [${handle++}] AXTextField ${value}` }, { type: "image", mimeType: "image/png", data: image }] };
+  const read = (): ComputerToolResult => failure ? { isError: true, content: [{ type: "text", text: "window closed" }] } : { content: [{ type: "text", text: JSON.stringify({ app, pid, process_start_time: birth, window_id: 456, truncated: false }) + `\n[${handle++}] AXWindow fixture\n  [${handle++}] AXTextField ${value}` }, { type: "image", mimeType: "image/png", data: image }] };
   const runtime = async () => {
     const connection = ++created;
     return {
@@ -29,7 +29,7 @@ function harness() {
     const result = await watches.start(session, "turn", { app, interval_ms: 500 }, () => true);
     return { result, data: JSON.parse(result.text) };
   };
-  return { runtime, watches, start, calls, read, counts: () => ({ created, closed }), change: (next: string) => { value = next; }, changeImage: () => { image = "bmV3LWltYWdl"; }, changeProcess: () => { pid++; }, fail: () => { failure = true; } };
+  return { runtime, watches, start, calls, read, counts: () => ({ created, closed }), change: (next: string) => { value = next; }, changeImage: () => { image = "bmV3LWltYWdl"; }, changeProcess: () => { pid++; }, changeBirth: () => { birth++; }, fail: () => { failure = true; } };
 }
 
 test("watch coalesces handle-only changes and returns reconstructable AX/image deltas", async t => {
@@ -106,5 +106,9 @@ test("subscription startup cannot survive a finished turn or changing process", 
   const { data } = await h.start(); h.changeProcess();
   t.mock.timers.tick(500); await flush();
   await assert.rejects(h.watches.next("chat", "turn", { watch_id: data.watch_id, after_sequence: 1 }), /process or window changed/);
+  await h.watches.stop("chat", "turn");
+  const reused = await h.start(); h.changeBirth();
+  t.mock.timers.tick(500); await flush();
+  await assert.rejects(h.watches.next("chat", "turn", { watch_id: reused.data.watch_id, after_sequence: 1 }), /process or window changed/);
   await h.watches.close();
 });

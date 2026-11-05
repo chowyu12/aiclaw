@@ -51,7 +51,7 @@ app.whenReady().then(async () => {
   assert.equal(foreground, sentinel, "the other fixture must be frontmost");
   const clipboardSnapshot = async () => Promise.all((await clipboard.read()).map(async item => Promise.all(item.types.map(async type => {
     const value = await item.getType(type);
-    return [type, value instanceof Blob ? Buffer.from(await value.arrayBuffer()).toString("base64") : JSON.stringify(value)];
+    return [type, typeof value.arrayBuffer === "function" ? Buffer.from(await value.arrayBuffer()).toString("base64") : JSON.stringify(value)];
   }))));
   const pointer = screen.getCursorScreenPoint(), savedClipboard = await clipboardSnapshot();
   const query = async (name, role) => {

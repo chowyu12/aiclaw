@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { basename } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
 import type { ComputerRequestParams, ComputerResult } from "@aiclaw/agent-client";
-import { ComputerNativeRuntime, type ComputerRuntime, type ComputerToolResult } from "./computer-runtime.js";
+import { createComputerRuntime, type ComputerRuntime, type ComputerToolResult } from "./computer-runtime.js";
 import { ComputerWatches } from "./computer-watch.js";
 import { computerAppPolicy } from "./computer-policy.js";
 
@@ -49,7 +49,7 @@ export class ComputerController {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly createRuntime: () => Promise<ComputerRuntime>;
   private readonly watches: ComputerWatches;
-  constructor(createRuntime: () => Promise<ComputerRuntime> = () => ComputerNativeRuntime.create()) { this.createRuntime = createRuntime; this.watches = new ComputerWatches(createRuntime); }
+  constructor(createRuntime: () => Promise<ComputerRuntime> = createComputerRuntime) { this.createRuntime = createRuntime; this.watches = new ComputerWatches(createRuntime); }
 
   perform(request: ComputerRequestParams): Promise<ComputerResult> {
     const key = JSON.stringify([request.sessionId, request.turnId]);
