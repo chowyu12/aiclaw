@@ -64,6 +64,13 @@ class Service:
     def __init__(self, manifest):
         if os.environ.get("XDG_SESSION_TYPE") == "wayland":
             raise RuntimeError("Wayland needs an explicit portal-backed desktop session; this service supports X11 only")
+        # libatspi can abort with SIGTRAP when its bus launcher is missing.
+        # Validate/activate the accessibility bus before entering native AT-SPI.
+        try:
+            bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
+            bus.call_sync("org.a11y.Bus", "/org/a11y/bus", "org.a11y.Bus", "GetAddress", None, GLib.VariantType.new("(s)"), Gio.DBusCallFlags.NONE, 2000, None)
+        except GLib.Error as error:
+            raise RuntimeError("Requires an AT-SPI accessibility bus: install at-spi2-core and run in a desktop D-Bus session. " + error.message) from error
         self.x = X11()
         self.clipboard = Clipboard()
         Atspi.init()

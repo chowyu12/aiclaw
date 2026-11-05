@@ -87,6 +87,10 @@ try {
   throw Error(`${String(error)}\nPackaged stderr:\n${stderr}`);
 } finally {
   socket?.close();
-  if(child && child.exitCode===null) {child.kill();await pause(1000);}
+  if(child && child.exitCode===null) {
+    child.kill(); await pause(1000);
+    if(child.exitCode===null) {child.kill("SIGKILL");await pause(100);}
+  }
+  child?.stderr.destroy(); child?.unref();
   await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:200});
 }

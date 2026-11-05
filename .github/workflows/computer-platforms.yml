@@ -100,7 +100,7 @@ jobs:
       - name: Launch actual Linux package and verify shipped runtime
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 libxtst6 libxcomposite1 libxfixes3 dbus-x11 xvfb openbox libnss3 libasound2t64 libgbm1
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-atspi-2.0 gir1.2-gtk-3.0 at-spi2-core libxtst6 libxcomposite1 libxfixes3 dbus-x11 xvfb openbox libnss3 libasound2t64 libgbm1
           sudo chown root:root release/AIClaw-linux-x64/chrome-sandbox
           sudo chmod 4755 release/AIClaw-linux-x64/chrome-sandbox
           dbus-run-session -- xvfb-run -a sh -c 'openbox >/tmp/openbox-package.log 2>&1 & sleep 1; node scripts/smoke-packaged-computer.mjs release/AIClaw-linux-x64/AIClaw'
