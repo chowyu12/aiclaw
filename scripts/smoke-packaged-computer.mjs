@@ -7,6 +7,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
+import { createRequire } from "node:module";
+
+const WebSocket = globalThis.WebSocket ?? createRequire(import.meta.url)("undici").WebSocket;
 
 const executable = resolve(process.argv[2]);
 const home = await mkdtemp(join(tmpdir(), "aiclaw-packaged-computer-"));
