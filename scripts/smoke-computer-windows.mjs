@@ -26,7 +26,7 @@ try {
   await run(powershell,["-NoProfile","-NonInteractive","-EncodedCommand",encoded('Add-Type -TypeDefinition ([IO.File]::ReadAllText($env:AICLAW_FIXTURE_SOURCE)) -ReferencedAssemblies System.dll,System.Drawing.dll,System.Windows.Forms.dll,System.Web.Extensions.dll -OutputAssembly $env:AICLAW_FIXTURE_EXE -OutputType WindowsApplication')],{env:{...process.env,AICLAW_FIXTURE_SOURCE:join(directory,"Fixture.cs"),AICLAW_FIXTURE_EXE:fixture},timeout:60_000});
   const target = spawn(fixture,[join(temporary,"target.json"),"AIClaw Target Fixture"],{stdio:"ignore"}); children.push(target);
   const sentinel = spawn(fixture,[join(temporary,"sentinel.json"),"AIClaw Sentinel Fixture"],{stdio:"ignore"}); children.push(sentinel);
-  const service = spawn(powershell,["-NoProfile","-NonInteractive","-STA","-EncodedCommand",encoded('& ([scriptblock]::Create([IO.File]::ReadAllText($env:AICLAW_COMPUTER_SERVICE))) -Manifest $env:AICLAW_COMPUTER_MANIFEST')],{env:environment,stdio:["pipe","pipe","pipe"],windowsHide:true}); children.push(service);
+  const service = spawn(powershell,["-NoProfile","-NonInteractive","-MTA","-EncodedCommand",encoded('& ([scriptblock]::Create([IO.File]::ReadAllText($env:AICLAW_COMPUTER_SERVICE))) -Manifest $env:AICLAW_COMPUTER_MANIFEST')],{env:environment,stdio:["pipe","pipe","pipe"],windowsHide:true}); children.push(service);
   service.stderr.on("data",chunk=>process.stderr.write(chunk));
   const transport = Duplex.from({readable:service.stdout,writable:service.stdin});
   service.once("error",error=>transport.destroy(error)); service.once("exit",code=>transport.destroy(code ? Error(`Service exited (${code})`) : undefined));
