@@ -271,11 +271,27 @@ function Perform($argsObject) {
                 $requested=Value $values 'action' 'invoke'
                 if ($operation -eq 'click') { $requested='invoke' }
                 switch ($requested) {
-                    'invoke' { $pattern=Pattern $node ([System.Windows.Automation.InvokePattern]::Pattern); if ($pattern) { $pattern.Invoke(); $semantic=$true } }
-                    'toggle' { $pattern=Pattern $node ([System.Windows.Automation.TogglePattern]::Pattern); if ($pattern) { $pattern.Toggle(); $semantic=$true } }
-                    'select' { $pattern=Pattern $node ([System.Windows.Automation.SelectionItemPattern]::Pattern); if ($pattern) { $pattern.Select(); $semantic=$true } }
-                    'expand' { $pattern=Pattern $node ([System.Windows.Automation.ExpandCollapsePattern]::Pattern); if ($pattern) { $pattern.Expand(); $semantic=$true } }
-                    'collapse' { $pattern=Pattern $node ([System.Windows.Automation.ExpandCollapsePattern]::Pattern); if ($pattern) { $pattern.Collapse(); $semantic=$true } }
+                    'invoke' {
+                        $pattern=Pattern $node ([System.Windows.Automation.InvokePattern]::Pattern)
+                        if ($pattern) {
+                            if ($background) { [AIClawComputerUse.Native]::BackgroundButton($node.Current.NativeWindowHandle,$targetObject.window.ID,$targetObject.window.PID) } else { $pattern.Invoke() }
+                            $semantic=$true
+                        }
+                    }
+                    'toggle' {
+                        $pattern=Pattern $node ([System.Windows.Automation.TogglePattern]::Pattern)
+                        if ($pattern) {
+                            if ($background) {
+                                $before=$pattern.Current.ToggleState
+                                [AIClawComputerUse.Native]::BackgroundButton($node.Current.NativeWindowHandle,$targetObject.window.ID,$targetObject.window.PID)
+                                if ($pattern.Current.ToggleState -eq $before) { throw 'Toggle read-back unchanged; do not replay' }
+                            } else { $pattern.Toggle() }
+                            $semantic=$true
+                        }
+                    }
+                    'select' { if ($background) { throw 'Strict background UIA selection is not validated; no input dispatched' }; $pattern=Pattern $node ([System.Windows.Automation.SelectionItemPattern]::Pattern); if ($pattern) { $pattern.Select(); $semantic=$true } }
+                    'expand' { if ($background) { throw 'Strict background UIA expansion is not validated; no input dispatched' }; $pattern=Pattern $node ([System.Windows.Automation.ExpandCollapsePattern]::Pattern); if ($pattern) { $pattern.Expand(); $semantic=$true } }
+                    'collapse' { if ($background) { throw 'Strict background UIA collapse is not validated; no input dispatched' }; $pattern=Pattern $node ([System.Windows.Automation.ExpandCollapsePattern]::Pattern); if ($pattern) { $pattern.Collapse(); $semantic=$true } }
                     default { throw 'Requested secondary action is not exposed' }
                 }
                 if (-not $semantic -and ($background -or $operation -ne 'click')) { throw 'Semantic action unavailable; no global input was sent' }

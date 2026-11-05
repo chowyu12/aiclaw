@@ -142,6 +142,14 @@ namespace AIClawComputerUse {
                     throw new InvalidOperationException("Selection read-back differs; do not replay");
             } finally { Marshal.FreeHGlobal(selected); }
         }
+        public static void BackgroundButton(int handle, long root, int pid) {
+            var window = new IntPtr(handle); var name = new StringBuilder(256);
+            GetClassName(window, name, name.Capacity);
+            if (WindowPID(handle) != pid || !SameUser(pid) || GetAncestor(window, 2).ToInt64() != root ||
+                !(name.ToString() == "Button" || name.ToString().StartsWith("WindowsForms10.BUTTON.", StringComparison.Ordinal)))
+                throw new InvalidOperationException("Strict background click supports only an observed standard Win32 Button; no focus-changing UIA fallback");
+            Message(window, 0x00f5, IntPtr.Zero, IntPtr.Zero);
+        }
         public static bool SameRect(Rect a, Rect b) { return a.Left == b.Left && a.Top == b.Top && a.Right == b.Right && a.Bottom == b.Bottom; }
         public static bool PointBelongsTo(long window, int x, int y) { return GetAncestor(WindowFromPoint(new Point { X = x, Y = y }), 2).ToInt64() == window; }
         static void Emit(Input input) {
