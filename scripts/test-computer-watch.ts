@@ -59,6 +59,28 @@ test("watch coalesces handle-only changes and returns reconstructable AX/image d
   } finally { await h.watches.close(); }
 });
 
+test("watch avoids false deltas when handle digit counts shift a native text cutoff", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let handle = 9;
+  const watches = new ComputerWatches(async () => ({
+    tools: [], async close() {},
+    async call(_action, args) {
+      const tree = `[${handle++}] AXTextField ${"unchanged".repeat(80)}`;
+      return {content:[
+        {type:"text",text:JSON.stringify({app,pid:123,window_id:456})+"\n"+(args.text_limit === "max" ? tree : tree.slice(0,500))},
+        {type:"image",mimeType:"image/png",data:"aW1hZ2U="},
+      ]};
+    },
+  }));
+  try {
+    const baseline = JSON.parse((await watches.start("chat","turn",{app,interval_ms:500},()=>true)).text);
+    t.mock.timers.tick(500); await flush();
+    const next = JSON.parse((await watches.next("chat","turn",{watch_id:baseline.watch_id,after_sequence:1,wait_ms:0})).text);
+    assert.equal(next.changed,false);
+    assert.equal(baseline.ax.lines[0],`AXTextField ${"unchanged".repeat(80)}`);
+  } finally {await watches.close();}
+});
+
 test("watch scope, cancellation, idle expiry and capture failure fail closed", async t => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const h = harness();

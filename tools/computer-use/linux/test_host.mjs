@@ -85,7 +85,8 @@ try {
   const launchReceipt=JSON.parse(launched.text.split("\n")[0]);
   assert.equal(launchReceipt.verified,true); assert.match(launchReceipt.app,/^[1-9][0-9]*$/);
   await launchCall("get_app_state",{app:launchReceipt.app});
-  await launchCall("stop_app",{app:launchReceipt.app,verify_after:false});
+  const stopped=await launchCall("stop_app",{app:launchReceipt.app,verify_after:false});
+  assert.equal(JSON.parse(stopped.text.split("\n")[0]).verified,true);
   console.log(JSON.stringify({ passed: true, backend: "x11-atspi", host_controller: true, private_stdio: true, source_identity_handshake: true, background_receipt: true, window_png: true, unicode_paste_read_back:true, clipboard_all_formats_restored:true, clipboard_survived_runtime_eof:true, clipboard_provider_exited_after_new_copy:true, static_window_no_update: true, ax_delta_reconstructed: true, sampling_preserved_action_observation: true, finish_turn_cancelled_wait: true, discovered_desktop_launch:true, launched_pid_verified:true, launched_window_observed:true, normal_close_requested:true }));
 } finally {
   await controller.close();

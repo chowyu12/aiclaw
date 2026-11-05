@@ -12,6 +12,7 @@ assert c.replace_if_unchanged(snapshot,g,True)
 assert c.snapshot()[0]==data
 assert c.owns_restored()
 assert c.replace_if_unchanged({},(-1,-1)) is None
+g=c.generation()
 c.clipboard.set_text('newer copy',-1)
 assert c.replace_if_unchanged(data,g,True) is None
 assert c.clipboard.wait_for_text()=='newer copy'

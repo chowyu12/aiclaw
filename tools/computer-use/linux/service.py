@@ -159,7 +159,7 @@ class Service:
                 return child
         raise RuntimeError("The selected process exposes no AT-SPI application; enable desktop accessibility and observe again")
 
-    def nodes(self, root, maximum=1200, state=None):
+    def nodes(self, root, maximum=1200, state=None, maximum_depth=64):
         state = state if state is not None else {}
         pending = collections.deque([(root, 0)])
         seen = set(); deadline = time.monotonic() + 2
@@ -172,7 +172,7 @@ class Service:
             seen.add(hash(node))
             yield node, depth
             count = node.get_child_count()
-            if depth < 64:
+            if depth < maximum_depth:
                 available = max(0, maximum - len(seen) - len(pending))
                 if count > available: state["truncated"] = True
                 for index in range(min(count, available)):
@@ -257,6 +257,9 @@ class Service:
         target = self.resolve(args)
         self.target = target
         maximum = integer(args.get("max_nodes" if query_only else "max_tree_nodes"), 1200, 1, 5000)
+        maximum_depth = 64 if query_only else min(64, integer(args.get("max_tree_depth"), 64, 1, 2**31-1))
+        raw_text_limit = args.get("text_limit", 500)
+        text_limit = 2_000_000 if raw_text_limit == "max" else integer(raw_text_limit, 500, 1, 2_000_000)
         matches, lines, visited = [], [], 0
         limit = integer(args.get("limit"), 20, 1, 100)
         needle, wanted_role = args.get("text", ""), args.get("role", "")
@@ -264,7 +267,7 @@ class Service:
             raise ValueError("Query needs text or role")
         traversal = {}
         if query_only or args.get("include_ax", True):
-            for node, depth in self.nodes(target["root"], maximum, traversal):
+            for node, depth in self.nodes(target["root"], maximum, traversal, maximum_depth):
                 visited += 1; index, attrs = self.retain(node, target)
                 candidate = " | ".join((attrs["title"], node.get_description() or "", attrs["value"]))
                 if query_only:
@@ -283,6 +286,9 @@ class Service:
         truncated = bool(traversal.get("truncated") or self.value_truncated or visited >= maximum or (query_only and len(matches) >= limit))
         if query_only:
             return text({**metadata, "matches": matches, "truncated": truncated, "visited": visited})
+        rendered = "\n".join(lines)
+        if len(rendered) > text_limit:
+            rendered = rendered[:text_limit]; truncated = True
         content = []
         if args.get("include_screenshot", True):
             frame, rgba = self.x.pixels(target["window_id"])
@@ -296,7 +302,7 @@ class Service:
                 raise RuntimeError("Window changed during capture; observe again")
             content.append({"type": "image", "mimeType": "image/png", "data": base64.b64encode(png).decode()})
         metadata.update(window_frame=target["frame"], truncated=truncated, image_width=self.image_size[0] if self.image_size else 0, image_height=self.image_size[1] if self.image_size else 0)
-        content.insert(0, {"type": "text", "text": json.dumps(metadata) + "\n" + "\n".join(lines)})
+        content.insert(0, {"type": "text", "text": json.dumps(metadata) + "\n" + rendered})
         return {"content": content}
 
     def global_focus(self, target):
@@ -497,7 +503,11 @@ class Service:
             self.invalidate(); target = self.resolve(args)
             if kind.endswith("StopRequest"):
                 self.x.message(target["window_id"], "_NET_CLOSE_WINDOW", [0, 2]); delay(0.2)
-                return text({"app": target["app"], "verified": not self.x.windows(target["pid"]), "normal_close_requested": True})
+                try:
+                    state = Path(f'/proc/{target["pid"]}/stat').read_text().rsplit(") ", 1)[1].split()
+                    stopped = state[0] == "Z" or state[19] != target["process_start_time"]
+                except FileNotFoundError: stopped = True
+                return text({"app": target["app"], "verified": stopped, "normal_close_requested": True})
             if args.get("modification") == "activate": self.x.activate(target["window_id"], CANCELLED.is_set)
             elif args.get("modification") == "deactivate": self.x.x.XIconifyWindow(self.x.display, target["window_id"], self.x.x.XDefaultScreen(self.x.display)); self.x.x.XFlush(self.x.display)
             else: raise ValueError("Unknown app modification")

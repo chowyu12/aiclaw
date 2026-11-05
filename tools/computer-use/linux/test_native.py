@@ -58,6 +58,11 @@ with tempfile.TemporaryDirectory(prefix="aiclaw-linux-acceptance-") as temp:
         action("click", {"elementID": query("Submit fixture")}, True)
         assert json.loads(Path(f"{temp}/receipt.json").read_text())["value"] == value
         assert x.active() == foreground and x.pointer() == pointer
+        limited = call("ComputerUseIPCAppGetSkyshotRequest", {"app": str(target.pid), "include_ax": True, "include_screenshot": False, "text_limit": 1})["content"][0]["text"]
+        header, rendered = limited.split("\n", 1)
+        assert json.loads(header)["truncated"] and len(rendered) == 1
+        shallow = call("ComputerUseIPCAppGetSkyshotRequest", {"app": str(target.pid), "include_ax": True, "include_screenshot": False, "text_limit": "max", "max_tree_depth": 1})["content"][0]["text"]
+        assert json.loads(shallow.split("\n", 1)[0])["truncated"]
         observed = call("ComputerUseIPCAppGetSkyshotRequest", {"app": str(target.pid), "include_ax": True})
         png = next(item for item in observed["content"] if item["type"] == "image")
         image = base64.b64decode(png["data"])

@@ -74,7 +74,26 @@ try {
   assert.ok(Buffer.from(image.data,"base64").subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])));
   const png=join(temporary,"window.png");await writeFile(png,Buffer.from(image.data,"base64"));
   await run(powershell,["-NoProfile","-NonInteractive","-EncodedCommand",encoded('Add-Type -AssemblyName System.Drawing; $image=[Drawing.Bitmap]::FromFile($env:AICLAW_FIXTURE_PNG); try {$red=0;for($y=0;$y -lt $image.Height;$y+=4){for($x=0;$x -lt $image.Width;$x+=4){$c=$image.GetPixel($x,$y);if($c.R -eq 204 -and $c.G -eq 51 -and $c.B -eq 68 -and $c.A -eq 255){$red++}}};if($red -lt 100){throw "Capture did not contain the occluded red target window"}} finally {$image.Dispose()}')],{env:{...process.env,AICLAW_FIXTURE_PNG:png},timeout:30_000});
-  console.log(JSON.stringify({passed:true,backend:"windows-uia",source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true}));
+  await call("get_app_state",{app,include_ax:false});
+  await action("pressKey",{key:"Right"});
+  await call("get_app_state",{app,include_ax:false});
+  const addition=" +输入 🌤️";
+  await action("type",{text:addition});
+  const gesture=(await query("Fixture gesture pad")).frame;
+  const screen=value(await call("get_app_state",{app,include_ax:false}));
+  const x=gesture.x-screen.window_frame.x+20, y=gesture.y-screen.window_frame.y+20;
+  await action("drag",{from_x:x,from_y:y,to_x:x+80,to_y:y+40});
+  await call("get_app_state",{app,include_ax:false});
+  await action("scroll",{x:x+80,y:y+40,direction:"down",pages:1});
+  await action("click",{element_index:String((await query("Submit fixture")).index)});
+  for(let attempt=0;attempt<40;attempt++) {
+    receipt=JSON.parse(await readFile(join(temporary,"target.json"),"utf8"));
+    if(receipt.value===text+addition&&receipt.drags>0&&receipt.scrolls>0) break;
+    await pause(50);
+  }
+  assert.equal(receipt.value,text+addition); assert.ok(receipt.drags>0); assert.ok(receipt.scrolls>0);
+  const stopped=value(await call("stop_app",{app})); assert.equal(stopped.verified,true);
+  console.log(JSON.stringify({passed:true,backend:"windows-uia",source_identity_handshake:true,discovery:true,background_value:text,text_selection:true,secondary_action:true,click_receipt:true,foreground_unchanged:true,window_only_png:true,occluded_target_color_verified:true,unicode_insertion:true,key_read_back:true,drag_events:receipt.drags,scroll_events:receipt.scrolls,normal_close_verified:true}));
 } finally {
   await runtime?.close();
   if(children[2]?.exitCode===null&&children[2]?.signalCode===null) await Promise.race([once(children[2],"exit"),pause(1000)]);

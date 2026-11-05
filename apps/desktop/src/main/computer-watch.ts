@@ -55,7 +55,7 @@ export class ComputerWatches {
   private poll(watch: Watch) {
     watch.timer = setTimeout(async () => {
       try {
-        const next = snapshot(await watch.runtime.call("get_app_state", { app: watch.app, window_id: watch.current.metadata.window_id, include_ax: true, include_screenshot: true }), watch.app, watch.current.sequence + 1);
+        const next = snapshot(await watch.runtime.call("get_app_state", { app: watch.app, window_id: watch.current.metadata.window_id, include_ax: true, include_screenshot: true, text_limit: "max" }), watch.app, watch.current.sequence + 1);
         if (watch.stopped) return;
         if (next.metadata.pid !== watch.current.metadata.pid || next.metadata.window_id !== watch.current.metadata.window_id || next.metadata.process_start_time !== watch.current.metadata.process_start_time) throw Error("Observed process or window changed; restart the subscription explicitly");
         if (next.hash !== watch.current.hash || JSON.stringify(next.metadata) !== JSON.stringify(watch.current.metadata) || JSON.stringify(next.lines) !== JSON.stringify(watch.current.lines)) {
@@ -86,7 +86,7 @@ export class ComputerWatches {
     if (this.watches.size >= 4) throw Error("At most four desktop observation subscriptions may run concurrently");
     const runtime = await this.createRuntime();
     try {
-      const current = snapshot(await runtime.call("get_app_state", { app: args.app, ...(args.window_id !== undefined ? { window_id: args.window_id } : {}), include_ax: true, include_screenshot: true }), String(args.app), 1);
+      const current = snapshot(await runtime.call("get_app_state", { app: args.app, ...(args.window_id !== undefined ? { window_id: args.window_id } : {}), include_ax: true, include_screenshot: true, text_limit: "max" }), String(args.app), 1);
       if (!active()) throw Error("Computer Use turn ended during subscription startup");
       const watch: Watch = { id: randomUUID(), session, turn, app: String(args.app), interval, runtime, current, stopped: false, waiters: new Set() };
       this.watches.set(key, watch); this.touch(watch); this.poll(watch);
