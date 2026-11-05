@@ -5,7 +5,9 @@ Set-StrictMode -Version 2
 [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
 $script:servicePath = if ($PSCommandPath) { $PSCommandPath } else { $env:AICLAW_COMPUTER_SERVICE }
 $script:serviceRoot = Split-Path -Parent $script:servicePath
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, System.Windows.Forms
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, UIAutomationClientsideProviders, System.Drawing, System.Windows.Forms
+$proxyAssembly=[AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.GetName().Name -eq 'UIAutomationClientsideProviders' } | Select-Object -First 1
+[System.Windows.Automation.ClientSettings]::RegisterClientSideProviderAssembly($proxyAssembly.GetName())
 Add-Type -TypeDefinition ([IO.File]::ReadAllText((Join-Path $script:serviceRoot 'Native.cs'))) -ReferencedAssemblies System.dll,System.Drawing.dll,System.Windows.Forms.dll
 [void][AIClawComputerUse.Native]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $script:target = $null
