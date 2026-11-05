@@ -13,11 +13,17 @@ using System.Threading;
 
 namespace AIClawComputerUse {
     public static class Native {
-        // The legacy managed UIA proxy loader walks reflected stack frames.
-        // Initialize through compiled code so it encounters this typed frame
-        // before PowerShell's DynamicMethod frames (whose ReflectedType is null).
+        // The legacy UIA proxy loader examines every caller frame. A dedicated
+        // compiled MTA thread avoids PowerShell DynamicMethod frames entirely.
         public static void InitializeAutomation(System.Reflection.AssemblyName assembly) {
-            System.Windows.Automation.ClientSettings.RegisterClientSideProviderAssembly(assembly);
+            Exception failure = null;
+            var thread = new Thread(() => {
+                try { System.Windows.Automation.ClientSettings.RegisterClientSideProviderAssembly(assembly); }
+                catch (Exception error) { failure = error; }
+            });
+            thread.SetApartmentState(ApartmentState.MTA);
+            thread.Start(); thread.Join();
+            if (failure != null) throw new InvalidOperationException("UI Automation proxy initialization failed", failure);
         }
         [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
