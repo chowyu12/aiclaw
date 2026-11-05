@@ -53,7 +53,9 @@ try {
     for(let attempt=0;attempt<100;attempt++) {
       readiness=await evaluate(`(async()=>{
         const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
-        const {app,BrowserWindow}=require('electron');
+        let electron;
+        try {electron=require('electron');} catch {return false;}
+        const {app,BrowserWindow}=electron;
         if(!app.isReady()) return false;
         const window=BrowserWindow.getAllWindows()[0];
         if(!window||window.webContents.isLoading()) return false;
