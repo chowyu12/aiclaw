@@ -83,9 +83,22 @@ export function mergePath(...parts: (string | string[] | undefined)[]): string {
   return result.join(delimiter);
 }
 
-/** 登录 shell 的 PATH 在前（与终端一致），然后是应用自己的，最后是兜底目录。 */
-export async function toolPath(home: string): Promise<string> {
-  if (process.platform === "win32") return process.env[Object.keys(process.env).find(key => key.toLowerCase() === "path") ?? "PATH"] ?? "";
-  const login = await loginShellPath();
-  return mergePath(login, process.env.PATH, commonBinDirs(home));
+let toolPathRequest: { key: string; promise: Promise<string> } | undefined;
+
+/** 进程内复用登录环境；PATH 顺序仍为登录 shell、继承环境、兜底目录。 */
+export function toolPath(home: string): Promise<string> {
+  if (process.platform === "win32") return Promise.resolve(process.env[Object.keys(process.env).find(key => key.toLowerCase() === "path") ?? "PATH"] ?? "");
+  const inherited = process.env.PATH;
+  const key = JSON.stringify([home, process.env.SHELL, process.env.HOME, process.env.ZDOTDIR, inherited]);
+  if (toolPathRequest?.key === key) return toolPathRequest.promise;
+  const promise = loginShellPath().then(login => {
+    // Failed shell discovery uses the normal fallback, but a later call may retry.
+    if (!login && toolPathRequest?.promise === promise) toolPathRequest = undefined;
+    return mergePath(login, inherited, commonBinDirs(home));
+  }).catch(error => {
+    if (toolPathRequest?.promise === promise) toolPathRequest = undefined;
+    throw error;
+  });
+  toolPathRequest = { key, promise };
+  return promise;
 }

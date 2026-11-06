@@ -784,6 +784,8 @@ sessions.on("status", (state, detail) => {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
+  // 与 Electron 和首屏加载并行；会话和命令复用同一次登录环境探测。
+  void toolPath(homedir()).catch(error => logApp(`登录环境预热失败：${String(error)}`));
   app.on("second-instance", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();

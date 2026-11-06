@@ -1,16 +1,17 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from "vue";
 import { store } from "../store";
-import ThemeView from "./ThemeView.vue";
-import SettingsView from "./SettingsView.vue";
-import ProvidersView from "./ProvidersView.vue";
-import PluginsView from "./PluginsView.vue";
-import SearchEnginesView from "./SearchEnginesView.vue";
-import McpView from "./McpView.vue";
-import MemoryView from "./MemoryView.vue";
-import SkillsView from "./SkillsView.vue";
-import UsageView from "./UsageView.vue";
-import SchedulesView from "./SchedulesView.vue";
-import ArchivedView from "./ArchivedView.vue";
+const ThemeView = defineAsyncComponent(() => import("./ThemeView.vue"));
+const SettingsView = defineAsyncComponent(() => import("./SettingsView.vue"));
+const ProvidersView = defineAsyncComponent(() => import("./ProvidersView.vue"));
+const PluginsView = defineAsyncComponent(() => import("./PluginsView.vue"));
+const SearchEnginesView = defineAsyncComponent(() => import("./SearchEnginesView.vue"));
+const McpView = defineAsyncComponent(() => import("./McpView.vue"));
+const MemoryView = defineAsyncComponent(() => import("./MemoryView.vue"));
+const SkillsView = defineAsyncComponent(() => import("./SkillsView.vue"));
+const UsageView = defineAsyncComponent(() => import("./UsageView.vue"));
+const SchedulesView = defineAsyncComponent(() => import("./SchedulesView.vue"));
+const ArchivedView = defineAsyncComponent(() => import("./ArchivedView.vue"));
 
 /**
  * 设置几页的路由。

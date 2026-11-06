@@ -2,7 +2,6 @@
 import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store } from "./store";
 import ChatView from "./views/ChatView.vue";
-import SettingsShell from "./views/SettingsShell.vue";
 import SessionSidebar from "./views/SessionSidebar.vue";
 import ActivityRail from "./views/ActivityRail.vue";
 import ApprovalDialog from "./views/ApprovalDialog.vue";
@@ -14,6 +13,7 @@ import { locale, t } from "./i18n";
 /** 「配完了」= 选好了默认模型（它所属的模型服务在库里带着端点与 Key）。 */
 const WorkspaceFiles = defineAsyncComponent(() => import("./views/WorkspaceFiles.vue"));
 const FilePreview = defineAsyncComponent(() => import("./views/FilePreview.vue"));
+const SettingsShell = defineAsyncComponent(() => import("./views/SettingsShell.vue"));
 watch(() => [store.sessionId, store.view], () => { actions.closeFileBrowser(); actions.closeFilePreview(); });
 watch(() => store.view === 'chat' && (store.fileBrowser || !!store.filePreview), open => {
   void window.aiclaw.files.previewLayout(open).catch(() => undefined);

@@ -5,11 +5,14 @@ import FileReferences from "./FileReferences.vue";
 import { filename, fileType } from "../file-card";
 import { highlightCode } from "../code-highlight";
 import { renderPreviewMarkdown } from "../markdown";
+import { htmlPreviewDocument } from "../html-preview";
 import { textMatches } from "../file-find";
 import { numberedDiff, splitDiff } from "../file-diff";
 import { t } from "../i18n";
 
 const props = defineProps<{ preview: FilePreviewState }>();
+const htmlFile = computed(() => /\.html?$/i.test(props.preview.path));
+const canRender = computed(() => htmlFile.value || props.preview.language === "markdown");
 const mode = ref("source"), layout = ref("split"), copied = ref(false);
 const closeButton = ref<HTMLButtonElement>();
 const previousFocus = document.activeElement as HTMLElement | null;
@@ -51,7 +54,7 @@ function moveFind(direction:number): void {
   body.value.scrollTop+=rect.top-pane.top-body.value.clientHeight/3;
   if(rect.left<pane.left||rect.right>pane.right)body.value.scrollLeft+=rect.left-pane.left;
 }
-async function openFind(): Promise<void> { findOpen.value=true;await nextTick();findInput.value?.focus();findInput.value?.select(); }
+async function openFind(): Promise<void> { if (htmlFile.value && mode.value === "rendered") mode.value="source";findOpen.value=true;await nextTick();findInput.value?.focus();findInput.value?.select(); }
 function closeFind(): void {findOpen.value=false;lineError.value="";CSS.highlights.delete("aiclaw-file-find");CSS.highlights.delete("aiclaw-file-active");}
 async function jumpLine(): Promise<void> {
   const value=Number(lineNumber.value),max=Math.min(3000,visibleLines.value.length);
@@ -82,8 +85,8 @@ watch(() => [props.preview.request, props.preview.loading], async () => {
   const ticket = ++restoreTicket;
   restoring = true;
   const saved = props.preview.reading;
-  const allowed = ["source", ...(props.preview.change ? ["diff", "before", "after"] : []), ...(props.preview.language === "markdown" ? ["rendered"] : [])];
-  mode.value = saved && allowed.includes(saved.mode) ? saved.mode : props.preview.change ? "diff" : props.preview.language === "markdown" ? "rendered" : "source";
+  const allowed = ["source", ...(props.preview.change ? ["diff", "before", "after"] : []), ...(canRender.value ? ["rendered"] : [])];
+  mode.value = saved && allowed.includes(saved.mode) ? saved.mode : props.preview.change ? "diff" : canRender.value ? "rendered" : "source";
   layout.value = saved?.layout ?? "split";
   copied.value = false;
   await nextTick();
@@ -103,6 +106,7 @@ const displayText = computed(() => visibleLines.value.slice(0, 3000).join("\n"))
 const truncated = computed(() => content.value.length > 512 * 1024 || visibleLines.value.length > 3000);
 const code = computed(() => highlightCode(displayText.value, props.preview.language));
 const markup = computed(() => renderPreviewMarkdown(displayText.value));
+const htmlDocument = computed(() => htmlFile.value ? htmlPreviewDocument(displayText.value) : "");
 const diff = computed(() => props.preview.change ? numberedDiff(props.preview.change.before, props.preview.change.after) : []);
 const lines = computed(() => diff.value.slice(0, 3000));
 const split = computed(() => splitDiff(lines.value));
@@ -135,7 +139,7 @@ onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();
     <header class="preview-header">
       <div class="preview-heading"><strong>{{ t('文件阅读区') }}</strong></div>
       <div class="preview-header-actions">
-        <button :aria-label="t('浏览工作区文件')" :title="t('浏览工作区文件')" @click="actions.toggleFileBrowser()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg></button>
+        <button :disabled="preview.loading || !!preview.error" :aria-label="t('打开文件所在目录')" :title="t('打开文件所在目录')" @click="actions.revealWorkspace(preview.path)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg></button>
         <button :aria-label="t('查找文件内容')" :title="t('查找文件内容')" @click="openFind"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg></button>
         <button :disabled="preview.loading" :aria-label="t('刷新')" :title="t('重新读取当前文件')" @click="actions.refreshFilePreview()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg><span class="sr-only">{{ t('刷新') }}</span></button>
         <button :disabled="preview.loading" :aria-label="t('对比')" :title="t('查看此文件最近一次记录的改动')" @click="actions.compareFilePreview()"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M6 9h3M15 15h3M16.5 13.5v3"/></svg><span class="sr-only">{{ t('对比') }}</span></button>
@@ -157,10 +161,10 @@ onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();
         <button :aria-pressed="mode === 'after'" @click="mode='after'">{{ t('修改后') }}</button>
       </template>
       <button v-else :aria-pressed="mode === 'source'" @click="mode='source'">{{ t('原文') }}</button>
-      <button v-if="preview.language === 'markdown'" :aria-pressed="mode === 'rendered'" @click="mode='rendered'">{{ t('渲染') }}</button>
+      <button v-if="canRender" :aria-pressed="mode === 'rendered'" @click="mode='rendered'">{{ t('渲染') }}</button>
       </div>
       <div class="preview-type-actions">
-        <span class="preview-language">{{ preview.language }}</span>
+        <span class="preview-language">{{ htmlFile ? 'HTML' : preview.language }}</span>
         <button v-if="mode !== 'diff'" :disabled="preview.loading || !!preview.error" @click="copy"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>{{ copied ? t('已复制') : t('复制内容') }}</button>
       </div>
     </nav>
@@ -195,6 +199,7 @@ onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();
         </div>
         <p v-if="diff.length > 3000" class="preview-note">{{ t('差异超过显示范围，仅预览前 3000 行。') }}</p>
       </div>
+      <div v-else-if="mode === 'rendered' && htmlFile" ref="body" class="preview-body html-preview"><iframe :title="t('文件预览')" sandbox="" referrerpolicy="no-referrer" :srcdoc="htmlDocument" /></div>
       <div v-else-if="mode === 'rendered'" ref="body" class="preview-body markdown-preview prose" @scroll="saveReading(true)"><FileReferences :html="markup" :base-path="preview.path" /></div>
       <div v-else ref="body" class="preview-body source-code" @scroll="saveReading(true)"><pre class="line-numbers" aria-hidden="true"><span v-for="(_,index) in visibleLines.slice(0,3000)" :key="index" :class="{current:index+1===activeLine}">{{ index+1 }}</span></pre><pre><code v-html="code" /></pre></div>
       <p v-if="mode !== 'diff' && truncated" class="preview-note">{{ t('内容超过显示范围，仅预览前 3000 行或 512 KB。') }}</p>
@@ -203,6 +208,7 @@ onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();
   </aside>
 </template>
 <style scoped>
+.html-preview{overflow:hidden;background:#fff}.html-preview iframe{display:block;width:100%;height:100%;border:0}
 .file-preview{width:720px;max-width:56%;flex:none;min-width:0;height:calc(100% - 20px);margin:10px 10px 10px 0;display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-md);overflow:hidden;color:var(--ink)}
 .preview-header{display:flex;align-items:center;padding:9px 12px;gap:11px;flex:none}
 .preview-heading{flex:1;min-width:0}.preview-heading strong{font-size:12px;font-weight:400;color:var(--muted)}

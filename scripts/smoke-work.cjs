@@ -33,7 +33,13 @@ app.whenReady().then(async()=>{
  let memoryRevision=1,memoryFails=false,memoryConflict=false,editedGlobal=null;const memoryReads=[],memorySaves=[],editedWorkspaces=new Map();
  let contextFixture={model:"test",window:100000,estimatedTokens:12500,lastInputTokens:12000,hasImages:false,compactions:1,records:[{at:1791850000000,before:95000,after:5000}]};const contextReads=[],browseReads=[],beforeRestoreContextReads=[];let resumeGate=null;
  let skillListFails=false;const skillCatalog=[{name:'alpha',description:'整理报告 <b>plain</b>',enabled:true},{name:'beta',description:'邮件处理',enabled:true},{name:'disabled',description:'Disabled skill',enabled:false},{name:'not-loaded',description:'Not mounted in current session',enabled:true}].map(skill=>({...skill,id:skill.name,dirName:skill.name,dir:'/fixture/skills/'+skill.name,source:'AIClaw',writable:true}));
- const handle=(key,fn)=>ipcMain.handle(IPC[key],fn);
+ let releaseStartupReads;
+ const startupReads = new Set(), startupGate = new Promise(resolve=>{releaseStartupReads=resolve});
+ let holdStartupReads=true;
+ const handle=(key,fn)=>ipcMain.handle(IPC[key],async(...args)=>{
+  if(holdStartupReads && ['profileList','groupRead','mcpRead','skillList'].includes(key)){startupReads.add(key);await startupGate;}
+  return fn(...args);
+ });
  let computerState={mode:'ready',active:null,watching:0};const computerActions=[];let computerChecks=0,computerSetups=0;
  const computerDiagnostic=()=>({platform:'darwin',available:true,accessibility:true,screenCapture:false,toolCount:18,message:'请开启屏幕录制权限。'});
  handle('computerStatus',()=>computerState);
@@ -50,7 +56,9 @@ app.whenReady().then(async()=>{
  let finishUpdate,updateInstalls=0;handle('updateInstall',()=>{updateInstalls++;return new Promise(resolve=>{finishUpdate=resolve;});});
  handle('fileMedia',(_e,path)=>{mediaReads.push(path);if(path==='generated/missing.png')throw Error('Image file missing');return {kind:'image',dataUrl:imageData};});
  let previewWindowWidth=null;handle('filePreviewLayout',(_e,open)=>{if(open&&previewWindowWidth===null){previewWindowWidth=win.getBounds().width;win.setSize(previewWindowWidth+730,win.getBounds().height);}else if(!open&&previewWindowWidth!==null){win.setSize(previewWindowWidth,win.getBounds().height);previewWindowWidth=null;}});
- handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}if(input.path.endsWith('.sql'))return {path:input.path,language:'sql',content:'SELECT id FROM users WHERE active = 9;'};return {path:input.path,language:'markdown',content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">\n\n'+Array.from({length:140},(_,index)=>'Paragraph '+index+'\n\n').join('')+'wide'.repeat(150)};});
+ const htmlPreviewFixture='<!doctype html><html lang="zh-CN"><head><style>body{margin:0;background:#f5f6f8;color:#0f172a;font:15px sans-serif}.report-card{background:#eef4ff;padding:24px;margin:20px;border-radius:12px}</style><meta http-equiv="refresh" content="0;url=https://example.com/html-preview-probe-refresh"></head><body><article class="report-card"><h1>HTML 报告预览</h1><p>工作复盘报告</p><table><tr><td>已完成</td></tr></table></article><script>parent.document.body.dataset.htmlPreviewEscaped="yes"</script><img src="https://example.com/html-preview-probe-image" onerror="parent.pwned=1"></body></html>';
+ let htmlPreviewNetworkRequests=0;
+ handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}if(/\.html?$/i.test(input.path))return {path:input.path,language:'xml',content:htmlPreviewFixture};if(input.path.endsWith('.sql'))return {path:input.path,language:'sql',content:'SELECT id FROM users WHERE active = 9;'};return {path:input.path,language:'markdown',content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">\n\n'+Array.from({length:140},(_,index)=>'Paragraph '+index+'\n\n').join('')+'wide'.repeat(150)};});
  handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
  let configGate=null, configWriteFails=false;
  const commandCalls=[], commandStops=[], codeCopies=[];
@@ -101,6 +109,9 @@ app.whenReady().then(async()=>{
 
  try {
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
+ for(let attempt=0;attempt<60&&startupReads.size<4;attempt++)await new Promise(resolve=>setTimeout(resolve,50));
+ check('independent startup reads are dispatched together before any completes',startupReads.size===4);
+ holdStartupReads=false;releaseStartupReads();
  await js("localStorage.setItem('aiclaw:session-grouping','groups');localStorage.removeItem('aiclaw:pinned-workspaces');localStorage.removeItem('aiclaw:session-sidebar-width')");
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
  await wait("document.querySelectorAll('.bucket').length===3");
@@ -143,7 +154,7 @@ app.whenReady().then(async()=>{
   check('modern theme persists without changing font or reading size',settings.writeConfig({theme:'modern'}).theme==='modern'&&new ConfigStore(themeDirectory).readConfig().theme==='modern'&&new ConfigStore(themeDirectory).readConfig().font==='songti'&&new ConfigStore(themeDirectory).readConfig().fontSize===18);
  } finally { require('node:fs').rmSync(themeDirectory,{recursive:true,force:true}); }
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
- check('theme has a dedicated settings navigation item and is absent from general configuration',await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题')")&&await js("!document.querySelector('[data-theme-option]') && !!document.querySelector('.settings select')"));
+ check('theme has a dedicated settings navigation item and is absent from general configuration',await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题') && !document.querySelector('[data-theme-option]') && !!document.querySelector('.settings select')"));
  const openThemes=async()=>{
   await js("document.querySelector('.activity-rail [data-view=settings]').click()");
   await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题')");
@@ -573,12 +584,13 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.preview-file-tab.active .tab-close').click()");
  check('closing final reading tab restores original window',await wait("!document.querySelector('.file-preview')")&&win.getBounds().width===1200);
  await js("document.querySelector('.prose .file-card').click()");await wait("!!document.querySelector('.file-preview')");
- await js("document.querySelector('.file-preview button[aria-label=\"浏览工作区文件\"]').click()");check('reading-area workspace browser opens without a composer file button',await wait("document.querySelectorAll('.workspace-files .file-row').length===2")&&browseReads.at(-1)?.sessionId==='s'&&win.getBounds().width===1930&&await js("!document.querySelector('.composer button[title=\"浏览工作区文件\"]')"));
- await js("document.querySelector('.workspace-files .file-row').click()");check('workspace directory expansion is lazy',await wait("document.querySelectorAll('.workspace-files .file-row').length===3")&&browseReads.at(-1)?.path==='src');
- await js("(()=>{const input=document.querySelector('.workspace-files input');input.value='example';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
- check('workspace file-name search crosses preload',await wait("document.querySelectorAll('.workspace-files .file-row').length===1")&&browseReads.at(-1)?.query==='example');
- writeFileSync('/tmp/aiclaw-workspace-files.png',(await win.webContents.capturePage()).toPNG());
- await js("document.querySelector('.workspace-files .file-row').click()");check('browser opens selected file in reading tab',await wait("!!document.querySelector('.source-code')")&&previewReads.at(-1)?.path==='/tmp/smoke/example.sql');
+ await js("document.querySelector('.file-preview button[aria-label=\"打开文件所在目录\"]').click()");
+ check('reading-area folder button reveals the current file through preload',await wait("!!document.querySelector('.file-preview') && !document.querySelector('.workspace-files')")&&revealedWorkspaces.at(-1)==='/tmp/smoke/generated/2026 AI 行业趋势.md');
+ win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',item:{id:'query-file',kind:'agentMessage',text:'[查询文件](/tmp/smoke/example.sql)'}}});
+ await wait("!!document.querySelector('.prose .file-card[data-file-path=\"/tmp/smoke/example.sql\"]')");
+ await js("document.querySelector('.prose .file-card[data-file-path=\"/tmp/smoke/example.sql\"]').click()");await wait("!!document.querySelector('.source-code')");
+ await js("document.querySelector('.file-preview button[aria-label=\"打开文件所在目录\"]').click()");
+ check('folder button follows the newly selected file instead of its workspace',revealedWorkspaces.at(-1)==='/tmp/smoke/example.sql');
  win.webContents.sendInputEvent({type:'keyDown',keyCode:'f',modifiers:['meta']});win.webContents.sendInputEvent({type:'keyUp',keyCode:'f',modifiers:['meta']});
  check('Command-F opens in-file search',await wait("!!document.querySelector('.file-find-bar')"));
  await js("(()=>{const input=document.querySelector('.file-find-bar input');input.value='SELECT';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
@@ -588,6 +600,26 @@ app.whenReady().then(async()=>{
  await js("(()=>{const input=document.querySelector('.file-find-bar .line-input');input.value='1';input.dispatchEvent(new Event('input',{bubbles:true}))})()");await click('跳行');check('go-to-line selects requested source line',await wait("document.querySelector('.line-numbers .current')?.textContent==='1'"));
  await js("(()=>{const input=document.querySelector('.file-find-bar .line-input');input.value='999';input.dispatchEvent(new Event('input',{bubbles:true}))})()");await click('跳行');check('go-to-line rejects out-of-range values',await wait("document.querySelector('.preview-error')?.textContent.includes('行号')"));
  await js("document.querySelector('.file-preview button[aria-label=\"关闭文件预览\"]').focus()");win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});check('Escape closes find before closing preview',await wait("!document.querySelector('.file-find-bar') && !!document.querySelector('.file-preview')"));
+ await js("document.querySelector('.file-preview button[aria-label=\"关闭文件预览\"]').click()");await wait("!document.querySelector('.file-preview')");
+ win.webContents.session.webRequest.onBeforeRequest({urls:['https://example.com/html-preview-probe*']},(_details,callback)=>{htmlPreviewNetworkRequests++;callback({cancel:true});});
+ win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',item:{id:'html-report',kind:'agentMessage',text:'[工作复盘报告.html](/tmp/smoke/report.html)'}}});
+ await wait("!!document.querySelector('.prose .file-card[data-file-path=\"/tmp/smoke/report.html\"]')");
+ await js("document.querySelector('.prose .file-card[data-file-path=\"/tmp/smoke/report.html\"]').click()");
+ check('HTML report opens rendered view by default with an HTML badge',await wait("!!document.querySelector('.html-preview iframe') && document.querySelector('.preview-language').textContent==='HTML'"));
+ let htmlRect=await js("(()=>{const rect=document.querySelector('.html-preview iframe').getBoundingClientRect();return {x:Math.round(rect.x+40),y:Math.round(rect.y+30),width:1,height:1}})()");
+ let paintedReport=false,lastHtmlPixel=[];
+ for(let attempt=0;attempt<60;attempt++){htmlRect=await js("(()=>{const rect=document.querySelector('.html-preview iframe').getBoundingClientRect();return {x:Math.round(rect.x+40),y:Math.round(rect.y+30),width:1,height:1}})()");const pixel=(await win.webContents.capturePage(htmlRect)).toBitmap({scaleFactor:1});lastHtmlPixel=[...pixel];if(pixel[0]===255 && pixel[1]===244 && pixel[2]===238){paintedReport=true;break;}await new Promise(resolve=>setTimeout(resolve,50));}
+ check('HTML report paints its own styles and retains table content',paintedReport && await js("new DOMParser().parseFromString(document.querySelector('.html-preview iframe').srcdoc,'text/html').querySelector('td')?.textContent==='已完成'"));
+ const htmlFrame=win.webContents.mainFrame.frames.find(frame=>frame.url==='about:srcdoc');
+ let frameScriptsBlocked=false,frameScriptError='';
+ try{await htmlFrame.executeJavaScript('window.htmlPreviewProbe=true')}catch(error){frameScriptError=String(error);frameScriptsBlocked=frameScriptError.includes('Script not run')}
+ if(!paintedReport || !frameScriptsBlocked)console.log(JSON.stringify({htmlRect,lastHtmlPixel,frameScriptError,frameURLs:win.webContents.mainFrame.frames.map(frame=>frame.url),htmlPreviewNetworkRequests}));
+ check('HTML report is isolated from parent DOM and cannot run scripts',frameScriptsBlocked && await js("(()=>{const frame=document.querySelector('.html-preview iframe');let isolated=false;try{frame.contentWindow.document}catch{isolated=true}return isolated && frame.contentDocument===null && frame.getAttribute('sandbox')==='' && !document.body.dataset.htmlPreviewEscaped})()") && htmlPreviewNetworkRequests===0);
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-html-preview.png',(await win.webContents.capturePage()).toPNG());
+ await click('原文');check('HTML source remains available and escaped',await wait("!!document.querySelector('.source-code') && document.querySelector('.source-code').textContent.includes('<!doctype html>') && !document.querySelector('.html-preview')"));
+ await click('渲染');check('HTML source can switch back to the rendered report',await wait("!!document.querySelector('.html-preview iframe')"));
+ await js("document.querySelector('.file-preview button[aria-label=\"查找文件内容\"]').click()");check('HTML find switches to searchable source',await wait("!!document.querySelector('.source-code') && !!document.querySelector('.file-find-bar')"));
  await js("document.querySelector('.file-preview button[aria-label=\"关闭文件预览\"]').click()");await wait("!document.querySelector('.file-preview')");
  await js("document.querySelector('.context-trigger').click()");check('context details distinguish estimated and reported tokens',await wait("document.querySelector('.context-details')?.textContent.includes('12,500') && document.querySelector('.context-details').textContent.includes('12,000') && document.querySelector('.context-details').textContent.includes('87,500')")&&await js("!!document.querySelector('.bar-right .context-trigger svg') && !document.querySelector('.composer > .context-control') && document.querySelector('.context-trigger').title.includes('13%') && document.querySelector('.context-trigger').getBoundingClientRect().width===24"));
  check('context details show persisted compaction metadata',await js("document.querySelector('.context-details ol').textContent.includes('95,000') && document.querySelector('.context-details').textContent.includes('压缩记录 · 1')"));
@@ -691,7 +723,7 @@ app.whenReady().then(async()=>{
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
  check('workspace pin survives reload',await wait("document.querySelector('.bucket')?.getAttribute('data-bucket-id')==='workspace:/other/smoke' && !!document.querySelector('.workspace-pin')"));
  await workspaceMore();await click('在 Finder 中显示');
- check('workspace reveal passes full directory path through preload',revealedWorkspaces[0]==='/other/smoke');
+ check('workspace reveal passes full directory path through preload',revealedWorkspaces.at(-1)==='/other/smoke');
  await workspaceMore();
  await js("document.querySelector('.workspace-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
  check('Escape closes workspace menu and returns focus to trigger',await wait("!document.querySelector('.workspace-menu')")&&await js("document.activeElement.getAttribute('aria-label')==='工作区更多操作'"));

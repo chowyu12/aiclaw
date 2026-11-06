@@ -236,14 +236,17 @@ export const actions = {
       setLocale(normalizeLocale(state.config.language));
       state.model = state.config.model;
       state.providerId = state.config.providerId;
-      state.profiles = (await window.aiclaw.profiles.list()) as {
+      const [profiles, groups, mcpServers, skills] = await Promise.all([
+        window.aiclaw.profiles.list(), window.aiclaw.groups.read(), window.aiclaw.mcp.read(), window.aiclaw.skills.list(),
+      ]);
+      state.profiles = profiles as {
         id: string;
         label: string;
         description: string;
       }[];
-      state.groups = (await window.aiclaw.groups.read()) as SessionGroupsView;
-      state.mcpServers = (await window.aiclaw.mcp.read()) as McpServerView[];
-      state.skills = (await window.aiclaw.skills.list()) as SkillView[];
+      state.groups = groups as SessionGroupsView;
+      state.mcpServers = mcpServers as McpServerView[];
+      state.skills = skills as SkillView[];
     } catch (error) {
       state.error = t("读取本地配置失败：{error}", { error: describeError(error) });
       return;
@@ -431,8 +434,7 @@ export const actions = {
       // start() 返回就是起来了。状态推送通常先到，但别赌顺序——App.vue 接下来
       // 就要按这个状态决定开不开会话。
       state.runtime = { state: "ready" };
-      await actions.refreshSessions();
-      await actions.loadProviders();
+      await Promise.all([actions.refreshSessions(), actions.loadProviders()]);
     } catch (error) {
       state.error = t("启动本地运行时失败：{error}", { error: describeError(error) });
     }
@@ -698,7 +700,6 @@ export const actions = {
     if (tab) tab.reading = plain(reading);
   },
 
-  toggleFileBrowser(): void { state.fileBrowser = !state.fileBrowser; },
   closeFileBrowser(): void { state.fileBrowser = false; },
   closeFilePreview(): void { state.filePreview = null; state.filePreviews = []; },
 
