@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import ComputerSettings from "./ComputerSettings.vue";
 import type { BrowserBridgeView } from "../../shared/types";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
@@ -635,11 +636,13 @@ async function purge(): Promise<void> {
         {{ t("改动下一个会话生效。") }}
       </p>
       <p class="note">
-        {{ t("computer use（截屏 + 鼠标键盘）是一个插件，开关在「插件」页：启用即授权，那一页写着它能碰什么。") }}
+        {{ t("桌面操作的插件开关在「插件」页，系统权限和运行状态可以在下方检查。") }}
         {{ t("需要操作浏览器之外的应用时用它；只是上网的话浏览器工具更省更准。") }}
       </p>
 
     </section>
+
+    <ComputerSettings />
 
     <section>
       <header>

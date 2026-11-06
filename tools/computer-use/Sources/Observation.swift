@@ -158,8 +158,50 @@ extension ComputerSession {
         elements.removeAll()
         elementRoles.removeAll()
         elementIdentities.removeAll()
+        backgroundKeyboardFocus = nil
+        backgroundKeyboardUnavailableReason = nil
         epoch += 1
         target = current
+    }
+
+    private func keyboardFocusProof(_ current: ComputerTarget, completeAX: Bool) -> ComputerKeyboardFocusProof? {
+        func unavailable(_ reason: String) -> ComputerKeyboardFocusProof? { backgroundKeyboardUnavailableReason = reason; return nil }
+        guard let running = NSRunningApplication(processIdentifier: current.pid), !running.isTerminated, let generation = computerProcessGeneration(current.pid),
+              running.bundleIdentifier == current.app else { return unavailable("process_generation_unavailable") }
+        let application = AXUIElementCreateApplication(current.pid)
+        if let focusedWindow = observationElement(application, kAXFocusedWindowAttribute), !CFEqual(focusedWindow, current.window) { return unavailable("different_focused_window") }
+        let element: AXUIElement, byAttribute: Bool
+        if let focused = observationElement(application, kAXFocusedUIElementAttribute) { element = focused; byAttribute = false }
+        else {
+            guard completeAX else { return unavailable("focused_field_unavailable") }
+            // Some frameworks omit the application-level focused element but
+            // expose the public keyboard-focus flag on the actual AX node.
+            // A complete observation must prove exactly one eligible node.
+            let candidates = elements.values.filter { candidate in
+                guard let focused = observationAttribute(candidate, kAXFocusedAttribute) as? NSNumber,
+                      CFGetTypeID(focused) == CFBooleanGetTypeID(), focused.boolValue else { return false }
+                return computerBackgroundKeyboardEditable(role: observationString(candidate, kAXRoleAttribute),
+                    subrole: observationString(candidate, kAXSubroleAttribute),
+                    protected: (observationAttribute(candidate, "AXProtectedContent") as? NSNumber)?.boolValue ?? false,
+                    editable: observationValueSettable(candidate))
+            }
+            guard candidates.count == 1, let candidate = candidates.first else { return unavailable(candidates.isEmpty ? "focused_field_unavailable" : "ambiguous_focused_fields") }
+            element = candidate; byAttribute = true
+        }
+        let role = observationString(element, kAXRoleAttribute), subrole = observationString(element, kAXSubroleAttribute)
+        let protected = (observationAttribute(element, "AXProtectedContent") as? NSNumber)?.boolValue ?? false
+        guard computerBackgroundKeyboardEditable(role: role, subrole: subrole, protected: protected, editable: observationValueSettable(element)) else { return unavailable("field_not_editable_or_protected") }
+        var parent: AXUIElement? = element, belongs = false, webContent = false
+        for _ in 0..<128 {
+            guard let node = parent else { break }
+            if observationString(node, kAXRoleAttribute) == "AXWebArea" { webContent = true }
+            if CFEqual(node, current.window) { belongs = true; break }
+            parent = observationElement(node, kAXParentAttribute)
+        }
+        guard belongs else { return unavailable("focused_field_outside_window") }
+        guard let textSnapshot = computerKeyboardTextSnapshot(element) else { return unavailable("text_or_selection_unavailable_or_too_large") }
+        return ComputerKeyboardFocusProof(target: current, application: running, processGeneration: generation, focusByAttribute: byAttribute, webContent: webContent, element: element, role: role,
+            identity: [kAXTitleAttribute, kAXDescriptionAttribute, kAXIdentifierAttribute].map { observationString(element, $0) }, textSnapshot: textSnapshot)
     }
 
     private func retainObservationElement(_ element: AXUIElement, role: String) -> Int {
@@ -204,7 +246,6 @@ extension ComputerSession {
             let current = try await resolveTarget(app: app, windowID: observationWindowID(args))
             beginObservation(current)
             var image: [String: Any]?
-            if includeScreenshot { image = try await screenshot(current) }
             var lines: [String] = [], truncated = false, renderedUnits = 0
             if includeAX {
                 var queue = [ObservationNode(element: current.window, depth: 0)], offset = 0
@@ -240,9 +281,24 @@ extension ComputerSession {
                     if offset % 32 == 0 { try Task.checkCancellation(); await Task.yield() }
                 }
             }
-            let metadata: [String: Any] = ["app": current.app, "pid": current.pid, "window_id": current.windowID,
+            if includeScreenshot {
+                let before = keyboardFocusProof(current, completeAX: includeAX && !truncated)
+                image = try await screenshot(current)
+                let after = keyboardFocusProof(current, completeAX: includeAX && !truncated)
+                if let before, let after, CFEqual(before.element, after.element),
+                   before.processGeneration == after.processGeneration, before.target.pid == after.target.pid,
+                   before.target.windowID == after.target.windowID, before.target.frame == after.target.frame,
+                   before.role == after.role, before.identity == after.identity, before.textSnapshot == after.textSnapshot {
+                    backgroundKeyboardFocus = after
+                } else if before != nil || after != nil { backgroundKeyboardUnavailableReason = "focus_changed_during_capture" }
+            }
+            var metadata: [String: Any] = ["app": current.app, "app_name": NSRunningApplication(processIdentifier: current.pid)?.localizedName ?? current.app, "pid": current.pid, "window_id": current.windowID,
                 "window_frame": observationFrameJSON(current.frame), "image_width": imageSize?.width ?? 0,
-                "image_height": imageSize?.height ?? 0, "truncated": truncated]
+                "image_height": imageSize?.height ?? 0, "truncated": truncated, "background_keyboard_ready": backgroundKeyboardFocus != nil]
+            if let focus = backgroundKeyboardFocus {
+                metadata["background_keyboard_focus"] = ["role": focus.role, "source": focus.focusByAttribute ? "unique_observed_AXFocused" : "AXFocusedUIElement", "web_content": focus.webContent, "identity": focus.identity.map { String(decoding: $0.utf16.prefix(500), as: UTF16.self) }]
+            }
+            if let reason = backgroundKeyboardUnavailableReason { metadata["background_keyboard_unavailable"] = reason }
             let data = try JSONSerialization.data(withJSONObject: metadata, options: [.sortedKeys])
             var content: [[String: Any]] = [["type": "text", "text": String(decoding: data, as: UTF8.self) + "\n" + lines.joined(separator: "\n")]]
             if let image { content.append(image) }
@@ -296,7 +352,7 @@ extension ComputerSession {
                 else if !children.0.isEmpty { truncated = true; reason = "max_depth" }
                 if offset % 32 == 0 { try Task.checkCancellation(); await Task.yield() }
             }
-            return try nativeJSON(["matches": matches, "truncated": truncated, "stop_reason": reason,
+            return try nativeJSON(["app": current.app, "app_name": NSRunningApplication(processIdentifier: current.pid)?.localizedName ?? current.app, "pid": current.pid, "matches": matches, "truncated": truncated, "stop_reason": reason,
                 "visited_nodes": visited, "window_id": current.windowID, "window_frame": observationFrameJSON(current.frame),
                 "limit": limit, "max_nodes": maximum, "image_width": imageSize?.width ?? 0, "image_height": imageSize?.height ?? 0])
         } catch { invalidate(); throw error }

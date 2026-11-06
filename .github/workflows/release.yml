@@ -88,11 +88,15 @@ jobs:
           path: apps/desktop/computer-use
           key: native-computer-${{ steps.native-inputs.outputs.fingerprint }}
       - run: npm run test:computer-native
-      - run: node scripts/build-computer-runtime.mjs --universal
+      - run: node scripts/build-computer-runtime.mjs --development
       - run: npm run build -w @aiclaw/agent-client && npm run build:main -w @aiclaw/desktop
       # Permission-free real IPC handshake. Live input needs an interactive Mac.
       - run: npx --no-install electron scripts/smoke-computer.cjs
+      - run: npx --no-install electron scripts/smoke-computer-listener-auth.cjs
       - run: npx --no-install electron scripts/smoke-computer-lifecycle.cjs
+      # Only production trusts the pinned signed AIClaw client. Development
+      # has a separate output and an exact local Electron CDHash pin.
+      - run: node scripts/build-computer-runtime.mjs --universal
       - run: tar -czf native-computer-runtime.tar.gz -C apps/desktop computer-use
       - uses: actions/upload-artifact@v4
         with:

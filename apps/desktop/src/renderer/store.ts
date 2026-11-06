@@ -1,3 +1,4 @@
+import type { ComputerControlState, ComputerControlAction } from "../shared/computer-control";
 import type { ConfigurationCard, ConfigurationReply, ConfigurationOutcome } from "../shared/app-config";
 import { reactive, readonly } from "vue";
 import type { FileChange, PendingSubmission, SessionWork } from "@aiclaw/agent-client";
@@ -56,12 +57,14 @@ export interface FilePreviewState {
 }
 let previewRequest = 0;
 let sessionRestoreRequest = 0;
+let computerRevision = 0;
 const queueRevisions = new Map<string, number>();
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
   view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived",
   runtime: { state: "stopped" } as RuntimeStatus,
+  computer: { mode: "ready", active: null, watching: 0 } as ComputerControlState,
   sessionId: "",
   queuedInputs: {} as Record<string, PendingSubmission[]>,
   queuedAutomatic: {} as Record<string, string[]>,
@@ -245,6 +248,15 @@ export const actions = {
       state.error = t("读取本地配置失败：{error}", { error: describeError(error) });
       return;
     }
+
+    window.aiclaw.on.computerStatus(payload => {
+      computerRevision++;
+      state.computer = payload as ComputerControlState;
+    });
+    const revision = computerRevision;
+    void window.aiclaw.computer.status().then(status => {
+      if (revision === computerRevision) state.computer = status as ComputerControlState;
+    }).catch(() => undefined);
 
     window.aiclaw.on.agentEvent((payload) => {
       const event = payload as AgentEventPayload;
@@ -1350,6 +1362,14 @@ export const actions = {
       state.error = describeError(error);
       return false;
     }
+  },
+
+  async controlComputer(action: ComputerControlAction): Promise<void> {
+    const revision = computerRevision;
+    try {
+      const status = await window.aiclaw.computer.control(action) as ComputerControlState;
+      if (revision === computerRevision) state.computer = status;
+    } catch (error) { state.error = describeError(error); }
   },
 
   async interrupt(): Promise<void> {

@@ -8,7 +8,7 @@
       "windows",
       "linux"
     ],
-    "description": "Start a turn-scoped, in-memory polling observation of one explicit app window. Returns initial screenshot and semantic AX baseline without actionable element IDs. Replaces this turn's prior subscription. Samples at the stated interval (not a native frame/event stream), coalesces changes, and expires after 60s without a consumer. Stop when finished. Query/observe separately before any input.",
+    "description": "Start a turn-scoped, in-memory observation of one explicit app window. Returns initial screenshot and semantic AX baseline without actionable element IDs. Replaces this turn's prior subscription. Uses a native window capture stream when supported, otherwise bounded polling at the stated interval, coalesces changes, and expires after 60s without a consumer. Stop when finished. Query/observe separately before any input.",
     "schema": {
       "type": "object",
       "properties": {
@@ -98,7 +98,7 @@
       "windows",
       "linux"
     ],
-    "description": "Read AIClaw-maintained application-specific operating guidance and background capability limits for an exact app identifier. Built-in Finder/Safari/TextEdit strategies fall back to generic discovery for other apps. This is guidance, not permission or proof that a UI control exists. Does not launch an app or create an actionable observation.",
+    "description": "Read AIClaw-maintained application-specific operating guidance and background capability limits for an exact app identifier. Built-in macOS Finder/Safari/TextEdit/Chrome/Edge/VSCode/WeCom strategies require exact bundle identifiers; PID-only Windows/Linux targets and other apps use generic guidance. Reports backend-specific semantic/background limits without granting extra capability. This is guidance, not permission or proof that a UI control exists. Does not launch an app or create an actionable observation.",
     "schema": {
       "type": "object",
       "properties": {

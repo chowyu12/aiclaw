@@ -34,6 +34,13 @@ app.whenReady().then(async()=>{
  let contextFixture={model:"test",window:100000,estimatedTokens:12500,lastInputTokens:12000,hasImages:false,compactions:1,records:[{at:1791850000000,before:95000,after:5000}]};const contextReads=[],browseReads=[],beforeRestoreContextReads=[];let resumeGate=null;
  let skillListFails=false;const skillCatalog=[{name:'alpha',description:'整理报告 <b>plain</b>',enabled:true},{name:'beta',description:'邮件处理',enabled:true},{name:'disabled',description:'Disabled skill',enabled:false},{name:'not-loaded',description:'Not mounted in current session',enabled:true}].map(skill=>({...skill,id:skill.name,dirName:skill.name,dir:'/fixture/skills/'+skill.name,source:'AIClaw',writable:true}));
  const handle=(key,fn)=>ipcMain.handle(IPC[key],fn);
+ let computerState={mode:'ready',active:null,watching:0};const computerActions=[];let computerChecks=0,computerSetups=0;
+ const computerDiagnostic=()=>({platform:'darwin',available:true,accessibility:true,screenCapture:false,toolCount:18,message:'请开启屏幕录制权限。'});
+ handle('computerStatus',()=>computerState);
+ handle('computerControl',(_e,action)=>{computerActions.push(action);computerState={mode:action==='resume'?'ready':action==='pause'?'paused':'stopped',active:null,watching:0};win?.webContents.send(IPC.onComputerStatus,computerState);return computerState;});
+ handle('computerDiagnostics',()=>{computerChecks++;return computerDiagnostic();});
+ handle('computerPermissionSetup',()=>{computerSetups++;return computerDiagnostic();});
+
  handle('memoryImportRead',()=>importFixture);
  handle('memoryRead',(_e,id)=>{memoryReads.push(id);if(memoryFails)throw Error('memory read unavailable');return {global:{path:'/fixture/.aiclaw/memory.md',content:editedGlobal??('- 全局偏好 '+memoryRevision+'\n<script>never execute</script>'),exists:true,error:''},workspace:id?{path:id==='other'?'/other/smoke/.aiclaw/memory.md':'/tmp/smoke/.aiclaw/memory.md',content:editedWorkspaces.get(id)??(id==='other'?'':'- 工作区约定'),exists:editedWorkspaces.has(id)||id!=='other',error:''}:null};});
  handle('memorySave',(_e,input)=>{memorySaves.push(input);if(memoryConflict)throw Error('记忆已被其他操作修改，请刷新后再编辑。');if(input.scope==='global')editedGlobal=input.content;else editedWorkspaces.set(input.sessionId,input.content);return {path:input.scope==='global'?'/fixture/.aiclaw/memory.md':'/other/smoke/.aiclaw/memory.md',content:input.content,exists:true,error:''};});
@@ -1030,6 +1037,30 @@ app.whenReady().then(async()=>{
  check('single-directory project does not add a redundant directory selector',await wait("!!document.querySelector('[data-bucket-id=\"p_single\"]')")&&await js("!document.querySelector('[data-bucket-id=\"p_single\"] .project-directory')"));
  await js("document.querySelector('[data-bucket-id=\"p_single\"] button[aria-label=\"在此工作区新建会话\"]').click()");
  check('single-directory project still creates chats in its configured directory',await wait("document.querySelectorAll('[data-bucket-id=\"p_single\"] .item').length===1")&&startedWorkspaces.at(-1)==='/tmp/only');
+
+ computerState={mode:'ready',active:{sessionId:'s',turnId:'desktop-t',action:'get_app_state',app:'com.example.fixture'},watching:0};
+ win.webContents.send(IPC.onComputerStatus,computerState);
+ check('desktop control bar shows global active target',await wait("document.querySelector('.computer-control-bar')?.textContent.includes('com.example.fixture')"));
+ await js("document.querySelector('.activity-rail [data-view=settings]').click()");
+ check('desktop controls remain visible in settings',await wait("!!document.querySelector('.computer-settings')")&&await js("!!document.querySelector('.computer-control-bar')"));
+ await js("[...document.querySelectorAll('.computer-settings button')].find(button=>button.textContent==='检查状态').click()");
+ check('desktop settings checks actual permission diagnostics on request',await wait("document.querySelector('.computer-settings')?.textContent.includes('未允许')")&&computerChecks===1);
+ await win.webContents.executeJavaScript("[...document.querySelectorAll('.computer-settings button')].find(button=>button.textContent==='打开授权引导').click()",true);
+ check('desktop permission setup requires an explicit user action',await wait("!document.querySelector('.computer-settings button:disabled')")&&computerSetups===1);
+ await js("[...document.querySelectorAll('.computer-control-bar button')].find(button=>button.textContent==='暂停桌面操作').click()");
+ check('desktop pause changes host control state',await wait("document.querySelector('.computer-control-bar')?.dataset.mode==='paused'")&&computerActions.at(-1)==='pause');
+ for(let i=0;i<70&&await js('navigator.userActivation.isActive');i++)await new Promise(resolve=>setTimeout(resolve,100));
+ const resumeCount=computerActions.filter(action=>action==='resume').length;
+ await js("[...document.querySelectorAll('.computer-control-bar button')].find(button=>button.textContent==='恢复桌面操作').click()");
+ check('synthetic clicks cannot resume blocked desktop control',await wait("document.querySelector('.error-bar')?.textContent.includes('direct user action')")&&computerActions.filter(action=>action==='resume').length===resumeCount);
+ await js("[...document.querySelectorAll('.computer-control-bar button')].find(button=>button.textContent==='停止桌面操作').click()");
+ check('global desktop stop stays available while paused',await wait("document.querySelector('.computer-control-bar')?.dataset.mode==='stopped'")&&computerActions.at(-1)==='stop');
+ await win.reload();
+ check('desktop stop status survives renderer reload',await wait("document.querySelector('.computer-control-bar')?.dataset.mode==='stopped'"));
+ await win.webContents.executeJavaScript("document.querySelector('.computer-control-bar button').click()",true);
+ check('explicit resume clears stopped state without replaying actions',await wait("!document.querySelector('.computer-control-bar')")&&computerActions.at(-1)==='resume');
+ computerState={mode:'ready',active:null,watching:1};win.webContents.send(IPC.onComputerStatus,computerState);
+ check('observation-only desktop use also exposes pause and stop',await wait("document.querySelector('.computer-control-bar')?.textContent.includes('正在观察窗口')"));
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);

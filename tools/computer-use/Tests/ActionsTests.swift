@@ -17,6 +17,7 @@ private func expectFailure(_ label: String, _ operation: () throws -> Void) thro
 
 @main
 struct ActionsTests {
+    @MainActor
     static func main() throws {
         let emoji = "👩🏽‍💻", combined = "e\u{301}"
         let text = "前\(emoji)\(combined)后"
@@ -43,6 +44,30 @@ struct ActionsTests {
         try require(actionBackgroundMode("background", operation: "click", input: ["elementID": "1"]), "semantic background click")
         for operation in ["pressKey", "type", "paste", "scroll", "drag"] {
             try expectFailure("global background input refused") { _ = try actionBackgroundMode("background", operation: operation, input: [:]) }
+        }
+        try require(actionBackgroundMode("background", operation: "pressKey", input: ["key": "Left"]), "PID key route still requires a live focused-field proof")
+        try require(actionBackgroundMode("background", operation: "type", input: ["text": "中文🌦️"]), "PID Unicode route still requires a live focused-field proof")
+        try expectFailure("background global shortcut refused") { _ = try actionBackgroundMode("background", operation: "pressKey", input: ["key": "super+a"]) }
+        try expectFailure("background oversized text refused") { _ = try actionBackgroundMode("background", operation: "type", input: ["text": String(repeating: "a", count: 16001)]) }
+        try require(computerBackgroundKeyboardEditable(role: "AXTextArea", subrole: "", protected: false, editable: true), "ordinary editable field eligible")
+        for (role, subrole, protected, editable) in [("AXButton", "", false, true), ("AXTextField", "AXSecureTextField", false, true), ("AXTextArea", "", true, true), ("AXTextArea", "", false, false)] {
+            try require(!computerBackgroundKeyboardEditable(role: role, subrole: subrole, protected: protected, editable: editable), "unproven or protected fields rejected")
+        }
+        guard let generation = computerProcessGeneration(getpid()) else { throw ComputerError("Own kernel process generation unavailable") }
+        try require(computerProcessGeneration(0) == nil && computerProcessGeneration(-1) == nil, "unknown process generations cannot become input authority")
+        let session = ComputerSession(), element = AXUIElementCreateApplication(getpid())
+        let target = ComputerTarget(app: "com.example.fixture", pid: getpid(), windowID: 1, frame: CGRect(x: 0, y: 0, width: 1, height: 1), window: element)
+        session.backgroundKeyboardFocus = ComputerKeyboardFocusProof(target: target, application: .current, processGeneration: generation, focusByAttribute: false, webContent: false, element: element, role: "AXTextArea", identity: [], textSnapshot: ComputerKeyboardTextSnapshot(digest: Data(), location: 0, length: 0))
+        session.backgroundKeyboardUnavailableReason = "test"
+        session.invalidate()
+        try require(session.backgroundKeyboardFocus == nil && session.backgroundKeyboardUnavailableReason == nil, "observation invalidation revokes focused keyboard proof")
+        let inserted = try actionBackgroundLiteralPlan(value: "A😀B", range: CFRange(location: 1, length: 2), text: "中文", role: "AXTextField")
+        try require(inserted.0 == "A中文B" && inserted.1.location == 3 && inserted.1.length == 0, "plain insertion preserves surrounding text and computes UTF-16 caret")
+        let emptyArea = try actionBackgroundLiteralPlan(value: "", range: CFRange(location: 0, length: 0), text: "🌦️", role: "AXTextArea")
+        try require(emptyArea.0 == "🌦️" && emptyArea.1.location == ("🌦️" as NSString).length, "empty area literal insertion")
+        try expectFailure("nonempty rich area cannot be flattened") { _ = try actionBackgroundLiteralPlan(value: "keep formatting", range: CFRange(location: 0, length: 0), text: "x", role: "AXTextArea") }
+        for range in [CFRange(location: -1, length: 0), CFRange(location: 9, length: 0), CFRange(location: 2, length: 0), CFRange(location: 0, length: 2), CFRange(location: 0, length: Int.max)] {
+            try expectFailure("invalid/surrogate-splitting selection refused") { _ = try actionBackgroundLiteralPlan(value: "A😀B", range: range, text: "x", role: "AXTextField") }
         }
         for input: [String: Any] in [["coordinate": [1, 2]], ["elementID": "1", "key": "shift"], ["elementID": "1", "duration": 1], ["elementID": "1", "clickCount": 2]] {
             try expectFailure("background click cannot fall back") { _ = try actionBackgroundMode("background", operation: "click", input: input) }

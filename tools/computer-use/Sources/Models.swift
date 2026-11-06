@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import Darwin
+import CryptoKit
 
 struct ComputerError: LocalizedError {
     let message: String
@@ -25,6 +27,50 @@ struct ComputerTarget {
     let window: AXUIElement
 }
 
+struct ComputerKeyboardFocusProof {
+    let target: ComputerTarget
+    let application: NSRunningApplication
+    let processGeneration: String
+    let focusByAttribute: Bool
+    let webContent: Bool
+    let element: AXUIElement
+    let role: String
+    let identity: [String]
+    let textSnapshot: ComputerKeyboardTextSnapshot
+}
+
+struct ComputerKeyboardTextSnapshot: Equatable {
+    let digest: Data
+    let location: Int
+    let length: Int
+}
+
+func computerKeyboardTextSnapshot(_ element: AXUIElement) -> ComputerKeyboardTextSnapshot? {
+    var value: CFTypeRef?, selection: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &value) == .success,
+          let text = value as? String, text.utf16.count <= 2_000_000,
+          AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &selection) == .success,
+          let selection, CFGetTypeID(selection) == AXValueGetTypeID() else { return nil }
+    var range = CFRange()
+    guard AXValueGetValue(unsafeBitCast(selection, to: AXValue.self), .cfRange, &range),
+          range.location >= 0, range.length >= 0, range.location <= text.utf16.count,
+          range.length <= text.utf16.count - range.location else { return nil }
+    return ComputerKeyboardTextSnapshot(digest: Data(SHA256.hash(data: Data(text.utf8))), location: range.location, length: range.length)
+}
+
+func computerProcessGeneration(_ pid: pid_t) -> String? {
+    guard pid > 0 else { return nil }
+    var info = proc_bsdinfo()
+    let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+    guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
+          info.pbi_pid == UInt32(pid), info.pbi_uid == geteuid(), info.pbi_start_tvsec > 0 else { return nil }
+    return "\(info.pbi_start_tvsec):\(info.pbi_start_tvusec)"
+}
+
+func computerBackgroundKeyboardEditable(role: String, subrole: String, protected: Bool, editable: Bool) -> Bool {
+    ["AXTextField", "AXTextArea"].contains(role) && subrole != "AXSecureTextField" && !protected && editable
+}
+
 @MainActor
 final class ComputerSession {
     var elements: [Int: AXUIElement] = [:]
@@ -35,6 +81,8 @@ final class ComputerSession {
     var epoch = 0
     var imageSize: CGSize?
     var discoveredApplications: [String: URL] = [:]
+    var backgroundKeyboardFocus: ComputerKeyboardFocusProof?
+    var backgroundKeyboardUnavailableReason: String?
 
     func invalidate() {
         elements.removeAll()
@@ -42,6 +90,8 @@ final class ComputerSession {
         elementIdentities.removeAll()
         target = nil
         imageSize = nil
+        backgroundKeyboardFocus = nil
+        backgroundKeyboardUnavailableReason = nil
         epoch += 1
     }
 }

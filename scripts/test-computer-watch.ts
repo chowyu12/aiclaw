@@ -134,3 +134,31 @@ test("subscription startup cannot survive a finished turn or changing process", 
   await assert.rejects(h.watches.next("chat", "turn", { watch_id: reused.data.watch_id, after_sequence: 1 }), /process or window changed/);
   await h.watches.close();
 });
+
+test("native capture uses its own stream and preserves AX/image delta semantics", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const calls: string[] = [];
+  const capture = (sequence: number): ComputerToolResult => ({ content: [
+    { type: "text", text: JSON.stringify({ app, pid: 123, window_id: 456, capture_id: "stream", capture_sequence: sequence, capture_backend: "screencapturekit" }) + `\n[${sequence}] AXTextField ${sequence === 1 ? "before" : "after"}` },
+    { type: "image", mimeType: "image/png", data: "aW1hZ2U=" },
+  ] });
+  const watches = new ComputerWatches(async () => ({
+    tools: [], nativeCapture: true,
+    async call() { throw Error("Native subscriptions must not poll screenshots"); },
+    async startCapture() { calls.push("start"); return capture(1); },
+    async nextCapture(args) { calls.push("next"); assert.equal(args.after_sequence, 1); return capture(5); },
+    async stopCapture() { return { content: [] }; },
+    async close() { calls.push("close"); },
+  }));
+  try {
+    const baseline = JSON.parse((await watches.start("chat", "turn", { app, interval_ms: 500 }, () => true)).text);
+    assert.equal(baseline.sampling, "native");
+    t.mock.timers.tick(0); await flush();
+    const update = await watches.next("chat", "turn", { watch_id: baseline.watch_id, after_sequence: 1, wait_ms: 0 });
+    const data = JSON.parse(update.text);
+    assert.equal(data.sequence, 5); assert.equal(data.sampling, "native"); assert.equal(data.dropped_updates, 3);
+    assert.equal(data.image_changed, false); assert.equal(update.imageBase64, undefined);
+    assert.deepEqual(data.ax.lines, ["AXTextField after"]);
+  } finally { await watches.close(); }
+  assert.deepEqual(calls, ["start", "next", "close"]);
+});

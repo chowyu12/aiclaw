@@ -219,7 +219,7 @@ class Service:
         if len(matches) != 1:
             raise RuntimeError("Cannot uniquely align the AT-SPI window and X11 window; no input was sent")
         birth = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]
-        return {"app": app, **window, "process_start_time": birth, "root": matches[0]}
+        return {"app": app, "app_name": accessible.get_name() or app, **window, "process_start_time": birth, "root": matches[0]}
 
     def attributes(self, node):
         role, name = node.get_role_name(), node.get_name() or ""
@@ -291,11 +291,11 @@ class Service:
                             break
                 else:
                     lines.append("  " * depth + f"[{index}] {attrs['role']} " + candidate.replace("\n", "\\n") + f" settable={attrs['settable']} actions={attrs['actions']}")
-        metadata = {key: target[key] for key in ("app", "pid", "window_id", "process_start_time")}
+        metadata = {key: target[key] for key in ("app", "app_name", "pid", "window_id", "process_start_time")}
         # Bounded search is conservative: reaching a budget never proves absence.
         truncated = bool(traversal.get("truncated") or self.value_truncated or visited >= maximum or (query_only and len(matches) >= limit))
         if query_only:
-            return text({**metadata, "matches": matches, "truncated": truncated, "visited": visited})
+            return text({**metadata, "window_frame": target["frame"], "matches": matches, "truncated": truncated, "visited": visited})
         rendered = "\n".join(lines)
         if len(rendered) > text_limit:
             rendered = rendered[:text_limit]; truncated = True

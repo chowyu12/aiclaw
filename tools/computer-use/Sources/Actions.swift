@@ -114,9 +114,29 @@ func actionBackgroundMode(_ raw: Any?, operation: String, input: [String: Any]) 
     case "setValue":
         guard input["autosubmitSearchFields"] as? Bool != true else { throw ComputerError("Background setValue cannot autosubmit; no input was sent") }
     case "selectText", "performSecondaryAction": break
+    case "pressKey":
+        let (_, flags) = try actionKey(actionString(input, "key"))
+        guard flags.subtracting(.maskShift).isEmpty else { throw ComputerError("Background keys currently support unmodified or Shift keys only; no input was sent") }
+    case "type":
+        let text = try actionString(input, "text")
+        guard text.utf16.count <= 16000 else { throw ComputerError("Background text exceeds 16000 UTF-16 units; no input was sent") }
     default: throw ComputerError("Background \(operation) is not supported; no foreground fallback or global input was sent")
     }
     return true
+}
+
+func actionBackgroundLiteralPlan(value: String, range: CFRange, text: String, role: String) throws -> (String, CFRange) {
+    let units = Array(value.utf16)
+    guard units.count <= 2_000_000, text.utf16.count <= 16000,
+          range.location >= 0, range.length >= 0, range.location <= units.count, range.length <= units.count - range.location else { throw ComputerError("Background literal text selection is outside the current value") }
+    func boundary(_ index: Int) -> Bool {
+        index == 0 || index == units.count || !((0xD800...0xDBFF).contains(units[index - 1]) && (0xDC00...0xDFFF).contains(units[index]))
+    }
+    guard boundary(range.location), boundary(range.location + range.length) else { throw ComputerError("Background literal text selection splits a UTF-16 surrogate pair") }
+    guard role == "AXTextField" || (role == "AXTextArea" && value.isEmpty && range.location == 0 && range.length == 0) else {
+        throw ComputerError("Background AX literal insertion cannot replace a nonempty rich text area; use an explicit set_value or foreground workflow")
+    }
+    return ((value as NSString).replacingCharacters(in: NSRange(location: range.location, length: range.length), with: text), CFRange(location: range.location + text.utf16.count, length: 0))
 }
 
 @MainActor
@@ -179,6 +199,140 @@ extension ComputerSession {
         do { if duration > 0 { try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000)) } }
         catch { up.post(tap: .cghidEventTap); throw error }
         up.post(tap: .cghidEventTap)
+    }
+
+    private func actionBackgroundKeyboardCheck(_ proof: ComputerKeyboardFocusProof, target: ComputerTarget, foreground: pid_t?, pointer: CGPoint?, clipboard: Int) throws {
+        try Task.checkCancellation()
+        guard AXIsProcessTrusted(), !proof.application.isTerminated,
+              let running = NSRunningApplication(processIdentifier: target.pid), !running.isTerminated,
+              running.bundleIdentifier == target.app, computerProcessGeneration(target.pid) == proof.processGeneration,
+              proof.target.pid == target.pid, proof.target.windowID == target.windowID,
+              proof.target.frame == target.frame, CFEqual(proof.target.window, target.window),
+              let foreground, foreground != target.pid, pointer != nil,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == foreground,
+              CGEvent(source: nil)?.location == pointer, NSPasteboard.general.changeCount == clipboard else {
+            throw ComputerError("Background keyboard target or user context changed; input may be partial. Observe again; no foreground fallback was used")
+        }
+        let application = AXUIElementCreateApplication(target.pid)
+        if let focusedWindow = try? actionAttribute(application, kAXFocusedWindowAttribute) {
+            guard CFGetTypeID(focusedWindow) == AXUIElementGetTypeID(), CFEqual(focusedWindow, target.window) else { throw ComputerError("Background keyboard focused window changed; observe again") }
+        }
+        if let focused = try? actionAttribute(application, kAXFocusedUIElementAttribute) {
+            guard CFGetTypeID(focused) == AXUIElementGetTypeID(), CFEqual(focused, proof.element) else { throw ComputerError("Background keyboard focused editable field changed; observe again") }
+        } else {
+            guard proof.focusByAttribute, let focused = (try? actionAttribute(proof.element, kAXFocusedAttribute)) as? NSNumber,
+                  CFGetTypeID(focused) == CFBooleanGetTypeID(), focused.boolValue else { throw ComputerError("Background keyboard focused editable field is no longer proven; observe again") }
+        }
+        let position = try actionAttribute(target.window, kAXPositionAttribute), size = try actionAttribute(target.window, kAXSizeAttribute)
+        guard CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { throw ComputerError("Background keyboard window geometry is unavailable") }
+        var origin = CGPoint.zero, dimensions = CGSize.zero
+        guard AXValueGetValue(unsafeBitCast(position, to: AXValue.self), .cgPoint, &origin),
+              AXValueGetValue(unsafeBitCast(size, to: AXValue.self), .cgSize, &dimensions), CGRect(origin: origin, size: dimensions) == proof.target.frame else {
+            throw ComputerError("Background keyboard window moved or resized; observe again")
+        }
+        let role = (try? actionAttribute(proof.element, kAXRoleAttribute)) as? String ?? ""
+        let subrole = (try? actionAttribute(proof.element, kAXSubroleAttribute)) as? String ?? ""
+        let protected = ((try? actionAttribute(proof.element, "AXProtectedContent")) as? NSNumber)?.boolValue ?? false
+        var settable = DarwinBoolean(false)
+        let editable = AXUIElementIsAttributeSettable(proof.element, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
+        guard role == proof.role, computerBackgroundKeyboardEditable(role: role, subrole: subrole, protected: protected, editable: editable),
+              [kAXTitleAttribute, kAXDescriptionAttribute, kAXIdentifierAttribute].map({ (try? actionAttribute(proof.element, $0)) as? String ?? "" }) == proof.identity else {
+            throw ComputerError("Background keyboard editable field identity changed or is protected; observe again")
+        }
+        var parent: AXUIElement? = proof.element
+        for _ in 0..<128 {
+            guard let element = parent else { break }
+            if CFEqual(element, target.window) { return }
+            guard let value = try? actionAttribute(element, kAXParentAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { break }
+            parent = unsafeBitCast(value, to: AXUIElement.self)
+        }
+        throw ComputerError("Background keyboard field no longer belongs to the pinned window")
+    }
+
+    private func actionBackgroundKeyboard(_ target: ComputerTarget, code: CGKeyCode, flags: CGEventFlags = [], duration: Double = 0, text: String? = nil) async throws {
+        guard let proof = backgroundKeyboardFocus, let source = CGEventSource(stateID: .privateState) else {
+            throw ComputerError("Background keyboard requires a fresh screenshot proving the focused editable field; no input was sent")
+        }
+        let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier, pointer = CGEvent(source: nil)?.location
+        let clipboard = NSPasteboard.general.changeCount
+        func check() throws { try actionBackgroundKeyboardCheck(proof, target: target, foreground: foreground, pointer: pointer, clipboard: clipboard) }
+        var dispatched = false
+        func send(_ units: [UInt16]?) async throws {
+            try check()
+            if !dispatched {
+                guard computerKeyboardTextSnapshot(proof.element) == proof.textSnapshot else { throw ComputerError("Focused text or selection changed since screenshot; no input was sent. Observe again") }
+            }
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: false) else { throw ComputerError("Could not construct PID-scoped keyboard events") }
+            down.flags = flags; up.flags = []
+            if let units {
+                units.withUnsafeBufferPointer {
+                    down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: $0.baseAddress)
+                    up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: $0.baseAddress)
+                }
+            }
+            down.setIntegerValueField(.keyboardEventAutorepeat, value: 0)
+            dispatched = true
+            down.postToPid(target.pid)
+            defer {
+                // Always release on cancellation, but never into a reused PID.
+                if !proof.application.isTerminated, computerProcessGeneration(target.pid) == proof.processGeneration { up.postToPid(target.pid) }
+            }
+            let deadline = ProcessInfo.processInfo.systemUptime + duration
+            while ProcessInfo.processInfo.systemUptime < deadline {
+                try await Task.sleep(nanoseconds: UInt64(min(0.05, max(0, deadline - ProcessInfo.processInfo.systemUptime)) * 1_000_000_000))
+                try check()
+            }
+        }
+        if let text {
+            let units = Array(text.utf16)
+            var offset = 0
+            while offset < units.count {
+                var end = min(offset + 16, units.count)
+                if end < units.count, (0xD800...0xDBFF).contains(units[end - 1]) { end -= 1 }
+                try await send(Array(units[offset..<end])); offset = end
+                try await Task.sleep(nanoseconds: 8_000_000)
+            }
+        } else { try await send(nil) }
+        try check()
+    }
+
+    private func actionBackgroundLiteral(_ target: ComputerTarget, text: String) async throws {
+        guard let proof = backgroundKeyboardFocus, proof.webContent else { throw ComputerError("Background literal insertion needs a proven focused web field") }
+        let foreground = NSWorkspace.shared.frontmostApplication?.processIdentifier, pointer = CGEvent(source: nil)?.location
+        let clipboard = NSPasteboard.general.changeCount
+        func check() throws { try actionBackgroundKeyboardCheck(proof, target: target, foreground: foreground, pointer: pointer, clipboard: clipboard) }
+        func selection() throws -> CFRange {
+            let value = try actionAttribute(proof.element, kAXSelectedTextRangeAttribute)
+            guard CFGetTypeID(value) == AXValueGetTypeID() else { throw ComputerError("Focused field does not expose a text selection") }
+            var range = CFRange()
+            guard AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cfRange, &range) else { throw ComputerError("Focused field selection is unreadable") }
+            return range
+        }
+        try check()
+        var writable = DarwinBoolean(false)
+        guard AXUIElementIsAttributeSettable(proof.element, kAXSelectedTextRangeAttribute as CFString, &writable) == .success, writable.boolValue,
+              let before = try actionAttribute(proof.element, kAXValueAttribute) as? String else { throw ComputerError("Background literal insertion needs readable/writable plain text and selection") }
+        let beforeRange = try selection(), plan = try actionBackgroundLiteralPlan(value: before, range: beforeRange, text: text, role: proof.role)
+        try check()
+        let verifiedRange = try selection()
+        guard (try actionAttribute(proof.element, kAXValueAttribute) as? String) == before,
+              verifiedRange.location == beforeRange.location, verifiedRange.length == beforeRange.length else { throw ComputerError("Focused text or selection changed before background insertion; no input was sent") }
+        guard computerKeyboardTextSnapshot(proof.element) == proof.textSnapshot else { throw ComputerError("Focused text or selection changed since screenshot; no input was sent. Observe again") }
+        // Adapter selection happens before any key event. This path never
+        // follows a failed/uncertain PID dispatch and never replays the write.
+        try actionSet(proof.element, kAXValueAttribute, plan.0 as CFString)
+        var caret = plan.1
+        guard let value = AXValueCreate(.cfRange, &caret) else { throw ComputerError("Background text was written but selection construction failed; outcome is unknown") }
+        try actionSet(proof.element, kAXSelectedTextRangeAttribute, value)
+        for _ in 0..<10 {
+            try check()
+            let after = try selection()
+            if (try actionAttribute(proof.element, kAXValueAttribute) as? String) == plan.0,
+               after.location == plan.1.location, after.length == 0 { return }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        throw ComputerError("Background literal insertion was dispatched but text/selection read-back differs; outcome is unknown, do not replay")
     }
 
     private func actionClick(_ args: [String: Any], target: ComputerTarget, observed: ComputerTarget, background: Bool) async throws -> String {
@@ -334,11 +488,26 @@ extension ComputerSession {
             let (code, flags) = try actionKey(actionString(input, "key"))
             let duration = try actionNumber(input, "duration", default: 0)
             guard duration >= 0, duration <= 10 else { throw ComputerError("duration must be 0–10 seconds") }
-            try await actionActivate(current); try await actionKeyboard(code, flags: flags, duration: duration)
-            receipt += " via foreground global keyboard input"
+            if background {
+                try await actionBackgroundKeyboard(current, code: code, flags: flags, duration: duration)
+                receipt += " via public PID-scoped background keyboard input"
+            } else {
+                try await actionActivate(current); try await actionKeyboard(code, flags: flags, duration: duration)
+                receipt += " via foreground global keyboard input"
+            }
         case "type":
             let text = try actionString(input, "text")
             guard text.utf16.count <= 2_000_000 else { throw ComputerError("Text exceeds 2000000 UTF-16 units") }
+            if background {
+                if backgroundKeyboardFocus?.webContent == true {
+                    try await actionBackgroundLiteral(current, text: text)
+                    receipt += " via AX literal insertion; focused plain value and UTF-16 selection verified, not keyboard event delivery"
+                } else {
+                    try await actionBackgroundKeyboard(current, code: 0, text: text)
+                    receipt += " via public PID-scoped background Unicode keyboard input; actual consumption must be observed"
+                }
+                break
+            }
             try await actionActivate(current)
             let textUnits = Array(text.utf16)
             var offset = 0
@@ -399,7 +568,8 @@ extension ComputerSession {
                   NSPasteboard.general.changeCount == clipboardGeneration else {
                 throw ComputerError("Background action was dispatched but foreground, pointer or clipboard changed. Outcome is unknown; do not replay or restore focus automatically")
             }
-            receipt += " in strict AX background mode; foreground, pointer and clipboard unchanged at read-back"
+            let method = operation == "pressKey" || (operation == "type" && backgroundKeyboardFocus?.webContent != true) ? "PID keyboard" : operation == "type" ? "AX literal" : "AX"
+            receipt += " in strict \(method) background mode; foreground, pointer and clipboard unchanged at read-back"
         }
         return nativeText("\(receipt). Dispatch is not proof of the intended application result; observe again before continuing. Previous element IDs are invalid.")
     }

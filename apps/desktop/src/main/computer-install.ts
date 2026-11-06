@@ -7,7 +7,9 @@ import { promisify } from "node:util";
 import { setTimeout as pause } from "node:timers/promises";
 const run = promisify(execFile);
 export const COMPUTER_APP_NAME = "AIClaw Computer Use.app";
-export function installedComputerBundle(): string { return join(homedir(), ".aiclaw", "computer-use", COMPUTER_APP_NAME); }
+export function computerDevelopmentHost(): boolean { return (process as NodeJS.Process & { defaultApp?: boolean }).defaultApp === true; }
+export function computerInstallDirectory(): string { return join(homedir(), ".aiclaw", computerDevelopmentHost() ? "computer-use-development" : "computer-use"); }
+export function installedComputerBundle(): string { return join(computerInstallDirectory(), COMPUTER_APP_NAME); }
 async function bundleIdentity(bundle: string): Promise<string> {
   const hash = createHash("sha256");
   for (const file of ["Contents/MacOS/AIClawComputerUse", "Contents/_CodeSignature/CodeResources"]) hash.update(await readFile(join(bundle, file)));
@@ -19,7 +21,7 @@ const verify = async (bundle: string) => { await run("/usr/bin/codesign", ["--ve
  * same-directory renames serialize competing hosts and keep partial copies out
  * of LaunchServices. No download, privileged installer or permission grant.
  */
-export async function installComputerBundle(source: string, directory = join(homedir(), ".aiclaw", "computer-use"), verifySignature: (bundle: string) => Promise<void> = verify): Promise<string> {
+export async function installComputerBundle(source: string, directory = computerInstallDirectory(), verifySignature: (bundle: string) => Promise<void> = verify): Promise<string> {
   source = await realpath(source);
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const parent = await lstat(directory);

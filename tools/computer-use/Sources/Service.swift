@@ -12,7 +12,11 @@ private let frameLimit = 16 * 1024 * 1024
 private final class DesktopService: NSObject, NSApplicationDelegate {
     private var listener: UnixListener?
     private var operations: OrderedOperations!
+    private let captures = CaptureOperations()
     private let processExecutableSHA256: String
+    private let migrationOnly = CommandLine.arguments.contains("--migration-only")
+    private var migrationDirectory: URL?
+    private var migrationHasHost = false
 
     init(executableURL: URL) throws {
         processExecutableSHA256 = SHA256.hash(data: try Data(contentsOf: executableURL)).map { String(format: "%02x", $0) }.joined()
@@ -20,8 +24,24 @@ private final class DesktopService: NSObject, NSApplicationDelegate {
         operations = OrderedOperations(service: self)
     }
 
-    func enqueue(_ request: NativeRequest) { operations.enqueue(request) }
-    func disconnected(_ connection: NativeConnection) { operations.cancel(connection) }
+    func enqueue(_ request: NativeRequest) {
+        if migrationOnly && !["ComputerUseIPCHandshakeRequest", "ComputerUseIPCLegacyMigrationRequest"].contains(request.type) {
+            Task { @MainActor in
+                defer { request.connection.release() }
+                guard request.connection.isOpen else { return }
+                do { try await request.connection.send(["id": request.id, "error": ["message": "The migration-only helper cannot perform desktop operations"]]) }
+                catch { request.connection.close() }
+            }
+            return
+        }
+        if migrationOnly { migrationHasHost = true }
+        if CaptureOperations.handles(request.type) { captures.enqueue(request) }
+        else { operations.enqueue(request) }
+    }
+    func disconnected(_ connection: NativeConnection) {
+        operations.cancel(connection); captures.cancel(connection)
+        if migrationOnly { NSApp.terminate(nil) }
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let arguments = CommandLine.arguments
@@ -30,8 +50,17 @@ private final class DesktopService: NSObject, NSApplicationDelegate {
             return
         }
         do {
+            guard !migrationOnly || computerHostAuthenticationProfile == "production" else { throw LegacyMigrationError.unverified }
+            migrationDirectory = URL(fileURLWithPath: arguments[index + 1]).deletingLastPathComponent()
             listener = try UnixListener(path: arguments[index + 1], service: self)
             listener?.start()
+            if migrationOnly {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 10_000_000_000)
+                    guard !Task.isCancelled, let self, !self.migrationHasHost else { return }
+                    NSApp.terminate(nil)
+                }
+            }
         } catch {
             // Never log requests, application titles, screenshots or user input.
             fputs("AIClaw Computer Use could not start its local IPC listener.\n", stderr)
@@ -39,12 +68,18 @@ private final class DesktopService: NSObject, NSApplicationDelegate {
         }
     }
 
-    func applicationWillTerminate(_ notification: Notification) { listener?.close(); operations.cancelAll() }
+    func applicationWillTerminate(_ notification: Notification) { listener?.close(); operations.cancelAll(); captures.cancelAll() }
 
     func dispatch(_ type: String, args: [String: Any], session: ComputerSession) async throws -> [String: Any] {
+        if migrationOnly && !["ComputerUseIPCHandshakeRequest", "ComputerUseIPCLegacyMigrationRequest"].contains(type) {
+            throw ComputerError("The migration-only helper cannot perform desktop operations")
+        }
         switch type {
         case "ComputerUseIPCHandshakeRequest":
-            return ["protocolVersion": protocolVersion, "serverVersion": "1", "processExecutableSHA256": processExecutableSHA256, "tools": try toolManifest()]
+            return ["protocolVersion": protocolVersion, "serverVersion": "1", "processExecutableSHA256": processExecutableSHA256, "tools": migrationOnly ? [] : try toolManifest(), "capabilities": ["nativeCapture": !migrationOnly, "migrationOnly": migrationOnly]]
+        case "ComputerUseIPCLegacyMigrationRequest":
+            guard migrationOnly, computerHostAuthenticationProfile == "production", let migrationDirectory else { throw LegacyMigrationError.unverified }
+            return try await LegacyComputerMigration.retireIdle(in: migrationDirectory)
         case "ComputerUseIPCPermissionStatusRequest", "ComputerUseIPCPermissionSetupRequest":
             let accessibility = AXIsProcessTrusted(), capture = CGPreflightScreenCaptureAccess()
             let showSetup = type == "ComputerUseIPCPermissionSetupRequest" && (!accessibility || !capture)
@@ -213,6 +248,8 @@ private final class NativeConnection: @unchecked Sendable {
     private var closed = false
     private var outstanding = 0
     private var task: Task<Void, Never>?
+    private var captureTask: Task<Void, Never>?
+    private let writes = DispatchQueue(label: "aiclaw.computer-use.responses", qos: .userInitiated)
     @MainActor let session = ComputerSession()
 
     @MainActor init(_ descriptor: Int32) {
@@ -239,13 +276,20 @@ private final class NativeConnection: @unchecked Sendable {
         if cancel { value?.cancel() }
     }
 
+    func setCaptureTask(_ value: Task<Void, Never>?) {
+        lock.lock(); captureTask = value; let cancel = closed; lock.unlock()
+        if cancel { value?.cancel() }
+    }
+
     func close() {
         lock.lock()
         guard !closed else { lock.unlock(); return }
         closed = true
         let active = task
+        let capture = captureTask
         lock.unlock()
         active?.cancel()
+        capture?.cancel()
         Darwin.shutdown(descriptor, SHUT_RDWR)
     }
 
@@ -254,7 +298,7 @@ private final class NativeConnection: @unchecked Sendable {
         guard data.count <= frameLimit else { throw ComputerError("IPC response exceeds the frame limit") }
         data.append(10)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            DispatchQueue.global(qos: .userInitiated).async { [self] in
+            writes.async { [self] in
                 let sent = data.withUnsafeBytes { bytes -> Bool in
                     var offset = 0
                     while offset < bytes.count {
@@ -270,6 +314,148 @@ private final class NativeConnection: @unchecked Sendable {
                 else { continuation.resume(throwing: ComputerError("IPC peer disconnected or stopped reading")) }
             }
         }
+    }
+}
+
+// Stream waits run independently of the globally ordered input lane. Each
+// connection owns one stream and one active start/next; stop can interrupt it.
+@MainActor
+private final class CaptureOperations {
+    private final class State {
+        var capture: NativeWindowCapture?
+        var active: Task<Void, Never>?
+        var activeID: UUID?
+        var cleanup: Task<Void, Never>?
+        var stopping = false
+    }
+    // Entries include streams still starting or stopping, so asynchronous
+    // startup cannot race past the global resource limit.
+    private var states: [UUID: State] = [:]
+
+    static func handles(_ type: String) -> Bool {
+        ["ComputerUseIPCAppStartCaptureRequest", "ComputerUseIPCAppNextCaptureUpdateRequest", "ComputerUseIPCAppStopCaptureRequest"].contains(type)
+    }
+
+    func enqueue(_ request: NativeRequest) {
+        let connection = request.connection
+        guard connection.isOpen else { connection.release(); return }
+        do {
+            switch request.type {
+            case "ComputerUseIPCAppStartCaptureRequest":
+                for (connectionID, existing) in states where existing.capture?.stopped == true && !existing.stopping {
+                    _ = cleanup(existing, connectionID: connectionID)
+                }
+                guard states[connection.id] == nil else { throw ComputerError("Stop the connection's existing capture before starting another") }
+                guard states.count < 4 else { throw ComputerError("Native capture limit reached (4 streams, including startup and shutdown)") }
+                let state = State()
+                states[connection.id] = state
+                run(request, state: state) {
+                    let capture = try await NativeWindowCapture.start(request.arguments)
+                    guard !Task.isCancelled, connection.isOpen, !state.stopping else {
+                        await capture.stop()
+                        throw CancellationError()
+                    }
+                    state.capture = capture
+                    return try await capture.next(afterSequence: 0, waitMilliseconds: 0)
+                }
+            case "ComputerUseIPCAppNextCaptureUpdateRequest":
+                let state = try state(for: request)
+                guard !state.stopping, state.active == nil, let capture = state.capture else { throw ComputerError("Capture is starting, stopping or already has a pending update request") }
+                let after = try integer(request.arguments, "after_sequence", fallback: 0, maximum: Int.max)
+                let wait = try integer(request.arguments, "wait_ms", fallback: 10_000, maximum: 10_000)
+                run(request, state: state) { try await capture.next(afterSequence: after, waitMilliseconds: wait) }
+            case "ComputerUseIPCAppStopCaptureRequest":
+                let state = try state(for: request, allowStarting: true)
+                let captureID = state.capture?.id
+                let stopped = cleanup(state, connectionID: connection.id)
+                Task { @MainActor in
+                    defer { connection.release() }
+                    await stopped.value
+                    guard connection.isOpen else { return }
+                    do { try await connection.send(["id": request.id, "result": try nativeJSON(["stopped": true, "capture_id": captureID.map { $0 as Any } ?? NSNull()])]) }
+                    catch { connection.close() }
+                }
+            default: throw ComputerError("Unsupported native capture request")
+            }
+        } catch {
+            Task { @MainActor in
+                defer { connection.release() }
+                guard connection.isOpen else { return }
+                do { try await connection.send(["id": request.id, "error": ["message": error.localizedDescription]]) }
+                catch { connection.close() }
+            }
+        }
+    }
+
+    private func state(for request: NativeRequest, allowStarting: Bool = false) throws -> State {
+        guard let state = states[request.connection.id] else { throw ComputerError("No native capture belongs to this connection") }
+        if allowStarting && state.capture == nil && request.arguments["capture_id"] == nil { return state }
+        guard let id = request.arguments["capture_id"] as? String, id == state.capture?.id else { throw ComputerError("Capture identifier does not belong to this connection") }
+        return state
+    }
+
+    private func integer(_ args: [String: Any], _ name: String, fallback: Int, maximum: Int) throws -> Int {
+        guard let raw = args[name] else { return fallback }
+        guard let value = raw as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID(), value.doubleValue.isFinite,
+              value.doubleValue.rounded() == value.doubleValue, value.doubleValue >= 0,
+              value.doubleValue <= Double(maximum), value.doubleValue < Double(Int.max) else { throw ComputerError("Invalid native capture \(name)") }
+        return value.intValue
+    }
+
+    private func run(_ request: NativeRequest, state: State, operation: @escaping @MainActor () async throws -> [String: Any]) {
+        let connection = request.connection, taskID = UUID()
+        state.activeID = taskID
+        let task = Task { @MainActor in
+            defer {
+                if state.activeID == taskID {
+                    state.active = nil; state.activeID = nil
+                    connection.setCaptureTask(nil)
+                }
+                if state.capture?.stopped == true && !state.stopping && states[connection.id] === state {
+                    _ = cleanup(state, connectionID: connection.id)
+                }
+                if state.capture == nil && !state.stopping && states[connection.id] === state { states.removeValue(forKey: connection.id) }
+                connection.release()
+            }
+            let response: [String: Any]
+            do {
+                try Task.checkCancellation()
+                let result = try await operation()
+                try Task.checkCancellation()
+                response = ["id": request.id, "result": result]
+            } catch {
+                response = ["id": request.id, "error": ["message": error is CancellationError ? "Native capture request cancelled" : error.localizedDescription]]
+            }
+            guard connection.isOpen else { return }
+            do { try await connection.send(response) }
+            catch { connection.close() }
+        }
+        state.active = task
+        connection.setCaptureTask(task)
+    }
+
+    private func cleanup(_ state: State, connectionID: UUID) -> Task<Void, Never> {
+        if let cleanup = state.cleanup { return cleanup }
+        state.stopping = true
+        state.active?.cancel()
+        state.capture?.cancel()
+        let active = state.active
+        let task = Task { @MainActor in
+            await state.capture?.stop()
+            await active?.value
+            await state.capture?.stop()
+            if states[connectionID] === state { states.removeValue(forKey: connectionID) }
+        }
+        state.cleanup = task
+        return task
+    }
+
+    func cancel(_ connection: NativeConnection) {
+        if let state = states[connection.id] { _ = cleanup(state, connectionID: connection.id) }
+    }
+
+    func cancelAll() {
+        for (connectionID, state) in states { _ = cleanup(state, connectionID: connectionID) }
     }
 }
 
@@ -325,7 +511,11 @@ private final class OrderedOperations {
                     do {
                         response = ["id": request.id, "result": try await service.dispatch(request.type, args: request.arguments, session: connection.session)]
                     } catch is CancellationError { throw CancellationError() }
-                    catch { response = ["id": request.id, "error": ["message": error.localizedDescription]] }
+                    catch {
+                        var failure: [String: Any] = ["message": error.localizedDescription]
+                        if let migration = error as? LegacyMigrationError { failure["code"] = migration.code }
+                        response = ["id": request.id, "error": failure]
+                    }
                     try Task.checkCancellation()
                     guard connection.isOpen else { throw CancellationError() }
                     try await connection.send(response)
@@ -403,8 +593,7 @@ private final class UnixListener {
             while true {
                 let client = accept(descriptor, nil, nil)
                 if client < 0 { if errno == EINTR { continue }; return }
-                var uid: uid_t = 0, gid: gid_t = 0
-                guard getpeereid(client, &uid, &gid) == 0, uid == geteuid(), slots.wait(timeout: .now()) == .success else { Darwin.close(client); continue }
+                guard ComputerPeerAuthentication.accepts(client), slots.wait(timeout: .now()) == .success else { Darwin.close(client); continue }
                 let ready = DispatchSemaphore(value: 0)
                 var connection: NativeConnection?
                 DispatchQueue.main.async { connection = NativeConnection(client); ready.signal() }
@@ -459,6 +648,12 @@ private final class UnixListener {
 @main
 struct ComputerServiceMain {
     @MainActor static func main() {
+        if CommandLine.arguments.contains("--verify-listener-fd") {
+            let args = CommandLine.arguments
+            guard args.count == 5, args[1] == "--verify-listener-fd", args[2] == "3", args[3] == "--expected-executable-sha256",
+                  ComputerPeerAuthentication.verifiesListener(3, expectedSHA256: args[4]) else { exit(77) }
+            exit(0)
+        }
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         guard let executableURL = Bundle.main.executableURL, let service = try? DesktopService(executableURL: executableURL) else {

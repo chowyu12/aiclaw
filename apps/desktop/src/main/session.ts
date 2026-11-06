@@ -50,6 +50,7 @@ import {
 } from "@aiclaw/agent-client";
 import type { AppConfig, ConfigStore, McpServer } from "./config.js";
 import { ComputerController } from "./computer.js";
+import type { ComputerControlAction, ComputerControlActivity, ComputerControlState } from "../shared/computer-control.js";
 import { TurnBrowsers } from "./browser.js";
 import { ExtensionBridge } from "./browser-bridge.js";
 import { browserName } from "./browser-cdp.js";
@@ -548,6 +549,18 @@ export class SessionManager extends EventEmitter {
       input.sessionId, input.text, input.images, input.audioPaths, input.references, input.requestId, undefined, input.mode ?? "queue",
     );
     return result.turnId;
+  }
+
+  computerStatus() { return this.computer.getStatus(); }
+  subscribeComputer(listener: (state: ComputerControlState) => void) { return this.computer.subscribe(listener); }
+  computerWindowBounds(activity: ComputerControlActivity) { return this.computer.windowBounds(activity); }
+  computerDiagnostics() { return this.computer.diagnostics(); }
+  showComputerPermissionSetup() { return this.computer.showPermissionSetup(); }
+  async controlComputer(action: ComputerControlAction) {
+    const affected = action === "stop" ? this.computer.affectedSessions() : [];
+    const status = await this.computer.setControl(action);
+    await Promise.allSettled(affected.map(sessionId => this.interrupt(sessionId)));
+    return status;
   }
 
   async interrupt(sessionId: string): Promise<void> {

@@ -97,7 +97,31 @@ try {
     })()`);
     assert.equal(receipt.tools,18);
     assert.ok(receipt.runtimeDirectory?.startsWith(join(home,".aiclaw/computer-use")),"Packaged runtime must execute from the isolated user installation");
-    console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,startup_installed_before_tool:true,user_runtime_installed:true,source_identity_handshake:true,...receipt}));
+    let mainWindowCloseVerified = false;
+    if (process.platform !== "darwin") {
+      clearTimeout(watchdog);
+      // A real hidden auxiliary BrowserWindow reproduces the window-count edge
+      // case without dispatching desktop input or creating production test hooks.
+      const closing = await evaluate(`(()=>{
+        const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
+        const {BrowserWindow}=require('electron');
+        const main=BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().includes('/renderer/index.html'));
+        if(!main) throw Error('Packaged main window is missing');
+        const hidden=new BrowserWindow({show:false,width:1,height:1,title:'AIClaw hidden lifecycle fixture',webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});
+        globalThis.__aiclawHiddenLifecycleFixture=hidden;
+        const verified=!hidden.isVisible() && BrowserWindow.getAllWindows().length>=2;
+        setTimeout(()=>main.close(),100);
+        return {hiddenAuxiliaryWindow:verified};
+      })()`);
+      assert.equal(closing.hiddenAuxiliaryWindow,true,"A hidden auxiliary window must be present during close verification");
+      // Detach the debugger so it cannot itself hold Node alive after close.
+      socket.close();
+      for(let attempt=0;attempt<150 && child.exitCode===null && child.signalCode===null;attempt++) await pause(100);
+      assert.equal(child.signalCode,null,"Closing the main window must exit naturally without a termination signal");
+      assert.equal(child.exitCode,0,"Closing the main window must exit even when a hidden control window exists");
+      mainWindowCloseVerified=true;
+    }
+    console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,startup_installed_before_tool:true,user_runtime_installed:true,source_identity_handshake:true,...(mainWindowCloseVerified?{main_window_close_exits_naturally:true,hidden_auxiliary_does_not_prevent_exit:true}:{}),...receipt}));
   } finally {clearTimeout(watchdog);}
 } catch(error) {
   throw Error(`${String(error)}\nPackaged stderr:\n${stderr}`);

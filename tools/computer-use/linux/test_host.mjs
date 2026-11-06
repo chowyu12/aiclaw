@@ -1,5 +1,6 @@
 /** Full Linux host/controller/stdio/native test in a private Xvfb desktop. */
 import assert from "node:assert/strict";
+import { verifyControlTransitions } from "../test_control.mjs";
 import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, readFile, readlink, rm, mkdir, writeFile } from "node:fs/promises";
@@ -91,6 +92,7 @@ try {
     await pause(100);
   }
   assert.throws(()=>process.kill(servicePID,0), /ESRCH/, "Clipboard-only provider must exit after the next copy");
+  const controlTransitions = await verifyControlTransitions({controller,app:target,platform:"linux-x11",fixtureAlive:async()=>{try{process.kill(Number(target),0);return true;}catch{return false;}}});
   const launchCall=(action,args)=>controller.perform({sessionId:"linux-launch-acceptance",turnId:"launch",action,arguments:args});
   const installed=JSON.parse((await launchCall("find_apps",{text:"AIClaw Launch Fixture"})).text);
   const launcher=installed.apps.find(item=>item.launch_id);
@@ -101,7 +103,9 @@ try {
   await launchCall("get_app_state",{app:launchReceipt.app});
   const stopped=await launchCall("stop_app",{app:launchReceipt.app,verify_after:false});
   assert.equal(JSON.parse(stopped.text.split("\n")[0]).verified,true);
-  console.log(JSON.stringify({ passed: true, backend: "x11-atspi", installed_runtime: true, host_controller: true, private_stdio: true, source_identity_handshake: true, background_receipt: true, window_png: true, unicode_paste_read_back:true, markdown_html_bold_consumed:true, clipboard_all_formats_restored:true, clipboard_survived_runtime_eof:true, clipboard_provider_exited_after_new_copy:true, static_window_no_update: true, ax_delta_reconstructed: true, sampling_preserved_action_observation: true, finish_turn_cancelled_wait: true, discovered_desktop_launch:true, launched_pid_verified:true, launched_window_observed:true, normal_close_requested:true }));
+  const summary = { passed: true, platform: "linux", architecture: process.arch, control_transitions: controlTransitions, backend: "x11-atspi", installed_runtime: true, host_controller: true, private_stdio: true, source_identity_handshake: true, background_receipt: true, window_png: true, unicode_paste_read_back:true, markdown_html_bold_consumed:true, clipboard_all_formats_restored:true, clipboard_survived_runtime_eof:true, clipboard_provider_exited_after_new_copy:true, static_window_no_update: true, ax_delta_reconstructed: true, sampling_preserved_action_observation: true, finish_turn_cancelled_wait: true, discovered_desktop_launch:true, launched_pid_verified:true, launched_window_observed:true, normal_close_requested:true };
+  if(process.env.AICLAW_COMPUTER_EVIDENCE_DIR){await mkdir(process.env.AICLAW_COMPUTER_EVIDENCE_DIR,{recursive:true});await writeFile(join(process.env.AICLAW_COMPUTER_EVIDENCE_DIR,"linux-live-summary.json"),JSON.stringify(summary,null,2)+"\n");}
+  console.log(JSON.stringify(summary));
 } finally {
   await controller.close();
   for (const child of children) child.kill("SIGTERM");
