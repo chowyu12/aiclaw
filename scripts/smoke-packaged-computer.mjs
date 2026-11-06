@@ -73,8 +73,10 @@ try {
       installedBeforeTool=await evaluate(`(()=>{
         const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
         const fs=require('node:fs'),path=require('node:path');
-        const root=path.join(require('node:os').homedir(),'.aiclaw/computer-use',process.platform);
-        return fs.existsSync(root)&&fs.readdirSync(root).some(name=>/^[a-f0-9]{64}$/.test(name)&&fs.existsSync(path.join(root,name,'Tools.json')));
+        const root=path.join(require('node:os').homedir(),'.aiclaw/computer-use');
+        if(process.platform==='darwin') return fs.existsSync(path.join(root,'AIClaw Computer Use.app/Contents/_CodeSignature/CodeResources'));
+        const platformRoot=path.join(root,process.platform);
+        return fs.existsSync(platformRoot)&&fs.readdirSync(platformRoot).some(name=>/^[a-f0-9]{64}$/.test(name)&&fs.existsSync(path.join(platformRoot,name,'Tools.json')));
       })()`);
       if(installedBeforeTool) break;
       await pause(100);
@@ -88,11 +90,12 @@ try {
         const result=await runtime.call('permission_status',{});
         if(result.isError) throw Error(JSON.stringify(result));
         const status=JSON.parse(result.content[0].text);
-        return {tools:runtime.tools.length,status,resources:process.resourcesPath};
+        const runtimeDirectory=process.platform==='darwin'?require(process.resourcesPath+'/app/dist/main/computer-install.js').installedComputerBundle():status.runtime_directory;
+        return {tools:runtime.tools.length,status,runtimeDirectory,resources:process.resourcesPath};
       } finally {await runtime.close();}
     })()`);
     assert.equal(receipt.tools,18);
-    assert.ok(receipt.status.runtime_directory?.startsWith(join(home,".aiclaw/computer-use")),"Packaged runtime must execute from the isolated user installation");
+    assert.ok(receipt.runtimeDirectory?.startsWith(join(home,".aiclaw/computer-use")),"Packaged runtime must execute from the isolated user installation");
     console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,startup_installed_before_tool:true,user_runtime_installed:true,source_identity_handshake:true,...receipt}));
   } finally {clearTimeout(watchdog);}
 } catch(error) {

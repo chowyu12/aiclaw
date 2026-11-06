@@ -70,14 +70,10 @@ test-computer-native: ## Verify native input and selection pure logic
 	npm run test:computer-native
 
 ifeq ($(shell uname -s),Darwin)
-# A stamp avoids spaces in Make's target parsing and unnecessary re-signing on
-# every make dev. Rebuild only when native code, tools or version actually changes.
-COMPUTER_STAMP := $(DESKTOP)/computer-use/.built
-build-computer: $(COMPUTER_STAMP) ## Build the independent macOS Computer Use app
-
-$(COMPUTER_STAMP): $(wildcard tools/computer-use/Sources/*.swift) scripts/build-computer-runtime.mjs $(AGENT_DIR)/internal/agent/computer-tools.json package.json
+# The builder fingerprints native inputs, toolchain and signer; unchanged apps
+# are reused without recompilation or re-signing, including across host releases.
+build-computer: ## Build or reuse the independent macOS Computer Use app
 	node scripts/build-computer-runtime.mjs
-	@touch $(COMPUTER_STAMP)
 else
 build-computer: ## Stage the independent Windows/Linux Computer Use service
 	node scripts/stage-computer-runtime.mjs

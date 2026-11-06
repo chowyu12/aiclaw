@@ -94,6 +94,10 @@ export class ComputerNativeRuntime implements ComputerRuntime {
     if (this.expectedIdentity && response.processExecutableSHA256 !== this.expectedIdentity) throw Error("The resident Computer Use app does not match this build; reconnect to the current helper");
     this.tools = response.tools;
   }
+  /** Host startup only; this setup action is not exposed as an Agent tool. */
+  async setupPermissions(): Promise<ComputerToolResult> {
+    return this.request("ComputerUseIPCPermissionSetupRequest", {});
+  }
   async call(name: string, args: Record<string, unknown>): Promise<ComputerToolResult> {
     const direct: Record<string, string> = {
       list_apps: "ComputerUseIPCListAppsRequest", find_apps: "ComputerUseIPCFindAppsRequest",

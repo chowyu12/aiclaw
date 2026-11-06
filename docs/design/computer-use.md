@@ -16,7 +16,7 @@ flowchart LR
 
 ## 进程、身份与 IPC
 
-安装包携带 helper，每次启动 AIClaw 时在后台校验签名并同步到固定用户目录 `~/.aiclaw/computer-use/AIClaw Computer Use.app`，无需先调用桌面控制工具；开发与正式安装均从这个位置运行。相同产物不重复复制；更新使用安装锁、同目录暂存与原子替换，校验失败保留旧 App 并记录应用日志，首次使用时仍会重试安装。同步本身不启动 helper 或请求系统权限。宿主通过 LaunchServices 启动该 helper，再直接连接其 Unix socket；不经过 CLI 代理或用户 MCP 配置。原生框架不加载到 Electron 内。
+安装包携带 helper，每次启动 AIClaw 时在后台校验签名并同步到固定用户目录 `~/.aiclaw/computer-use/AIClaw Computer Use.app`，无需先调用桌面控制工具；开发与正式安装均从这个位置运行。相同产物不重复复制；更新使用安装锁、同目录暂存与原子替换，校验失败保留旧 App 并记录应用日志，首次使用时仍会重试安装。同步完成后，macOS 启动流程通过 LaunchServices 启动 helper，并经身份校验的 IPC 检查辅助功能与屏幕录制权限；缺少任一项时显示授权引导窗口，全部具备时不弹窗。只有用户点击引导按钮才调用对应系统授权 API、打开系统设置；实际授权由用户确认。启动检查不执行截图或桌面输入，完成后关闭检查连接。宿主通过 LaunchServices 启动该 helper，再直接连接其 Unix socket；不经过 CLI 代理或用户 MCP 配置。原生框架不加载到 Electron 内。
 
 协议是 **`AIClawComputerUseIPC-1`**。请求使用 `{id, requestType, request}`，响应为 `{id, result}` 或 `{id, error}`。请求名称参考恢复出的 Codex 接口，**不与 `CodexComputerUseIPC-5` wire 兼容**。握手返回版本、工具清单和进程启动时捕获的自身可执行文件 SHA-256；宿主拒绝版本或可执行身份不匹配的驻留进程。
 
@@ -121,7 +121,11 @@ CI 的 macOS job 构建并验证 universal helper，上传 tar artifact；Linux 
 
 Windows/Linux 随应用启动同步到 `~/.aiclaw/computer-use/<linux|win32>/<源码与动作清单摘要>/`，首次调用也核验安装。先完整写入临时目录，再原子发布；同一代际复用，损坏或链接代际拒绝执行。文件边界参与安装摘要，协议另核对执行源码摘要。Unix 还检查目录所有者与写权限。不同版本使用独立目录，避免 Windows 活跃进程占用工作目录时替换失败，并保留并存旧宿主使用的旧代际。这些目录只包含运行时源码和清单，不存截图/剪贴板历史；旧代际暂不自动清理。平台 CI 已从实际用户安装目录启动进程并完成桌面操作。两平台还使用独立启动且窗口已就绪的 AIClaw 命名 fixture，实测从发现和显式 PID 控制入口拒绝 AIClaw 自身及 helper 可执行文件。
 
-当前验证使用 **ad-hoc 开发签名**。构建脚本支持 `COMPUTER_USE_SIGN_IDENTITY`，但尚未配置生产证书或完成公证。不能据此保证更新后的权限持续有效；生产交付需要稳定签名身份与单独的安装、升级验收。
+v3.7.43 发布包使用 ad-hoc 签名。本次改为固定自签证书：主应用、Electron 嵌套程序和 Computer Use helper 复用同一证书，公开证书固定在 `tools/computer-use/signing-certificate.pem`。已签好的 helper 不被主应用签名过程重签。自签证书不提供 Developer ID、Apple 公证或 Gatekeeper 分发信任；从旧 ad-hoc 版本迁移需要用户重新授权一次。真实升级后的系统权限保持仍需单独验收。
+
+签名私钥、加密 P12、密码和专用钥匙串仅保存在本机 `~/.aiclaw/signing/`，目录权限 0700、文件 0600，不进入仓库。`node scripts/mac-signing.mjs --setup` 导入或复用原身份；仓库已有固定公开证书时，缺少对应 P12 会失败，不会生成替代证书。更换构建机必须导入原 P12 与密码，不能重新申请同名证书。CI 使用 `AICLAW_MAC_SIGNING_P12_BASE64`、`AICLAW_MAC_SIGNING_PASSWORD` 两项 Actions Secrets；缺失即阻断发布。需备份原 P12 与密码，避免身份丢失。可显式设置 `COMPUTER_USE_SIGN_IDENTITY` 与 `COMPUTER_USE_SIGN_KEYCHAIN` 使用已有证书；`COMPUTER_USE_SIGN_IDENTITY=-` 仅用于明确选择的 ad-hoc 开发构建。
+
+helper 使用独立版本文件 `tools/computer-use/runtime.json`。构建指纹包含 Swift 源码、工具清单、helper 版本、构建与签名脚本、目标架构、证书指纹、Swift/SDK 版本；主应用版本不参与。输入不变时校验原包签名、签名覆盖的指纹和可执行摘要，直接复用原始字节。CI 在 master 保存 universal helper 缓存供后续标签复用；缓存失效可重建，仍必须使用原证书。Linux 交叉打包后由独立 macOS job 签名主应用，发布只采用该 job 的 Mac ZIP。
 
 ## 验证状态
 
@@ -136,9 +140,9 @@ Windows/Linux 随应用启动同步到 `~/.aiclaw/computer-use/<linux|win32>/<�
 
 [实际提交回执](/Users/zhouyy/.codex/visualizations/2026/11/05/01a1aacb-6689-7b11-841f-9bcc35cb2d46/rea-search/native-live-summary.json) 记录了 Unicode 值、富文本加粗、拖动/滚动事件及一次步进器辅助动作；[验证截图](/Users/zhouyy/.codex/visualizations/2026/11/05/01a1aacb-6689-7b11-841f-9bcc35cb2d46/rea-search/native-fixture-verified.png) 来自本实现选定窗口的 ScreenCaptureKit 截图。测试不操作已有用户应用或发送外部数据。
 
-事件投递后的短暂窗口变化只重试只读观察，最多两次；输入本身不重放。开发构建采用时间戳依赖，未修改原生源、工具契约或版本时 `make dev` 不重复编译/签名。
+事件投递后的短暂窗口变化只重试只读观察，最多两次；输入本身不重放。开发构建按上述输入指纹复用；只更新主应用版本时 `make dev` 不重复编译/签名 helper。
 
-上述结果验证本机 macOS arm64 上的测试 App，不证明任意第三方 App 或实际 x64 输入效果。仍使用开发签名，未完成生产证书、公证及升级授权保持验收。本轮新增的是轮询观察/AX 文本增量和项目维护的应用策略；原生逐帧/AX 事件流、历史、音频、日历、短信和锁屏能力仍见证据报告的差距清单。
+上述结果验证本机 macOS arm64 上的测试 App，不证明任意第三方 App 或实际 x64 输入效果。当时使用 ad-hoc 开发签名；本次固定自签证书的验证见后文，尚未完成公证及升级授权保持验收。本轮新增的是轮询观察/AX 文本增量和项目维护的应用策略；原生逐帧/AX 事件流、历史、音频、日历、短信和锁屏能力仍见证据报告的差距清单。
 
 ### 2026-11-06 续接验收
 
@@ -162,4 +166,19 @@ Windows/Linux 随应用启动同步到 `~/.aiclaw/computer-use/<linux|win32>/<�
 
 本次收尾重新通过 Go race、46 项宿主/安装/观察契约（45 通过、1 项平台跳过）及 Linux 原生实测。新增 Wayland 回归将会话标记为 Wayland 并故意提供无效 D-Bus 地址，确认首先返回 X11-only 错误，不进入原生初始化；另测缺 AT-SPI 总线时返回明确错误而非 SIGTRAP。
 
-本次 macOS 实测复跑在权限预检处停止，未派发任何 fixture 输入。系统当前未给此构建完整授权，因此不声称本次重新验证了 macOS 真实输入。`tools/computer-use/Sources/`、`computer-watch.ts` 和 `computer-policy.ts` 相对已有实测回执对应的 `cf729e65` 未变更；这三部分沿用前文已核对的真实回执，并结合本次重新通过的宿主/race 回归和 Windows/Linux 实测。生产签名、公证和升级后授权保持仍属于另行交付条件。
+五阶段目标在 `268372a7` 收尾时，macOS 实测复跑在权限预检处停止，未派发任何 fixture 输入。系统当前未给此构建完整授权，因此不声称本次重新验证了 macOS 真实输入。`tools/computer-use/Sources/`、`computer-watch.ts` 和 `computer-policy.ts` 相对已有实测回执对应的 `cf729e65` 未变更；这三部分沿用前文已核对的真实回执，并结合本次重新通过的宿主/race 回归和 Windows/Linux 实测。生产签名、公证和升级后授权保持仍属于另行交付条件。
+
+### 启动时授权引导
+
+macOS 启动使用 `ComputerNativeRuntime.create()` 同步并校验当前 helper，再调用宿主专用 `ComputerUseIPCPermissionSetupRequest`。该请求读取权限状态，缺任一权限时展示现有引导窗口；`permission_status` 保持只读。引导操作不加入 Agent 工具清单，模型不能经工具入口打开它。检查失败写应用日志，不阻塞主界面；成功或失败均关闭启动检查连接。
+
+引导窗口的按钮分别使用 `AXIsProcessTrustedWithOptions(prompt: true)` 和 `CGRequestScreenCaptureAccess()` 发起系统授权申请。应用不能自行确认系统权限；启动引导用于补齐权限；更新身份问题由固定证书与 helper 复用处理，系统权限保持仍需真实升级验收。
+
+已验证：47 项宿主/安装/观察测试（46 通过、1 项平台跳过）、主进程构建、完整 TypeScript 检查、universal helper 构建及原生逻辑测试；真实 IPC 在当前缺辅助功能/录屏权限时返回引导已展示，工具清单仍为 18 项。外部 UI 检查工具读取窗口超时，未取得窗口截图，也未代用户进行系统授权。
+
+
+### 固定签名身份验收
+
+真实本机重建测试已验证：只改主应用版本复用相同 helper 可执行字节和 inode；修改 helper 版本后可执行摘要变化，但新旧包的 designated requirement 完全相同，均绑定原证书；缓存签名篡改、CI 缺失身份均被拒绝。一次性 CI 钥匙串导入保留同一证书指纹，未修改 TCC 授权。完整 Electron 主应用的嵌套签名验证通过，签名过程中 helper 字节不变；签名后的独立 fixture 成功启动沙盒渲染进程并执行 JavaScript。这些结果证明签名与复用机制，不代替用户授权后真实升级的 TCC 保持测试。
+
+本轮 `make check` 全部通过：Go race、格式/vet/no-cgo、完整 TypeScript、371 项宿主/渲染测试（370 通过、1 项平台跳过）、19 项更新器测试、原生逻辑与固定身份验收、40 项内核冒烟、23 项桌面桥接冒烟、327 项界面检查及原生 IPC。当前新身份的 AX/录屏均未授权，不能据此声称已通过授权保持测试。GitHub 两项签名 Secrets 已经用户明确授权后配置，云端完整发布流程仍需独立运行验证。

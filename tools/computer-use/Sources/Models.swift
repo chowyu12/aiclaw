@@ -66,7 +66,7 @@ final class PermissionWindow: NSObject {
             panel.isReleasedWhenClosed = false
             let title = NSTextField(labelWithString: "Allow AIClaw Computer Use to control applications")
             title.font = .boldSystemFont(ofSize: 16)
-            let detail = NSTextField(wrappingLabelWithString: "Enable AIClaw Computer Use in Privacy & Security → Accessibility and Screen Recording. Permissions belong to this independent helper application. AIClaw does not grant access automatically. After changing access, retry the observation.")
+            let detail = NSTextField(wrappingLabelWithString: "AIClaw needs Accessibility to operate other apps and Screen Recording to see their windows. Grant access to AIClaw Computer Use in System Settings, then close this window and continue in AIClaw. macOS may ask you to reopen the helper after granting access.")
             let accessibility = NSButton(title: "Open Accessibility Settings", target: self, action: #selector(openAccessibility))
             let capture = NSButton(title: "Open Screen Recording Settings", target: self, action: #selector(openCapture))
             let stack = NSStackView(views: [title, detail, accessibility, capture])

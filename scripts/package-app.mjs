@@ -23,6 +23,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packager } from "@electron/packager";
 import { stageComputerRuntime, stageComputerHostDependencies } from "./stage-computer-runtime.mjs";
+import { signMacApplication } from "./mac-signing.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const STAGING = join(REPO, "build", "app");
@@ -236,10 +237,8 @@ async function main() {
     // 「加载已解压的扩展程序」选它（设置 → 浏览器里有按钮直接打开这个目录）。
     extraResource: [...goBinaries(), join(REPO, "apps", "browser-extension")],
     appCopyright: "AIClaw contributors",
-    // macOS 这边**没有签名**：签名与公证都只能在 macOS 上做，而这条流水线
-    // 跑在 Linux。用户第一次打开要右键「打开」，或者
-    // `xattr -dr com.apple.quarantine /Applications/AIClaw.app`。
-    // 以后有 macOS runner 了，在这里加 osxSign / osxNotarize。
+    // 本机 macOS 打包后使用固定身份签名；Linux 交叉打包由 macOS CI 补签。
+    // 自签证书不提供 Apple 公证或 Gatekeeper 分发信任。
     darwinDarkModeSupport: true,
     // 语音输入要用麦克风：Info.plist 里没有这条说明，macOS 直接拒绝访问、连授权框都不弹。
     extendInfo: platform === "darwin" ? { NSMicrophoneUsageDescription: "语音输入：把你说的话转成文字填进输入框。" } : undefined,
@@ -247,6 +246,9 @@ async function main() {
   });
 
   if (platform === "win32") stampWindowsExe();
+  if (platform === "darwin" && process.platform === "darwin") {
+    for (const path of paths) await signMacApplication(join(path, `${APP_NAME}.app`));
+  }
 
   for (const path of paths) console.log(`packaged ${path}`);
 }

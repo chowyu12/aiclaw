@@ -1,4 +1,4 @@
-/** Permission-free contract test of our independent native app. */
+/** Permission-free contract test; may show setup guidance, never requests access. */
 const { app } = require("electron");
 const { readFileSync } = require("node:fs");
 const path = require("node:path");
@@ -22,6 +22,10 @@ app.whenReady().then(async () => {
     const status = await runtime.call("permission_status", {});
     const permissions = JSON.parse(status.content[0].text);
     if (typeof permissions.accessibilityTrusted !== "boolean" || typeof permissions.screenCaptureGranted !== "boolean") throw Error("Invalid native permission response");
+    if (permissions.setupWindowShown !== false) throw Error("Reading permission status must not open the setup window");
+    const setup = await runtime.setupPermissions();
+    const state = JSON.parse(setup.content[0].text);
+    if (state.setupWindowShown !== (!state.accessibilityTrusted || !state.screenCaptureGranted)) throw Error("Startup setup must open only when a required permission is missing");
     console.log(`AIClaw native IPC handshake and ${specs.length} tool contracts verified (no screenshots or input). Permissions: AX=${permissions.accessibilityTrusted}, capture=${permissions.screenCaptureGranted}.`);
   } finally { await runtime.close(); }
 }).then(() => { clearTimeout(watchdog); app.quit(); }).catch(error => { console.error(error); clearTimeout(watchdog); app.exit(1); });

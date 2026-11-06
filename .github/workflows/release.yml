@@ -2,6 +2,13 @@ name: Desktop Release
 on:
   push:
     tags: ["v*"]
+    branches: [master]
+    paths:
+      - 'tools/computer-use/**'
+      - 'tools/claw-agent/internal/agent/computer-tools.json'
+      - 'scripts/build-computer-runtime.mjs'
+      - 'scripts/mac-signing.mjs'
+      - '.github/workflows/release.yml'
   workflow_dispatch:
 permissions:
   contents: write
@@ -11,6 +18,7 @@ env:
 
 jobs:
   test:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,6 +73,20 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run setup:electron
+      - name: Import the fixed signing identity
+        env:
+          AICLAW_MAC_SIGNING_P12_BASE64: ${{ secrets.AICLAW_MAC_SIGNING_P12_BASE64 }}
+          AICLAW_MAC_SIGNING_PASSWORD: ${{ secrets.AICLAW_MAC_SIGNING_PASSWORD }}
+        run: node scripts/mac-signing.mjs --setup
+      - name: Fingerprint native runtime inputs
+        id: native-inputs
+        run: echo "fingerprint=$(node scripts/build-computer-runtime.mjs --universal --fingerprint)" >> "$GITHUB_OUTPUT"
+      # Master seeds the default-branch cache; tags can restore it across releases.
+      # The builder verifies the pinned signer and signed input fingerprint on hits.
+      - uses: actions/cache@v4
+        with:
+          path: apps/desktop/computer-use
+          key: native-computer-${{ steps.native-inputs.outputs.fingerprint }}
       - run: npm run test:computer-native
       - run: node scripts/build-computer-runtime.mjs --universal
       - run: npm run build -w @aiclaw/agent-client && npm run build:main -w @aiclaw/desktop
@@ -76,6 +98,33 @@ jobs:
         with:
           name: native-computer-runtime
           path: native-computer-runtime.tar.gz
+          if-no-files-found: error
+
+  mac-sign:
+    needs: package
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Import the fixed signing identity
+        env:
+          AICLAW_MAC_SIGNING_P12_BASE64: ${{ secrets.AICLAW_MAC_SIGNING_P12_BASE64 }}
+          AICLAW_MAC_SIGNING_PASSWORD: ${{ secrets.AICLAW_MAC_SIGNING_PASSWORD }}
+        run: node scripts/mac-signing.mjs --setup
+      - uses: actions/download-artifact@v4
+        with:
+          name: aiclaw-packages
+          path: package-files
+      - run: node scripts/sign-mac-packages.mjs package-files
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aiclaw-mac-signed
+          path: package-files/*-mac-*.zip
           if-no-files-found: error
 
   package:
@@ -165,7 +214,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [package, windows-installer]
+    needs: [mac-sign, windows-installer]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -173,9 +222,16 @@ jobs:
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
-          path: release
-          merge-multiple: true
-          pattern: aiclaw-*
+          name: aiclaw-packages
+          path: release/base
+      - uses: actions/download-artifact@v4
+        with:
+          name: aiclaw-mac-signed
+          path: release/mac
+      - uses: actions/download-artifact@v4
+        with:
+          name: aiclaw-windows-installer
+          path: release/installer
       - name: Prepare notes and checksums
         # actions/checkout fetches the tag by commit SHA, which leaves a
         # lightweight tag behind and loses the annotation — the release then
@@ -184,7 +240,9 @@ jobs:
           git fetch --force origin "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
           git for-each-ref "refs/tags/${GITHUB_REF_NAME}" --format='%(contents)' > RELEASE_NOTES.md
           test -s RELEASE_NOTES.md || echo "AIClaw ${GITHUB_REF_NAME}" > RELEASE_NOTES.md
-          cd release
+          mkdir -p dist-release
+          cp release/base/*-win-x64.zip release/base/*-linux-x64.zip release/mac/*.zip release/installer/*.exe dist-release/
+          cd dist-release
           # Fail loudly on an empty download rather than publishing a release
           # with nothing in it.
           count=$(find . -maxdepth 1 -type f | wc -l)
@@ -194,4 +252,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           body_path: RELEASE_NOTES.md
-          files: release/*
+          files: dist-release/*

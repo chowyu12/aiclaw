@@ -13,9 +13,8 @@ import { ConfigStore, type McpServer } from "./config.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
 import { ManagedRuntimes } from "./managed-runtimes.js";
-import { installComputerBundle } from "./computer-install.js";
 import { syncPortableComputerRuntime } from "./computer-portable-install.js";
-import { bundledComputerBundle } from "./computer-runtime.js";
+import { ComputerNativeRuntime } from "./computer-runtime.js";
 import { ConfigurationAssistant } from "./app-config.js";
 import { Scheduler } from "./scheduler.js";
 import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
@@ -771,9 +770,12 @@ if (!app.requestSingleInstanceLock()) {
     createWindow();
     installAppMenu();
     if (process.platform === "darwin") {
-      void installComputerBundle(bundledComputerBundle())
-        .then(path => logApp(`Computer Use 已同步：${path}`))
-        .catch(error => logApp(`Computer Use 同步失败：${String(error)}`));
+      void ComputerNativeRuntime.create()
+        .then(async runtime => {
+          try { await runtime.setupPermissions(); logApp("Computer Use 已同步并检查权限"); }
+          finally { await runtime.close(); }
+        })
+        .catch(error => logApp(`Computer Use 启动权限检查失败：${String(error)}`));
     } else if (process.platform === "linux" || process.platform === "win32") {
       void syncPortableComputerRuntime()
         .then(runtime => logApp(`Computer Use 已同步：${runtime.directory}`))

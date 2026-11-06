@@ -45,8 +45,11 @@ private final class DesktopService: NSObject, NSApplicationDelegate {
         switch type {
         case "ComputerUseIPCHandshakeRequest":
             return ["protocolVersion": protocolVersion, "serverVersion": "1", "processExecutableSHA256": processExecutableSHA256, "tools": try toolManifest()]
-        case "ComputerUseIPCPermissionStatusRequest":
-            return try nativeJSON(["accessibilityTrusted": AXIsProcessTrusted(), "screenCaptureGranted": CGPreflightScreenCaptureAccess()])
+        case "ComputerUseIPCPermissionStatusRequest", "ComputerUseIPCPermissionSetupRequest":
+            let accessibility = AXIsProcessTrusted(), capture = CGPreflightScreenCaptureAccess()
+            let showSetup = type == "ComputerUseIPCPermissionSetupRequest" && (!accessibility || !capture)
+            if showSetup { PermissionWindow.shared.show() }
+            return try nativeJSON(["accessibilityTrusted": accessibility, "screenCaptureGranted": capture, "setupWindowShown": showSetup])
         case "ComputerUseIPCListAppsRequest", "ComputerUseIPCFindAppsRequest":
             let inventory = try discover(args)
             for entry in inventory["apps"] as? [[String: Any]] ?? [] {

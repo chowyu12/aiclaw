@@ -285,6 +285,19 @@ async function peer(mode = "ok", timeout = 300, sourceIdentity?: string) {
   return { runtime, requests, async close() { await runtime.close(); for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }); } };
 }
 
+test("startup permission setup uses private IPC without becoming an Agent action", async () => {
+  const h = await peer();
+  try {
+    await h.runtime.initialize();
+    await h.runtime.setupPermissions();
+    assert.equal(h.requests[1].requestType, "ComputerUseIPCPermissionSetupRequest");
+    assert.deepEqual(h.requests[1].request, {});
+    assert.ok(!h.runtime.tools.some(tool => tool.name === "permission_setup"));
+    await assert.rejects(h.runtime.call("permission_setup", {}), /Unsupported native operation/);
+    assert.equal(h.requests.length, 2, "Agent calls cannot open the setup window");
+  } finally { await h.close(); }
+});
+
 test("real IPC framing maps the nine actions to typed native requests", async () => {
   const h = await peer();
   try {

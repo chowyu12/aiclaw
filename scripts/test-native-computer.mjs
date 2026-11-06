@@ -12,5 +12,6 @@ if (process.platform === "darwin") {
     const sources = ["Sources/Markdown.swift", "Sources/Models.swift", "Sources/Observation.swift", "Sources/Actions.swift", "Tests/ActionsTests.swift"].map(path => join(repo, "tools/computer-use", path));
     execFileSync("xcrun", ["swiftc", "-swift-version", "5", "-target", `${process.arch === "x64" ? "x86_64" : "arm64"}-apple-macos14.4`, ...sources, "-o", binary], { stdio: "inherit" });
     execFileSync(binary, [], { stdio: "inherit" });
+    execFileSync(process.execPath,[join(repo,"scripts/test-mac-signing.mjs")],{stdio:"inherit"});
   } finally { rmSync(temporary, { recursive: true, force: true }); }
 } else console.log("Native Computer Use logic tests require macOS; no native component on this OS.");
