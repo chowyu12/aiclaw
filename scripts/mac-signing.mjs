@@ -90,6 +90,12 @@ export function setupMacSigning() {
   const present=security(["find-certificate","-a","-p",keychain]).toString();
   if (!present.includes("BEGIN CERTIFICATE")) security(["import",p12,"-k",keychain,"-P",password,"-T","/usr/bin/codesign"]);
   security(["set-key-partition-list","-S","apple-tool:,apple:,codesign:","-s","-k",password,keychain]);
+  // codesign also consults the search list when assembling certificate chains.
+  // Change only the disposable GitHub runner, never the developer's search list.
+  if (process.env.GITHUB_ACTIONS==="true" && process.env.RUNNER_TEMP && root===join(process.env.RUNNER_TEMP,"aiclaw-signing")) {
+    const existing=[...security(["list-keychains","-d","user"]).toString().matchAll(/"([^"\n]+)"/g)].map(match=>match[1]);
+    security(["list-keychains","-d","user","-s",keychain,...existing.filter(path=>path!==keychain)]);
+  }
   console.log(`Signing identity ready: ${identity.certificateSHA256}. Private material remains in the local signing directory.`);
   return loadMacSigning();
 }

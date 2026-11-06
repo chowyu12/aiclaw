@@ -6,7 +6,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statS
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadMacSigning } from "./mac-signing.mjs";
+import { loadMacSigning, signMacBundle } from "./mac-signing.mjs";
 if (process.env.COMPUTER_USE_SIGN_IDENTITY==="-") {console.log("Fixed identity acceptance skipped in explicit ad-hoc mode");process.exit(0);}
 const repo=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const root=mkdtempSync(join(tmpdir(),"aiclaw-signing-acceptance-"));
@@ -40,6 +40,8 @@ try {
   if (source && existsSync(join(source,"identity.p12"))) {
     const imported=spawnSync(process.execPath,[join(root,"scripts/mac-signing.mjs"),"--setup"],{encoding:"utf8",env:{...process.env,CI:"true",AICLAW_MAC_SIGNING_DIRECTORY:join(root,"ci-signing"),AICLAW_MAC_SIGNING_P12_BASE64:readFileSync(join(source,"identity.p12")).toString("base64"),AICLAW_MAC_SIGNING_PASSWORD:readFileSync(join(source,"password"),"utf8").trim()}});
     assert.equal(imported.status,0,imported.stderr);assert.ok(imported.stdout.includes(signing.certificateSHA256));
+    const probe=join(root,"imported-signing-probe");cpSync("/usr/bin/true",probe);
+    signMacBundle(probe,"com.github.chowyu12.aiclaw.signing-probe",{...signing,keychain:join(root,"ci-signing/aiclaw.keychain-db")});
   }
   console.log("PASS: host-only release reused exact signed bytes; changed helper rebuilt with identical certificate DR; CI import retained the pinned identity; tampered cache and missing CI identity refused; no TCC grants changed");
 } finally {

@@ -182,3 +182,5 @@ macOS 启动使用 `ComputerNativeRuntime.create()` 同步并校验当前 helper
 真实本机重建测试已验证：只改主应用版本复用相同 helper 可执行字节和 inode；修改 helper 版本后可执行摘要变化，但新旧包的 designated requirement 完全相同，均绑定原证书；缓存签名篡改、CI 缺失身份均被拒绝。一次性 CI 钥匙串导入保留同一证书指纹，未修改 TCC 授权。完整 Electron 主应用的嵌套签名验证通过，签名过程中 helper 字节不变；签名后的独立 fixture 成功启动沙盒渲染进程并执行 JavaScript。这些结果证明签名与复用机制，不代替用户授权后真实升级的 TCC 保持测试。
 
 本轮 `make check` 全部通过：Go race、格式/vet/no-cgo、完整 TypeScript、371 项宿主/渲染测试（370 通过、1 项平台跳过）、19 项更新器测试、原生逻辑与固定身份验收、40 项内核冒烟、23 项桌面桥接冒烟、327 项界面检查及原生 IPC。当前新身份的 AX/录屏均未授权，不能据此声称已通过授权保持测试。GitHub 两项签名 Secrets 已经用户明确授权后配置，云端完整发布流程仍需独立运行验证。
+
+用户完成首次授权后，本机真实升级验收通过：从当前 helper 更新为独立测试版本 1.0.1，可执行 SHA-256 从 `e4fedc0d8b20b74078abc5ac0c7873c293dad9b2867270d5cf102d0b73a1e060` 变为 `134b921947f4bc41e3ce24370ad40a0094f6c376a7b6f984ac41031c6da4b5a7`，证书 requirement 相同；新进程握手确认新摘要后，AX/录屏均由 true 保持 true。恢复当前构建后仍为 true；验收未修改 TCC。此结论限本机 macOS 当前版本与该身份。
