@@ -1,10 +1,10 @@
 import { strict as assert } from "node:assert";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { commonBinDirs, extractPath, loginShellPath, mergePath } from "../apps/desktop/src/main/shell-path.ts";
+import { commonBinDirs, extractPath, loginShellPath, mergePath, toolPath } from "../apps/desktop/src/main/shell-path.ts";
 
 /**
  * 给内核的 PATH。从程序坞打开的应用只有系统那几个目录，nvm / Homebrew 装的 CLI
@@ -42,4 +42,42 @@ test("从登录 shell 读 PATH；shell 出错时返回空串而不是抛", { ski
   chmodSync(fake, 0o755);
   assert.equal(await loginShellPath(fake), "/home/me/.nvm/versions/node/v22/bin:/usr/bin");
   assert.equal(await loginShellPath(join(dir, "no-such-shell")), "");
+});
+
+
+test("startup prewarm and tool callers share one login shell, while PATH changes refresh it", { skip: process.platform === "win32" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aiclaw-path-cache-")), shell = join(dir, "shell");
+  const previous = { SHELL: process.env.SHELL, PATH: process.env.PATH };
+  try {
+    writeFileSync(shell, '#!/bin/sh\nprintf x >> "$0.calls"\n/bin/sleep 0.05\nPATH="/login-custom/bin:/usr/bin" eval "$2"\n');
+    chmodSync(shell, 0o700);
+    process.env.SHELL = shell; process.env.PATH = "/inherited/startup";
+    const [first, concurrent] = await Promise.all([toolPath(dir), toolPath(dir)]);
+    assert.equal(first, concurrent);
+    assert.ok(first.startsWith("/login-custom/bin:/usr/bin:/inherited/startup"));
+    assert.equal(await toolPath(dir), first);
+    assert.equal(readFileSync(shell + ".calls", "utf8"), "x");
+    process.env.PATH = "/changed/startup";
+    assert.ok((await toolPath(dir)).startsWith("/login-custom/bin:/usr/bin:/changed/startup"));
+    assert.equal(readFileSync(shell + ".calls", "utf8"), "xx");
+  } finally {
+    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("failed startup shell discovery keeps fallback paths and can recover without restarting", { skip: process.platform === "win32" }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aiclaw-path-retry-")), shell = join(dir, "shell");
+  const previous = { SHELL: process.env.SHELL, PATH: process.env.PATH };
+  try {
+    writeFileSync(shell, '#!/bin/sh\nprintf x >> "$0.calls"\n'); chmodSync(shell, 0o700);
+    process.env.SHELL = shell; process.env.PATH = "/fallback-parent";
+    assert.ok((await toolPath(dir)).startsWith("/fallback-parent"));
+    writeFileSync(shell, '#!/bin/sh\nprintf x >> "$0.calls"\nPATH="/recovered/bin:/usr/bin" eval "$2"\n');
+    assert.ok((await toolPath(dir)).startsWith("/recovered/bin:/usr/bin:/fallback-parent"));
+    assert.equal(readFileSync(shell + ".calls", "utf8"), "xx");
+  } finally {
+    for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

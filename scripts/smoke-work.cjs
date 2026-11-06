@@ -33,7 +33,13 @@ app.whenReady().then(async()=>{
  let memoryRevision=1,memoryFails=false,memoryConflict=false,editedGlobal=null;const memoryReads=[],memorySaves=[],editedWorkspaces=new Map();
  let contextFixture={model:"test",window:100000,estimatedTokens:12500,lastInputTokens:12000,hasImages:false,compactions:1,records:[{at:1791850000000,before:95000,after:5000}]};const contextReads=[],browseReads=[],beforeRestoreContextReads=[];let resumeGate=null;
  let skillListFails=false;const skillCatalog=[{name:'alpha',description:'整理报告 <b>plain</b>',enabled:true},{name:'beta',description:'邮件处理',enabled:true},{name:'disabled',description:'Disabled skill',enabled:false},{name:'not-loaded',description:'Not mounted in current session',enabled:true}].map(skill=>({...skill,id:skill.name,dirName:skill.name,dir:'/fixture/skills/'+skill.name,source:'AIClaw',writable:true}));
- const handle=(key,fn)=>ipcMain.handle(IPC[key],fn);
+ let releaseStartupReads;
+ const startupReads = new Set(), startupGate = new Promise(resolve=>{releaseStartupReads=resolve});
+ let holdStartupReads=true;
+ const handle=(key,fn)=>ipcMain.handle(IPC[key],async(...args)=>{
+  if(holdStartupReads && ['profileList','groupRead','mcpRead','skillList'].includes(key)){startupReads.add(key);await startupGate;}
+  return fn(...args);
+ });
  let computerState={mode:'ready',active:null,watching:0};const computerActions=[];let computerChecks=0,computerSetups=0;
  const computerDiagnostic=()=>({platform:'darwin',available:true,accessibility:true,screenCapture:false,toolCount:18,message:'请开启屏幕录制权限。'});
  handle('computerStatus',()=>computerState);
@@ -103,6 +109,9 @@ app.whenReady().then(async()=>{
 
  try {
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
+ for(let attempt=0;attempt<60&&startupReads.size<4;attempt++)await new Promise(resolve=>setTimeout(resolve,50));
+ check('independent startup reads are dispatched together before any completes',startupReads.size===4);
+ holdStartupReads=false;releaseStartupReads();
  await js("localStorage.setItem('aiclaw:session-grouping','groups');localStorage.removeItem('aiclaw:pinned-workspaces');localStorage.removeItem('aiclaw:session-sidebar-width')");
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
  await wait("document.querySelectorAll('.bucket').length===3");
@@ -145,7 +154,7 @@ app.whenReady().then(async()=>{
   check('modern theme persists without changing font or reading size',settings.writeConfig({theme:'modern'}).theme==='modern'&&new ConfigStore(themeDirectory).readConfig().theme==='modern'&&new ConfigStore(themeDirectory).readConfig().font==='songti'&&new ConfigStore(themeDirectory).readConfig().fontSize===18);
  } finally { require('node:fs').rmSync(themeDirectory,{recursive:true,force:true}); }
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
- check('theme has a dedicated settings navigation item and is absent from general configuration',await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题')")&&await js("!document.querySelector('[data-theme-option]') && !!document.querySelector('.settings select')"));
+ check('theme has a dedicated settings navigation item and is absent from general configuration',await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题') && !document.querySelector('[data-theme-option]') && !!document.querySelector('.settings select')"));
  const openThemes=async()=>{
   await js("document.querySelector('.activity-rail [data-view=settings]').click()");
   await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent==='主题')");
