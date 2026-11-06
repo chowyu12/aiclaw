@@ -681,3 +681,26 @@ test("常见命令和无语言标记的命令块可辨认，普通代码保持�
  assert.equal(doc.querySelector("pre.command-block code")?.textContent,"ls -la\n");
  assert.equal(doc.querySelector("pre.code-block code")?.textContent,"print(1)\n");
 });
+
+test("HTML report preview preserves document styles, tables and fragment links", async () => {
+  const { htmlPreviewDocument } = await import("../apps/desktop/src/renderer/html-preview.ts");
+  const html = htmlPreviewDocument('<!doctype html><html lang="zh-CN"><head><style>.card{background:#eef4ff;padding:20px}</style></head><body><h1>工作复盘报告</h1><a href="#result">结果</a><table id="result"><tr><td>完成</td></tr></table></body></html>');
+  const doc = new JSDOM(html).window.document;
+  assert.equal(doc.documentElement.lang, "zh-CN");
+  assert.match(doc.querySelector("style")!.textContent!, /background:#eef4ff/);
+  assert.equal(doc.querySelector("td")?.textContent, "完成");
+  assert.equal(doc.querySelector("a")?.getAttribute("href"), "#result");
+  assert.equal(doc.head.firstElementChild?.getAttribute("http-equiv"), "Content-Security-Policy");
+});
+
+test("HTML preview removes active content and navigation while forbidding remote resources", async () => {
+  const { htmlPreviewDocument } = await import("../apps/desktop/src/renderer/html-preview.ts");
+  const html = htmlPreviewDocument('<head><base href="file:///Users/"><meta http-equiv="refresh" content="0;url=https://example.com/leak"><link rel="stylesheet" href="https://example.com/style"></head><body onload="parent.pwned=1"><script>parent.pwned=1</script><iframe src="file:///etc/passwd"></iframe><object data="file:///etc/passwd"></object><form action="https://example.com/post"><input></form><a href="https://example.com/out" target="_top">外链</a><svg><a xlink:href="https://example.com/svg">链接</a></svg><img src="https://example.com/pixel" onerror="parent.pwned=1"></body>');
+  const doc = new JSDOM(html).window.document;
+  assert.equal(doc.querySelector("script,base,link,iframe,object,embed,form,[onload],[onerror],[target],[href],[xlink\\:href],meta[http-equiv=refresh]"), null);
+  const csp = doc.querySelector('meta[http-equiv="Content-Security-Policy"]')!.getAttribute("content")!;
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /script-src 'none'/);
+  assert.match(csp, /img-src data:/);
+  assert.match(csp, /form-action 'none'/);
+});
