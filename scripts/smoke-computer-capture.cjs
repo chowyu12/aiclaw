@@ -152,6 +152,7 @@ app.whenReady().then(async () => {
     catch (error) { if (attempt >= 30) throw error; await pause(100); }
   }
   assert.notEqual(replacement.metadata.window_id, initial.metadata.window_id);
+  await pause(300);
   phase = "pending-loss-slot-reuse";
   const replacements = [];
   // Every failed capture must surrender its global slot without explicit stop
@@ -175,6 +176,7 @@ app.whenReady().then(async () => {
       break;
     } catch (error) { if (attempt >= 30) throw error; await pause(100); }
   }
+  await pause(300);
   phase = "idle-loss-slot-reuse";
   const idleReplacements = [];
   for (const peer of [protocolPeers[3], ...protocolPeers.slice(0, 3)]) {

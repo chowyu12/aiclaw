@@ -84,5 +84,7 @@
 - Linux arm64 / X11 隔离容器真实暂停/停止、跨聊天排队拒绝、旧观察失效、重新观察并设值、订阅取消、query 几何及既有富文本/剪贴板回归通过。实际浮条在单屏原点为零的 1.5/2 倍缩放均验收通过。非 1 倍多屏/非零原点及混合缩放尚无真实验证，浮条明确隐藏；Wayland 不支持。
 - 原生测试证据归档于 `/Users/zhouyy/.codex/visualizations/2026/11/06/01a1adfb-4653-7b53-b81f-62dbebeed8c0/computer-use-parity/`；Linux 回执位于 `build/computer-evidence/linux-control-local/`。
 - 完整 `make check` 已通过：396 项宿主/渲染测试（395 通过、1 平台跳过）、19 项更新器、40 项内核冒烟、337 项界面检查、完整类型/Go race/原生鉴权迁移测试。最后原生资源清理与非 macOS 主窗口退出修复单独回归。
-- 正式固定证书 Electron 包已验证 production 身份、双向认证、旧空闲签名服务正常迁移、伪造 listener 零应用帧、权限 true 且不弹授权；使用临时只读验收入口，不代表默认 UI 启动验收。当前最终清理修复对应的包正在重验。
-- 仍待：最后生命周期针对性回归、最终正式包重验、Windows/Linux x64 当前提交 CI，以及最终逐项清单审计。未完成这些检查前目标保持 active。
+- 正式固定证书 Electron 包已验证 production 身份、双向认证、旧空闲签名服务正常迁移、伪造 listener 零应用帧、权限 true 且不弹授权；使用临时只读验收入口，不代表默认 UI 启动验收。最终清理修复对应的包也已重验通过，sealed helper 指纹与当前原生源码一致；收据位于 `build/computer-evidence/production-auth/`。
+- 捕获最终清理回归通过：非法 cursor 不终止流；四条 pending 流因目标关闭失败后，以及四条无 pending 流失效后，均无需 Stop 或断连即可回收并复用全部配额。窗口替换在 AX/CG 身份对齐和 300ms 展示稳定后重新捕获，不吞原生错误。普通请求等待 3ms。
+- Windows/Linux 关闭主窗口时存在真实隐藏辅助窗口的自然退出验收已纳入完整包 CI。
+- 仍待：Windows/Linux x64 和桌面打包当前提交 CI，以及最终逐项清单审计。未完成这些检查前目标保持 active。
