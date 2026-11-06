@@ -2,8 +2,8 @@
  * process over a loopback-only debugger. No production test hooks or UI input.
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
@@ -132,5 +132,30 @@ try {
     if(child.exitCode===null) {child.kill("SIGKILL");await pause(100);}
   }
   child?.stderr.destroy(); child?.unref();
+  if (process.platform === "darwin") {
+    // LaunchServices owns the resident helper. Stop only this test's exact
+    // canonical executable before deleting its private HOME; never use its
+    // shared bundle ID, force-kill, or leave a running unlinked test generation.
+    let expected;
+    try { expected=await realpath(join(home,".aiclaw/computer-use/AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse")); }
+    catch(error) { if(error.code!=="ENOENT") throw error; }
+    if(expected) {
+      assert.equal(expected,join(await realpath(home),".aiclaw/computer-use/AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse"),"Refuse helper cleanup outside the canonical private HOME");
+      const rows=execFileSync("/bin/ps",["-axo","pid=,uid=,comm="],{encoding:"utf8"}).split("\n");
+      for(const row of rows) {
+        const match=row.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        if(!match || Number(match[2])!==process.getuid() || match[3]!==expected) continue;
+        const pid=Number(match[1]);
+        const current=()=>{
+          try { const value=execFileSync("/bin/ps",["-p",String(pid),"-o","uid=,comm="],{encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim().match(/^(\d+)\s+(.+)$/);return value && Number(value[1])===process.getuid() && value[2]===expected; }
+          catch { return false; }
+        };
+        if(!current()) continue;
+        try { process.kill(pid,"SIGTERM"); } catch(error) { if(error.code!=="ESRCH") throw error; }
+        for(let attempt=0;attempt<40 && current();attempt++) await pause(50);
+        assert.ok(!current(),"The owned packaged helper did not terminate normally; its HOME was preserved");
+      }
+    }
+  }
   await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:200});
 }
