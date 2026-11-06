@@ -73,10 +73,12 @@ export async function openFromChat(
   return { ok: true, action: "open", detail: path };
 }
 
-/** Reveal a directory without executing or opening its contents. */
+/** Reveal a directory or select a file without executing or opening its contents. */
 export function revealWorkspace(path: string): void {
-  if (typeof path !== "string" || !isAbsolute(path) || !existsSync(path) || !statSync(path).isDirectory()) {
-    throw new Error(tr("找不到工作区目录"));
+  if (typeof path !== "string" || !isAbsolute(path) || !existsSync(path)) {
+    throw new Error(tr("找不到 {path}", { path }));
   }
+  const info = statSync(path);
+  if (!info.isDirectory() && !info.isFile()) throw new Error(tr("这不是一个文件"));
   shell.showItemInFolder(resolve(path));
 }

@@ -698,7 +698,6 @@ export const actions = {
     if (tab) tab.reading = plain(reading);
   },
 
-  toggleFileBrowser(): void { state.fileBrowser = !state.fileBrowser; },
   closeFileBrowser(): void { state.fileBrowser = false; },
   closeFilePreview(): void { state.filePreview = null; state.filePreviews = []; },
 

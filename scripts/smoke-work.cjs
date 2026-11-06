@@ -575,12 +575,13 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.preview-file-tab.active .tab-close').click()");
  check('closing final reading tab restores original window',await wait("!document.querySelector('.file-preview')")&&win.getBounds().width===1200);
  await js("document.querySelector('.prose .file-card').click()");await wait("!!document.querySelector('.file-preview')");
- await js("document.querySelector('.file-preview button[aria-label=\"浏览工作区文件\"]').click()");check('reading-area workspace browser opens without a composer file button',await wait("document.querySelectorAll('.workspace-files .file-row').length===2")&&browseReads.at(-1)?.sessionId==='s'&&win.getBounds().width===1930&&await js("!document.querySelector('.composer button[title=\"浏览工作区文件\"]')"));
- await js("document.querySelector('.workspace-files .file-row').click()");check('workspace directory expansion is lazy',await wait("document.querySelectorAll('.workspace-files .file-row').length===3")&&browseReads.at(-1)?.path==='src');
- await js("(()=>{const input=document.querySelector('.workspace-files input');input.value='example';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
- check('workspace file-name search crosses preload',await wait("document.querySelectorAll('.workspace-files .file-row').length===1")&&browseReads.at(-1)?.query==='example');
- writeFileSync('/tmp/aiclaw-workspace-files.png',(await win.webContents.capturePage()).toPNG());
- await js("document.querySelector('.workspace-files .file-row').click()");check('browser opens selected file in reading tab',await wait("!!document.querySelector('.source-code')")&&previewReads.at(-1)?.path==='/tmp/smoke/example.sql');
+ await js("document.querySelector('.file-preview button[aria-label=\"打开文件所在目录\"]').click()");
+ check('reading-area folder button reveals the current file through preload',await wait("!!document.querySelector('.file-preview') && !document.querySelector('.workspace-files')")&&revealedWorkspaces.at(-1)==='/tmp/smoke/generated/2026 AI 行业趋势.md');
+ win.webContents.send(IPC.onAgentEvent,{method:'item/completed',params:{sessionId:'s',item:{id:'query-file',kind:'agentMessage',text:'[查询文件](/tmp/smoke/example.sql)'}}});
+ await wait("!!document.querySelector('.prose .file-card[data-file-path=\"/tmp/smoke/example.sql\"]')");
+ await js("document.querySelector('.prose .file-card[data-file-path=\"/tmp/smoke/example.sql\"]').click()");await wait("!!document.querySelector('.source-code')");
+ await js("document.querySelector('.file-preview button[aria-label=\"打开文件所在目录\"]').click()");
+ check('folder button follows the newly selected file instead of its workspace',revealedWorkspaces.at(-1)==='/tmp/smoke/example.sql');
  win.webContents.sendInputEvent({type:'keyDown',keyCode:'f',modifiers:['meta']});win.webContents.sendInputEvent({type:'keyUp',keyCode:'f',modifiers:['meta']});
  check('Command-F opens in-file search',await wait("!!document.querySelector('.file-find-bar')"));
  await js("(()=>{const input=document.querySelector('.file-find-bar input');input.value='SELECT';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
@@ -713,7 +714,7 @@ app.whenReady().then(async()=>{
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
  check('workspace pin survives reload',await wait("document.querySelector('.bucket')?.getAttribute('data-bucket-id')==='workspace:/other/smoke' && !!document.querySelector('.workspace-pin')"));
  await workspaceMore();await click('在 Finder 中显示');
- check('workspace reveal passes full directory path through preload',revealedWorkspaces[0]==='/other/smoke');
+ check('workspace reveal passes full directory path through preload',revealedWorkspaces.at(-1)==='/other/smoke');
  await workspaceMore();
  await js("document.querySelector('.workspace-menu').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
  check('Escape closes workspace menu and returns focus to trigger',await wait("!document.querySelector('.workspace-menu')")&&await js("document.activeElement.getAttribute('aria-label')==='工作区更多操作'"));

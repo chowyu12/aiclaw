@@ -139,7 +139,7 @@ onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();
     <header class="preview-header">
       <div class="preview-heading"><strong>{{ t('文件阅读区') }}</strong></div>
       <div class="preview-header-actions">
-        <button :aria-label="t('浏览工作区文件')" :title="t('浏览工作区文件')" @click="actions.toggleFileBrowser()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg></button>
+        <button :disabled="preview.loading || !!preview.error" :aria-label="t('打开文件所在目录')" :title="t('打开文件所在目录')" @click="actions.revealWorkspace(preview.path)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg></button>
         <button :aria-label="t('查找文件内容')" :title="t('查找文件内容')" @click="openFind"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg></button>
         <button :disabled="preview.loading" :aria-label="t('刷新')" :title="t('重新读取当前文件')" @click="actions.refreshFilePreview()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg><span class="sr-only">{{ t('刷新') }}</span></button>
         <button :disabled="preview.loading" :aria-label="t('对比')" :title="t('查看此文件最近一次记录的改动')" @click="actions.compareFilePreview()"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16M6 9h3M15 15h3M16.5 13.5v3"/></svg><span class="sr-only">{{ t('对比') }}</span></button>
