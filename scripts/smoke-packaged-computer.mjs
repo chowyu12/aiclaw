@@ -12,7 +12,8 @@ import { createRequire } from "node:module";
 const WebSocket = globalThis.WebSocket ?? createRequire(import.meta.url)("undici").WebSocket;
 
 const executable = resolve(process.argv[2]);
-const home = await mkdtemp(join(tmpdir(), "aiclaw-packaged-computer-"));
+// macOS Unix sockets allow only 103 path bytes; os.tmpdir() can itself be long.
+const home = await mkdtemp(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "aiclaw-pkg-"));
 const pending = new Map(); let socket, child, sequence=0, stderr="";
 const evaluate = expression => new Promise((resolve,reject) => {
   const id=++sequence;
