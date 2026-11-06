@@ -36,9 +36,17 @@ jobs:
       - run: npm run build -w @aiclaw/agent-client
       - run: npm run build:main -w @aiclaw/desktop
       - name: Installer and controller contracts
-        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer-install.ts scripts/test-computer.ts scripts/test-computer-watch.ts
+        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer-install.ts scripts/test-computer.ts scripts/test-computer-watch.ts scripts/test-computer-control.ts scripts/test-computer-policy.ts scripts/test-computer-overlay.ts
       - name: Native Windows UIA and window capture acceptance
+        env:
+          AICLAW_COMPUTER_EVIDENCE_DIR: ${{ runner.temp }}/computer-use-windows
         run: node scripts/smoke-computer-windows.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: computer-use-windows-evidence
+          path: ${{ runner.temp }}/computer-use-windows
+          if-no-files-found: warn
       - name: Native clipboard transactions
         if: always()
         shell: powershell
@@ -72,7 +80,7 @@ jobs:
       - run: npm run build:main -w @aiclaw/desktop
       - run: node scripts/stage-computer-runtime.mjs
       - name: Controller contracts
-        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer-install.ts scripts/test-computer.ts scripts/test-computer-watch.ts
+        run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer-install.ts scripts/test-computer.ts scripts/test-computer-watch.ts scripts/test-computer-control.ts scripts/test-computer-policy.ts scripts/test-computer-overlay.ts
       - run: docker build -f tools/computer-use/linux/Dockerfile.test -t aiclaw-computer-test .
       - name: Native X11 and clipboard acceptance
         run: |
@@ -81,16 +89,46 @@ jobs:
             -v "$PWD/tools/claw-agent/internal/agent/computer-tools.json:/Tools.json:ro" \
             aiclaw-computer-test dbus-run-session -- xvfb-run -a sh -c \
             'openbox >/tmp/openbox.log 2>&1 & sleep 1; /usr/bin/python3 /computer-use/test_clipboard.py && /usr/bin/python3 /computer-use/test_native.py /Tools.json'
-      - name: Host workflow and clipboard lifetime acceptance
+      - name: Host workflow, pause-stop and clipboard lifetime acceptance
         run: |
+          mkdir -p build/computer-evidence/linux
           docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+            -e AICLAW_COMPUTER_EVIDENCE_DIR=/evidence \
+            -v "$PWD/build/computer-evidence/linux:/evidence" \
+            -v "$PWD/tools/computer-use/test_control.mjs:/aiclaw/tests/test_control.mjs:ro" \
             -v "$PWD/tools/computer-use/linux:/aiclaw/tests/linux:ro" \
             -v "$PWD/apps/desktop/computer-use/linux:/aiclaw/computer-use/linux:ro" \
             -v "$PWD/apps/desktop/dist/main:/aiclaw/dist/main:ro" \
+            -v "$PWD/apps/desktop/dist/shared:/aiclaw/dist/shared:ro" \
             -v "$PWD/node_modules/markdown-it:/aiclaw/node_modules/markdown-it:ro" \
             -v "$PWD/package.json:/aiclaw/package.json:ro" \
             aiclaw-computer-test dbus-run-session -- xvfb-run -a sh -c \
             'openbox >/tmp/openbox.log 2>&1 & sleep 1; node /aiclaw/tests/linux/test_host.mjs'
+      - name: Actual X11 overlay geometry at uniform HiDPI scales
+        # The private desktop container is root; sandbox is disabled only for this
+        # owned calibration fixture, not for the production package acceptance.
+        run: |
+          npm run setup:electron
+          for overlay_scale in 1.5 2; do
+            docker run --rm -e PYTHONDONTWRITEBYTECODE=1 \
+              -e AICLAW_COMPUTER_EVIDENCE_DIR=/evidence \
+              -v "$PWD/build/computer-evidence/linux:/evidence" \
+              -v "$PWD/node_modules/electron/dist:/electron:ro" \
+              -v "$PWD/tools/computer-use/linux:/aiclaw/tests/linux:ro" \
+              -v "$PWD/apps/desktop/computer-use/linux:/aiclaw/computer-use/linux:ro" \
+              -v "$PWD/apps/desktop/dist/main:/aiclaw/dist/main:ro" \
+              -v "$PWD/apps/desktop/dist/shared:/aiclaw/dist/shared:ro" \
+              -v "$PWD/node_modules/markdown-it:/aiclaw/node_modules/markdown-it:ro" \
+              -v "$PWD/package.json:/aiclaw/package.json:ro" \
+              aiclaw-computer-test dbus-run-session -- xvfb-run -a -s '-screen 0 2560x1600x24' sh -c \
+              "openbox >/tmp/openbox-scale.log 2>&1 & sleep 1; /electron/electron --no-sandbox --disable-gpu --force-device-scale-factor=$overlay_scale /aiclaw/tests/linux/test_overlay_scale.cjs"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: computer-use-linux-x11-evidence
+          path: build/computer-evidence/linux
+          if-no-files-found: warn
       - name: Build complete Linux package
         run: |
           npm run build -w @aiclaw/desktop

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences } from "electron";
+import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, nativeImage, Notification, screen, shell, systemPreferences, globalShortcut, type IpcMainInvokeEvent } from "electron";
 import { homedir } from "node:os";
 import { toolPath } from "./shell-path.js";
 import { CommandRunner } from "./command-runner.js";
@@ -14,6 +14,7 @@ import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
 import { ManagedRuntimes } from "./managed-runtimes.js";
 import { syncPortableComputerRuntime } from "./computer-portable-install.js";
+import { ComputerOverlay } from "./computer-overlay.js";
 import { ComputerNativeRuntime } from "./computer-runtime.js";
 import { ConfigurationAssistant } from "./app-config.js";
 import { Scheduler } from "./scheduler.js";
@@ -61,6 +62,8 @@ const skills = new SkillManager(store);
 const runtimes = new ManagedRuntimes({ root: join(store.homeDir, "runtimes"), report: message => sessions.emit("log", "app", `${message}\n`) });
 // SessionManager 要问技能：会话启动时把当前启用的技能目录下发给内核。
 const sessions = new SessionManager(store, skills, runtimes);
+let computerOverlay: ComputerOverlay | undefined;
+const computerStopShortcut = process.platform === "darwin" ? "Command+Shift+Escape" : "Control+Alt+Shift+Escape";
 const commands = new CommandRunner(event => push(IPC.onCommand, event));
 let commandPath: Promise<string> | undefined;
 let commandGeneration = 0;
@@ -237,11 +240,19 @@ function createWindow(): void {
     commandGeneration++;
     commands.stopAll(false);
     mainWindow = null;
+    // A hidden control surface must not keep Windows/Linux running after close.
+    if (process.platform !== "darwin") app.quit();
   });
 }
 
 function push(channel: string, payload: unknown): void {
   mainWindow?.webContents.send(channel, payload);
+}
+
+function requireComputerRenderer(event: IpcMainInvokeEvent): void {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
+    throw new Error("Desktop control is available only from the main application window");
+  }
 }
 
 function registerIpc(): void {
@@ -307,6 +318,22 @@ function registerIpc(): void {
     store.purgeAll();
   });
 
+  ipcMain.handle(IPC.computerOverlayStatus, event => {
+    if (!computerOverlay) throw new Error("Desktop control is not ready");
+    return computerOverlay.statusFor(event);
+  });
+  ipcMain.handle(IPC.computerOverlayControl, (event, action: unknown) => {
+    if (!computerOverlay) throw new Error("Desktop control is not ready");
+    return computerOverlay.controlFrom(event, action);
+  });
+  ipcMain.handle(IPC.computerStatus, event => { requireComputerRenderer(event); return sessions.computerStatus(); });
+  ipcMain.handle(IPC.computerControl, (event, action: unknown) => {
+    requireComputerRenderer(event);
+    if (action !== "pause" && action !== "resume" && action !== "stop") throw new Error("Invalid desktop control action");
+    return sessions.controlComputer(action);
+  });
+  ipcMain.handle(IPC.computerDiagnostics, event => { requireComputerRenderer(event); return sessions.computerDiagnostics(); });
+  ipcMain.handle(IPC.computerPermissionSetup, event => { requireComputerRenderer(event); return sessions.showComputerPermissionSetup(); });
   ipcMain.handle(IPC.runtimeStart, () => sessions.start());
   ipcMain.handle(IPC.runtimeStop, () => sessions.stop());
   ipcMain.handle(IPC.runtimeStatus, () => ({ state: sessions.running ? "ready" : "stopped" }));
@@ -720,6 +747,10 @@ sessions.on("approval", (request) => {
 });
 
 sessions.on("browserBridge", (view) => push(IPC.onBrowserBridge, view));
+sessions.subscribeComputer(state => {
+  push(IPC.onComputerStatus, state);
+  computerOverlay?.update(state);
+});
 
 sessions.on("userInput", (question) => {
   const payload: QuestionPayload = {
@@ -768,7 +799,29 @@ if (!app.requestSingleInstanceLock()) {
     setCurrentLocale(normalizeLocale(store.readConfig().language));
     registerIpc();
     createWindow();
+    computerOverlay = new ComputerOverlay({
+      platform: process.platform,
+      displays: () => screen.getAllDisplays(),
+      toDip: frame => screen.screenToDipRect(null, frame),
+      readBounds: activity => sessions.computerWindowBounds(activity),
+      sendStatus: (window, state) => window.webContents.send(IPC.onComputerOverlayStatus, state),
+      control: action => sessions.controlComputer(action),
+      translate: source => tr(source),
+      createWindow: () => new BrowserWindow({
+        width: 370, height: 58, show: false, frame: false, alwaysOnTop: true,
+        resizable: false, minimizable: false, maximizable: false, skipTaskbar: true,
+        title: "AIClaw Desktop Control", backgroundColor: "#252a32",
+        webPreferences: { preload: join(here, "../preload/computer-overlay.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
+      }),
+      loadWindow: window => process.env.VITE_DEV_SERVER_URL
+        ? window.loadURL(new URL("computer-overlay.html", process.env.VITE_DEV_SERVER_URL).href)
+        : window.loadFile(join(here, "../renderer/computer-overlay.html")),
+    });
+    computerOverlay.update(sessions.computerStatus());
     installAppMenu();
+    if (!globalShortcut.register(computerStopShortcut, () => {
+      void sessions.controlComputer("stop").catch(error => logApp(`停止桌面操作失败：${String(error)}`));
+    })) logApp("桌面停止快捷键已被占用，请使用应用内停止按钮");
     if (process.platform === "darwin") {
       void ComputerNativeRuntime.create()
         .then(async runtime => {
@@ -785,7 +838,7 @@ if (!app.requestSingleInstanceLock()) {
     void sessions.syncBrowserBridge();
     scheduler.start();
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (!mainWindow) createWindow();
     });
   });
 
@@ -794,6 +847,8 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on("before-quit", () => {
+    globalShortcut.unregister(computerStopShortcut);
+    computerOverlay?.dispose();
     // 让 claw-agent 有机会落盘会话再退出。
     commands.stopAll();
     scheduler.stop();

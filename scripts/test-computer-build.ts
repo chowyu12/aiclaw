@@ -19,6 +19,6 @@ test("native fingerprint ignores host releases and invalidates native, resource,
       assert.notEqual(computerBuildFingerprint(input),first,name);
       writeFileSync(join(root,name),files[name as keyof typeof files]);
     }
-    for(const changed of [{architectures:["arm64","x86_64"]},{certificateSHA256:"other-certificate"},{toolchain:{...input.toolchain,sdkBuild:"build-2"}}]) assert.notEqual(computerBuildFingerprint({...input,...changed}),first);
+    for(const changed of [{architectures:["arm64","x86_64"]},{certificateSHA256:"other-certificate"},{toolchain:{...input.toolchain,sdkBuild:"build-2"}},{authenticationProfile:"development"},{hostRequirement:"another host"}]) assert.notEqual(computerBuildFingerprint({...input,...changed}),first);
   } finally {rmSync(root,{recursive:true,force:true});}
 });

@@ -174,7 +174,7 @@ function Observe($argsObject, [bool]$queryOnly) {
     Clear-Observation
     try {
         $targetObject=Resolve-Target $argsObject; $script:target=$targetObject
-        $metadata=@{app=$targetObject.app;pid=$targetObject.window.PID;window_id=$targetObject.window.ID;process_start_time=$targetObject.window.Birth;window_frame=(Frame $targetObject.window.Frame);truncated=$false;image_width=0;image_height=0}
+        $metadata=@{app=$targetObject.app;app_name=$targetObject.window.Name;pid=$targetObject.window.PID;window_id=$targetObject.window.ID;process_start_time=$targetObject.window.Birth;window_frame=(Frame $targetObject.window.Frame);truncated=$false;image_width=0;image_height=0}
         $maximum=[int](Number (Value $argsObject $(if ($queryOnly) {'max_nodes'} else {'max_tree_nodes'})) 1200 1 5000)
         $limit=[int](Number (Value $argsObject 'limit') 20 1 100)
         $needle=Value $argsObject 'text' ''; $role=Value $argsObject 'role' ''; $exact=Value $argsObject 'exact' $false
@@ -201,7 +201,7 @@ function Observe($argsObject, [bool]$queryOnly) {
             }
             $metadata.truncated=$script:truncated
         }
-        if ($queryOnly) { return Text @{app=$targetObject.app;pid=$targetObject.window.PID;window_id=$targetObject.window.ID;matches=@($matches);visited=$visited;truncated=$metadata.truncated} }
+        if ($queryOnly) { $metadata.matches=@($matches); $metadata.visited=$visited; return Text $metadata }
         $content=@()
         if (Value $argsObject 'include_screenshot' $true) {
             $png=[AIClawComputerUse.Native]::Capture($targetObject.window.ID)

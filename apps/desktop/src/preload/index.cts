@@ -24,6 +24,18 @@ const api = {
     stop: () => ipcRenderer.invoke(IPC.runtimeStop),
     status: () => ipcRenderer.invoke(IPC.runtimeStatus),
   },
+  computer: {
+    status: () => ipcRenderer.invoke(IPC.computerStatus),
+    control: (action: "pause" | "resume" | "stop") => {
+      if (action === "resume" && !navigator.userActivation?.isActive) return Promise.reject(new Error("A direct user action is required to resume desktop control"));
+      return ipcRenderer.invoke(IPC.computerControl, action);
+    },
+    diagnose: () => ipcRenderer.invoke(IPC.computerDiagnostics),
+    setupPermissions: () => {
+      if (!navigator.userActivation?.isActive) return Promise.reject(new Error("A direct user action is required to open desktop permissions"));
+      return ipcRenderer.invoke(IPC.computerPermissionSetup);
+    },
+  },
   command: {
     run: (input: {id: string; sessionId: string; command: string}) => {
       if (!navigator.userActivation?.isActive) return Promise.reject(new Error("A direct user action is required to run a command"));
@@ -198,6 +210,11 @@ const api = {
     pickDirectory: () => ipcRenderer.invoke(IPC.pickDirectory),
   },
   on: {
+    computerStatus: (handler: (payload: unknown) => void) => {
+      const listener = (_event: unknown, payload: unknown) => handler(payload);
+      ipcRenderer.on(IPC.onComputerStatus, listener);
+      return () => ipcRenderer.off(IPC.onComputerStatus, listener);
+    },
     command: (handler: (payload: unknown) => void) => {
       const listener = (_event: unknown, payload: unknown) => handler(payload);
       ipcRenderer.on(IPC.onCommand, listener);

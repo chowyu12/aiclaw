@@ -425,3 +425,5 @@ export interface BrowserBridgeView {
 }
 
 export interface SearchSource { title: string; url: string; snippet: string; }
+
+export type { ComputerControlActivity, ComputerControlState, ComputerControlAction, ComputerDiagnostics } from "./computer-control.js";

@@ -64,7 +64,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       },
       "additionalProperties": false
@@ -169,7 +169,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       },
       "required": [
@@ -309,7 +309,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       }
     },
@@ -323,7 +323,7 @@
     "name": "computer_key",
     "action": "press_key",
     "readOnly": false,
-    "description": "Press a key or key-combination on the keyboard, including modifier and navigation keys.\n  - This supports xdotool's `key` syntax.\n  - Examples: \"a\", \"Return\", \"Tab\", \"super+c\", \"Up\", \"KP_0\" (for the numpad 0 key). Use the latest observation_id and element_index. Verify the returned post-action state. If an error says the outcome is unknown, observe again before deciding whether to retry.",
+    "description": "Press a supported key or combination, such as a, Return, Tab, super+c or Left, using the latest observation_id. macOS background mode requires a fresh screenshot proving the unchanged focused editable field, text, selection, process and window; only plain/Shift keys are supported, with no Cmd/Ctrl/Alt shortcuts. Key dispatch does not prove application consumption. Verify resulting state; an unknown outcome requires a new observation before deciding whether to retry.",
     "schema": {
       "type": "object",
       "additionalProperties": false,
@@ -361,7 +361,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       }
     },
@@ -417,7 +417,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       },
       "required": [
@@ -471,7 +471,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       },
       "additionalProperties": false,
@@ -493,7 +493,7 @@
     "name": "computer_type",
     "action": "type_text",
     "readOnly": false,
-    "description": "Insert literal text at the current editable focus. Prefer computer_query plus computer_set_value for a settable field; clicking a text field does not prove focus changed. macOS key_method=sky_key is an explicit background delivery option for the observed on-screen window. After a focus error, query a settable control instead of repeatedly clicking and typing. Use the latest observation_id; verify the result before submitting.",
+    "description": "Insert literal text at the current editable focus using the latest observation_id. macOS interaction_mode=background requires a fresh screenshot with background_keyboard_ready (include_ax=true for complete focus evidence), unchanged text/selection, and at most 16000 UTF-16 units. Cocoa uses public PID-directed Unicode events; web plain fields use explicit AX literal insertion preserving surrounding text, and web text areas must be empty. Nonempty rich text areas are refused. These routes do not guarantee arbitrary app consumption; verify resulting text before submitting. No automatic retry or foreground fallback.",
     "schema": {
       "required": [
         "app",
@@ -525,7 +525,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       }
     },
@@ -581,7 +581,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       },
       "required": [
@@ -637,7 +637,7 @@
             "foreground",
             "background"
           ],
-          "description": "Defaults to foreground. Strict background currently supports only semantic AX click (single left click without modifiers/hold), set_value without autosubmit, select_text, and secondary actions. It never falls back to foreground/global input; unsupported actions are refused before dispatch. Target apps may still change focus in response to their own actions; observe the receipt."
+          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
         }
       },
       "required": [

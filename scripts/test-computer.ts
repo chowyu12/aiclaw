@@ -272,6 +272,7 @@ async function peer(mode = "ok", timeout = 300, sourceIdentity?: string) {
           socket.write(JSON.stringify({ id: frame.id, result: { protocolVersion: mode === "version" ? "other" : COMPUTER_PROTOCOL, serverVersion: "1", serviceSourceSHA256: "portable-source", tools: [{ name: "list_apps", inputSchema: { properties: {} } }] } }) + "\n"); continue;
         }
         if (mode === "timeout") continue;
+        if (mode.startsWith("migration-")) { socket.write(JSON.stringify({ id: frame.id, error: { message: "Close the older desktop service", code: mode === "migration-busy" ? "COMPUTER_LEGACY_BUSY" : "COMPUTER_LEGACY_UNVERIFIED" } }) + "\n"); continue; }
         if (mode === "native-error") { socket.write(JSON.stringify({ id: frame.id, error: { message: "native validation refused" } }) + "\n"); continue; }
         const reply = () => socket.write(JSON.stringify({ id: frame.id, result: result("native receipt") }) + "\n");
         if (mode === "slow" && frame.requestType === "ComputerUseIPCAppGetSkyshotRequest") setTimeout(reply, timeout * 1.5);
@@ -296,6 +297,18 @@ test("startup permission setup uses private IPC without becoming an Agent action
     await assert.rejects(h.runtime.call("permission_setup", {}), /Unsupported native operation/);
     assert.equal(h.requests.length, 2, "Agent calls cannot open the setup window");
   } finally { await h.close(); }
+});
+
+test("private migration IPC preserves stable recovery codes without becoming an Agent action", async () => {
+  for (const [mode, code] of [["migration-busy", "COMPUTER_LEGACY_BUSY"], ["migration-unverified", "COMPUTER_LEGACY_UNVERIFIED"]]) {
+    const h = await peer(mode);
+    try {
+      await h.runtime.initialize();
+      await assert.rejects((h.runtime as any).request("ComputerUseIPCLegacyMigrationRequest", {}), (error: any) => error.code === code);
+      await assert.rejects(h.runtime.call("legacy_migration", {}), /Unsupported native operation/);
+      assert.equal(h.requests.length, 2);
+    } finally { await h.close(); }
+  }
 });
 
 test("real IPC framing maps the nine actions to typed native requests", async () => {
@@ -353,11 +366,18 @@ test("packaging accepts only the built architecture and exact native binary iden
     const binary = join(root, "AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse");
     await mkdir(join(root, "AIClaw Computer Use.app/Contents/MacOS"), { recursive: true });
     const bytes = Buffer.from("owned native artifact"); await writeFile(binary, bytes);
-    await writeFile(join(root, "AIClaw Computer Use.build.json"), JSON.stringify({ architectures: ["arm64"], executableSHA256: createHash("sha256").update(bytes).digest("hex"), protocolVersion: COMPUTER_PROTOCOL }));
+    const metadata = { architectures: ["arm64"], executableSHA256: createHash("sha256").update(bytes).digest("hex"), protocolVersion: COMPUTER_PROTOCOL, authenticationProfile: "production" };
+    const sealed = join(root,"AIClaw Computer Use.app/Contents/Resources/Build.json");
+    await mkdir(join(root,"AIClaw Computer Use.app/Contents/Resources"),{recursive:true});
+    await writeFile(sealed,JSON.stringify({authenticationProfile:"production"}));
+    await writeFile(join(root, "AIClaw Computer Use.build.json"), JSON.stringify(metadata));
     const destination = join(directory, "staged");
     await stageComputerRuntime({ repo: directory, destination, platform: "darwin", arch: "arm64" });
     assert.deepEqual(await readFile(join(destination, "computer-use/AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse")), bytes);
     await assert.rejects(stageComputerRuntime({ repo: directory, destination, platform: "darwin", arch: "x64" }), /architecture/);
+    await writeFile(sealed,JSON.stringify({authenticationProfile:"development"}));
+    await assert.rejects(stageComputerRuntime({ repo: directory, destination, platform: "darwin", arch: "arm64" }), /development Computer Use/);
+    await writeFile(sealed,JSON.stringify({authenticationProfile:"production"}));
     await writeFile(binary, "tampered");
     await assert.rejects(stageComputerRuntime({ repo: directory, destination, platform: "darwin", arch: "arm64" }), /build identity/);
   } finally { await rm(directory, { recursive: true, force: true }); }
@@ -395,10 +415,10 @@ test("verification flags are typed and failed captures stop scripted continuatio
 test("application strategies match exact identities and provide bounded guidance", async () => {
   const { computerAppPolicy } = await import("../apps/desktop/src/main/computer-policy.ts");
   for (const [id, expected] of [["com.apple.finder", "finder"], ["com.apple.Safari", "safari"], ["com.apple.TextEdit", "textedit"]]) {
-    const policy = computerAppPolicy(id!);
+    const policy = computerAppPolicy(id!, "darwin");
     assert.equal(policy.policy_id, expected); assert.equal(policy.guidance_only, true);
     assert.ok(policy.instructions.length > 4); assert.ok(policy.sources.every(source => source.startsWith("https://support.apple.com/")));
-    assert.ok(policy.unsupported_background.includes("keyboard"));
+    assert.ok(policy.unsupported_background.includes("Cmd/Ctrl/Alt shortcuts"));
   }
   assert.equal(computerAppPolicy("com.apple.Safari.attacker").policy_id, "generic");
   assert.equal(computerAppPolicy("Safari").policy_id, "generic");

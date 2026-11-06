@@ -73,7 +73,7 @@ ifeq ($(shell uname -s),Darwin)
 # The builder fingerprints native inputs, toolchain and signer; unchanged apps
 # are reused without recompilation or re-signing, including across host releases.
 build-computer: ## Build or reuse the independent macOS Computer Use app
-	node scripts/build-computer-runtime.mjs
+	node scripts/build-computer-runtime.mjs --development
 else
 build-computer: ## Stage the independent Windows/Linux Computer Use service
 	node scripts/stage-computer-runtime.mjs
@@ -192,9 +192,11 @@ define cross_build
 endef
 
 package-mac: deps build-client build-desktop ## 打 macOS arm64 包（未签名）
+	@if [ "$$(uname -s)" = Darwin ]; then node scripts/build-computer-runtime.mjs --universal; fi
 	$(call cross_build,darwin,arm64,darwin,arm64,)
 
 package-mac-intel: deps build-client build-desktop ## 打 macOS x64 包（未签名）
+	@if [ "$$(uname -s)" = Darwin ]; then node scripts/build-computer-runtime.mjs --universal; fi
 	$(call cross_build,darwin,x64,darwin,amd64,)
 
 package-win: deps build-client build-desktop ## 打 Windows x64 包（exe 图标与版本信息由 resedit 写，不需要 wine）

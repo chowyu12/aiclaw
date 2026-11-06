@@ -6,6 +6,7 @@ type Snapshot = { sequence: number; metadata: Record<string, unknown>; lines: st
 type Watch = {
   id: string; session: string; turn: string; app: string; interval: number; runtime: ComputerRuntime;
   current: Snapshot; previous?: Snapshot; timer?: ReturnType<typeof setTimeout>; idle?: ReturnType<typeof setTimeout>;
+  native?: { id: string; sequence: number };
   stopped: boolean; failure?: Error; waiters: Set<() => void>;
 };
 const IDLE_MS = 60_000;
@@ -33,13 +34,16 @@ function splice(before: string[], after: string[]) {
   return { start, delete_count: before.length - start - end, lines: after.slice(start, after.length - end) };
 }
 
-/** Bounded, in-memory polling subscriptions. A separate native connection prevents
+/** Bounded, in-memory subscriptions. A separate native connection prevents
  * sampling from invalidating the caller's action observations or element handles.
  */
 export class ComputerWatches {
   private watches = new Map<string, Watch>();
   private readonly createRuntime: () => Promise<ComputerRuntime>;
-  constructor(createRuntime: () => Promise<ComputerRuntime>) { this.createRuntime = createRuntime; }
+  private readonly changed: () => void;
+  private readonly failed: () => void;
+  constructor(createRuntime: () => Promise<ComputerRuntime>, changed: () => void = () => {}, failed: () => void = () => {}) { this.createRuntime = createRuntime; this.changed = changed; this.failed = failed; }
+  get size(): number { return this.watches.size; }
   private key(session: string, turn: string) { return JSON.stringify([session, turn]); }
   private touch(watch: Watch) {
     clearTimeout(watch.idle);
@@ -50,13 +54,24 @@ export class ComputerWatches {
   private async closeWatch(watch: Watch) {
     watch.stopped = true; clearTimeout(watch.timer); clearTimeout(watch.idle); this.signal(watch);
     if (this.watches.get(this.key(watch.session, watch.turn)) === watch) this.watches.delete(this.key(watch.session, watch.turn));
+    this.changed();
     await watch.runtime.close();
   }
   private poll(watch: Watch) {
     watch.timer = setTimeout(async () => {
       try {
-        const next = snapshot(await watch.runtime.call("get_app_state", { app: watch.app, window_id: watch.current.metadata.window_id, include_ax: true, include_screenshot: true, text_limit: "max" }), watch.app, watch.current.sequence + 1);
+        const result = watch.native
+          ? await watch.runtime.nextCapture!({ capture_id: watch.native.id, after_sequence: watch.native.sequence, wait_ms: 10_000 })
+          : await watch.runtime.call("get_app_state", { app: watch.app, window_id: watch.current.metadata.window_id, include_ax: true, include_screenshot: true, text_limit: "max" });
         if (watch.stopped) return;
+        const next = snapshot(result, watch.app, watch.current.sequence + 1);
+        if (watch.native) {
+          const sequence = next.metadata.capture_sequence;
+          if (next.metadata.capture_id !== watch.native.id || !Number.isSafeInteger(sequence) || Number(sequence) < watch.native.sequence) throw Error("Native capture identity or sequence changed");
+          if (sequence === watch.native.sequence) { this.poll(watch); return; }
+          watch.native.sequence = Number(sequence);
+          next.sequence = Number(sequence);
+        }
         if (next.metadata.pid !== watch.current.metadata.pid || next.metadata.window_id !== watch.current.metadata.window_id || next.metadata.process_start_time !== watch.current.metadata.process_start_time) throw Error("Observed process or window changed; restart the subscription explicitly");
         if (next.hash !== watch.current.hash || JSON.stringify(next.metadata) !== JSON.stringify(watch.current.metadata) || JSON.stringify(next.lines) !== JSON.stringify(watch.current.lines)) {
           watch.previous = watch.current; watch.current = next; this.signal(watch);
@@ -65,9 +80,10 @@ export class ComputerWatches {
       } catch (error) {
         if (watch.stopped) return;
         watch.failure = error instanceof Error ? error : Error(String(error)); this.signal(watch);
+        this.failed();
         await watch.runtime.close();
       }
-    }, watch.interval);
+    }, watch.native ? 0 : watch.interval);
     watch.timer.unref?.();
   }
   private event(watch: Watch, after: number): ComputerResult {
@@ -76,7 +92,7 @@ export class ComputerWatches {
     const imageChanged = reset || previous.hash !== current.hash;
     return { text: JSON.stringify({ watch_id: watch.id, sequence: current.sequence, base_sequence: reset ? null : previous.sequence, changed: true, reset, dropped_updates: Math.max(0, current.sequence - after - 1), metadata: current.metadata,
       ax: reset ? { lines: current.lines } : splice(previous.lines, current.lines), image_changed: imageChanged,
-      sampling: "polling", interval_ms: watch.interval, expires_after_idle_ms: IDLE_MS,
+      sampling: watch.native ? "native" : "polling", interval_ms: watch.interval, expires_after_idle_ms: IDLE_MS,
       action_authority: false, instruction: "Subscription samples have no valid observation_id or element indexes. Query or observe explicitly before input." }), ...(imageChanged ? { imageBase64: current.image } : {}) };
   }
   async start(session: string, turn: string, args: Record<string, unknown>, active: () => boolean): Promise<ComputerResult> {
@@ -86,10 +102,21 @@ export class ComputerWatches {
     if (this.watches.size >= 4) throw Error("At most four desktop observation subscriptions may run concurrently");
     const runtime = await this.createRuntime();
     try {
-      const current = snapshot(await runtime.call("get_app_state", { app: args.app, ...(args.window_id !== undefined ? { window_id: args.window_id } : {}), include_ax: true, include_screenshot: true, text_limit: "max" }), String(args.app), 1);
       if (!active()) throw Error("Computer Use turn ended during subscription startup");
-      const watch: Watch = { id: randomUUID(), session, turn, app: String(args.app), interval, runtime, current, stopped: false, waiters: new Set() };
+      if (runtime.nativeCapture && (!runtime.startCapture || !runtime.nextCapture || !runtime.stopCapture)) throw Error("Native capture capabilities are incomplete");
+      const current = snapshot(runtime.nativeCapture
+        ? await runtime.startCapture!({ app: args.app, ...(args.window_id !== undefined ? { window_id: args.window_id } : {}), interval_ms: interval })
+        : await runtime.call("get_app_state", { app: args.app, ...(args.window_id !== undefined ? { window_id: args.window_id } : {}), include_ax: true, include_screenshot: true, text_limit: "max" }), String(args.app), 1);
+      if (!active()) throw Error("Computer Use turn ended during subscription startup");
+      let native: Watch["native"];
+      if (runtime.nativeCapture) {
+        if (typeof current.metadata.capture_id !== "string" || !current.metadata.capture_id || !Number.isSafeInteger(current.metadata.capture_sequence) || Number(current.metadata.capture_sequence) < 1) throw Error("Invalid native capture receipt");
+        native = { id: current.metadata.capture_id, sequence: Number(current.metadata.capture_sequence) };
+        current.sequence = native.sequence;
+      }
+      const watch: Watch = { id: randomUUID(), session, turn, app: String(args.app), interval, runtime, current, native, stopped: false, waiters: new Set() };
       this.watches.set(key, watch); this.touch(watch); this.poll(watch);
+      this.changed();
       return this.event(watch, 0);
     } catch (error) { await runtime.close(); throw error; }
   }
@@ -102,10 +129,10 @@ export class ComputerWatches {
       const wake = () => { clearTimeout(timer); watch.waiters.delete(wake); resolve(); };
       const timer = setTimeout(wake, wait); watch.waiters.add(wake);
     });
-    if (watch.stopped) throw Error("Observation subscription stopped or expired");
     if (watch.failure) throw Error(`Observation subscription failed: ${watch.failure.message}`);
+    if (watch.stopped) throw Error("Observation subscription stopped or expired");
     if (watch.current.sequence > after) return this.event(watch, after);
-    return { text: JSON.stringify({ watch_id: watch.id, sequence: watch.current.sequence, changed: false, sampling: "polling", interval_ms: watch.interval }) };
+    return { text: JSON.stringify({ watch_id: watch.id, sequence: watch.current.sequence, changed: false, sampling: watch.native ? "native" : "polling", interval_ms: watch.interval }) };
   }
   async stop(session: string, turn: string, args?: Record<string, unknown>): Promise<ComputerResult> {
     const watch = this.watches.get(this.key(session, turn));

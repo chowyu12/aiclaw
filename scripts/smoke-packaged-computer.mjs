@@ -2,8 +2,8 @@
  * process over a loopback-only debugger. No production test hooks or UI input.
  */
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { setTimeout as pause } from "node:timers/promises";
@@ -97,7 +97,31 @@ try {
     })()`);
     assert.equal(receipt.tools,18);
     assert.ok(receipt.runtimeDirectory?.startsWith(join(home,".aiclaw/computer-use")),"Packaged runtime must execute from the isolated user installation");
-    console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,startup_installed_before_tool:true,user_runtime_installed:true,source_identity_handshake:true,...receipt}));
+    let mainWindowCloseVerified = false;
+    if (process.platform !== "darwin") {
+      clearTimeout(watchdog);
+      // A real hidden auxiliary BrowserWindow reproduces the window-count edge
+      // case without dispatching desktop input or creating production test hooks.
+      const closing = await evaluate(`(()=>{
+        const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
+        const {BrowserWindow}=require('electron');
+        const main=BrowserWindow.getAllWindows().find(window=>window.webContents.getURL().includes('/renderer/index.html'));
+        if(!main) throw Error('Packaged main window is missing');
+        const hidden=new BrowserWindow({show:false,width:1,height:1,title:'AIClaw hidden lifecycle fixture',webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false}});
+        globalThis.__aiclawHiddenLifecycleFixture=hidden;
+        const verified=!hidden.isVisible() && BrowserWindow.getAllWindows().length>=2;
+        setTimeout(()=>main.close(),100);
+        return {hiddenAuxiliaryWindow:verified};
+      })()`);
+      assert.equal(closing.hiddenAuxiliaryWindow,true,"A hidden auxiliary window must be present during close verification");
+      // Detach the debugger so it cannot itself hold Node alive after close.
+      socket.close();
+      for(let attempt=0;attempt<150 && child.exitCode===null && child.signalCode===null;attempt++) await pause(100);
+      assert.equal(child.signalCode,null,"Closing the main window must exit naturally without a termination signal");
+      assert.equal(child.exitCode,0,"Closing the main window must exit even when a hidden control window exists");
+      mainWindowCloseVerified=true;
+    }
+    console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,startup_installed_before_tool:true,user_runtime_installed:true,source_identity_handshake:true,...(mainWindowCloseVerified?{main_window_close_exits_naturally:true,hidden_auxiliary_does_not_prevent_exit:true}:{}),...receipt}));
   } finally {clearTimeout(watchdog);}
 } catch(error) {
   throw Error(`${String(error)}\nPackaged stderr:\n${stderr}`);
@@ -108,5 +132,30 @@ try {
     if(child.exitCode===null) {child.kill("SIGKILL");await pause(100);}
   }
   child?.stderr.destroy(); child?.unref();
+  if (process.platform === "darwin") {
+    // LaunchServices owns the resident helper. Stop only this test's exact
+    // canonical executable before deleting its private HOME; never use its
+    // shared bundle ID, force-kill, or leave a running unlinked test generation.
+    let expected;
+    try { expected=await realpath(join(home,".aiclaw/computer-use/AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse")); }
+    catch(error) { if(error.code!=="ENOENT") throw error; }
+    if(expected) {
+      assert.equal(expected,join(await realpath(home),".aiclaw/computer-use/AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse"),"Refuse helper cleanup outside the canonical private HOME");
+      const rows=execFileSync("/bin/ps",["-axo","pid=,uid=,comm="],{encoding:"utf8"}).split("\n");
+      for(const row of rows) {
+        const match=row.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
+        if(!match || Number(match[2])!==process.getuid() || match[3]!==expected) continue;
+        const pid=Number(match[1]);
+        const current=()=>{
+          try { const value=execFileSync("/bin/ps",["-p",String(pid),"-o","uid=,comm="],{encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim().match(/^(\d+)\s+(.+)$/);return value && Number(value[1])===process.getuid() && value[2]===expected; }
+          catch { return false; }
+        };
+        if(!current()) continue;
+        try { process.kill(pid,"SIGTERM"); } catch(error) { if(error.code!=="ESRCH") throw error; }
+        for(let attempt=0;attempt<40 && current();attempt++) await pause(50);
+        assert.ok(!current(),"The owned packaged helper did not terminate normally; its HOME was preserved");
+      }
+    }
+  }
   await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:200});
 }

@@ -6,10 +6,10 @@ import { createComputerRuntime, type ComputerRuntime, type ComputerToolResult } 
 import { ComputerWatches } from "./computer-watch.js";
 import { computerAppPolicy } from "./computer-policy.js";
 import MarkdownIt from "markdown-it/browser";
+import { computerActionIsObservation, type ComputerControlAction, type ComputerControlActivity, type ComputerControlState, type ComputerDiagnostics } from "../shared/computer-control.js";
 
 const pasteMarkdown = new MarkdownIt({ html: false });
 
-const READS = new Set(["list_apps", "find_apps", "frontmost_window", "permission_status", "get_app_state", "query", "watch_start", "watch_next", "watch_stop", "app_policy"]);
 const ARGUMENTS: Record<string, string[]> = {
   app_policy: ["app"],
   watch_start: ["app", "window_id", "interval_ms"], watch_next: ["watch_id", "after_sequence", "wait_ms"], watch_stop: ["watch_id"],
@@ -52,19 +52,154 @@ export class ComputerController {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly createRuntime: () => Promise<ComputerRuntime>;
   private readonly watches: ComputerWatches;
-  constructor(createRuntime: () => Promise<ComputerRuntime> = createComputerRuntime) { this.createRuntime = createRuntime; this.watches = new ComputerWatches(createRuntime); }
+  private mode: ComputerControlState["mode"] = "ready";
+  private generation = 0;
+  private active: ComputerControlActivity | null = null;
+  private targetActivity: ComputerControlActivity | null = null;
+  private boundsRuntime?: { generation: number; runtime: ComputerRuntime };
+  private connections = new Set<ComputerRuntime>();
+  private listeners = new Set<(state: ComputerControlState) => void>();
+  constructor(createRuntime: () => Promise<ComputerRuntime> = createComputerRuntime) {
+    this.createRuntime = createRuntime;
+    this.watches = new ComputerWatches(() => this.connect(), () => this.publish(), () => { void this.setControl("pause"); });
+  }
+
+  getStatus(): ComputerControlState {
+    const active = this.active ?? this.targetActivity;
+    return { mode: this.mode, active: active ? { ...active, ...(this.targetActivity?.app === active.app && this.targetActivity.sessionId === active.sessionId && this.targetActivity.turnId === active.turnId ? { displayName: this.targetActivity.displayName, windowId: this.targetActivity.windowId, pid: this.targetActivity.pid, frame: this.targetActivity.frame ? { ...this.targetActivity.frame } : undefined } : {}) } : null, watching: this.watches.size };
+  }
+  subscribe(listener: (state: ComputerControlState) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  private publish(): void { for (const listener of this.listeners) listener(this.getStatus()); }
+  affectedSessions(): string[] { return [...new Set([...this.turns].filter(([, active]) => active).map(([key]) => JSON.parse(key)[0] as string))]; }
+  private checkGeneration(generation: number): void {
+    if (this.mode !== "ready" || generation !== this.generation) throw Error("Computer Use was paused or stopped. Resume explicitly, then observe again; no queued input was replayed.");
+  }
+  private async connect(): Promise<ComputerRuntime> {
+    const generation = this.generation;
+    this.checkGeneration(generation);
+    const runtime = await this.createRuntime();
+    try { this.checkGeneration(generation); }
+    catch (error) { await runtime.close(); throw error; }
+    this.connections.add(runtime);
+    const close = runtime.close.bind(runtime);
+    let closing: Promise<void> | undefined;
+    runtime.close = () => {
+      this.connections.delete(runtime);
+      return closing ??= close();
+    };
+    return runtime;
+  }
+  async setControl(action: ComputerControlAction): Promise<ComputerControlState> {
+    if (!["pause", "resume", "stop"].includes(action)) throw Error("Unknown desktop control action");
+    if (action === "resume") {
+      if (this.mode !== "ready") { this.mode = "ready"; this.active = null; this.targetActivity = null; this.publish(); }
+      return this.getStatus();
+    }
+    this.mode = action === "pause" ? "paused" : "stopped";
+    this.generation++;
+    if (action === "stop") for (const key of this.turns.keys()) this.turns.set(key, false);
+    for (const session of this.sessions.values()) session.observations.clear();
+    this.sessions.clear(); this.active = null;
+    if (action === "stop") this.targetActivity = null;
+    this.boundsRuntime = undefined;
+    // Never queue the stop behind the input it must cancel. A new generation
+    // can proceed after resume even if a broken old backend never settles.
+    this.queue = Promise.resolve();
+    const closing = [...this.connections].map(runtime => runtime.close());
+    const watches = this.watches.close();
+    this.publish();
+    await Promise.allSettled([...closing, watches]);
+    return this.getStatus();
+  }
+  async diagnostics(): Promise<ComputerDiagnostics> {
+    let runtime: ComputerRuntime | undefined;
+    try {
+      runtime = await this.createRuntime();
+      const result = observation(await runtime.call("permission_status", {}));
+      const status = JSON.parse(result.text);
+      const accessibility = typeof status.accessibilityTrusted === "boolean" ? status.accessibilityTrusted : null;
+      const screenCapture = typeof status.screenCaptureGranted === "boolean" ? status.screenCaptureGranted : null;
+      return { platform: process.platform, available: true, accessibility, screenCapture, toolCount: runtime.tools.length,
+        message: process.platform === "win32" ? "Windows 无法操作权限更高的窗口。" : process.platform === "linux" ? "支持 Linux X11，暂不支持 Wayland。" : accessibility && screenCapture ? "桌面操作权限已就绪。" : "请开启辅助功能和屏幕录制权限。" };
+    } catch (error) {
+      const code = (error as { code?: unknown } | null)?.code;
+      const legacy = code === "COMPUTER_LEGACY_BUSY" ? "旧版桌面会话尚未结束，请先停止旧会话后重新检查。" : code === "COMPUTER_LEGACY_UNVERIFIED" ? "旧版桌面服务无法验证。请在活动监视器中退出 AIClawComputerUse，再重新检查。" : undefined;
+      return { platform: process.platform, available: false, accessibility: null, screenCapture: null, toolCount: 0,
+        message: legacy ?? (process.platform === "linux" ? "桌面服务不可用，请检查 X11 会话和系统无障碍组件。" : "桌面服务未能连接，请重新检测或重启应用。") };
+    } finally { await runtime?.close(); }
+  }
+  async showPermissionSetup(): Promise<ComputerDiagnostics> {
+    if (process.platform === "darwin") {
+      const runtime = await this.createRuntime();
+      try {
+        if (!("setupPermissions" in runtime) || typeof runtime.setupPermissions !== "function") throw Error("Permission setup is unavailable");
+        await runtime.setupPermissions();
+      } finally { await runtime.close(); }
+    }
+    return this.diagnostics();
+  }
+
+  async windowBounds(activity: ComputerControlActivity): Promise<NonNullable<ComputerControlActivity["frame"]> | null> {
+    const generation = this.generation, current = this.getStatus().active;
+    if (this.mode !== "ready" || !activity.windowId || !current || current.windowId !== activity.windowId || current.app !== activity.app || current.sessionId !== activity.sessionId || current.turnId !== activity.turnId) return null;
+    const app = this.target(activity.app);
+    if (!this.boundsRuntime || this.boundsRuntime.generation !== generation) this.boundsRuntime = { generation, runtime: await this.connect() };
+    const runtime = this.boundsRuntime.runtime;
+    try {
+      this.checkGeneration(generation);
+      const data = JSON.parse(observation(await runtime.call("query", { app, window_id: activity.windowId, text: "__aiclaw_bounds__", max_nodes: 1, limit: 1 })).text);
+      this.checkGeneration(generation);
+      const frame = this.frame(data.window_frame);
+      if (data.window_id !== activity.windowId || activity.pid && data.pid !== activity.pid || !frame) throw Error("Target window identity changed");
+      return frame;
+    } catch {
+      if (this.boundsRuntime?.runtime === runtime) this.boundsRuntime = undefined;
+      await runtime.close();
+      if (generation === this.generation && this.targetActivity?.sessionId === activity.sessionId && this.targetActivity.turnId === activity.turnId && this.targetActivity.windowId === activity.windowId) {
+        this.targetActivity = null; this.sessions.get(activity.sessionId)?.observations.delete(app); this.publish();
+      }
+      return null;
+    }
+  }
+
+  private frame(value: unknown): NonNullable<ComputerControlActivity["frame"]> | null {
+    if (!value || typeof value !== "object") return null;
+    const frame = value as Record<string, unknown>;
+    if (!["x", "y", "width", "height"].every(key => typeof frame[key] === "number" && Number.isFinite(frame[key])) || Number(frame.width) <= 0 || Number(frame.height) <= 0) return null;
+    return { x: Number(frame.x), y: Number(frame.y), width: Number(frame.width), height: Number(frame.height) };
+  }
+
+  private rememberTarget(result: ComputerResult, request: ComputerRequestParams): void {
+    try {
+      const parsed = JSON.parse(result.text.split("\n")[0]!);
+      const data = parsed.metadata ?? parsed;
+      const frame = this.frame(data.window_frame);
+      if (!frame || !Number.isSafeInteger(data.window_id) || data.window_id <= 0) return;
+      this.targetActivity = { sessionId: request.sessionId, turnId: request.turnId, app: String(request.arguments.app), action: "waiting", ...(typeof data.app_name === "string" ? { displayName: data.app_name.replace(/[\r\n\0]/g, " ").trim().slice(0, 120) } : {}), windowId: data.window_id, ...(Number.isSafeInteger(data.pid) ? { pid: data.pid } : {}), frame };
+      this.publish();
+    } catch { /* Some operations have no target-window metadata. */ }
+  }
 
   perform(request: ComputerRequestParams): Promise<ComputerResult> {
+    const generation = this.generation;
+    if (this.mode !== "ready") return Promise.reject(Error("Computer Use is paused or stopped. Resume it explicitly before observing or sending input."));
     const key = JSON.stringify([request.sessionId, request.turnId]);
     if (!this.turns.has(key)) this.turns.set(key, true);
     // Waiting for a sampled change must not block desktop actions or stop requests.
-    if (request.action === "watch_next") return this.execute(request);
-    const operation = this.queue.then(() => this.execute(request));
+    if (request.action === "watch_next") return this.execute(request, generation);
+    const operation = this.queue.then(async () => {
+      this.checkGeneration(generation);
+      const activity = { sessionId: request.sessionId, turnId: request.turnId, action: request.action, app: typeof request.arguments?.app === "string" ? request.arguments.app : "" };
+      this.active = activity; this.publish();
+      try { return await this.execute(request, generation); }
+      finally { if (this.active === activity) { this.active = null; this.publish(); } }
+    });
     this.queue = operation.catch(() => {});
     return operation;
   }
 
-  private async execute(request: ComputerRequestParams): Promise<ComputerResult> {
+  private async execute(request: ComputerRequestParams, generation: number): Promise<ComputerResult> {
+    this.checkGeneration(generation);
     const { action, sessionId, turnId } = request;
     const key = JSON.stringify([sessionId, turnId]);
     if (!this.turns.get(key)) throw Error("Computer Use turn has ended; no queued operation was dispatched");
@@ -72,7 +207,7 @@ export class ComputerController {
     if (!sessionId || !turnId) throw Error("Computer session and turn are required");
     const input = request.arguments;
     if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Computer arguments must be an object");
-    const read = READS.has(action);
+    const read = computerActionIsObservation(action);
     const lifecycle = ["start_app", "stop_app", "modify_app"].includes(action);
     const hostArguments = read ? [] : lifecycle ? ["observation_id", "verify_after"] : ["observation_id", "verify_after", "interaction_mode"];
     for (const key of Object.keys(input)) {
@@ -81,6 +216,9 @@ export class ComputerController {
     if (input.verify_after !== undefined && typeof input.verify_after !== "boolean") throw Error("verify_after must be a boolean");
     if (input.interaction_mode !== undefined && !["foreground", "background"].includes(String(input.interaction_mode))) throw Error("interaction_mode must be foreground or background");
     const args = { ...input }; delete args.observation_id; delete args.verify_after;
+    // An intentional app quit must stop its observation before the native
+    // stream reports a lost target and pauses the desktop session.
+    if (action === "stop_app" || action === "modify_app" && args.modification === "deactivate") await this.watches.stop(sessionId, turnId);
     if (action === "watch_next") return this.watches.next(sessionId, turnId, args);
     if (action === "watch_stop") return this.watches.stop(sessionId, turnId, args);
     if (action === "query" && ![args.text, args.role].some(value => typeof value === "string" && value.trim())) throw Error("computer_query requires text or role");
@@ -89,10 +227,14 @@ export class ComputerController {
     let app = ["list_apps", "find_apps", "frontmost_window", "permission_status"].includes(action) ? "" : this.target(args.app, action === "start_app");
     if (app) args.app = app;
     if (action === "app_policy") return { text: JSON.stringify(computerAppPolicy(app)) };
-    if (action === "watch_start") return this.watches.start(sessionId, turnId, args, () => this.turns.get(key) === true);
+    if (action === "watch_start") {
+      const result = await this.watches.start(sessionId, turnId, args, () => this.turns.get(key) === true && generation === this.generation && this.mode === "ready");
+      this.checkGeneration(generation); this.rememberTarget(result, request);
+      return result;
+    }
     let session = this.sessions.get(sessionId);
     if (session && session.turn !== turnId) {
-      this.sessions.delete(sessionId); await session.runtime.close(); session = undefined;
+      if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId); await session.runtime.close(); session = undefined;
     }
     // Do not start a service for an unobserved input, including after a crash.
     const previous = session?.observations.get(app);
@@ -105,11 +247,12 @@ export class ComputerController {
       if ((args.x !== undefined || action === "drag") && !latest.pixels) throw Error("Coordinate actions require a fresh screenshot");
     }
     if (!session) {
-      const runtime = await this.createRuntime();
+      const runtime = await this.connect();
       session = { runtime, turn: turnId, observations: new Map(), policies: new Set() };
       this.sessions.set(sessionId, session);
     }
-    if (!this.turns.get(key)) throw Error("Computer Use turn ended during startup; no operation was dispatched");
+    this.checkGeneration(generation);
+    if (!this.turns.get(key)) { if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId); await session.runtime.close(); throw Error("Computer Use turn ended during startup; no operation was dispatched"); }
     const targetedQueries = session.runtime.tools.some(tool => tool.name === "query");
     if (action === "get_app_state" && args.include_ax === undefined) args.include_ax = !targetedQueries;
     const native = session.runtime.tools.find(tool => tool.name === action);
@@ -130,6 +273,7 @@ export class ComputerController {
     }
     // The native connection owns one current window/element table. Switching
     // apps invalidates the prior app too, even within this chat and turn.
+    if (!read && app) for (const other of this.sessions.values()) if (other !== session) other.observations.delete(app);
     if (app) session.observations.clear();
     let output: ComputerResult;
     try { output = observation(await session.runtime.call(action, args)); }
@@ -137,9 +281,10 @@ export class ComputerController {
       // A timed-out proxy can still have dispatched input. Drop the connection
       // and every observation; reconnect only for an explicit later observation.
       // A native tool-error response is still a healthy IPC connection.
-      if (!(error instanceof ComputerToolError)) { this.sessions.delete(sessionId); await session.runtime.close(); }
+      if (!(error instanceof ComputerToolError)) { if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId); await session.runtime.close(); }
       throw Error(`${String(error)}${read ? "" : ". Outcome may be unknown; query the intended semantic control again with computer_query, or take a fresh screenshot. Do not automatically repeat input or submission."}`);
     }
+    this.checkGeneration(generation);
     let launchUnverified = false;
     if (action === "start_app" && process.platform !== "darwin") {
       try {
@@ -165,6 +310,7 @@ export class ComputerController {
       output.text += `\nobservation_id: ${id}\nUse only indexes returned by this query. Truncated searches do not establish that missing controls are absent.`;
     }
     if (action === "get_app_state") remember(output, args.include_screenshot !== false, args.include_ax !== false);
+    if (["query", "get_app_state"].includes(action)) this.rememberTarget(output, request);
     if (!read && input.verify_after === false) {
       output.text += "\nPost-action screenshot deferred. Dispatch is not proof of completion. Old observations and indexes are invalid; query or observe again before the next input, and verify the intended effect at decision points and completion.";
     }
@@ -172,8 +318,10 @@ export class ComputerController {
       try {
         let state: ComputerResult;
         for (let attempt = 0; ; attempt++) {
+          this.checkGeneration(generation);
           try {
             state = observation(await session.runtime.call("get_app_state", { app, include_ax: !targetedQueries, ...(previous?.windowID && !lifecycle ? { window_id: previous.windowID } : {}) }));
+            this.checkGeneration(generation);
             break;
           } catch (error) {
             // Event delivery is asynchronous. Retry only transient read-back,
@@ -183,17 +331,19 @@ export class ComputerController {
           }
         }
         remember(state, true, !targetedQueries);
+        this.rememberTarget(state, request);
         if (previous?.screenshotHash && previous.screenshotHash === screenshotHash(state)) state.text += "\nScreenshot unchanged from the previous observation. Dispatch is not proof of progress; query the intended control before deciding whether another input is appropriate.";
         if (targetedQueries) state.text += "\nThis is a screenshot-only verification. Use computer_query for the next semantic control; old element indexes are invalid.";
         output.text += `\nPost-action app observation (verify the intended change before continuing):\n${state.text}`;
         output.imageBase64 = state.imageBase64;
       } catch (error) {
         session.observations.delete(app);
-        if (!(error instanceof ComputerToolError)) { this.sessions.delete(sessionId); await session.runtime.close(); }
+        if (!(error instanceof ComputerToolError)) { if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId); await session.runtime.close(); }
         output.text += `\nInput was dispatched, but verification failed: ${String(error)}. Outcome is unknown; observe again. Do not automatically replay input.`;
         output.verificationFailed = true;
       }
     }
+    this.checkGeneration(generation);
     if (["query", "get_app_state"].includes(action) && !session.policies.has(app)) {
       session.policies.add(app);
       const policy = computerAppPolicy(app);
@@ -219,31 +369,35 @@ export class ComputerController {
   async finishTurn(sessionId: string, turnId: string): Promise<void> {
     const key = JSON.stringify([sessionId, turnId]);
     if (this.turns.has(key)) this.turns.set(key, false);
-    await this.watches.stop(sessionId, turnId);
-    const operation = this.queue.then(async () => {
-      const session = this.sessions.get(sessionId);
-      if (session?.turn === turnId) { this.sessions.delete(sessionId); await session.runtime.close(); }
-    });
-    this.queue = operation.catch(() => {}); await operation;
+    const session = this.sessions.get(sessionId);
+    if (session?.turn === turnId) this.sessions.delete(sessionId);
+    if (this.active?.sessionId === sessionId && this.active.turnId === turnId) this.active = null;
+    if (this.targetActivity?.sessionId === sessionId && this.targetActivity.turnId === turnId) this.targetActivity = null;
+    const bounds = !this.targetActivity ? this.boundsRuntime : undefined;
+    if (bounds) this.boundsRuntime = undefined;
+    const closing = session?.turn === turnId ? session.runtime.close() : Promise.resolve();
+    this.publish();
+    await Promise.all([closing, bounds?.runtime.close(), this.watches.stop(sessionId, turnId)]);
   }
 
   async releaseSession(sessionId: string): Promise<void> {
     for (const key of this.turns.keys()) if (JSON.parse(key)[0] === sessionId) this.turns.set(key, false);
-    await this.watches.releaseSession(sessionId);
-    const operation = this.queue.then(async () => {
-      const session = this.sessions.get(sessionId); this.sessions.delete(sessionId);
-      for (const key of this.turns.keys()) if (JSON.parse(key)[0] === sessionId) this.turns.delete(key);
-      await session?.runtime.close();
-    });
-    this.queue = operation.catch(() => {}); await operation;
+    const session = this.sessions.get(sessionId); this.sessions.delete(sessionId);
+    if (this.active?.sessionId === sessionId) this.active = null;
+    if (this.targetActivity?.sessionId === sessionId) this.targetActivity = null;
+    const bounds = !this.targetActivity ? this.boundsRuntime : undefined;
+    if (bounds) this.boundsRuntime = undefined;
+    const closing = session?.runtime.close();
+    // Keep ended-turn tombstones until already queued requests have observed them.
+    void this.queue.finally(() => {
+      for (const [key, active] of this.turns) if (!active && JSON.parse(key)[0] === sessionId) this.turns.delete(key);
+    }).catch(() => {});
+    this.publish();
+    await Promise.all([closing, bounds?.runtime.close(), this.watches.releaseSession(sessionId)]);
   }
 
   async close(): Promise<void> {
-    for (const key of this.turns.keys()) this.turns.set(key, false);
-    await this.watches.close();
-    await this.queue;
-    const sessions = [...this.sessions.values()]; this.sessions.clear();
-    await Promise.all(sessions.map(session => session.runtime.close()));
+    await this.setControl("stop");
     this.turns.clear();
   }
 }

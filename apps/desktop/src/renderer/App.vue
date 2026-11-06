@@ -6,6 +6,7 @@ import SettingsShell from "./views/SettingsShell.vue";
 import SessionSidebar from "./views/SessionSidebar.vue";
 import ActivityRail from "./views/ActivityRail.vue";
 import ApprovalDialog from "./views/ApprovalDialog.vue";
+import ComputerControlBar from "./views/ComputerControlBar.vue";
 import { FONTS, normalizeFont, normalizeFontSize } from "../shared/typography";
 import { normalizeTheme } from "../shared/themes";
 import { locale, t } from "./i18n";
@@ -77,6 +78,7 @@ onMounted(() => {
     <SessionSidebar v-show="sessionsOpen || store.view !== 'chat'" id="session-sidebar" @close="closeSessions" @keydown.esc="closeSessions" />
 
     <main class="pane">
+      <ComputerControlBar />
       <div v-if="store.error" class="error-bar">
         <span>{{ store.error }}</span>
         <button @click="actions.clearError()">{{ t("知道了") }}</button>
