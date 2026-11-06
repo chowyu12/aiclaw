@@ -204,3 +204,37 @@ test("queued optimistic input moves after the preceding answer when execution st
   assert.deepEqual(live.A.timeline.map(item=>item.id),["first","answer","confirmed"]);
   assert.equal(live.A.timeline[2]?.kind==="user" && live.A.timeline[2].queued,undefined);
 });
+
+test("background completion marks only the finished conversation unread", () => {
+  const live = fresh();
+  applyAgentEvent(live, event("turn/started", "A"), "A");
+  applyAgentEvent(live, event("item/completed", "A", { item: { id: "reply", kind: "agentMessage", text: "done" } }), "B", "B");
+  assert.ok(!live.A!.unread, "streamed output is not a completion notification");
+  applyAgentEvent(live, event("turn/completed", "A"), "B", "B");
+  assert.equal(live.A!.unread, true);
+  assert.equal(live.A!.busy, false);
+  assert.equal(live.B, undefined);
+});
+
+test("settings hides the selected conversation; visible completion stays read", () => {
+  const live = fresh();
+  applyAgentEvent(live, event("turn/started", "A"), "A", "");
+  applyAgentEvent(live, event("turn/completed", "A"), "A", "");
+  assert.equal(live.A!.unread, true);
+  live.A!.unread = false;
+  applyAgentEvent(live, event("turn/started", "A"), "A", "A");
+  applyAgentEvent(live, event("turn/completed", "A"), "A", "A");
+  assert.equal(live.A!.unread, false);
+  // A replay after reading the result must not create another notification.
+  applyAgentEvent(live, event("turn/completed", "A"), "B", "B");
+  assert.equal(live.A!.unread, false);
+});
+
+test("stopped turns do not create unread completion dots; failures do", () => {
+  for (const error of ["Interrupted", "已中断", "model unavailable"]) {
+    const live = fresh();
+    applyAgentEvent(live, event("turn/started", "A"), "B");
+    applyAgentEvent(live, event("turn/completed", "A", { error }), "B");
+    assert.equal(!!live.A!.unread, error === "model unavailable");
+  }
+});

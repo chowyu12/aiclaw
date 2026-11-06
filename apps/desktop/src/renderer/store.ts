@@ -276,7 +276,7 @@ export const actions = {
         queueRevisions.set(queued.sessionId, (queueRevisions.get(queued.sessionId) ?? 0) + 1);
         updateQueue(queued.sessionId, queued.pending ?? [], queued.queuedRequestIds);
       }
-      const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId);
+      const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId, state.view === "chat" ? state.sessionId : "");
       // 错误条是全局的：后台那个会话出错也要让人看见，不然它就静静地停了。
       if (applied.error) {
         const label = applied.sessionId === state.sessionId ? "" : t("{label}：", { label: sessionLabel(applied.sessionId) });
@@ -484,6 +484,7 @@ export const actions = {
    */
   async openSession(sessionId: string): Promise<void> {
     state.view = "chat";
+    ensureLive(state.live, sessionId).unread = false;
     if (sessionId === state.sessionId && (state.loadingSession === sessionId || state.sessionInfo?.sessionId === sessionId)) return;
     const request = ++sessionRestoreRequest;
     state.error = "";
@@ -505,7 +506,7 @@ export const actions = {
       // 进行中的那几步只存在于事件流里，换成历史就把它们弄丢了。
       // 没在跑的以内核的历史为准——那是权威的，也覆盖了这期间排队进去的输入。
       if (!state.live[sessionId]?.busy) {
-        state.live[sessionId] = newLive(restoreHistory(info.history ?? []));
+        state.live[sessionId] = { ...newLive(restoreHistory(info.history ?? [])), unread: state.live[sessionId]?.unread };
       }
     } catch (error) {
       if (state.sessionId === sessionId && request === sessionRestoreRequest) state.sessionLoadError = t("打开会话失败：{error}", { error: describeError(error) });
@@ -1432,6 +1433,7 @@ export const actions = {
 
   setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived"): void {
     state.view = view;
+    if (view === "chat" && state.live[state.sessionId]) state.live[state.sessionId]!.unread = false;
   },
 
   clearError(): void {

@@ -54,6 +54,7 @@ const updateTitle = computed(() => {
   <nav class="activity-rail" :aria-label="t('应用导航')">
     <div class="rail-brand"><BrandLogo compact /></div>
     <button :aria-label="t('会话列表')" :title="t('会话列表')" :aria-expanded="sessionsOpen" aria-controls="session-sidebar" @click="$emit('sessions')">
+      <span v-if="Object.values(store.live).some(session => session.unread)" class="rail-unread" role="status" :aria-label="t('未读')" :title="t('未读')"></span>
       <svg class="home-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v2h-2v8h-5v-6h-4v6H5v-8H3Z"/></svg>
     </button>
     <button v-for="item in SHORTCUTS" :key="item.view" :data-view="item.view" :aria-label="t(item.label)" :title="t(item.label)" :aria-pressed="store.view === item.view" @click="actions.setView(item.view)">
@@ -72,6 +73,7 @@ const updateTitle = computed(() => {
 
 <style scoped>
 .activity-rail{display:flex;flex-direction:column;align-items:center;gap:12px;flex:0 0 56px;width:56px;padding:17px 8px 10px;border-right:1px solid var(--chrome-rule);background:var(--rail);z-index:22}
+.rail-unread{position:absolute;right:4px;top:4px;width:7px;height:7px;border-radius:50%;background:#0878e8}.activity-rail button{position:relative}
 .rail-brand{margin-bottom:8px}.activity-rail button{display:grid;place-items:center;flex:none;width:36px;height:36px;padding:8px;border:0;border-radius:9px;background:transparent;color:var(--ink-2);cursor:pointer}.activity-rail button:hover,.activity-rail button[aria-expanded=true],.activity-rail button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent)}.activity-rail button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.activity-rail button:disabled{opacity:.4;cursor:default}.activity-rail svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}.activity-rail .home-icon{fill:currentColor;stroke:none}.activity-rail circle{fill:var(--rail)}
 .rail-bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:10px}.activity-rail .rail-update{width:44px;padding:6px 0;height:auto;min-height:44px;gap:3px;color:var(--accent)}.activity-rail .rail-update:disabled{opacity:1;cursor:progress}.rail-update-label{font-size:10px;max-width:42px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>

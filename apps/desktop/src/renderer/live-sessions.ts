@@ -77,6 +77,8 @@ export interface LiveSession {
   timeline: TimelineEntry[];
   /** 有一轮在跑。发送那一刻置真，turn/completed 或出错置假。 */
   busy: boolean;
+  /** A turn finished while this conversation was not visible. */
+  unread?: boolean;
 }
 
 export function newLive(timeline: TimelineEntry[] = []): LiveSession {
@@ -205,6 +207,7 @@ export function applyAgentEvent(
   live: Record<string, LiveSession>,
   payload: AgentEventPayload,
   fallback: string,
+  visibleSessionId = fallback,
 ): Applied {
   const params = (payload.params ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" && params.sessionId ? params.sessionId : fallback;
@@ -344,6 +347,7 @@ export function applyAgentEvent(
       record.busy = true;
       return applied;
     case "turn/completed": {
+      if (record.busy && sessionId !== visibleSessionId && !INTERRUPTED.has(String(params.error ?? ""))) record.unread = true;
       record.busy = false;
       for (const entry of record.timeline) {
         if (entry.kind === "agent") entry.streaming = false;

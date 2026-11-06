@@ -297,7 +297,7 @@ function holdsCurrent(bucket: Bucket): boolean {
 /** 折叠着的分组里，上次看过之后有新消息的会话数。 */
 function unread(bucket: Bucket): number {
   const seen = store.groups.seenAt?.[bucket.id] ?? 0;
-  return bucket.sessions.filter((session) => Date.parse(session.updatedAt) > seen).length;
+  return bucket.sessions.filter((session) => store.live[session.id]?.unread || Date.parse(session.updatedAt) > seen).length;
 }
 
 /** 分组里有会话正在执行或在等回答：折叠时标题上亮一个点。 */
@@ -501,6 +501,7 @@ function when(iso: string): string {
               <span v-if="agentsCollapsed(session.id) && agentsBusy(session.id)" class="running" :title="t(`有子 agent 正在执行`)"></span>
             </button>
           </div>
+          <span v-if="store.live[session.id]?.unread && !store.live[session.id]?.busy" class="session-unread" role="status" :aria-label="t('未读')" :title="t('未读')"></span>
           <div class="item-actions" @click.stop>
             <select v-if="store.groups.groups.some(project => Array.isArray(project.directories))" class="project-move" :aria-label="t('移动到项目')" :value="store.groups.assignments[session.id] || ''" @change="actions.assignSession(session.id, ($event.target as HTMLSelectElement).value || null)">
               <option value="">{{ t('未分配项目') }}</option>
@@ -537,6 +538,7 @@ function when(iso: string): string {
               {{ child.session.title || t("子 agent") }}
             </div>
           </div>
+          <span v-if="store.live[child.session.id]?.unread && !store.live[child.session.id]?.busy" class="session-unread" role="status" :aria-label="t('未读')" :title="t('未读')"></span>
           <div class="item-actions" @click.stop>
             <button class="icon tiny" :title="t(`重命名会话`)" :aria-label="t(`重命名会话`)" :disabled="!!renamingSession" @click="renamingSession = child.session.id">
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 2 4 4-7.5 7.5-4.5.5.5-4.5Z M8.5 3.5l4 4" /></svg>
@@ -887,6 +889,14 @@ function when(iso: string): string {
   color: var(--ok);
   font-size: 10.5px;
   line-height: 16px;
+}
+
+.session-unread {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #0878e8;
 }
 
 .running {

@@ -49,6 +49,7 @@ export const chat: Record<string, string> = {
   "拖动调整会话列表宽度": "Drag to resize the conversation sidebar",
   "应用导航": "App navigation",
   "会话列表": "Conversations",
+  "未读": "Unread",
   "收起会话列表": "Close conversations",
   "对话": "Chat",
   "文件阅读区": "File reader",
