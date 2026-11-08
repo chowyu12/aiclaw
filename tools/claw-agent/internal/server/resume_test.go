@@ -3,11 +3,34 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 )
+
+func TestHistoryAvailableBeforeSessionResume(t *testing.T) {
+	s, root := collabServer(t, &scriptedModel{root: func(int, wireRequest) string { return sseText("saved answer") }})
+	root.RunTurn(context.Background(), "turn", "saved question", nil, nil, &emitter{server: s})
+	if err := root.Checkpoint(); err != nil {
+		t.Fatal(err)
+	}
+	s.dropSession(root.ID)
+	w := &receiptWriter{}
+	s.out = w
+	params, _ := json.Marshal(protocol.SessionIDParams{SessionID: root.ID})
+	s.dispatch(context.Background(), frame{ID: json.RawMessage(`1`), Method: protocol.MethodSessionHistory, Params: params})
+	if len(w.frames) != 1 || w.frames[0].Error != nil {
+		t.Fatalf("history request failed: %+v", w.frames)
+	}
+	if !strings.Contains(string(w.frames[0].Result), "saved question") || !strings.Contains(string(w.frames[0].Result), "saved answer") {
+		t.Fatalf("history missing messages: %s", w.frames[0].Result)
+	}
+	if s.session(root.ID) != nil {
+		t.Fatal("reading history must not start a session")
+	}
+}
 
 func TestResumeDoesNotUnmountAfterFailedSave(t *testing.T) {
 	s, root := collabServer(t, &scriptedModel{})

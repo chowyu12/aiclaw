@@ -84,6 +84,71 @@ func TestPoolSharesOneConnectionAcrossSessions(t *testing.T) {
 	}
 }
 
+func TestPoolFirstWaiterCanCancelWithoutCancelingSharedHandshake(t *testing.T) {
+	entered := make(chan struct{})
+	unblock := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var msg struct {
+			ID     *int64 `json:"id"`
+			Method string `json:"method"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&msg)
+		if msg.Method == "initialize" {
+			close(entered)
+			<-unblock
+		}
+		if msg.ID == nil {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := `{}`
+		if msg.Method == "initialize" {
+			result = `{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"x","version":"1"}}`
+		}
+		if msg.Method == "tools/list" {
+			result = `{"tools":[]}`
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%d,"result":%s}`, *msg.ID, result)
+	}))
+	defer server.Close()
+	pool := newMCPPool()
+	config := protocol.MCPServerConfig{URL: server.URL}
+	ctx, cancel := context.WithCancel(context.Background())
+	first := make(chan error, 1)
+	go func() { _, _, err := pool.acquire(ctx, "x", config); first <- err }()
+	<-entered
+	second := make(chan error, 1)
+	go func() {
+		_, key, err := pool.acquire(context.Background(), "x", config)
+		if err == nil {
+			pool.release(key)
+		}
+		second <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		pool.mu.Lock()
+		refs := pool.entries[fingerprint("x", config)].refs
+		pool.mu.Unlock()
+		if refs == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("second waiter did not join")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel()
+	if err := <-first; err != context.Canceled {
+		t.Fatalf("first waiter: %v", err)
+	}
+	close(unblock)
+	if err := <-second; err != nil {
+		t.Fatalf("second waiter: %v", err)
+	}
+}
+
 func TestPoolTreatsDifferentConfigAsDifferentServer(t *testing.T) {
 	// 配置变了还共用旧连接，表现会是「改了配置没生效」——上一版刚修过那类 bug。
 	var handshakes atomic.Int64

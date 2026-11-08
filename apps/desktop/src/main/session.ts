@@ -6,7 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { app, clipboard, shell } from "electron";
+import { app, clipboard, session, shell } from "electron";
 import { BROWSER_CANDIDATES, browserIdForApplication } from "./browser-choice.js";
 import { resolveWorkspace } from "./workspace-defaults.js";
 import { toolPath } from "./shell-path.js";
@@ -197,6 +197,7 @@ export class SessionManager extends EventEmitter {
   private starting: Promise<void> | null = null;
   /** 给内核的 PATH，第一次启动时从登录 shell 读一次。见 shell-path.ts。 */
   private path: string | undefined;
+  private systemProxyActive = false;
 
   private async launch(): Promise<void> {
     this.emit("status", "starting");
@@ -205,6 +206,8 @@ export class SessionManager extends EventEmitter {
     // PATH 换成终端里那样的：模型跑的命令、技能调的 CLI、stdio 的 MCP server 都从内核继承它。
     this.path ??= await toolPath(homedir());
     const env: NodeJS.ProcessEnv = { ...process.env, AICLAW_LOCALE: this.store.readConfig().language };
+    this.systemProxyActive = this.store.readConfig().systemProxy;
+    env.AICLAW_SYSTEM_PROXY = this.systemProxyActive ? "1" : "0";
     // Windows 环境键不区分大小写，不能同时向子进程传 Path 和 PATH。
     const pathKey = Object.keys(env).find(key => key.toLowerCase() === "path") ?? "PATH";
     env[pathKey] = this.path;
@@ -224,6 +227,10 @@ export class SessionManager extends EventEmitter {
       this.emit("event", n.method, n.params);
     });
     client.on("approval", (request) => this.emit("approval", request));
+    client.on("proxyResolve", async ({ url, respond, fail }) => {
+      try { respond(await session.defaultSession.resolveProxy(url)); }
+      catch { fail("System proxy resolution failed"); }
+    });
     client.on("userInput", (question) => this.emit("userInput", question));
     client.on("appConfig", (action) => this.emit("appConfig", action));
     // 模型要建、列、删定时任务：调度器在主进程，交给它。
@@ -461,6 +468,7 @@ export class SessionManager extends EventEmitter {
    * 不还原的话点开旧会话是一片空白，看起来像记录丢了。
    */
   sessionWork(id: string) { return this.requireClient().sessionWork(id); }
+  sessionHistory(id: string) { return this.requireClient().sessionHistory(id); }
   sessionContext(id: string) { return this.requireClient().sessionContext(id); }
   goalSet(id: string, goal: import("@aiclaw/agent-client").GoalInput) { return this.requireClient().goalSet(id, goal); }
   goalUpdate(id: string, update: import("@aiclaw/agent-client").GoalUpdate) { return this.requireClient().goalUpdate(id, update); }
@@ -469,9 +477,14 @@ export class SessionManager extends EventEmitter {
   changesList(id: string) { return this.requireClient().changesList(id); }
   changesUndo(id: string, changeId: string) { return this.requireClient().changesUndo(id, changeId); }
 
-  async resumeSession(sessionId: string): Promise<SessionInfo> {
+  async resumeSession(sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}): Promise<SessionInfo> {
     const client = this.requireClient();
-    const result = await client.sessionResume(sessionId, await this.buildRefresh());
+    const refresh = await this.buildRefresh();
+    if (recoveryModel) {
+      refresh.recoveryModel = { ...recoveryModel, baseUrl: "" };
+      refresh.modelSeesImages = await this.modelSeesImages({ ...this.store.readConfig(), ...recoveryModel });
+    }
+    const result = await client.sessionResume(sessionId, refresh);
     if (!sessionId.startsWith("c_")) this.desktopSessions.add(sessionId);
     // 端点与 Key 不用在这里对齐：会话记的是 providerId，内核恢复时按 id 到库里
     // 取**当前**的端点与 Key。用户改了端点，旧会话点开就是新地址。
@@ -930,7 +943,10 @@ export class SessionManager extends EventEmitter {
   /** 试连一个 MCP server 并列出它的工具。配置页用，与会话无关。 */
   async networkDiagnostics(): Promise<string> {
     const config = this.store.readConfig();
-    return this.requireClient().networkDiagnostics(config.providerId, config.model);
+    const report = await this.requireClient().networkDiagnostics(config.providerId, config.model);
+    const mode = this.systemProxyActive ? "System proxy enabled" : "System proxy disabled (environment proxy may still apply)";
+    const pending = config.systemProxy !== this.systemProxyActive ? "\nProxy setting changed; restart the runtime to apply it." : "";
+    return `${mode}${pending}\n${report}`;
   }
 
   async probeMcp(server: McpServer): Promise<MCPProbeResult> {

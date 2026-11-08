@@ -28,6 +28,7 @@ export interface RoleConfig {
 }
 
 export interface AppConfig {
+  systemProxy: boolean;
   theme: import("../shared/themes.js").Theme;
   font: import("../shared/typography.js").Font;
   fontSize: import("../shared/typography.js").FontSize;

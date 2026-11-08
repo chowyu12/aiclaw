@@ -377,7 +377,8 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionRecover, (_event, id: string, requestId: string, action: "resume" | "dismiss" | "steer") => sessions.recoverSession(id, requestId, action));
   ipcMain.handle(IPC.changesList, (_event, id: string) => sessions.changesList(id));
   ipcMain.handle(IPC.changesUndo, (_event, id: string, changeId: string) => sessions.changesUndo(id, changeId));
-  ipcMain.handle(IPC.sessionResume, (_event, sessionId: string) => sessions.resumeSession(sessionId));
+  ipcMain.handle(IPC.sessionResume, (_event, sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}) => sessions.resumeSession(sessionId, recoveryModel));
+  ipcMain.handle(IPC.sessionHistory, (_event, sessionId: string) => sessions.sessionHistory(sessionId));
   ipcMain.handle(IPC.sessionSend, (_event, input) => sessions.sendTurn(input));
   ipcMain.handle(IPC.sessionInterrupt, (_event, sessionId: string) => sessions.interrupt(sessionId));
   ipcMain.handle(IPC.sessionList, async () => {
@@ -707,6 +708,12 @@ sessions.on("schedule", ({ request, respond, fail }) => {
 });
 
 sessions.on("event", (method, params) => {
+  if (method === "host/requestCancelled") {
+    const id = String((params as { id: string | number }).id);
+    pendingApprovals.delete(id);
+    pendingPayloads.delete(id);
+    pendingQuestions.delete(id);
+  }
   if (method === "turn/completed") {
     const done = params as { sessionId?: string; turnId?: string; error?: string } | undefined;
     if (done?.sessionId) configuration.clear(done.sessionId);
@@ -715,15 +722,15 @@ sessions.on("event", (method, params) => {
   // 一轮结束（完成、失败、中断）时，它还没回应的审批就作废了：内核那边已经
   // 不等了。不清的话渲染层重新加载后会把它们当成待办再弹一遍。
   if (method === "turn/completed") {
-    const sessionId = (params as { sessionId?: string } | undefined)?.sessionId;
+    const { sessionId, turnId } = (params as { sessionId?: string; turnId?: string } | undefined) ?? {};
     for (const [id, request] of pendingApprovals) {
-      if (request.sessionId === sessionId) {
+      if (request.sessionId === sessionId && request.turnId === turnId) {
         pendingApprovals.delete(id);
         pendingPayloads.delete(id);
       }
     }
     for (const [id, entry] of pendingQuestions) {
-      if (entry.payload.sessionId === sessionId) pendingQuestions.delete(id);
+      if (entry.payload.sessionId === sessionId && entry.payload.turnId === turnId) pendingQuestions.delete(id);
     }
   }
   push(IPC.onAgentEvent, { method, params });
@@ -735,6 +742,7 @@ sessions.on("approval", (request) => {
   const payload: ApprovalPayload = {
     id: key,
     sessionId: request.sessionId,
+    turnId: request.turnId,
     kind: request.kind,
     title: request.title,
     detail: request.detail,

@@ -5,6 +5,7 @@ import { applyPreset, presetCandidates } from "../../shared/presets";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
+import { draftFor } from "../drafts";
 import { t } from "../i18n";
 import {
   classifyFile,
@@ -32,7 +33,6 @@ import {
   skillQuery,
   skillCandidates,
   applySkill,
-  type MentionBinding,
 } from "../mentions";
 import type { SessionSummaryView, SkillView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
@@ -44,7 +44,7 @@ import QuestionCard from "./QuestionCard.vue";
 
 defineProps<{ configured: boolean }>();
 
-const draft = ref("");
+const draft = computed({ get: () => draftFor(store.sessionId).text, set: value => { draftFor(store.sessionId).text = value; } });
 const scroller = ref<HTMLElement | null>(null);
 const modelOpen = ref(false);
 const policyOpen = ref(false);
@@ -84,6 +84,7 @@ const voiceError = ref("");
 const voiceElapsed = ref(0);
 const voiceLevel = ref(0);
 let recorder: VoiceRecorder | null = null;
+let voiceSession = "";
 let voiceTimer: ReturnType<typeof setInterval> | undefined;
 
 const sttReady = computed(() => Boolean(store.config?.roles?.stt?.providerId && store.config?.roles?.stt?.model));
@@ -98,6 +99,7 @@ async function toggleVoice(): Promise<void> {
   voiceError.value = "";
   if (voiceState.value === "recording") return finishVoice();
   if (voiceState.value !== "idle") return;
+  const sessionId = store.sessionId;
   if (!sttReady.value) {
     voiceError.value = t("还没有配听写模型：到「配置 → 多模态」里给「听写」选一个模型。");
     return;
@@ -108,6 +110,7 @@ async function toggleVoice(): Promise<void> {
     return;
   }
   recorder = new VoiceRecorder();
+  voiceSession = sessionId;
   try {
     await recorder.start();
   } catch (error) {
@@ -128,6 +131,7 @@ async function toggleVoice(): Promise<void> {
 async function finishVoice(): Promise<void> {
   clearInterval(voiceTimer);
   const current = recorder;
+  const sessionId = voiceSession;
   recorder = null;
   voiceLevel.value = 0;
   if (!current) {
@@ -146,7 +150,11 @@ async function finishVoice(): Promise<void> {
       voiceError.value = t("没听出内容，再说一次试试。");
       return;
     }
-    insertAtCursor(text);
+    if (store.sessionId === sessionId) insertAtCursor(text);
+    else {
+      const target = draftFor(sessionId);
+      target.text += (target.text ? "\n" : "") + text;
+    }
   } catch (error) {
     voiceError.value = describeError(error);
   } finally {
@@ -202,7 +210,7 @@ function insertAtCursor(text: string): void {
 // 打 @ 弹出会话列表（标题命中的在前，然后是正文搜索命中的），↑↓ 选、Enter / Tab 确定、
 // Esc 关掉。选中插入「@标题 」并记下绑定；发送时只交还留在正文里的那几个。
 
-const bindings = ref<MentionBinding[]>([]);
+const bindings = computed({ get: () => draftFor(store.sessionId).bindings, set: value => { draftFor(store.sessionId).bindings = value; } });
 const slash = ref<ReturnType<typeof skillQuery>>(null);
 const skillIndex = ref(0);
 const skillMenu = ref<HTMLElement | null>(null);
@@ -358,20 +366,21 @@ function onMentionKey(event: KeyboardEvent): boolean {
 // 贴一张报错截图问「这是什么」是最常见的用法之一。图片走视觉通道发给模型，
 // 文本文件并进正文（模型没有别的办法读到它——那个文件可能在任何地方）。
 
-const attachments = ref<Attachment[]>([]);
+const attachments = computed({ get: () => draftFor(store.sessionId).attachments, set: value => { draftFor(store.sessionId).attachments = value; } });
 const attachError = ref("");
 const picker = ref<HTMLInputElement | null>(null);
 
 async function accept(files: FileList | File[] | null | undefined): Promise<void> {
   attachError.value = "";
+  const target = draftFor(store.sessionId);
   for (const file of Array.from(files ?? [])) {
-    const images = attachments.value.filter((item) => item.kind === "image").length;
-    const audio = attachments.value.filter((item) => item.kind === "audio").length;
+    const images = target.attachments.filter((item) => item.kind === "image").length;
+    const audio = target.attachments.filter((item) => item.kind === "audio").length;
     const verdict = classifyFile(file, images, audio);
     try {
-      if (verdict.accept === "image") attachments.value.push(await readImage(file));
-      else if (verdict.accept === "audio") attachments.value.push(await readAudio(file));
-      else if (verdict.accept === "text") attachments.value.push(await readTextFile(file));
+      if (verdict.accept === "image") target.attachments.push(await readImage(file));
+      else if (verdict.accept === "audio") target.attachments.push(await readAudio(file));
+      else if (verdict.accept === "text") target.attachments.push(await readTextFile(file));
       // 拒绝的要说出来。默默忽略的话，用户以为模型看过了那份文件。
       else attachError.value = verdict.reason;
     } catch (error) {
@@ -438,6 +447,7 @@ function attachmentLabel(item: Attachment): string {
 const submitting = ref(false);
 async function submit(): Promise<void> {
   if (submitting.value) return;
+  const target = draftFor(store.sessionId);
   const originalDraft = draft.value;
   const originalBindings = bindings.value;
   const pending = attachments.value;
@@ -466,9 +476,9 @@ async function submit(): Promise<void> {
   try {
     if (!await actions.send(text, images, audio, references)) {
       // Keep anything typed while sending and restore all original attachments.
-      draft.value = originalDraft + (draft.value ? "\n" + draft.value : "");
-      attachments.value = [...pending, ...attachments.value];
-      bindings.value = [...originalBindings, ...bindings.value];
+      target.text = originalDraft + (target.text ? "\n" + target.text : "");
+      target.attachments = [...pending, ...target.attachments];
+      target.bindings = [...originalBindings, ...target.bindings];
     }
   } finally {
     submitting.value = false;
@@ -717,7 +727,7 @@ const forking = ref(false);
   <PromptPresets v-if="presetsOpen" :draft="presetDraft" @close="presetsOpen=false; input?.focus()" />
   <div class="chat">
     <header class="chat-header" :aria-label="t('对话')"><strong class="chat-session-title" :title="sessionTitle">{{ sessionTitle }}</strong><span class="chat-workspace" :title="workspaceTitle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg>{{ workspaceLabel }}</span></header>
-    <div v-if="!configured" class="gate">
+    <div v-if="!configured && !store.sessionId" class="gate">
       <h2>{{ t("先完成配置") }}</h2>
       <p>{{ t("到「模型服务」页添加一个端点、填上 Key、写上模型名，再回来选一个默认模型。") }}</p>
     </div>
@@ -1173,7 +1183,7 @@ const forking = ref(false);
                 </button>
                 <button
                   class="send"
-                  :disabled="submitting || (!draft.trim() && !attachments.length)"
+                  :disabled="submitting || !!store.sessionLoadError || !!store.loadingSession || (!draft.trim() && !attachments.length)"
                   :title="store.busy ? t('排队发送') : t('发送')"
                   :aria-label="store.busy ? t('排队发送') : t('发送')"
                   @click="submit()"

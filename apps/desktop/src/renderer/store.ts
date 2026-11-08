@@ -261,8 +261,17 @@ export const actions = {
       if (revision === computerRevision) state.computer = status as ComputerControlState;
     }).catch(() => undefined);
 
+    const cancelledHostRequests = new Set<string>();
+    const completedHostTurns = new Set<string>();
+    let hostGeneration = 0;
     window.aiclaw.on.agentEvent((payload) => {
       const event = payload as AgentEventPayload;
+      if (event.method === "host/requestCancelled") {
+        const id = String((event.params as { id: string | number }).id);
+        cancelledHostRequests.add(id);
+        state.approvals = state.approvals.filter((approval) => approval.id !== id);
+        state.questions = state.questions.filter((question) => question.id !== id);
+      }
       if (event.method === "session/reasoningUpdated") {
         const updated = event.params as {sessionId: string; reasoningEffort: string};
         if (updated.sessionId === state.sessionId && state.sessionInfo) state.sessionInfo = {...state.sessionInfo, reasoningEffort: updated.reasoningEffort};
@@ -295,7 +304,12 @@ export const actions = {
       if (applied.method === "turn/completed") {
         void actions.refreshSessions();
         // 一轮结束（完成、失败、中断），它没回答的问题就作废了：内核那边已经不等了。
-        state.questions = state.questions.filter((question) => question.sessionId !== applied.sessionId);
+        const turnId = (event.params as {turnId?: string}).turnId;
+        completedHostTurns.add(`${applied.sessionId}:${turnId}`);
+        for (const approval of state.approvals) if (approval.sessionId === applied.sessionId && approval.turnId === turnId) cancelledHostRequests.add(approval.id);
+        for (const question of state.questions) if (question.sessionId === applied.sessionId && question.turnId === turnId) cancelledHostRequests.add(question.id);
+        state.approvals = state.approvals.filter((approval) => approval.sessionId !== applied.sessionId || approval.turnId !== turnId);
+        state.questions = state.questions.filter((question) => question.sessionId !== applied.sessionId || question.turnId !== turnId);
         // 跑着时被推迟的重挂，现在补上（只补当前看着的会话；别的会话点开时自然会重挂）。
         if (state.remountPending && applied.sessionId === state.sessionId && !state.queuedInputs[applied.sessionId]?.length) {
           void actions.remountCurrentSession();
@@ -325,11 +339,12 @@ export const actions = {
       const question = payload as QuestionPayload;
       if (!state.questions.some((item) => item.id === question.id)) state.questions.push(question);
     });
+    const pendingHostGeneration = hostGeneration;
     void window.aiclaw.question
       .pending()
       .then((pending) => {
         for (const question of pending as QuestionPayload[]) {
-          if (!state.questions.some((item) => item.id === question.id)) state.questions.push(question);
+          if (hostGeneration === pendingHostGeneration && !completedHostTurns.has(`${question.sessionId}:${question.turnId}`) && !cancelledHostRequests.has(question.id) && !state.questions.some((item) => item.id === question.id)) state.questions.push(question);
         }
       })
       .catch(() => undefined);
@@ -339,7 +354,7 @@ export const actions = {
       .pending()
       .then((pending) => {
         for (const approval of pending as ApprovalPayload[]) {
-          if (!state.approvals.some((item) => item.id === approval.id)) state.approvals.push(approval);
+          if (hostGeneration === pendingHostGeneration && !completedHostTurns.has(`${approval.sessionId}:${approval.turnId}`) && !cancelledHostRequests.has(approval.id) && !state.approvals.some((item) => item.id === approval.id)) state.approvals.push(approval);
         }
       })
       .catch(() => undefined);
@@ -347,10 +362,15 @@ export const actions = {
       state.runtime = payload as RuntimeStatus;
       // 运行时一停，内存里跑着的轮次全没了；不清的话「正在执行」会一直亮着。
       if (state.runtime.state !== "ready") {
+        hostGeneration++;
+        cancelledHostRequests.clear();
+        completedHostTurns.clear();
         sessionRestoreRequest++;
         state.loadingSession = "";
         state.sessionInfo = null;
         state.configurations = [];
+        state.approvals = [];
+        state.questions = [];
         for (const record of Object.values(state.live)) record.busy = false;
       }
       if (state.runtime.state === "failed") {
@@ -509,7 +529,16 @@ export const actions = {
         state.live[sessionId] = { ...newLive(restoreHistory(info.history ?? [])), unread: state.live[sessionId]?.unread };
       }
     } catch (error) {
-      if (state.sessionId === sessionId && request === sessionRestoreRequest) state.sessionLoadError = t("打开会话失败：{error}", { error: describeError(error) });
+      const reason = describeError(error);
+      try {
+        const history = await window.aiclaw.session.history(sessionId);
+        if (state.sessionId === sessionId && request === sessionRestoreRequest) {
+          if (!state.live[sessionId]?.busy) state.live[sessionId] = { ...newLive(restoreHistory(history)), unread: state.live[sessionId]?.unread };
+          state.sessionLoadError = t("当前为只读历史。恢复原服务后重试，或在下方选择其他模型继续：{error}", { error: reason });
+        }
+      } catch {
+        if (state.sessionId === sessionId && request === sessionRestoreRequest) state.sessionLoadError = t("打开会话失败：{error}", { error: reason });
+      }
     } finally {
       if (state.loadingSession === sessionId && request === sessionRestoreRequest) state.loadingSession = "";
     }
@@ -1255,7 +1284,7 @@ export const actions = {
    * 会让内核要么过早压缩、要么撑爆窗口。这里只知道默认模型的窗口，别的传 0。
    */
   async switchModel(providerId: number, modelId: string, contextWindow = 0): Promise<void> {
-    if (state.modelChanging || !modelId || (modelId === state.model && providerId === state.providerId)) return;
+    if (state.modelChanging || !modelId || (!state.sessionLoadError && modelId === state.model && providerId === state.providerId)) return;
     const previous = { model: state.model, providerId: state.providerId };
     state.model = modelId;
     state.providerId = providerId;
@@ -1267,6 +1296,19 @@ export const actions = {
     const limit = contextWindow || (isDefault ? (state.config?.contextWindow ?? 0) : 0);
     state.modelChanging = true;
     try {
+      if (state.sessionLoadError) {
+        const request = ++sessionRestoreRequest;
+        const info = await window.aiclaw.session.resume(sessionId, { providerId, model: modelId, contextWindow: limit, reasoningEffort: state.config?.reasoningEffort });
+        if (state.sessionId === sessionId && request === sessionRestoreRequest) {
+          state.sessionInfo = info;
+          state.model = info.model;
+          state.providerId = info.providerId;
+          state.sessionLoadError = "";
+          state.live[sessionId] = { ...newLive(restoreHistory(info.history ?? [])), unread: state.live[sessionId]?.unread };
+        }
+        await actions.refreshSessions();
+        return;
+      }
       await window.aiclaw.session.configure({
         sessionId,
         providerId,
@@ -1282,7 +1324,7 @@ export const actions = {
       await actions.refreshSessions();
     } catch (error) {
       // 切失败就把显示切回去，别让界面显示一个内核并没有在用的模型。
-      if (state.sessionId === sessionId && state.sessionInfo?.sessionId === sessionId) {
+      if (state.sessionId === sessionId) {
         state.model = previous.model;
         state.providerId = previous.providerId;
         state.error = t("切换模型失败：{error}", { error: describeError(error) });
@@ -1314,7 +1356,7 @@ export const actions = {
     audio: { name: string; data: string }[] = [],
     references: { id: string; title: string }[] = [],
   ): Promise<boolean> {
-    if (state.policyChanging) return false;
+    if (state.policyChanging || state.sessionLoadError || state.loadingSession) return false;
     if (!text.trim() && images.length === 0 && audio.length === 0) return false;
     // 没有会话就先开一个。删掉当前会话之后运行时仍然是 ready，输入框还能打字，
     // 早先这里直接 return——发出去石沉大海，用户看不出发生了什么。

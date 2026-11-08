@@ -292,7 +292,13 @@ app.whenReady().then(async()=>{
  check('returning from settings preserves an expanded conversation sidebar',await wait("document.querySelector('.sidebar').classList.contains('is-chat') && document.querySelector('.sidebar').getClientRects().length>0"));
  await js("document.querySelector('[data-bucket-id=\"workspace:/other/smoke\"] .item').click()");
  check('switching conversations keeps the sidebar docked and expanded',await wait("document.querySelector('[data-bucket-id=\"workspace:/other/smoke\"] .item.active') && document.querySelector('.sidebar').getClientRects().length>0"));
+ await js("(()=>{const input=document.querySelector('.composer textarea');input.value='other chat draft';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
  await js("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .item').click()");
+ await wait("!!document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .item.active')");
+ check('draft from another chat is not shown in the current chat',await js("document.querySelector('.composer textarea').value!=='other chat draft'"));
+ await js("document.querySelector('[data-bucket-id=\"workspace:/other/smoke\"] .item').click()");
+ check('switching back restores the original chat draft',await wait("document.querySelector('.composer textarea').value==='other chat draft'"));
+ await js("(()=>{const input=document.querySelector('.composer textarea');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .item').click()})()");
  await wait("!!document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .item.active')");
  await js("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .fold').click()");
  check('workspace collapse persists by full path',await wait("!document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .item')")&&groups.collapsed['workspace:/tmp/smoke']===true);

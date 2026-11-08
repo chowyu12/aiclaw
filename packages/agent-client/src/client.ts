@@ -89,6 +89,7 @@ export interface PendingAppConfigAction {
 }
 
 export interface ClientEvents {
+  proxyResolve: (action: { url: string; respond: (result: string) => void; fail: (message: string) => void }) => void;
   appConfig: (action: PendingAppConfigAction) => void;
   notification: (notification: AgentNotification) => void;
   approval: (request: PendingApproval) => void;
@@ -120,6 +121,10 @@ export class ClawAgentClient extends EventEmitter {
       this.emit("notification", { method, params } as AgentNotification);
     });
     this.transport.on("serverRequest", (id, method, params) => {
+      if (method === "proxy/resolve") {
+        this.emit("proxyResolve", { url: (params as {url: string}).url, respond: result => this.transport.respond(id, result), fail: message => this.transport.respondError(id, {code: -32000, message}) });
+        return;
+      }
       if (method === "approval/request") {
         this.emit("approval", { id, ...(params as ApprovalRequestParams) });
         return;

@@ -1,5 +1,6 @@
 /** 英文词典：settings 这一组界面（中文原文 → 英文）。 */
 export const settings: Record<string, string> = {
+ "使用系统代理（重启本地运行时后生效）": "Use the system proxy (restart the runtime to apply)",
  "网络专项诊断": "Network diagnostics",
  "诊断中…": "Diagnosing…",
  "网络诊断未完成，请确认内核已启动后重试。": "Network diagnostics could not finish. Start the runtime and retry.",

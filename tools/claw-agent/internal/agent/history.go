@@ -9,6 +9,7 @@ import (
 	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
 
@@ -32,8 +33,34 @@ import (
 // 给模型看的消息，没有这些数字。所以历史步骤不带时间——**宁可不显示，也不要
 // 编一个**，界面上那几个数字是用来判断「慢在等模型还是慢在跑工具」的。
 func (s *Session) History() []protocol.Item {
-	messages := s.historyMessages()
-	modelName := s.config.Model.Model
+	return renderHistory(s.historyMessages(), s.config.Model.Model)
+}
+
+// StoredHistory reads a transcript without starting a model client or mounting tools.
+func StoredHistory(ctx context.Context, db *store.Store, id string) ([]protocol.Item, error) {
+	record, err := db.Load(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	var config protocol.SessionStartParams
+	if err := json.Unmarshal(record.Config, &config); err != nil {
+		return nil, err
+	}
+	var messages []llm.Message
+	if len(record.Messages) > 0 {
+		if err := json.Unmarshal(record.Messages, &messages); err != nil {
+			return nil, err
+		}
+	}
+	s := &Session{ID: id, db: db, messages: messages}
+	messages, err = s.readHistoryMessages()
+	if err != nil {
+		return nil, err
+	}
+	return renderHistory(messages, config.Model.Model), nil
+}
+
+func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
 
 	// 先把工具结果按 call id 建索引，下面按 assistant 里的顺序取用。
 	results := make(map[string]string, len(messages))

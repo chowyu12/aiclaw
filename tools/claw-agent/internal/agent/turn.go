@@ -794,6 +794,12 @@ func (s *Session) callModel(
 		},
 	})
 	if err != nil {
+		s.mu.Lock()
+		if s.config.Model == model {
+			s.lastInputTokens = 0
+			s.estimateCompaction = true
+		}
+		s.mu.Unlock()
 		// 流断在半截时已经有文字发给宿主了。把那个条目收尾成它实际收到的
 		// 内容，否则界面上会永远留一条转着圈的半截消息；重试产生的是
 		// 一个新条目，用户看到的顺序是「半截 → 重试提示 → 完整回答」。
@@ -809,7 +815,7 @@ func (s *Session) callModel(
 	s.mu.Lock()
 	if s.config.Model == model {
 		s.lastInputTokens = response.Usage.InputTokens
-		s.estimateCompaction = false
+		s.estimateCompaction = response.Usage.InputTokens <= 0
 	}
 	s.mu.Unlock()
 	// 只有产生了正文才发 completed；纯工具调用的轮次没有正文条目。

@@ -61,10 +61,11 @@ func (s *Session) needsCompaction() bool {
 	}
 	s.mu.Lock()
 	used := s.lastInputTokens
-	estimate := s.estimateCompaction
 	s.mu.Unlock()
-	if used == 0 && estimate {
-		used, _ = contextEstimate(s.snapshotMessages(), s.llmTools())
+	// Reported usage describes the previous request, not the current history:
+	// tool results and new user input may have been appended since then.
+	if estimated, _ := contextEstimate(s.snapshotMessages(), s.llmTools()); estimated > used {
+		used = estimated
 	}
 	return used > 0 && used >= window*autoCompactPercent/100
 }

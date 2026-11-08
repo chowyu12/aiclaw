@@ -131,6 +131,7 @@ export interface SessionStartParams {
  * 给了就整份生效（空对象 = 一个 MCP server 都不挂），不做「空的就跳过」。
  */
 export interface SessionRefresh {
+  recoveryModel?: ModelConfig;
   enabledBuiltins?: string[];
   mcpServers: Record<string, MCPServerConfig>;
   skillDirs: string[];
@@ -647,6 +648,7 @@ export interface ApprovalRequestParams {
 
 /** 服务端通知的判别联合，宿主按 method 分发。 */
 export type AgentNotification =
+ | { method: "host/requestCancelled"; params: {id: number | string; method: string} }
  | { method: "session/reasoningUpdated"; params: {sessionId: string; reasoningEffort: string} }
  | { method: "session/toolsUpdated"; params: {sessionId: string; tools: string[]; mcpStatus: Record<string,string>; foldedTools: string[]} }
  | { method: "session/workUpdated"; params: {sessionId: string; goal: Goal} }

@@ -677,6 +677,10 @@ async function purge(): Promise<void> {
           {{ t("凭据已经抹掉，只会显示「已配置 / 未配置」。") }}
         </p>
       </header>
+      <label class="row">
+        <input type="checkbox" :checked="store.config.systemProxy" @change="saveField({ systemProxy: ($event.target as HTMLInputElement).checked })" />
+        <span>{{ t("使用系统代理（重启本地运行时后生效）") }}</span>
+      </label>
       <div class="row">
         <button class="ghost" :disabled="networkBusy" @click="diagnoseNetwork()">{{ networkBusy ? t("诊断中…") : t("网络专项诊断") }}</button>
         <button class="ghost" :disabled="networkBusy" @click="loadReport()">

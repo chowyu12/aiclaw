@@ -67,7 +67,8 @@ func TestHostApprovalDenialRemainsAValidResponse(t *testing.T) {
 }
 
 func TestHostRequestCancellationRemovesPendingResponse(t *testing.T) {
-	s := &Server{out: &receiptWriter{}, outboundPending: map[int64]chan frame{}}
+	writer := &receiptWriter{}
+	s := &Server{out: writer, outboundPending: map[int64]chan frame{}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := s.requestHost(ctx, protocol.RequestComputer, nil); err != context.Canceled {
@@ -76,6 +77,11 @@ func TestHostRequestCancellationRemovesPendingResponse(t *testing.T) {
 	if len(s.outboundPending) != 0 {
 		t.Fatal("cancelled host request leaked")
 	}
+	writer.mu.Lock()
+	if len(writer.frames) != 2 || writer.frames[1].Method != "host/requestCancelled" || string(writer.frames[1].Params) != `{"id":1,"method":"computer/request"}` {
+		t.Fatalf("missing cancellation notification: %+v", writer.frames)
+	}
+	writer.mu.Unlock()
 	// A late reply must be harmless, rather than blocking the receive loop.
 	s.resolveOutbound(frame{ID: json.RawMessage(`1`), Result: json.RawMessage(`{}`)})
 }

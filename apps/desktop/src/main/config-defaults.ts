@@ -21,6 +21,7 @@ const NO_ROLES: RoleConfig = {
  */
 
 export const DEFAULT_CONFIG: AppConfig = {
+  systemProxy: false,
   language: "en",
   theme: "white",
   font: "system",
@@ -69,6 +70,7 @@ export function normalizeConfig(config: AppConfig): AppConfig {
   const providerId = Number(config.providerId);
   return {
     ...config,
+    systemProxy: config.systemProxy === true,
     theme: normalizeTheme(config.theme),
     font: normalizeFont(config.font),
     fontSize: normalizeFontSize(config.fontSize),

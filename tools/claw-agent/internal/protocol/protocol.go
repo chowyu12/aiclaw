@@ -818,6 +818,7 @@ type SessionResumeParams struct {
 // 给了就整份生效（空 map = 一个 MCP server 都不挂），不做「空的就跳过」——
 // 那样用户删掉最后一个 server 之后反而删不掉。
 type SessionRefresh struct {
+	RecoveryModel     *ModelConfig               `json:"recoveryModel,omitempty"`
 	EnabledBuiltins   []string                   `json:"enabledBuiltins,omitempty"`
 	MCPServers        map[string]MCPServerConfig `json:"mcpServers"`
 	SkillDirs         []string                   `json:"skillDirs"`

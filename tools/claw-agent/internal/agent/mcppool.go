@@ -44,7 +44,8 @@ type pooledEntry struct {
 	startedAt time.Time
 	// ready 在握手结束后关闭。先占位再握手，两个会话同时挂同一个 server 时
 	// 后来的那个等在这儿，而不是各起一个。
-	ready chan struct{}
+	ready  chan struct{}
+	cancel context.CancelFunc
 }
 
 type mcpPool struct {
@@ -98,11 +99,11 @@ func (p *mcpPool) acquire(
 			select {
 			case <-entry.ready:
 			case <-ctx.Done():
-				p.release(key)
+				p.releaseEntry(key, entry)
 				return nil, "", ctx.Err()
 			}
 			if entry.err != nil {
-				p.release(key)
+				p.releaseEntry(key, entry)
 				return nil, "", entry.err
 			}
 			return entry.client, key, nil
@@ -112,7 +113,8 @@ func (p *mcpPool) acquire(
 		go entry.close()
 	}
 
-	entry := &pooledEntry{refs: 1, startedAt: p.now(), ready: make(chan struct{})}
+	startCtx, cancel := context.WithCancel(context.Background())
+	entry := &pooledEntry{refs: 1, startedAt: p.now(), ready: make(chan struct{}), cancel: cancel}
 	p.entries[key] = entry
 	p.mu.Unlock()
 
@@ -125,34 +127,54 @@ func (p *mcpPool) acquire(
 			return auth[0](ctx, config.URL)
 		}
 	}
-	client, err := mcpclient.Start(ctx, mcpclient.Config{
-		AccessToken: token,
-		Command:     config.Command,
-		Args:        config.Args,
-		Env:         config.Env,
-		URL:         config.URL,
-		Headers:     config.Headers,
-	})
-	entry.client, entry.err = client, err
-	close(entry.ready)
+	go func() {
+		client, err := mcpclient.Start(startCtx, mcpclient.Config{
+			AccessToken: token,
+			Command:     config.Command,
+			Args:        config.Args,
+			Env:         config.Env,
+			URL:         config.URL,
+			Headers:     config.Headers,
+		})
+		entry.client, entry.err = client, err
+		close(entry.ready)
 
-	if err != nil {
-		// 失败不留在池里：下一个会话应该重试，而不是拿到同一个错误。
-		p.mu.Lock()
-		if p.entries[key] == entry {
-			delete(p.entries, key)
+		if err != nil {
+			// 失败不留在池里：下一个会话应该重试，而不是拿到同一个错误。
+			p.mu.Lock()
+			if p.entries[key] == entry {
+				delete(p.entries, key)
+			}
+			p.mu.Unlock()
 		}
-		p.mu.Unlock()
-		return nil, "", err
+	}()
+	select {
+	case <-entry.ready:
+		if entry.err != nil {
+			p.releaseEntry(key, entry)
+			return nil, "", entry.err
+		}
+		return entry.client, key, nil
+	case <-ctx.Done():
+		p.releaseEntry(key, entry)
+		return nil, "", ctx.Err()
 	}
-	return client, key, nil
 }
 
 // release 归还一条连接。最后一个用完的负责关掉它。
 func (p *mcpPool) release(key string) {
 	p.mu.Lock()
 	entry, ok := p.entries[key]
+	p.mu.Unlock()
 	if !ok {
+		return
+	}
+	p.releaseEntry(key, entry)
+}
+
+func (p *mcpPool) releaseEntry(key string, entry *pooledEntry) {
+	p.mu.Lock()
+	if p.entries[key] != entry {
 		p.mu.Unlock()
 		return
 	}
@@ -163,7 +185,8 @@ func (p *mcpPool) release(key string) {
 	}
 	delete(p.entries, key)
 	p.mu.Unlock()
-	entry.close()
+	entry.cancel()
+	go entry.close()
 }
 
 func (e *pooledEntry) close() {

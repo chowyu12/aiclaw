@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +124,11 @@ func New(options Options, out io.Writer) (*Server, error) {
 		outboundPending: map[int64]chan frame{},
 		shutdown:        make(chan struct{}),
 		db:              db,
+	}
+	if os.Getenv("AICLAW_SYSTEM_PROXY") == "1" {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = server.systemProxy
+		http.DefaultTransport = transport
 	}
 	oauthDir := options.DataHome
 	if options.AppDB != "" {
@@ -413,7 +419,12 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		}
 		session := s.session(params.SessionID)
 		if session == nil {
-			s.writeError(f.ID, codeInvalidParams, i18n.D("会话不存在或尚未恢复：{id}", "id", params.SessionID))
+			items, err := agent.StoredHistory(ctx, s.db, params.SessionID)
+			if err != nil {
+				s.writeError(f.ID, codeInternal, err.Error())
+				return
+			}
+			s.writeResult(f.ID, protocol.SessionHistoryResult{Items: items})
 			return
 		}
 		s.writeResult(f.ID, protocol.SessionHistoryResult{Items: session.History()})
@@ -578,6 +589,12 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 	}
 	s.submissionMu.Lock()
 	if existing := s.session(params.SessionID); existing != nil {
+		if params.Refresh != nil && params.Refresh.RecoveryModel != nil {
+			s.submissionMu.Unlock()
+			s.lifecycleMu.Unlock()
+			s.writeError(f.ID, codeInvalidParams, "session is already active; configure its model instead")
+			return
+		}
 		// 已经在内存里的会话，配置没变就直接回它现在的样子。
 		//
 		// 变了就卸掉重来（跑着的时候不动它：把会话卸了，那一轮的事件就没有
@@ -1189,8 +1206,13 @@ func (s *Server) requestHost(ctx context.Context, method string, params any) (js
 		return result.Result, nil
 	case <-ctx.Done():
 		s.outboundMu.Lock()
+		_, pending := s.outboundPending[id]
 		delete(s.outboundPending, id)
 		s.outboundMu.Unlock()
+		if pending {
+			params, _ := json.Marshal(map[string]any{"id": id, "method": method})
+			s.write(frame{JSONRPC: "2.0", Method: "host/requestCancelled", Params: params})
+		}
 		return nil, ctx.Err()
 	}
 }

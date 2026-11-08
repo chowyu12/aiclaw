@@ -38,6 +38,7 @@ export const IPC = {
   changesUndo: "changes:undo",
   sessionStart: "session:start",
   sessionResume: "session:resume",
+  sessionHistory: "session:history",
   sessionSend: "session:send",
   sessionInterrupt: "session:interrupt",
   sessionList: "session:list",

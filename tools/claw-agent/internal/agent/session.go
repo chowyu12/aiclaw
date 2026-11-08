@@ -1381,6 +1381,12 @@ func Load(
 	// 工作目录与模型不在这里面：换工作目录会让历史里的文件路径对不上；
 	// 模型是会话自己的选择（端点由宿主用 session/configure 另行对齐）。
 	if refresh != nil {
+		if refresh.RecoveryModel != nil {
+			if refresh.RecoveryModel.ProviderID <= 0 || strings.TrimSpace(refresh.RecoveryModel.Model) == "" {
+				return nil, i18n.E("恢复会话时请选择有效的模型服务和模型")
+			}
+			config.Model = *refresh.RecoveryModel
+		}
 		if refresh.EnabledBuiltins != nil {
 			config.EnabledBuiltins = refresh.EnabledBuiltins
 		}

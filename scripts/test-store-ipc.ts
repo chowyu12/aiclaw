@@ -14,6 +14,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { reactive, readonly } from "vue";
+import { draftFor } from "../apps/desktop/src/renderer/drafts.ts";
+
+test("草稿和附件按会话隔离，异步失败恢复到原会话", () => {
+  const first = draftFor("test-first");
+  first.text = "first draft";
+  first.attachments.push({ kind: "text", name: "notes.txt", text: "secret", truncated: false });
+  const second = draftFor("test-second");
+  assert.equal(second.text, "");
+  assert.deepEqual(second.attachments, []);
+  second.text = "second draft";
+  first.text += " restored";
+  assert.equal(draftFor("test-first").text, "first draft restored");
+  assert.equal(draftFor("test-second").text, "second draft");
+  assert.equal(draftFor("test-first").attachments[0]?.name, "notes.txt");
+});
 
 /** 与 store.ts 里那个同形。改那边要改这边。 */
 function plain<T>(value: T): T {

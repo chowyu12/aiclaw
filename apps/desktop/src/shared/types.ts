@@ -23,6 +23,7 @@ export interface RuntimeStatus {
 export interface ApprovalPayload {
   id: string;
   sessionId: string;
+  turnId: string;
   kind: "exec" | "write" | "tool";
   title: string;
   /** 完整命令或路径，原样展示不截断——用户要据此判断。 */
@@ -330,6 +331,7 @@ export interface RoleConfigView {
 }
 
 export interface AppConfigView {
+  systemProxy: boolean;
   theme: import("./themes.js").Theme;
   font: import("./typography.js").Font;
   fontSize: import("./typography.js").FontSize;
