@@ -1,5 +1,4 @@
 import type { SearchSource } from "../shared/types";
-import { referencedFiles } from "./markdown.js";
 import type { TimelineEntry } from "./store.js";
 
 /**
@@ -33,17 +32,6 @@ export interface Turn {
 export function finalMessage(turn: Turn): AgentEntry | null {
   const last = turn.entries.at(-1);
   return last?.kind === "agent" && !last.streaming ? last : null;
-}
-
-/** Tool artifacts stay in steps; only final-answer references select user-facing previews. */
-export function turnArtifacts(turn: Turn): string[] {
-  const answer = finalMessage(turn);
-  if (!answer) return [];
-  return referencedFiles(answer.text);
-}
-
-export function imageArtifacts(turn: Turn): string[] {
-  return turnArtifacts(turn).filter(path => /\.(png|jpe?g|webp|gif)$/i.test(path));
 }
 
 export function groupTurns(timeline: readonly TimelineEntry[]): Turn[] {

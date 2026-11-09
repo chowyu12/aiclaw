@@ -5,7 +5,7 @@ import { describeError } from "../errors";
 import { t } from "../i18n";
 import { filename } from "../file-card";
 
-const props = defineProps<{ paths: string[] }>();
+const props = defineProps<{ paths: string[]; embedded?: boolean; alt?: string }>();
 defineEmits<{ loaded: [] }>();
 const root = ref<HTMLElement | null>(null);
 const visible = ref(false);
@@ -47,10 +47,10 @@ watch(() => [visible.value, props.paths] as const, () => {
 </script>
 
 <template>
-  <div ref="root" class="generated-images" :class="{ multiple: paths.length > 1 }">
+  <div ref="root" class="generated-images" :class="{ multiple: paths.length > 1, embedded }">
     <figure v-for="path in paths" :key="path">
       <button v-if="media[path]?.dataUrl && !media[path]?.error" class="image-preview" :aria-label="t('查看大图')" @click="preview(path)">
-        <img :src="media[path]!.dataUrl" :alt="path" @load="$emit('loaded')" @error="media[path] = { error: t('图片无法显示') }" />
+        <img :src="media[path]!.dataUrl" :alt="alt || path" @load="$emit('loaded')" @error="media[path] = { error: t('图片无法显示') }" />
       </button>
       <p v-else-if="media[path]?.error" class="image-error" role="status">{{ media[path]!.error }}</p>
       <p v-else class="image-loading">{{ t("正在读取…") }}</p>
@@ -58,7 +58,7 @@ watch(() => [visible.value, props.paths] as const, () => {
     </figure>
     <dialog ref="viewer" class="image-viewer" :aria-label="t('查看大图')" @click="closeBackdrop" @close="selected = ''">
       <button class="viewer-close" :aria-label="t('关闭图片预览')" @click="viewer?.close()">×</button>
-      <img v-if="selected" :src="media[selected]?.dataUrl" :alt="selected" />
+      <img v-if="selected" :src="media[selected]?.dataUrl" :alt="alt || selected" />
       <p>{{ filename(selected) }}</p>
     </dialog>
   </div>
@@ -66,6 +66,7 @@ watch(() => [visible.value, props.paths] as const, () => {
 
 <style scoped>
 .generated-images { display: flex; flex-wrap: wrap; gap: 16px; max-width: var(--content-width); margin: 12px auto 20px; padding: 0 28px; }
+.generated-images.embedded { margin: 12px 0; padding: 0; max-width: 100%; }
 figure { margin: 0; max-width: 100%; }
 .image-preview { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
 .image-preview img { display: block; max-width: min(480px, 100%); max-height: 480px; width: auto; height: auto; border-radius: 12px; }

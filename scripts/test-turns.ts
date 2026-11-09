@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { groupTurns, turnBlocks, finalMessage, imageArtifacts, turnArtifacts, turnSources, stepsElapsed } from "../apps/desktop/src/renderer/turns.ts";
+import { groupTurns, turnBlocks, finalMessage, turnSources, stepsElapsed } from "../apps/desktop/src/renderer/turns.ts";
 import { activitySummary } from "../apps/desktop/src/renderer/activity-summary.ts";
 import type { TimelineEntry } from "../apps/desktop/src/renderer/store.ts";
 
@@ -37,17 +37,15 @@ test("截图会话中的辅助脚本只留在步骤，不成为回答附件", ()
     step("exec", { artifacts: paths }),
     agent("answer", "截图覆盖全部应用窗口，过程中新建的窗口已关闭。"),
   ])[0]!;
-  assert.deepEqual(turnArtifacts(turn), []);
-  assert.deepEqual(imageArtifacts(turn), []);
   assert.deepEqual(turn.steps[0]!.artifacts, paths);
+  assert.equal(finalMessage(turn)?.id, "answer");
 });
 
 test("任意中间文件不会自动交付，旧存档中的产物记录同样处理", () => {
   const paths = ["helper.swift", "inspect.py", "report.md", "report.docx", "tmp/screenshot.png", ".archify/run/candidate.json", "receipt.json", "speech.wav"];
   const turn = groupTurns([user("u"), step("write", { artifacts: paths }), agent("answer", "已完成。")])[0]!;
-  assert.deepEqual(turnArtifacts(turn), []);
-  assert.deepEqual(imageArtifacts(turn), []);
   assert.deepEqual(turn.steps[0]!.artifacts, paths);
+  assert.equal(finalMessage(turn)?.id, "answer");
 });
 
 test("仅最终回答选择交付文件，保留未由内置写文件工具生成的交付链接", () => {
@@ -57,8 +55,7 @@ test("仅最终回答选择交付文件，保留未由内置写文件工具生�
     step("write", { artifacts: ["helper.py", "tmp/screenshot.png", "report.docx", "final.png"] }),
     agent("answer", "[报告](/work/report.docx) ![最终图](/work/final.png) [命令生成的文件](/work/export.xlsx)"),
   ])[0]!;
-  assert.deepEqual(turnArtifacts(turn).sort(), ["/work/export.xlsx", "/work/final.png", "/work/report.docx"]);
-  assert.deepEqual(imageArtifacts(turn), ["/work/final.png"]);
+  assert.equal(finalMessage(turn)?.id, "answer");
 });
 
 test("流式回答或只有工具步骤时不提前发布产物，轮次之间不串图", () => {
@@ -66,13 +63,11 @@ test("流式回答或只有工具步骤时不提前发布产物，轮次之间�
     user("u1"), step("image", { artifacts: ["first.png"] }), agent("a1", "![图](/work/first.png)"),
     user("u2"), step("next", { artifacts: ["second.png"] }),
   ]);
-  assert.deepEqual(imageArtifacts(turns[0]!), ["/work/first.png"]);
-  assert.deepEqual(imageArtifacts(turns[1]!), []);
   turns[1]!.messages.push({ kind: "agent", id: "stream", text: "![图](/work/second.png)", streaming: true });
   turns[1]!.entries.push(turns[1]!.messages[0]!);
-  assert.deepEqual(imageArtifacts(turns[1]!), []);
+  assert.equal(finalMessage(turns[1]!), null);
   turns[1]!.messages[0]!.streaming = false;
-  assert.deepEqual(imageArtifacts(turns[1]!), ["/work/second.png"]);
+  assert.equal(finalMessage(turns[1]!)?.id, "stream");
 });
 
 test("一轮里交替出现的回答与步骤，步骤全部归成一块", () => {
@@ -175,7 +170,6 @@ test("中断在工具或采样阶段时，上一条进展不能冒充最终回�
   for (const kind of ["tool", "llm"] as const) {
     const turn = groupTurns([user("u"), agent("progress", "接下来检查。"), step("failed", { step: kind, state: "failed" })])[0]!;
     assert.equal(finalMessage(turn), null);
-    assert.deepEqual(turnArtifacts(turn), []);
     assert.equal(turnBlocks(turn)[0]?.key, "progress");
   }
 });

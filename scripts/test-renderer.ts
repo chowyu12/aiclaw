@@ -23,7 +23,7 @@ if (!(globalThis as { window?: unknown }).window) {
   (globalThis as { document?: unknown }).document = dom.window.document;
 }
 
-const { renderQuestionMarkdown, renderMarkdown, looksLikePath, referencedFiles, renderPreviewMarkdown } = await import("../apps/desktop/src/renderer/markdown.ts");
+const { renderQuestionMarkdown, renderMarkdown, looksLikePath, renderPreviewMarkdown } = await import("../apps/desktop/src/renderer/markdown.ts");
 
 /**
  * 把块之间的换行挤掉再比对。
@@ -501,7 +501,6 @@ test("句中和括号内的文件引用保持行内，独立文件保留完整�
     assert.ok(card.querySelector(".file-ref"));
     assert.equal(card.querySelector(".file-open-trigger")?.getAttribute("aria-haspopup"), "menu");
     assert.match(doc.querySelector("p")!.textContent!, /代理运行状态（.*），之前已经拉起。/);
-    assert.deepEqual(referencedFiles(source), ["/Applications/AIClaw Computer Use.app"]);
     const standalone = new JSDOM(renderMarkdown(reference)).window.document;
     assert.equal(standalone.querySelector(".file-card")?.hasAttribute("data-file-inline"), false);
     const table = new JSDOM(renderMarkdown(`| 应用 |\n| --- |\n| ${reference} |`)).window.document;
@@ -526,7 +525,6 @@ test("含斜杠的字段列表、日期和仓库名保留行内代码与完整�
     const doc = new JSDOM(renderMarkdown(source)).window.document;
     assert.equal(doc.querySelector(".file-card"), null, text);
     assert.equal(doc.querySelector("code")?.textContent, text);
-    assert.deepEqual(referencedFiles(source), [], text);
   }
 });
 
@@ -536,7 +534,6 @@ test("明确路径前缀仍可打开无扩展名的文件或目录", () => {
     const source = `文件：\`${text}\``;
     const doc = new JSDOM(renderMarkdown(source)).window.document;
     assert.equal(doc.querySelector(".file-card")?.getAttribute("data-file-path"), text);
-    assert.deepEqual(referencedFiles(source), [text]);
   }
 });
 
@@ -616,6 +613,9 @@ test("local Markdown previews never fetch images or inline CSS resources", () =>
  const doc=new JSDOM(html).window.document;
  assert.ok(doc.querySelector('h3'));assert.equal(doc.querySelector('img'),null);assert.equal(doc.querySelector('[style]'),null);assert.equal(doc.querySelector('script'),null);
  assert.ok(doc.body.textContent?.includes('Text'));
+ const forged = new JSDOM(renderPreviewMarkdown('<span class="local-image" data-local-image="/work/private.png" data-image-alt="forged">File</span>')).window.document;
+ assert.equal(forged.querySelector('[data-local-image]'), null);
+ assert.equal(forged.querySelector('[data-image-alt]'), null);
 });
 
 
@@ -625,10 +625,11 @@ test("explicit local image references use host-validated files without fetching 
     const path = source.includes("final image") ? "/work/final image.png" : "/work/final.png";
     assert.equal(doc.querySelector(".file-card")?.getAttribute("data-file-path"), path);
     assert.equal(doc.querySelector("img"), null);
-    assert.deepEqual(referencedFiles(source), [path]);
+    assert.equal(doc.querySelector(".local-image")?.getAttribute("data-local-image"), path);
+    assert.equal(doc.querySelector(".local-image")?.getAttribute("data-image-alt"), "最终图");
+    assert.equal(new JSDOM(renderPreviewMarkdown(source)).window.document.querySelector(".local-image"), null);
   }
   for (const source of ["![bad](file:///etc/passwd)", "![bad](javascript:alert(1))"]) {
-    assert.deepEqual(referencedFiles(source), []);
     assert.doesNotMatch(renderMarkdown(source), /data-file-path/);
   }
 });
@@ -653,7 +654,6 @@ test("Python 可执行路径和运行命令保持行内代码，脚本路径仍�
  const doc = new JSDOM(renderMarkdown(source)).window.document;
  assert.deepEqual([...doc.querySelectorAll("code")].map(node => node.textContent), ["/usr/bin/python3", "python3", "python3 sum1to100.py"]);
  assert.deepEqual([...doc.querySelectorAll(".file-card")].map(node => node.getAttribute("data-file-path")), ["sum1to100.py"]);
- assert.deepEqual(referencedFiles(source), ["sum1to100.py"]);
  assert.equal(looksLikePath("/opt/python3 sum1to100.py"), false);
  assert.equal(looksLikePath("我的 报表.xlsx"), true);
 });
@@ -667,7 +667,6 @@ test("终端命令、普通代码和文件引用分别渲染", () => {
  assert.equal(doc.querySelector(".file-card")?.getAttribute("data-file-path"), "sum1to100.py");
  assert.equal(doc.querySelector("pre.command-block code")?.textContent, "python3 sum1to100.py\n");
  assert.equal(doc.querySelector("pre.code-block code")?.textContent, "print(1)\n");
- assert.deepEqual(referencedFiles(source), ["sum1to100.py"]);
 });
 
 
@@ -703,4 +702,14 @@ test("HTML preview removes active content and navigation while forbidding remote
   assert.match(csp, /script-src 'none'/);
   assert.match(csp, /img-src data:/);
   assert.match(csp, /form-action 'none'/);
+});
+
+
+test("only explicit supported local image syntax schedules inline previews", () => {
+  for (const source of ["[下载](photo.jpg)", "`photo.jpg`", "![vector](photo.svg)", "![document](report.pdf)", "![remote](https://example.com/photo.jpg)"]) {
+    assert.equal(new JSDOM(renderMarkdown(source)).window.document.querySelector(".local-image"), null);
+  }
+  const source = "![Photo](</work/watch & strap.JPG>)";
+  const doc = new JSDOM(renderMarkdown(source)).window.document;
+  assert.equal(doc.querySelector(".local-image")?.getAttribute("data-local-image"), "/work/watch & strap.JPG");
 });

@@ -1,16 +1,24 @@
 <script setup lang="ts">
 import { nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import CodeBlock from "./CodeBlock.vue";
+import GeneratedImages from "./GeneratedImages.vue";
 import { fileLanguage, previewReference } from "../../shared/file-preview";
 import { actions } from "../store";
 import { t } from "../i18n";
 
+defineEmits<{ loaded: [] }>();
 const props = defineProps<{ html: string; basePath?: string; sessionId?: string; runScope?: string }>();
 const menu = ref<HTMLElement>();
 const content = ref<HTMLElement>();
 const codeTargets = shallowRef<{node: HTMLElement; code: string; language: string; runnable: boolean; key: string}[]>([]);
-watch(() => [props.html, props.sessionId, props.runScope], async () => {
+const imageTargets = shallowRef<{node: HTMLElement; path: string; alt: string}[]>([]);
+watch(() => [props.html, props.basePath, props.sessionId, props.runScope], async () => {
   await nextTick();
+  imageTargets.value = [...content.value?.querySelectorAll<HTMLElement>(".local-image[data-local-image]") ?? []].flatMap(node => {
+    const raw = node.getAttribute("data-local-image") ?? "";
+    if (!/\.(png|jpe?g|webp|gif)$/i.test(raw)) return [];
+    return [{node, path: props.basePath ? previewReference(props.basePath, raw) : raw, alt: node.getAttribute("data-image-alt") ?? ""}];
+  });
   codeTargets.value = [...content.value?.querySelectorAll<HTMLElement>(".code-card") ?? []].map((node, index) => {
     const pre = node.querySelector<HTMLPreElement>(":scope > pre");
     const code = pre?.querySelector("code")?.textContent ?? "";
@@ -71,6 +79,9 @@ onUnmounted(() => { window.removeEventListener("resize", close); document.remove
 <template>
   <div class="file-references">
     <div ref="content" class="file-reference-content" @click="activate" @keydown="onKey" v-html="html" />
+    <Teleport v-for="(target, index) in imageTargets" :key="JSON.stringify([sessionId, target.path, index])" :to="target.node">
+      <GeneratedImages :paths="[target.path]" :alt="target.alt" embedded @loaded="$emit('loaded')" />
+    </Teleport>
     <Teleport v-for="target in codeTargets" :key="target.key" :to="target.node">
       <CodeBlock :code="target.code" :language="target.language" :runnable="target.runnable" :session-id="sessionId" :run-key="target.key" />
     </Teleport>
@@ -82,6 +93,8 @@ onUnmounted(() => { window.removeEventListener("resize", close); document.remove
 </template>
 
 <style scoped>
+.file-reference-content :deep(.local-image) { display: block; }
+.file-reference-content :deep(.local-image:has(.image-preview) > .file-card) { display: none; }
 .file-reference-content :deep(.code-card:has(> .code-block-mount > .code-panel) > pre) { display: none; }
 .file-reference-content :deep(.code-card) { min-width: 0; margin: 0 0 0.85em; }
 .file-open-menu { position: fixed; margin: 0; width: 204px; max-width: calc(100vw - 16px); padding: 5px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); color: var(--ink); box-shadow: 0 8px 28px #0002; }

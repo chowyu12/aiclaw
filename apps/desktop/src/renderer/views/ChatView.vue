@@ -19,7 +19,7 @@ import {
   type TextAttachment,
 } from "../attachments";
 import ContextIndicator from "./ContextIndicator.vue";
-import { groupTurns, turnBlocks, finalMessage, imageArtifacts, turnSources, stepsElapsed, type Turn } from "../turns";
+import { groupTurns, turnBlocks, finalMessage, turnSources, stepsElapsed, type Turn } from "../turns";
 import { activitySummary } from "../activity-summary";
 import { renderMarkdown } from "../markdown";
 import { formatMessageTime, fullMessageTime } from "../message-meta";
@@ -36,7 +36,6 @@ import {
 } from "../mentions";
 import type { SessionSummaryView, SkillView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
-import GeneratedImages from "./GeneratedImages.vue";
 import FileReferences from "./FileReferences.vue";
 import SearchSources from "./SearchSources.vue";
 import ConfigurationCard from "./ConfigurationCard.vue";
@@ -856,14 +855,8 @@ const forking = ref(false);
             <!-- 最终回答独立于过程；复制、反馈和交付文件均只属于这条回答。 -->
             <div v-if="answerDone(turn)" class="say final-answer">
             <div v-if="answerDone(turn)" class="msg agent">
-              <FileReferences class="prose" :html="renderMarkdown(finalMessage(turn)!.text)" :session-id="store.sessionId" :run-scope="finalMessage(turn)!.id" />
+              <FileReferences class="prose" :html="renderMarkdown(finalMessage(turn)!.text)" :session-id="store.sessionId" :run-scope="finalMessage(turn)!.id" @loaded="turn.key === turns.at(-1)?.key && scrollToEnd()" />
             </div>
-            <GeneratedImages
-              v-if="answerDone(turn) && imageArtifacts(turn).length > 0"
-              :key="`${store.sessionId}:${turn.key}`"
-              :paths="imageArtifacts(turn)"
-              @loaded="turn.key === turns.at(-1)?.key && scrollToEnd()"
-            />
             <div v-if="answerDone(turn) || turnSources(turn).length > 0" class="answer-footer">
             <SearchSources v-if="turnSources(turn).length > 0" :key="`${store.sessionId}:${turn.key}`" :sources="turnSources(turn)" />
             <!-- 一轮一行，不是每截一行：一轮里模型会被采样好几次，回答散成几截，

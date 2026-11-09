@@ -149,8 +149,9 @@ md.renderer.rules.image = (tokens, index, _options, env) => {
   if (isLocalFileLink(src)) {
     let path = src;
     try { path = decodeURIComponent(src); } catch { /* Keep literal percent signs. */ }
-    if (env?.files instanceof Set) env.files.add(path);
-    return fileCard(path);
+    const fallback = fileCard(path);
+    if (env?.localImages === false || !/\.(png|jpe?g|webp|gif)$/i.test(path)) return fallback;
+    return `<span class="local-image" data-local-image="${md.utils.escapeHtml(path)}" data-image-alt="${md.utils.escapeHtml(alt)}">${fallback}</span>`;
   }
   if (!isSafeImage(src)) return md.utils.escapeHtml(alt || "图片");
   const safeSrc = md.utils.escapeHtml(src);
@@ -184,10 +185,9 @@ md.renderer.rules.fence = (tokens, index) => {
  * 可执行的那几类不给直接打开。所以这里认错了最多是点下去提示「找不到」，
  * 而模型伪造一个 `class="file-ref"` 也拿不到任何额外能力。
  */
-md.renderer.rules.code_inline = (tokens, index, _options, env) => {
+md.renderer.rules.code_inline = (tokens, index) => {
   const text = tokens[index]!.content;
   if (!looksLikePath(text)) return `<code${isCommand(text) ? ' class="command-inline"' : ""}>${md.utils.escapeHtml(text)}</code>`;
-  if (env?.files instanceof Set) env.files.add(text);
   return fileCard(text, tokens[index]!.meta?.fileInline === true || tokens.some((token, i) => i !== index && token.content.trim().length > 0));
 };
 
@@ -208,20 +208,12 @@ md.core.ruler.after("inline", "local-file-cards", state => {
       if (end < 0) continue;
       let path = href;
       try { path = decodeURIComponent(href); } catch { /* Keep literal paths with percent signs. */ }
-      if (state.env?.files instanceof Set) state.env.files.add(path);
       const card = new state.Token("html_inline", "", 0);
       card.content = fileCard(path, tableCell || children.some((child, index) => (index < i || index > end) && child.content.trim().length > 0));
       children.splice(i, end - i + 1, card);
     }
   }
 });
-
-/** File references actually rendered as cards, used to avoid duplicate trailing outputs. */
-export function referencedFiles(source: string): string[] {
-  const files = new Set<string>();
-  md.render(source, { files });
-  return [...files];
-}
 
 /** 删除线统一成 `<del>`：markdown-it 默认出 `<s>`，样式那边只认 del。 */
 md.renderer.rules.s_open = () => "<del>";
@@ -348,7 +340,7 @@ export function renderMarkdown(source: string): string {
 
 /** Local document previews never fetch embedded images or CSS resources automatically. */
 export function renderPreviewMarkdown(source: string): string {
-  return sanitizer().sanitize(md.render(source), { ...PURIFY_CONFIG, FORBID_TAGS: ["img"], FORBID_ATTR: ["style"] }) as unknown as string;
+  return sanitizer().sanitize(md.render(source, { localImages: false }), { ...PURIFY_CONFIG, FORBID_TAGS: ["img"], FORBID_ATTR: ["style", "data-local-image", "data-image-alt"] }) as unknown as string;
 }
 
 /** Questions render formatting without HTML, images or file actions; choices keep links inert. */
