@@ -323,3 +323,34 @@ test("a tick interrupted during dispatch does not start remaining tasks from its
   await tick;
   assert.equal(calls, 1);
 });
+
+test("task chat binding survives later runs, startup failure and scheduler restart", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "aiclaw-task-chat-"));
+  const targets: (string | undefined)[] = [];
+  let fail = false;
+  const host = {
+    async runTask(task: ScheduledTask) {
+      targets.push(task.lastSessionId);
+      const stored = JSON.parse(readFileSync(join(dir, "schedules.json"), "utf8")) as ScheduledTask[];
+      assert.equal(stored[0]!.lastSessionId, task.lastSessionId, "keep the binding before awaiting the host");
+      if (fail) throw Error("resume unavailable");
+      return { sessionId: task.lastSessionId || "dedicated-chat", turnId: `turn-${targets.length}` };
+    },
+    notify() {},
+  };
+  let scheduler = new Scheduler(dir, host);
+  const task = scheduler.save({ name: "daily", prompt: "check", rule: { kind: "daily", time: "09:00" } });
+  await scheduler.runNow(task.id);
+  scheduler.onTurnCompleted("dedicated-chat", undefined, "turn-1");
+  scheduler = new Scheduler(dir, host);
+  fail = true;
+  await assert.rejects(scheduler.runNow(task.id), /resume unavailable/);
+  assert.equal(scheduler.list()[0]!.lastSessionId, "dedicated-chat");
+  fail = false;
+  await scheduler.runNow(task.id);
+  scheduler.onTurnCompleted("dedicated-chat", undefined, "turn-1");
+  assert.equal(scheduler.list()[0]!.lastStatus, "running", "an old completion cannot finish the new run");
+  scheduler.onTurnCompleted("dedicated-chat", undefined, "turn-3");
+  assert.equal(scheduler.list()[0]!.lastStatus, "ok");
+  assert.deepEqual(targets, [undefined, "dedicated-chat", "dedicated-chat"]);
+});

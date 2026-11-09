@@ -12,7 +12,7 @@ import (
 
 // 定时任务：让模型替用户排「每天 9 点汇总邮件」「周五下午提醒我写周报」这类事。
 //
-// 调度器在宿主（桌面端）：到点时它用**当前的**应用配置开一个新会话，把任务的提示词
+// 调度器在宿主（桌面端）：到点时它首次创建任务会话并在后续执行中复用，把任务的提示词
 // 当作用户消息发出去——模型、MCP、技能都按那时的设置来，不用在任务里存一份会过期的配置。
 // 应用没开着时不会跑；错过 12 小时以内的，下次打开时补跑一次。
 //
@@ -24,11 +24,11 @@ func (s *Session) registerScheduleTools() error {
 		return nil
 	}
 	ruleSchema := map[string]any{
-		"mode":                map[string]any{"type": "string", "enum": []string{"followup", "cron"}, "description": "Default followup continues this chat; cron opens a new chat each run"},
+		"mode":                map[string]any{"type": "string", "enum": []string{"followup", "cron"}, "description": "Default followup continues this chat; cron reuses a dedicated chat for this task"},
 		"notification_policy": map[string]any{"type": "string", "enum": []string{"changes", "all"}, "description": "Followup defaults to notifying only changed results, errors, or completion"},
 		"stop_when":           map[string]any{"type": "string", "description": "User-requested completion condition. Leave empty for ongoing monitoring"},
 		"name":                map[string]any{"type": "string", "description": "Task name, kept short, e.g. \"Daily email digest\""},
-		"prompt":              map[string]any{"type": "string", "description": "The complete instruction to run when the task fires, treated as a message the user sends at that time. Spell out what to do and how to deliver the result (e.g. \"Summarize today's unread emails and list the ones I need to reply to\"). Followup keeps the current chat context; cron runs in a new chat"},
+		"prompt":              map[string]any{"type": "string", "description": "The complete instruction to run when the task fires, treated as a message the user sends at that time. Spell out what to do and how to deliver the result (e.g. \"Summarize today's unread emails and list the ones I need to reply to\"). Followup keeps the current chat context; cron keeps its own task chat"},
 		"kind": map[string]any{
 			"type": "string", "enum": []string{"daily", "weekdays", "weekly", "interval", "once"},
 			"description": "daily: every day; weekdays: every weekday (Monday to Friday); weekly: on chosen days each week; interval: every N minutes; once: run a single time",
@@ -43,7 +43,7 @@ func (s *Session) registerScheduleTools() error {
 
 	if err := register(tools.Tool{
 		Name: "schedule_create",
-		Description: "Create a scheduled task. Default followup continues the current chat; mode cron opens a new chat on each run. " +
+		Description: "Create a scheduled task. Default followup continues the current chat; mode cron creates a dedicated task chat on its first run and reuses it thereafter. " +
 			"Use it when the user says things like \"every day\", \"every week\", \"remind me\", \"on a schedule\" or \"in an hour\". Tasks only run while the app is open; " +
 			"the user is asked to confirm before the task is created. Times are in the user's local time zone.",
 		Schema: schemaOf(ruleSchema, "name", "prompt", "kind"),

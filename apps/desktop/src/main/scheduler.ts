@@ -18,8 +18,8 @@ import {
 /**
  * 定时任务的调度器。
  *
- * 跑在主进程里：到点时用**当前的**应用配置开一个新会话，把任务的提示词当作用户消息
- * 发出去——模型、MCP、技能、审批档位都按那时的设置，任务里不存一份会过期的配置。
+ * 跑在主进程里：首次运行时用当前应用配置创建任务会话，后续复用它，把任务提示词当作用户消息
+ * 发出去。恢复时刷新工具、技能与审批设置，保留会话本身的模型和历史。
  * 应用没开着时不会跑；错过 12 小时以内的，下次打开时补跑一次（见 dueState）。
  *
  * 每 30 秒看一眼有没有到点的，而不是给每个任务算好 setTimeout：电脑睡一觉醒来，
@@ -29,7 +29,7 @@ import {
  */
 
 export interface SchedulerHost {
-  /** 开一个后台会话并发出第一条消息，返回会话 id。不切换用户正在看的会话。 */
+  /** 在任务会话发出一轮消息，返回会话 id。不切换用户正在看的会话。 */
   runTask(task: ScheduledTask): Promise<string | { sessionId: string; turnId: string }>;
   /** 任务跑完（或失败）时通知用户。 */
   notify(task: ScheduledTask, ok: boolean, detail: string): void;
@@ -232,7 +232,7 @@ export class Scheduler extends EventEmitter {
     const startedAt = new Date().toISOString();
     this.update(task.id, item => {
       item.lastStatus = "running"; item.lastRunId = task.lastRunId; item.lastTurnId = undefined;
-      item.lastSessionId = task.mode === "followup" ? task.sessionId : undefined;
+      item.lastSessionId = task.mode === "followup" ? task.sessionId : task.lastSessionId;
       item.lastError = undefined; item.lastRunAt = startedAt;
     });
     try {

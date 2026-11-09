@@ -421,7 +421,7 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
-   * 给定时任务开一个后台会话并发出第一条消息。
+   * 同一任务复用后台会话；首次运行或会话已移除时才新建。
    *
    * 与 startSession 的区别：不动「当前会话」那几样状态（工作区、挂载结果）——用户
    * 可能正在看着别的会话，定时任务在旁边跑，不该把他那边的技能发现和状态栏换掉。
@@ -429,15 +429,19 @@ export class SessionManager extends EventEmitter {
   async runScheduledTask(task: import("../shared/schedule.js").ScheduledTask, text: string, bind: (id: string) => void): Promise<{sessionId: string; turnId: string}> {
     await this.start();
     const client = this.requireClient();
-    let sessionId: string;
-    if (task.mode === "followup") {
-      if (!task.sessionId) throw new Error(tr("请选择跟进的会话"));
+    let sessionId: string | undefined;
+    const previousId = task.mode === "followup" ? task.sessionId : task.lastSessionId;
+    if (task.mode === "followup" && !previousId) throw new Error(tr("请选择跟进的会话"));
+    if (previousId) {
       const summaries = await client.sessionList();
-      const source = summaries.find(item => item.id === task.sessionId && !item.parentId && !item.archivedAt);
-      if (!source) throw new Error(tr("原会话不存在或已归档"));
-      await client.sessionResume(task.sessionId, {...await this.buildRefresh(), enableAppConfig: false});
-      sessionId = task.sessionId;
-    } else {
+      const source = summaries.find(item => item.id === previousId && !item.parentId && !item.archivedAt);
+      if (!source && task.mode === "followup") throw new Error(tr("原会话不存在或已归档"));
+      if (source) {
+        await client.sessionResume(previousId, {...await this.buildRefresh(), enableAppConfig: false});
+        sessionId = previousId;
+      }
+    }
+    if (!sessionId) {
       const params = await this.buildParams(this.store.readConfig(), task.workspace);
       params.enableAppConfig = false;
       params.title = `⏰ ${task.name}`;
@@ -445,7 +449,7 @@ export class SessionManager extends EventEmitter {
       sessionId = (await client.sessionStart(params)).sessionId;
     }
     bind(sessionId);
-    const receipt = await client.turnStart(sessionId, text, undefined, undefined, undefined, task.lastRunId, task.mode === "followup");
+    const receipt = await client.turnStart(sessionId, text, undefined, undefined, undefined, task.lastRunId, true);
     return {sessionId, turnId: receipt.turnId};
   }
 

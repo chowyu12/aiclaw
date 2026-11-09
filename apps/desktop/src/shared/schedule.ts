@@ -186,7 +186,7 @@ export interface ScheduledTask {
   lastRunAt?: string;
   lastStatus?: "running" | "ok" | "failed" | "missed";
   lastError?: string;
-  /** 上次运行开的那个会话，界面上点它就打开。 */
+  /** 最近运行的会话；普通任务后续执行复用它，界面上点它就打开。 */
   lastSessionId?: string;
 }
 

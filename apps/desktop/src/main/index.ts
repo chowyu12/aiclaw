@@ -82,7 +82,7 @@ Previous result: ${JSON.stringify(task.lastResult ?? null)}
 Stop condition: ${JSON.stringify(task.stopWhen || "none; keep monitoring")}
 After checking, call schedule_report with id=${JSON.stringify(task.id)}, run_id=${JSON.stringify(task.lastRunId)}, a concise result and stable result_key reflecting observed state. Do not include the current timestamp in result_key. Set complete only after verifying the stop condition. Stay quiet if nothing changed.` : "");
     const receipt = await sessions.runScheduledTask(task, text, id => scheduler.bindRunSession(task.id, task.lastRunId!, id));
-    if (task.mode !== "followup") {
+    if (task.mode !== "followup" && receipt.sessionId !== task.lastSessionId) {
       const groups = store.readGroups();
       store.writeGroups({assignments: {...groups.assignments, [receipt.sessionId]: SCHEDULED_GROUP}});
     }

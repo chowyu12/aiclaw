@@ -13,7 +13,7 @@ import {
 } from "../../shared/schedule";
 
 /**
- * 设置 → 定时任务：到点时 AIClaw 自动开一个新会话，把任务的指令当作你的一条消息发出去。
+ * 设置 → 定时任务：到点时 AIClaw 复用任务会话（首次执行时创建），把任务的指令当作你的一条消息发出去。
  *
  * 也可以在对话里直接说「每天 9 点帮我汇总邮件」，模型会用 schedule_create 建一个
  * （建之前请你确认）；建出来的同样列在这里，能改、能停、能删。
@@ -214,7 +214,7 @@ function lastText(task: TaskRow): string {
       <header>
         <h2>{{ t("定时任务") }}</h2>
         <p class="sub">
-          {{ t("可在原会话持续跟进，也可每次开启新会话。跟进会保留检查结果，默认仅在结果变化、失败或完成时通知。") }}
+          {{ t("可在原会话持续跟进，也可使用任务专属会话。每个任务复用同一个会话；跟进默认仅在结果变化、失败或完成时通知。") }}
           {{ t("跟进结果留在原会话，满足停止条件后自动停用；新建会话的任务归入「定时任务」分组。") }}
         </p>
       </header>
@@ -233,7 +233,7 @@ function lastText(task: TaskRow): string {
 
       <!-- 新建 / 修改 -->
       <article v-if="editing" class="card editor">
-        <label><span>{{ t("执行方式") }}</span><select v-model="editing.mode"><option value="followup">{{ t("在原会话跟进") }}</option><option value="cron">{{ t("每次新建会话") }}</option></select></label>
+        <label><span>{{ t("执行方式") }}</span><select v-model="editing.mode"><option value="followup">{{ t("在原会话跟进") }}</option><option value="cron">{{ t("任务专属会话") }}</option></select></label>
         <label v-if="editing.mode === 'followup'"><span>{{ t("跟进会话") }}</span><select v-model="editing.sessionId"><option value="">{{ t("请选择跟进的会话") }}</option><option v-for="session in store.sessions.filter(item => !item.parentId)" :key="session.id" :value="session.id">{{ session.title || session.id }}</option></select></label>
         <label v-if="editing.mode === 'followup'"><span>{{ t("通知方式") }}</span><select v-model="editing.notificationPolicy"><option value="changes">{{ t("仅变化、失败或完成时通知") }}</option><option value="all">{{ t("每次执行后通知") }}</option></select></label>
         <label v-if="editing.mode === 'followup'"><span>{{ t("停止条件（可选）") }}</span><input v-model="editing.stopWhen" :placeholder="t('例如：检查通过后停止')" /></label>
@@ -321,7 +321,7 @@ function lastText(task: TaskRow): string {
           </label>
           <button class="icon" :disabled="!!store.schedulesError" :title="t(`删除`)" @click="remove(task)">×</button>
         </div>
-        <p class="hint">{{ task.mode === "followup" ? t("在原会话跟进") : t("每次新建会话") }} · {{ task.notificationPolicy === "changes" ? t("仅变化、失败或完成时通知") : t("每次执行后通知") }}</p>
+        <p class="hint">{{ task.mode === "followup" ? t("在原会话跟进") : t("任务专属会话") }} · {{ task.notificationPolicy === "changes" ? t("仅变化、失败或完成时通知") : t("每次执行后通知") }}</p>
         <p class="prompt">{{ task.prompt }}</p>
         <p v-if="task.lastResult" class="prompt">{{ t("上次检查结果：") }}{{ task.lastResult }}</p>
         <p v-if="task.stopWhen" class="hint">{{ t("停止条件：") }}{{ task.stopWhen }}</p>

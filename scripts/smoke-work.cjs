@@ -329,6 +329,37 @@ app.whenReady().then(async()=>{
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
 
 
+ // Exercise scheduled-session routing through the real SessionManager method.
+ const scheduledManager=Object.create(SessionManager.prototype),scheduledCalls=[];
+ let scheduledSources=[],resumeError=false,turnError=false,createdScheduled=0;
+ scheduledManager.start=async()=>{};
+ scheduledManager.store={readConfig:()=>({})};
+ scheduledManager.buildParams=async()=>({model:{model:'fixture'}});
+ scheduledManager.buildRefresh=async()=>({});
+ scheduledManager.client={running:true,
+  sessionList:async()=>scheduledSources,
+  sessionStart:async()=>{scheduledCalls.push('create');return {sessionId:`task-chat-${++createdScheduled}`};},
+  sessionResume:async id=>{scheduledCalls.push(`resume:${id}`);if(resumeError)throw Error('resume failed');},
+  turnStart:async(id,_text,_images,_audio,_references,_requestId,onlyIfIdle)=>{scheduledCalls.push(`turn:${id}`);if(onlyIfIdle!==true)throw Error('scheduled input must not interrupt a busy chat');if(turnError)throw Error('busy');return {turnId:'scheduled-turn'};},
+ };
+ const boundScheduled=[];
+ const runScheduled=task=>scheduledManager.runScheduledTask({id:'fixture-task',name:'fixture',workspace:'',...task},'fixture instruction',id=>boundScheduled.push(id));
+ const firstScheduled=await runScheduled({});
+ scheduledSources=[{id:firstScheduled.sessionId}];
+ const nextScheduled=await runScheduled({lastSessionId:firstScheduled.sessionId});
+ check('scheduled runs reuse their task chat and require it to be idle',createdScheduled===1&&nextScheduled.sessionId===firstScheduled.sessionId&&boundScheduled.length===2&&scheduledCalls.includes(`resume:${firstScheduled.sessionId}`));
+ resumeError=true;
+ let scheduledResumeFailed=false;try{await runScheduled({lastSessionId:firstScheduled.sessionId});}catch{scheduledResumeFailed=true;}
+ check('resume failure does not silently create another scheduled chat',scheduledResumeFailed&&createdScheduled===1);
+ resumeError=false;turnError=true;
+ let scheduledBusy=false;try{await runScheduled({lastSessionId:firstScheduled.sessionId});}catch{scheduledBusy=true;}
+ check('busy task chat does not trigger a replacement chat or replay',scheduledBusy&&createdScheduled===1);
+ turnError=false;scheduledSources=[{id:firstScheduled.sessionId,archivedAt:'2026-01-01'}];
+ const replacementScheduled=await runScheduled({lastSessionId:firstScheduled.sessionId});
+ check('archived task chat is replaced without altering its history',createdScheduled===2&&replacementScheduled.sessionId!==firstScheduled.sessionId);
+ let missingFollowup=false;try{await runScheduled({mode:'followup',sessionId:'removed-chat'});}catch{missingFollowup=true;}
+ check('missing explicit followup chat still fails instead of changing target',missingFollowup&&createdScheduled===2);
+
  const policyCalls=[];
  const manager=Object.create(SessionManager.prototype);manager.desktopSessions=new Set(['desktop-one','desktop-two']);
  manager.client={running:true,sessionConfigure:async(id,_model,_workspace,policy)=>{policyCalls.push([id,policy]);if(id==='desktop-two'&&policy==='always')throw Error('policy checkpoint failed');}};
