@@ -206,3 +206,8 @@ test("活动行直接描述工具做了什么，保留在进展说明之间", ()
   if (activity.kind === "activity") assert.equal(activitySummary(activity.steps), "检查浏览器连接");
   assert.equal(finalMessage(turn)?.text, "验证通过。");
 });
+
+test("code-mode 活动摘要不把 exec 包装与子工具重复计数", () => {
+  const steps = groupTurns([user("u"), step("exec", { title: "exec · 查询文件" }), step("child", { title: "read_file", parentId: "exec" }), step("wait", { title: "wait" })])[0]!.steps;
+  assert.equal(activitySummary(steps), "读取了 1 项内容");
+});

@@ -404,18 +404,19 @@ func TestToolArgumentsMayBeAJsonString(t *testing.T) {
 	}
 }
 
-func TestTimersAreDocumentedAsAbsent(t *testing.T) {
-	// goja 没有定时器。脚本用了会抛错，所以描述里必须提前说清楚，
-	// 否则模型会写出一个「轮询等待」然后在第一行就挂掉。
-	out, err := run(t, nil, `return typeof setTimeout;`)
-	if err != nil {
-		t.Fatal(err)
+func TestAwaitedTimersAndCancellation(t *testing.T) {
+	out, err := run(t, nil, `let hit=false; const id=setTimeout(()=>{hit=true},5);clearTimeout(id); await new Promise(resolve=>setTimeout(resolve,15));return hit;`)
+	if err != nil || out != "false" {
+		t.Fatalf("timer result=%q err=%v", out, err)
 	}
-	if out != "undefined" {
-		t.Skip("这个 goja 版本带了定时器，描述可以相应放开")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err = New(nil, DefaultLimits()).Run(ctx, `await new Promise(resolve=>setTimeout(resolve,60000));`)
+	if err == nil {
+		t.Fatal("timer wait ignored cancellation")
 	}
-	if !strings.Contains(Description(nil), "no timers such as setTimeout") {
-		t.Error("描述里要说明没有定时器")
+	if !strings.Contains(Description(nil), "setTimeout") {
+		t.Fatal("timer contract missing")
 	}
 }
 

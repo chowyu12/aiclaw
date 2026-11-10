@@ -77,7 +77,7 @@ func Description(tools []Tool) string {
 
 - Every exec call must include both title and code. The title is a short action in the user's language, describing the goal (e.g. check the current time or search for GDP data), not a tool name or code. Example arguments: {"title":"确认当前时间","code":"text(await tools.run_command({command: 'date', reason: '确认当前时间'}));"}.
 - The code runs in an isolated JS environment: no require, no file system, no network, no console,
-  **and no timers such as setTimeout** (to wait, just await the tool; don't build your own polling).
+  with bounded setTimeout/clearTimeout for awaited waits (maximum delay 60000 ms).
   Only the tools and helpers listed below are available. To read or write files or run commands, use the corresponding tools.
 - Pass raw JavaScript source; don't wrap it in markdown code fences.
 - Every tool lives on the global tools object and returns a Promise: const r = await tools.some_tool({ ... }).
@@ -87,7 +87,7 @@ func Description(tools []Tool) string {
   string concatenation give the raw JSON text; to .slice it, JSON.stringify(r) first. run_command returns a string with no .stdout.
 - When the name is in a variable, write tools[name], **without the tools. prefix in the name** — the list below shows the call form
   tools.some_tool(...), where the tool name is only the "some_tool" part.
-- A failing tool throws an exception; catch it with try/catch and try another approach.
+- A failing tool throws an exception; catch it with try/catch and inspect current state before retrying any side effect.
 - Oversized printed output is a partial preview. Follow output_id with the top-level read_tool_output tool to recover pages. Store complete structured results before selecting fields. A deliberate head/tail/slice is also partial evidence; inspect relevant fields/pages before claiming data is absent.
 - **Return only the results you need**: keep intermediate data inside the script instead of text()-ing all of it.
   That is the whole point of exec — a dozen queries, and only the last few lines come back.
@@ -95,8 +95,14 @@ func Description(tools []Tool) string {
 Helpers:
 - text(value): append a line of output. Objects are JSON-encoded.
 - exit(): stop immediately (like an early return).
-- store(key, value) / load(key): save and load data across runs within the same chat.
+- store(key, value) / load(key): save JSON-serializable data across runs within the same live chat, including tool catalog refreshes. Snapshots are copied; changes require another store(). Limit: 1 MiB per value, 8 MiB / 256 keys per chat. Data is not persisted across app restarts.
 - ALL_TOOLS: [{ name, description }]; filter it yourself to find tools.
+- tools.tool_search({query, limit:8}) / tools.tool_describe({name}): get complete descriptions, inputSchema and TypeScript declarations. Inspect unfamiliar parameters before calling.
+- setTimeout(callback, delayMs) / clearTimeout(id): bounded timers; await a Promise to keep the script alive. Unawaited timers do not keep it alive.
+- notify(value): print output and request an immediate yield to the model.
+- yield_control(): yield accumulated output while the script continues.
+- image(dataUrlOrContent), audio(dataUrlOrContent), generatedImage({image_url, output_hint?}): explicitly emit base64 data URLs or individual MCP media blocks. No HTTP URLs. Media is separate from text truncation. Audio is delivered as a playable file; models without audio input use transcribe_audio if needed.
+- exec accepts yield_time_ms and max_output_tokens. When it returns a running cell_id, call the top-level wait({cell_id}) for new output or wait({cell_id,terminate:true}) to cancel. Never restart the original script to poll. Cells stop when their originating turn ends or is canceled.
 
 Example:
   const rows = [];
@@ -128,7 +134,7 @@ Example:
 		// 存在的东西：只写「还有 101 个」，它就断定没有；而按字母序取前几个，看到的
 		// 全是同一个前缀（一串「企业 xx 查询」），另一头的整块工具照样看不见。
 		builder.WriteString(fmt.Sprintf(
-			"…and %d more without signatures listed, e.g. %s. Search ALL_TOOLS by name or description to find the full name, then call it directly.\n",
+			"…and %d more without signatures listed, e.g. %s. Search ALL_TOOLS by name or description to find the full name, then use tools.tool_describe({name}) for its full parameters before calling it.\n",
 			len(hidden), strings.Join(sampleIdents(hidden, sampledHidden), ", "),
 		))
 	}

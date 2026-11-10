@@ -33,7 +33,7 @@ import (
 // 给模型看的消息，没有这些数字。所以历史步骤不带时间——**宁可不显示，也不要
 // 编一个**，界面上那几个数字是用来判断「慢在等模型还是慢在跑工具」的。
 func (s *Session) History() []protocol.Item {
-	return renderHistory(s.historyMessages(), s.config.Model.Model)
+	return s.withCodeTraces(renderHistory(s.historyMessages(), s.config.Model.Model))
 }
 
 // StoredHistory reads a transcript without starting a model client or mounting tools.
@@ -57,7 +57,7 @@ func StoredHistory(ctx context.Context, db *store.Store, id string) ([]protocol.
 	if err != nil {
 		return nil, err
 	}
-	return renderHistory(messages, config.Model.Model), nil
+	return s.withCodeTraces(renderHistory(messages, config.Model.Model)), nil
 }
 
 func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
@@ -66,7 +66,11 @@ func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
 	results := make(map[string]string, len(messages))
 	artifacts := make(map[string][]string)
 	sources := make(map[string][]protocol.SearchSource)
+	content := make(map[string][]protocol.ToolContent)
 	for _, message := range messages {
+		if message.Role == llm.RoleTool {
+			content[message.ToolCallID] = message.OutputContent
+		}
 		if message.Role == llm.RoleTool {
 			results[message.ToolCallID] = message.Content
 			artifacts[message.ToolCallID] = message.Artifacts
@@ -136,6 +140,8 @@ func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
 				items = append(items, protocol.Item{
 					ID:       historyID("tool", index*1000+callIndex),
 					Kind:     protocol.ItemToolCall,
+					CallID:   call.ID,
+					Content:  content[call.ID],
 					ToolName: call.Name,
 					ToolArgs: call.Arguments,
 					// 没有结果说明那次调用没跑完（中断过）。标成失败而不是留空，

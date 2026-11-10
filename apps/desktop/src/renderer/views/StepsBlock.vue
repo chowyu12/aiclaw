@@ -93,7 +93,7 @@ function llmSubline(step: Turn["steps"][number]): string {
     </button>
 
     <div v-if="open" class="steps-body">
-      <details v-for="step in turn.steps" :key="step.id" class="step" :data-state="step.state">
+      <details v-for="step in turn.steps" :key="step.id" class="step" :data-state="step.state" :data-nested="!!step.parentId">
         <summary @click="loadArtifacts(step)">
           <div class="row">
             <span class="dot" />
@@ -113,6 +113,9 @@ function llmSubline(step: Turn["steps"][number]): string {
           </div>
         </summary>
         <pre v-if="step.detail" class="step-detail">{{ step.detail }}</pre>
+        <div v-for="(content, index) in step.content?.filter(item => item.type === 'image' && item.url.startsWith('data:image/')) ?? []" :key="index" class="artifact">
+          <img :src="content.url" :alt="content.hint || 'Tool image'" />
+        </div>
 
         <!-- 产出物：生成的图直接画出来、语音给个播放器。只显示不算完——
              点一下能在访达里打开，用户要的往往是那个文件本身。 -->
@@ -395,4 +398,6 @@ function llmSubline(step: Turn["steps"][number]): string {
 .steps-head.live {
   color: var(--ink-2);
 }
+
+.step[data-nested="true"] { margin-inline-start: 14px; }
 </style>

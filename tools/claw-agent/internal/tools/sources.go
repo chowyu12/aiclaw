@@ -30,11 +30,15 @@ func (s *SourceSink) Sources() []protocol.SearchSource {
 }
 
 func RecordSearchSources(ctx context.Context, output string) {
+	RecordSources(ctx, ParseSearchSources(output))
+}
+
+// RecordSources propagates nested tool evidence to its enclosing execution.
+func RecordSources(ctx context.Context, sources []protocol.SearchSource) {
 	sink, ok := ctx.Value(sourceKey{}).(*SourceSink)
 	if !ok {
 		return
 	}
-	sources := ParseSearchSources(output)
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
 	for _, source := range sources {

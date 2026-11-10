@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/codemode"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/mcpclient"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/memory"
@@ -97,6 +98,10 @@ type Session struct {
 	messages     []llm.Message
 	registry     *tools.Registry
 	codeModeBase *tools.Registry
+	codeRuntime  *codemode.Runtime
+	codeCells    *codemode.Cells
+	codeTraceMu  sync.Mutex
+	codeTraces   map[string][]protocol.Item
 	mcpBindings  map[string]*mcpBinding
 	// mcpKeys 是这个会话从连接池里借走的那些连接。Close 时归还，
 	// 最后一个用完的会话负责真正关掉它——见 mcppool.go。
@@ -1253,6 +1258,9 @@ func (s *Session) Busy() bool {
 // Close 关闭所有 MCP 子进程。
 func (s *Session) Close() {
 	s.Interrupt()
+	if s.codeCells != nil {
+		s.codeCells.Close()
+	}
 	if s.shells != nil {
 		s.shells.Close()
 	}
@@ -1274,6 +1282,9 @@ func (s *Session) Interrupt() {
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
+	}
+	if s.codeCells != nil {
+		s.codeCells.CancelAll()
 	}
 }
 
@@ -1343,7 +1354,7 @@ func (s *Session) Save(ctx context.Context, db *store.Store) error {
 	if err != nil {
 		return err
 	}
-	return db.Save(ctx, store.Session{
+	if err := db.Save(ctx, store.Session{
 		ID:        snapshot.ID,
 		Title:     snapshot.Title,
 		CreatedAt: snapshot.CreatedAt,
@@ -1354,7 +1365,10 @@ func (s *Session) Save(ctx context.Context, db *store.Store) error {
 		TurnCount: snapshot.TurnCount,
 		Config:    config,
 		Messages:  messages,
-	})
+	}); err != nil {
+		return err
+	}
+	return s.saveCodeTraces(ctx, db)
 }
 
 // Load 从库里恢复一个会话并重新挂载工具。

@@ -238,3 +238,18 @@ test("stopped turns do not create unread completion dots; failures do", () => {
     assert.equal(!!live.A!.unread, error === "model unavailable");
   }
 });
+
+test("code-mode 子调用在实时事件与恢复历史中保留父步骤和失败状态", () => {
+  const live = fresh();
+  const item = { id: "child", parentId: "exec", kind: "toolCall", toolName: "read_file", toolArgs: '{}', toolResult: "denied", toolFailed: true, durationMs: 12 };
+  applyAgentEvent(live, event("item/started", "A", { item }), "A");
+  applyAgentEvent(live, event("item/completed", "A", { item }), "A");
+  const step = live.A!.timeline[0]!;
+  assert.ok(step.kind === "step");
+  assert.equal(step.parentId, "exec");
+  assert.equal(step.state, "failed");
+  const restored = restoreHistory([item])[0]!;
+  assert.ok(restored.kind === "step");
+  assert.equal(restored.parentId, "exec");
+  assert.equal(restored.durationMs, 12);
+});

@@ -52,6 +52,9 @@ type ApprovalFunc func(
 
 // Env 是工具执行时的环境。
 type Env struct {
+	// RunContext owns yielded code-mode cells until this turn ends or is canceled.
+	RunContext context.Context
+
 	SaveOutput   OutputSaver
 	SecretValues []string
 	// Optional observation hooks receive successful known skill loads/file reads.

@@ -2,9 +2,14 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"time"
+	"fmt"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/mcpclient"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
+	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/codemode"
@@ -41,34 +46,28 @@ func (s *Session) installCodeMode() int {
 		return 0
 	}
 
-	bridged := make([]codemode.Tool, 0, len(existing))
+	if s.codeRuntime == nil {
+		s.codeRuntime = codemode.New(nil, codemode.DefaultLimits())
+		s.codeRuntime.WorkerCommand = codemode.SelfWorkerCommand()
+		s.codeRuntime.SaveOutput = s.saveToolOutput
+		s.codeCells = codemode.NewCells(s.codeRuntime)
+	}
+	bridged := make([]codemode.Tool, 0, len(existing)+2)
 	for _, tool := range existing {
-		tool := tool
-		bridged = append(bridged, codemode.Tool{
-			ParallelSafe: tool.ParallelSafe(),
-			Name:         tool.Name,
-			Description:  tool.Description,
-			Schema:       tool.Schema,
-			Call: func(ctx context.Context, arguments json.RawMessage) (string, error) {
-				// env 由 exec 的 handler 在调用时塞进来——它是每轮新建的，
-				// 不能在这里捕获。
-				env, ok := ctx.Value(envKey{}).(*tools.Env)
-				if !ok {
-					return "", i18n.E("内部错误：脚本里拿不到执行环境")
-				}
-				// 脚本里调的工具也记一笔用量：不记的话开了代码模式的会话，统计里全是 exec。
-				started := time.Now()
-				output, err := tool.Handler(ctx, arguments, env)
-				s.recordToolUsage(tool.Name, arguments, started, err != nil, "exec")
-				return output, err
-			},
-		})
+		bridged = append(bridged, s.bridgeCodeTool(tool))
 	}
 	bridged = codemode.AssignIdentifiers(bridged)
-
-	runtime := codemode.New(bridged, codemode.DefaultLimits())
-	runtime.SaveOutput = s.saveToolOutput
-	description := codemode.Description(bridged)
+	for _, discovery := range s.codeRuntime.DiscoveryTools() {
+		native := discovery.Call
+		tool := tools.Tool{Name: discovery.Name, Description: discovery.Description, Schema: discovery.Schema, Effect: tools.EffectRead,
+			Handler: func(ctx context.Context, args json.RawMessage, _ *tools.Env) (string, error) {
+				return native(ctx, args)
+			}}
+		discovery.Call = s.bridgeCodeTool(tool).Call
+		bridged = append(bridged, discovery)
+	}
+	s.codeRuntime.UpdateTools(bridged)
+	description := codemode.Description(s.codeRuntime.Tools())
 	before, after := codeModeSavings(existing, description)
 	s.codeModeTokens = [2]int{before, after}
 
@@ -84,14 +83,18 @@ func (s *Session) installCodeMode() int {
 			"type": "object",
 			"properties": {
 				"title": {"type": "string", "minLength": 1, "description": "A short action title in the user's language describing what this step will do, e.g. check the current time or search for GDP data. Do not use code, variable declarations, or generic labels such as call run_command as the title."},
-				"code": {"type": "string", "description": "The JavaScript to run. Top-level await and return are allowed."}
+				"code": {"type": "string", "description": "The JavaScript to run. Top-level await and return are allowed."},
+                "yield_time_ms":{"type":"integer","minimum":0,"maximum":60000,"description":"Return early with a cell_id if the script is still running; default 30000 ms."},
+                "max_output_tokens":{"type":"integer","minimum":1,"maximum":6144,"description":"Approximate text output budget; default 6000. Media has a separate limit."}
 			},
 			"required": ["title", "code"],
 			"additionalProperties": false
 		}`),
 		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
 			var args struct {
-				Code string `json:"code"`
+				Code      string `json:"code"`
+				YieldMS   *int   `json:"yield_time_ms"`
+				MaxTokens *int   `json:"max_output_tokens"`
 			}
 			if err := json.Unmarshal(raw, &args); err != nil {
 				return "", errors.New(tools.ExplainBadArguments(string(raw), err))
@@ -99,7 +102,19 @@ func (s *Session) installCodeMode() int {
 			if args.Code == "" {
 				return "", i18n.E("code 不能为空")
 			}
-			return runtime.Run(context.WithValue(ctx, envKey{}, env), args.Code)
+			ms, bytes, err := codeObservationLimits(args.YieldMS, args.MaxTokens)
+			if err != nil {
+				return "", err
+			}
+			lifetime := ctx
+			if env != nil && env.RunContext != nil {
+				lifetime = env.RunContext
+			}
+			observation, err := s.codeCells.Start(context.WithValue(ctx, envKey{}, env), lifetime, args.Code, ms, bytes)
+			if err != nil {
+				return "", err
+			}
+			return s.codeObservation(ctx, env, observation)
 		},
 	})
 	if err != nil {
@@ -108,9 +123,13 @@ func (s *Session) installCodeMode() int {
 		return 0
 	}
 
+	if err := replacement.Register(s.codeWaitTool()); err != nil {
+		return 0
+	}
+
 	if len(s.folded) > 0 {
 		for _, tool := range s.registry.List() {
-			if tool.Name != "exec" {
+			if tool.Name != "exec" && tool.Name != "wait" {
 				_ = replacement.Register(tool)
 			}
 		}
@@ -120,7 +139,7 @@ func (s *Session) installCodeMode() int {
 	for _, tool := range existing {
 		s.folded = append(s.folded, tool.Name)
 	}
-	return len(bridged)
+	return len(existing)
 }
 
 // FoldedTools 返回代码模式下被收进 exec 的工具名；没开代码模式是空的。
@@ -163,5 +182,133 @@ func (s *Session) foldStatusIntoExec() {
 			continue
 		}
 		s.mcpStatus[name] = i18n.D("已挂载 {n} 个工具（已收进 exec，不单独占用上下文）", "n", mounted)
+	}
+}
+
+func codeObservationLimits(ms, tokens *int) (int, int, error) {
+	wait, budget := 30000, 6000
+	if ms != nil {
+		wait = *ms
+	}
+	if tokens != nil {
+		budget = *tokens
+	}
+	if wait < 0 || wait > 60000 || budget < 1 || budget > 6144 {
+		return 0, 0, errors.New("yield_time_ms must be 0..60000 and max_output_tokens 1..6144")
+	}
+	return wait, budget * 4, nil
+}
+
+func (s *Session) codeWaitTool() tools.Tool {
+	return tools.Tool{Name: "wait", Effect: tools.EffectRead,
+		Description: "Continue observing a yielded exec cell without rerunning it. Only new output is returned. Use only with the cell_id from exec. terminate=true cancels the cell and its nested tools. Cells are session-local and stop at the end of their originating turn.",
+		Schema:      json.RawMessage(`{"type":"object","properties":{"cell_id":{"type":"string"},"yield_time_ms":{"type":"integer","minimum":0,"maximum":60000},"max_output_tokens":{"type":"integer","minimum":1,"maximum":6144},"terminate":{"type":"boolean"}},"required":["cell_id"],"additionalProperties":false}`),
+		Handler: func(ctx context.Context, raw json.RawMessage, env *tools.Env) (string, error) {
+			var args struct {
+				ID        string `json:"cell_id"`
+				YieldMS   *int   `json:"yield_time_ms"`
+				MaxTokens *int   `json:"max_output_tokens"`
+				Terminate bool   `json:"terminate"`
+			}
+			if err := json.Unmarshal(raw, &args); err != nil {
+				return "", err
+			}
+			if args.YieldMS == nil {
+				v := 10000
+				args.YieldMS = &v
+			}
+			ms, bytes, err := codeObservationLimits(args.YieldMS, args.MaxTokens)
+			if err != nil {
+				return "", err
+			}
+			observation, err := s.codeCells.Wait(ctx, args.ID, ms, bytes, args.Terminate)
+			if err != nil {
+				return "", err
+			}
+			return s.codeObservation(ctx, env, observation)
+		},
+	}
+}
+
+func (s *Session) codeObservation(ctx context.Context, env *tools.Env, o codemode.Observation) (string, error) {
+	text := o.Text
+	for _, item := range o.Media {
+		if env == nil {
+			return text, errors.New("media output requires a tool environment")
+		}
+		tools.EmitContent(ctx, protocol.ToolContent{Type: item.Type, URL: item.URL, Hint: item.Hint})
+		prefix, encoded, _ := strings.Cut(item.URL, ",")
+		data, err := base64.StdEncoding.DecodeString(encoded)
+		if err != nil {
+			return text, err
+		}
+		if item.Type != "audio" {
+			env.Attach(data)
+		}
+		if item.Type == "generatedImage" || item.Type == "audio" {
+			kind, ext := "image", detectImageExt(data)
+			if item.Type == "audio" {
+				kind = "audio"
+				ext = "wav"
+				switch {
+				case strings.Contains(prefix, "mpeg"):
+					ext = "mp3"
+				case strings.Contains(prefix, "ogg"):
+					ext = "ogg"
+				case strings.Contains(prefix, "mp4"):
+					ext = "m4a"
+				case strings.Contains(prefix, "webm"):
+					ext = "webm"
+				}
+			}
+			effect := tools.EffectWrite
+			_, inside, err := env.ResolveWrite(generatedDir + "/output." + ext)
+			if err != nil {
+				return text, err
+			}
+			if !inside {
+				effect = tools.EffectWriteOutside
+			}
+			if err := env.RequestApproval(ctx, effect, protocol.ApprovalWrite, "Save code-mode media", generatedDir, "Save explicitly emitted media as a local file"); err != nil {
+				return text, err
+			}
+			path, err := saveGenerated(env, kind+"-"+newID("media"), ext, data)
+			if err != nil {
+				return text, err
+			}
+			tools.Produce(ctx, path)
+			text += fmt.Sprintf("\n%s output: %s", kind, path)
+			if item.Hint != "" {
+				text += "\n" + item.Hint
+			}
+		}
+	}
+	if o.Running {
+		text += "\nScript running with cell ID " + o.ID + "; use wait with cell_id to continue. Do not rerun this script."
+	}
+	return strings.TrimSpace(text), o.Error
+}
+
+// All nested entry points, including metadata discovery, share the same execution boundary.
+func (s *Session) bridgeCodeTool(tool tools.Tool) codemode.Tool {
+	return codemode.Tool{ParallelSafe: tool.ParallelSafe(), Name: tool.Name, Description: tool.Description, Schema: tool.Schema,
+		Call: func(ctx context.Context, args json.RawMessage) (string, error) {
+			env, ok := ctx.Value(envKey{}).(*tools.Env)
+			if !ok || env == nil {
+				return "", i18n.E("内部错误：脚本里拿不到执行环境")
+			}
+			scope, _ := ctx.Value(toolExecutionKey{}).(*toolExecutionScope)
+			_, output, err := s.executeRecorded(ctx, llm.ToolCall{Name: tool.Name, Arguments: string(args)}, env, scope, "exec", func(ctx context.Context) (string, error) {
+				return invokeToolHandler(mcpclient.WithStructuredOutput(ctx), tool, args, env)
+			})
+			return output, err
+		},
+	}
+}
+
+// KeepCodeModeState preserves live chat data when idle settings remount its tools.
+func (s *Session) KeepCodeModeState(previous *Session) {
+	if previous != nil && previous.ID == s.ID && previous.codeRuntime != nil && s.codeRuntime != nil {
+		s.codeRuntime.CopyStateFrom(previous.codeRuntime)
 	}
 }

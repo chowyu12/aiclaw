@@ -52,8 +52,8 @@ func TestCodeModeReplacesTheWholeToolList(t *testing.T) {
 	// 这是它存在的理由：工具清单每次请求整份重发、压缩碰不到它。
 	session := codeModeSession(t, &recordingEmitter{approve: true})
 	names := session.registry.Names()
-	if len(names) != 1 || names[0] != "exec" {
-		t.Fatalf("应当只剩 exec，实际 %v", names)
+	if len(names) != 2 || names[0] != "exec" || names[1] != "wait" {
+		t.Fatalf("应当保留 exec 和 wait，实际 %v", names)
 	}
 	// 而且原来那些工具要在描述里能找到，否则模型不知道能调什么。
 	tool, _ := session.registry.Get("exec")
@@ -142,7 +142,7 @@ func TestSkillsStayOutsideCodeMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	names := session.registry.Names()
-	if len(names) != 2 {
+	if len(names) != 3 {
 		t.Fatalf("exec 之外还应当能再挂工具，实际 %v", names)
 	}
 }

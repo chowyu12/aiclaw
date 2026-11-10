@@ -51,6 +51,8 @@ export type TimelineEntry =
   | {
       kind: "step";
       id: string;
+      parentId?: string;
+      content?: readonly { type: string; url: string; hint?: string }[];
       /** llm：一次模型采样；tool：工具调用；notice：内核说的话。 */
       step: "llm" | "tool" | "notice";
       title: string;
@@ -105,6 +107,8 @@ export interface Applied {
 
 type StepStats = Pick<
   Extract<TimelineEntry, { kind: "step" }>,
+  | "content"
+  | "parentId"
   | "seq"
   | "startedAt"
   | "durationMs"
@@ -180,6 +184,8 @@ function pushStep(
 export function stepStats(item: Record<string, unknown>): StepStats {
   const usage = item.usage as { totalTokens?: number } | undefined;
   return {
+    content: Array.isArray(item.content) ? item.content as { type: string; url: string; hint?: string }[] : undefined,
+    parentId: typeof item.parentId === "string" ? item.parentId : undefined,
     seq: numberOr(item.seq),
     startedAt: numberOr(item.startedAt),
     durationMs: numberOr(item.durationMs),

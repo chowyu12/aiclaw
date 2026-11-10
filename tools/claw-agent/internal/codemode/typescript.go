@@ -51,6 +51,18 @@ func render(node any, depth int) string {
 		return "unknown"
 	}
 
+	if types, ok := schema["type"].([]any); ok {
+		variants := make([]any, 0, len(types))
+		for _, kind := range types {
+			branch := make(map[string]any, len(schema))
+			for k, v := range schema {
+				branch[k] = v
+			}
+			branch["type"] = kind
+			variants = append(variants, branch)
+		}
+		return renderUnion(variants, depth)
+	}
 	// enum 优先：它比 type 更具体，"a" | "b" 比 string 有用得多。
 	if values, ok := schema["enum"].([]any); ok && len(values) > 0 {
 		return renderEnum(values)

@@ -30,6 +30,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/telemetry"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/codemode"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/searchmcp"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/server"
 	"go.opentelemetry.io/otel/log"
@@ -54,6 +55,8 @@ func run(args []string) error {
 		return usageError()
 	}
 	switch args[0] {
+	case "code-mode-worker":
+		return codemode.ServeWorker(os.Stdin, os.Stdout)
 	case "serve":
 		return runServe(args[1:])
 	case "mcp-search":

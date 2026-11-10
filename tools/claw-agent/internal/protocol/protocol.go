@@ -983,10 +983,19 @@ const (
 	ItemNotice ItemKind = "notice"
 )
 
+type ToolContent struct {
+	Type string `json:"type"`
+	URL  string `json:"url"`
+	Hint string `json:"hint,omitempty"`
+}
+
 type Item struct {
-	RequestID string   `json:"requestId,omitempty"`
-	ID        string   `json:"id"`
-	Kind      ItemKind `json:"kind"`
+	Content   []ToolContent `json:"content,omitempty"`
+	CallID    string        `json:"callId,omitempty"`
+	ParentID  string        `json:"parentId,omitempty"`
+	RequestID string        `json:"requestId,omitempty"`
+	ID        string        `json:"id"`
+	Kind      ItemKind      `json:"kind"`
 	/** 用户消息与助手消息的时间（Unix 毫秒）。界面在消息下面显示；0 表示不知道（旧存档）。 */
 	At int64 `json:"at,omitempty"`
 	/** 文本类条目的正文。 */

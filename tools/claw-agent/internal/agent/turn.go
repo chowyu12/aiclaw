@@ -123,6 +123,11 @@ func (s *Session) RunTurn(
 
 	s.addGoalContext()
 	usage, err := s.loop(ctx, turnID, emitter)
+	if s.codeCells != nil {
+		if running := s.codeCells.FinishTurn(); running > 0 && err == nil {
+			err = errors.New("The turn ended with uncollected running code-mode cells. They were canceled; inspect current state before repeating side effects.")
+		}
+	}
 	if goalErr := s.accountGoal(0); err == nil {
 		err = goalErr
 	}
@@ -379,6 +384,7 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 	s.refreshSystemPromptLocked()
 	s.mu.Unlock()
 	env := s.turnEnv(turnID, emitter)
+	env.RunContext = ctx
 	if usage, _ := ctx.Value(skillUsageKey{}).(*skillUsage); usage != nil {
 		env.SkillLoaded = usage.loaded
 		env.FileRead = usage.read
@@ -530,6 +536,9 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		s.mu.Unlock()
 		cancelTools()
 		if steeredTools {
+			if s.codeCells != nil {
+				s.codeCells.CancelAll()
+			}
 			s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "The user changed direction while tools were running. Canceled operations may have partially executed. Preserve completed results, follow the new input, and verify actual state before repeating any action.", Shown: &llm.Shown{Hidden: true}})
 		}
 		// 工具产出的图片（截屏）作为紧随其后的一条 user 消息送进去。
@@ -879,46 +888,78 @@ func (s *Session) executeOne(
 	emitter Emitter,
 	steps *stepCounter,
 ) llm.Message {
-	itemID := newID("tool")
-	// 序号在真正开跑之前取，而不是在拿到锁之后：用户看到的顺序应当是模型
-	// 决定调用的顺序，不是它们碰巧抢到执行权的顺序。
-	started := time.Now()
-	item := protocol.Item{
-		ID:        itemID,
-		Kind:      protocol.ItemToolCall,
-		ToolName:  call.Name,
-		ToolArgs:  call.Arguments,
-		Summary:   summarizeCall(call),
-		Seq:       steps.next(),
-		StartedAt: started.UnixMilli(),
-	}
-	emitter.Notify(protocol.NotifyItemStarted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
-
-	// 产出物按调用收集：一轮里的工具可能并发跑，挂在 Env 上会串。
-	artifacts := &tools.ArtifactSink{}
-	sources := &tools.SourceSink{}
-	output, err := s.runTool(tools.WithSources(tools.WithArtifacts(ctx, artifacts), sources), call, env)
-	item.Sources = sources.Sources()
-	item.Artifacts = artifacts.Paths()
+	scope := &toolExecutionScope{turnID: turnID, emitter: emitter, steps: steps}
+	item, output, err := s.executeRecorded(ctx, call, env, scope, "", func(ctx context.Context) (string, error) { return s.runTool(ctx, call, env) })
 	if err != nil {
-		item.ToolFailed = true
 		if output != "" {
 			output += "\n"
 		}
-		item.ToolResult = output + err.Error()
-		// 失败原因回给模型，它据此改参数重试；这和 MCP 的 isError 语义一致。
 		output += toolErrorResult(err.Error())
-	} else {
-		item.ToolResult = output
 	}
-	item.DurationMS = time.Since(started).Milliseconds()
-	s.recordToolUsage(call.Name, []byte(call.Arguments), started, err != nil, "")
-	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
-
-	// 截断只作用于进历史的副本：界面上留的是工具实际返回的内容。
-	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: s.historyOutput(ctx, output), Artifacts: item.Artifacts, Sources: item.Sources, At: time.Now().UnixMilli()}
+	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: s.historyOutput(ctx, output), Artifacts: item.Artifacts, OutputContent: item.Content, Sources: item.Sources, At: time.Now().UnixMilli()}
 	s.journalMessage(result)
 	return result
+}
+
+// executeRecorded is shared by direct and nested tools. Nested results are UI evidence,
+// not additional model-history messages: the script still selects what the model sees.
+func (s *Session) executeRecorded(ctx context.Context, call llm.ToolCall, env *tools.Env, scope *toolExecutionScope, source string, invoke func(context.Context) (string, error)) (protocol.Item, string, error) {
+	itemID := newID("tool")
+	started := time.Now()
+	item := protocol.Item{ID: itemID, Kind: protocol.ItemToolCall, ToolName: call.Name, ToolArgs: call.Arguments, Summary: summarizeCall(call), StartedAt: started.UnixMilli()}
+	if scope != nil {
+		item.ParentID = scope.parentID
+		item.Seq = scope.steps.next()
+		scope.emitter.Notify(protocol.NotifyItemStarted, protocol.ItemNotification{SessionID: s.ID, TurnID: scope.turnID, Item: item})
+		child := *scope
+		child.parentID = itemID
+		if call.ID != "" {
+			child.parentCallID = call.ID
+		}
+		ctx = context.WithValue(ctx, toolExecutionKey{}, &child)
+	}
+	if source == "exec" && scope != nil {
+		pending := item
+		pending.ToolFailed = true
+		pending.ToolResult = "Operation started but completion has not been recorded; inspect state before retrying."
+		s.recordCodeTrace(scope.parentCallID, pending)
+	}
+	artifacts := &tools.ArtifactSink{}
+	sources := &tools.SourceSink{}
+	output, err := invoke(tools.WithSources(tools.WithArtifacts(ctx, artifacts), sources))
+	item.Artifacts = artifacts.Paths()
+	item.Content = artifacts.Content()
+	item.Sources = sources.Sources()
+	item.ToolResult = output
+	if err != nil {
+		item.ToolFailed = true
+		if output != "" {
+			item.ToolResult += "\n"
+		}
+		item.ToolResult += err.Error()
+	}
+	item.DurationMS = time.Since(started).Milliseconds()
+	s.recordToolUsage(call.Name, []byte(call.Arguments), started, err != nil, source)
+	if source == "exec" && scope != nil {
+		s.recordCodeTrace(scope.parentCallID, item)
+	}
+	if scope != nil {
+		scope.emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: scope.turnID, Item: item})
+	}
+	for _, path := range item.Artifacts {
+		tools.Produce(ctx, path)
+	}
+	tools.RecordSources(ctx, item.Sources)
+	return item, output, err
+}
+
+type toolExecutionKey struct{}
+type toolExecutionScope struct {
+	turnID       string
+	parentID     string
+	parentCallID string
+	emitter      Emitter
+	steps        *stepCounter
 }
 
 func (s *Session) runTool(ctx context.Context, call llm.ToolCall, env *tools.Env) (string, error) {
@@ -942,6 +983,16 @@ func (s *Session) runTool(ctx context.Context, call llm.ToolCall, env *tools.Env
 	}
 	// 单个工具的墙钟上限。exec 有自己更短的超时，这里防的是没有自身上限的工具
 	//（比如一个卡住的 MCP server）把整轮拖死。
+	return invokeToolHandler(ctx, tool, args, env)
+}
+
+func invokeToolHandler(ctx context.Context, tool tools.Tool, args json.RawMessage, env *tools.Env) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if !json.Valid(args) {
+		return "", errors.New("tool arguments are not valid JSON")
+	}
 	toolCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	return tool.Handler(toolCtx, args, env)

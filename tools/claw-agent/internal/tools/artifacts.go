@@ -12,6 +12,7 @@ package tools
 
 import (
 	"context"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"sync"
 )
 
@@ -19,8 +20,22 @@ type artifactKey struct{}
 
 // ArtifactSink 收集一次工具调用产出的文件路径（相对工作区）。
 type ArtifactSink struct {
-	mu    sync.Mutex
-	paths []string
+	mu      sync.Mutex
+	paths   []string
+	content []protocol.ToolContent
+}
+
+func (s *ArtifactSink) Content() []protocol.ToolContent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]protocol.ToolContent(nil), s.content...)
+}
+func EmitContent(ctx context.Context, item protocol.ToolContent) {
+	if sink, ok := ctx.Value(artifactKey{}).(*ArtifactSink); ok {
+		sink.mu.Lock()
+		sink.content = append(sink.content, item)
+		sink.mu.Unlock()
+	}
 }
 
 // Add 记下一个产出物。

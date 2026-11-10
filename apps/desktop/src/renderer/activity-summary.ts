@@ -3,7 +3,8 @@ import type { StepEntry } from "./turns.js";
 
 /** Summaries describe observed tool activity, never infer business progress from reasoning. */
 export function activitySummary(steps: readonly StepEntry[]): string {
-  const tools = steps.filter(step => step.step === "tool");
+  const parents = new Set(steps.map(step => step.parentId).filter(Boolean));
+  const tools = steps.filter(step => step.step === "tool" && !parents.has(step.id) && step.title.split(" · ")[0] !== "wait");
   const running = steps.some(step => step.state === "running");
   if (!tools.length) {
     const notice = steps.find(step => step.step === "notice");

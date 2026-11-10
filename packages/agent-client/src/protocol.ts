@@ -566,6 +566,9 @@ export interface ThreadRef {
 }
 
 export interface Item {
+  content?: { type: string; url: string; hint?: string }[];
+  /** Parent exec or nested tool call, when present. */
+  parentId?: string;
   requestId?: string;
   id: string;
   kind: ItemKind;

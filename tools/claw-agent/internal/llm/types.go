@@ -35,8 +35,9 @@ type Message struct {
 	// ProviderState 保存原生输出，供同一端点、协议和模型重放；不进入 UI。
 	ProviderState *ProviderState `json:"providerState,omitempty"`
 	// Artifacts and Sources are local UI metadata, omitted from model requests.
-	Artifacts []string                `json:"artifacts,omitempty"`
-	Sources   []protocol.SearchSource `json:"sources,omitempty"`
+	Artifacts     []string                `json:"artifacts,omitempty"`
+	OutputContent []protocol.ToolContent  `json:"outputContent,omitempty"`
+	Sources       []protocol.SearchSource `json:"sources,omitempty"`
 	// Images 是随这条消息一起发给模型的图片（PNG 字节）。
 	//
 	// 只在 RoleUser 上有意义：Chat Completions 的 tool 结果消息必须是纯字符串，

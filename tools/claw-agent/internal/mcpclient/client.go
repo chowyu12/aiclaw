@@ -285,6 +285,16 @@ func toolsChanged(raw []byte, notify func()) bool {
 // 服务端回 isError 时这里返回 error 并把文本带出来——MCP 里那是「工具失败」，
 // 与协议错误分开处理：前者要让模型看见原因，后者才是故障。
 func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMessage) (string, error) {
+	return c.callTool(ctx, name, arguments)
+}
+
+type structuredOutputKey struct{}
+
+// WithStructuredOutput retains MCP media blocks for explicit code-mode output helpers.
+func WithStructuredOutput(ctx context.Context) context.Context {
+	return context.WithValue(ctx, structuredOutputKey{}, true)
+}
+func (c *Client) callTool(ctx context.Context, name string, arguments json.RawMessage) (string, error) {
 	if len(arguments) == 0 {
 		arguments = json.RawMessage(`{}`)
 	}
@@ -296,7 +306,8 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMe
 		return "", err
 	}
 	var result struct {
-		Content []struct {
+		StructuredContent json.RawMessage `json:"structuredContent"`
+		Content           []struct {
 			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
@@ -317,6 +328,16 @@ func (c *Client) CallTool(ctx context.Context, name string, arguments json.RawMe
 			text = i18n.D("工具执行失败")
 		}
 		return "", errors.New(text)
+	}
+	if structured, _ := ctx.Value(structuredOutputKey{}).(bool); structured {
+		if len(result.StructuredContent) > 0 && string(result.StructuredContent) != "null" {
+			return string(raw), nil
+		}
+		for _, item := range result.Content {
+			if item.Type != "text" {
+				return string(raw), nil
+			}
+		}
 	}
 	return text, nil
 }

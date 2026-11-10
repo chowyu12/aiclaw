@@ -64,6 +64,7 @@ func DefaultLimits() Limits {
 
 // Runtime 执行脚本。一个会话一个，store/load 的数据存在这里。
 type Runtime struct {
+	catalogMu  sync.RWMutex
 	tools      []Tool
 	limits     Limits
 	SaveOutput tools.OutputSaver
@@ -74,12 +75,16 @@ type Runtime struct {
 	// 内核会并行执行它们，而它们共用这一张表。Go 里并发写 map 不是竞态
 	// 那么简单——是直接 fatal，整个内核没了。
 	storeMu sync.Mutex
-	stored  map[string]any
+	stored  map[string]json.RawMessage
 	gate    sync.RWMutex // Shared across cells: writes exclude every other tool call.
+	// WorkerCommand runs untrusted JavaScript outside the agent process in production.
+	WorkerCommand []string
 }
 
 func New(tools []Tool, limits Limits) *Runtime {
-	return &Runtime{tools: tools, limits: limits, stored: map[string]any{}}
+	r := &Runtime{limits: limits, stored: map[string]json.RawMessage{}}
+	r.UpdateTools(tools)
+	return r
 }
 
 // errExit 是 exit() 抛出来的哨兵，表示「正常提前结束」。
@@ -87,11 +92,30 @@ var errExit = errors.New("codemode: exit")
 
 // Run 执行一段脚本，返回给模型看的输出。
 func (r *Runtime) Run(parent context.Context, source string) (string, error) {
+	parent = r.snapshot(parent)
+	if len(source) > maxScriptBytes {
+		return "", errors.New("script exceeds 1 MiB")
+	}
+	if len(r.WorkerCommand) > 0 {
+		return r.runProcess(parent, source)
+	}
+	return r.runLocal(parent, source)
+}
+
+func (r *Runtime) runLocal(parent context.Context, source string) (string, error) {
 	ctx, cancel := context.WithCancel(parent)
 	vm := goja.New()
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	output := tools.OutputBuffer{Complete: true}
-	appendOutput := func(text string) { _, _ = output.Write([]byte(text)) }
+	hooks := hooksFrom(parent)
+	appendOutput := func(text string) {
+		_, _ = output.Write([]byte(text))
+		if hooks.Output != nil {
+			if err := hooks.Output(OutputItem{Type: "text", Text: text}); err != nil {
+				panic(vm.NewGoError(err))
+			}
+		}
+	}
 	preview := func() string {
 		return tools.OutputPreview(parent, output.String(), min(r.limits.MaxOutput, tools.MaxOutputPreview), output.Complete, r.SaveOutput)
 	}
@@ -132,7 +156,11 @@ func (r *Runtime) Run(parent context.Context, source string) (string, error) {
 			settle := func() error {
 				pending--
 				if callErr != nil {
-					return reject(vm.ToValue(callErr.Error()))
+					// Do not expose a host error's concrete fields or methods to JavaScript.
+					failure := vm.NewGoError(errors.New(callErr.Error()))
+					_ = failure.Set("tool", tool.Ident)
+					_ = failure.Set("output", tools.OutputPrefix(result, tools.MaxOutputPreview))
+					return reject(failure)
 				}
 				appendOutput(warning)
 				return resolve(toolValue(vm, result))
@@ -143,7 +171,34 @@ func (r *Runtime) Run(parent context.Context, source string) (string, error) {
 			}
 		}()
 	}
-	if err := r.install(ctx, vm, appendOutput, &calls, schedule); err != nil {
+	timers := map[int]*time.Timer{}
+	defer func() {
+		for _, timer := range timers {
+			timer.Stop()
+		}
+	}()
+	nextTimer := 0
+	setTimer := func(fn goja.Callable, delay time.Duration) int {
+		if len(timers) >= 200 {
+			panic(vm.NewTypeError("too many pending timers"))
+		}
+		nextTimer++
+		id := nextTimer
+		timers[id] = time.AfterFunc(delay, func() {
+			select {
+			case completions <- func() error { delete(timers, id); _, err := fn(goja.Undefined()); return err }:
+			case <-ctx.Done():
+			}
+		})
+		return id
+	}
+	clearTimer := func(id int) {
+		if timer := timers[id]; timer != nil {
+			timer.Stop()
+			delete(timers, id)
+		}
+	}
+	if err := r.install(ctx, vm, appendOutput, &calls, schedule, setTimer, clearTimer); err != nil {
 		return "", err
 	}
 	// Charge only VM execution, not wall time waiting for concurrent tools/approval.
@@ -195,7 +250,7 @@ func (r *Runtime) Run(parent context.Context, source string) (string, error) {
 		return preview(), i18n.E("脚本没有返回预期的结果")
 	}
 	// Drain admitted calls even if the script forgot to await them; none may outlive Run.
-	for pending > 0 && promise.State() != goja.PromiseStateRejected {
+	for (pending > 0 || (promise.State() == goja.PromiseStatePending && len(timers) > 0)) && promise.State() != goja.PromiseStateRejected {
 		select {
 		case <-budgetExceeded:
 			return preview(), budgetError
@@ -245,11 +300,14 @@ func (r *Runtime) install(
 	appendOutput func(string),
 	calls *atomic.Int64,
 	schedule func(Tool, json.RawMessage, func(any) error, func(any) error),
+	setTimer func(goja.Callable, time.Duration) int,
+	clearTimer func(int),
 ) error {
 	bridge := newToolBridge(vm)
-	catalog := make([]any, 0, len(r.tools))
+	toolList := r.toolsFor(ctx)
+	catalog := make([]any, 0, len(toolList))
 
-	for _, tool := range r.tools {
+	for _, tool := range toolList {
 		tool := tool
 		catalog = append(catalog, map[string]any{"name": tool.Ident, "description": tool.Description})
 		bridge.add(tool.Ident, vm.ToValue(func(call goja.FunctionCall) goja.Value {
@@ -290,20 +348,84 @@ func (r *Runtime) install(
 			panic(vm.NewGoError(errExit))
 		},
 		"store": func(call goja.FunctionCall) goja.Value {
-			r.storeMu.Lock()
-			r.stored[call.Argument(0).String()] = call.Argument(1).Export()
-			r.storeMu.Unlock()
+			key := call.Argument(0).String()
+			encoded := serializable(vm, call.Argument(1))
+			store := r.put
+			if h := hooksFrom(ctx); h.Store != nil {
+				store = h.Store
+			}
+			if err := store(key, encoded); err != nil {
+				panic(vm.NewTypeError(err.Error()))
+			}
 			return goja.Undefined()
 		},
 		"load": func(call goja.FunctionCall) goja.Value {
-			r.storeMu.Lock()
-			value, ok := r.stored[call.Argument(0).String()]
-			r.storeMu.Unlock()
-			if !ok {
+			load := r.get
+			if h := hooksFrom(ctx); h.Load != nil {
+				load = h.Load
+			}
+			value, err := load(call.Argument(0).String())
+			if err != nil {
+				panic(vm.NewGoError(err))
+			}
+			if value == nil {
 				return goja.Undefined()
 			}
-			return vm.ToValue(value)
+			parse, _ := goja.AssertFunction(vm.Get("JSON").ToObject(vm).Get("parse"))
+			v, err := parse(goja.Undefined(), vm.ToValue(string(value)))
+			if err != nil {
+				panic(err)
+			}
+			return v
 		},
+		"setTimeout": func(call goja.FunctionCall) goja.Value {
+			fn, ok := goja.AssertFunction(call.Argument(0))
+			if !ok {
+				panic(vm.NewTypeError("callback must be a function"))
+			}
+			ms := call.Argument(1).ToInteger()
+			if ms < 0 {
+				ms = 0
+			}
+			if ms > 60000 {
+				panic(vm.NewTypeError("timer delay exceeds 60000 ms"))
+			}
+			return vm.ToValue(setTimer(fn, time.Duration(ms)*time.Millisecond))
+		},
+		"clearTimeout": func(call goja.FunctionCall) goja.Value {
+			clearTimer(int(call.Argument(0).ToInteger()))
+			return goja.Undefined()
+		},
+		"yield_control": func(goja.FunctionCall) goja.Value {
+			if h := hooksFrom(ctx); h.Yield != nil {
+				h.Yield()
+			}
+			return goja.Undefined()
+		},
+		"notify": func(call goja.FunctionCall) goja.Value {
+			appendOutput(stringify(call.Argument(0)) + "\n")
+			if h := hooksFrom(ctx); h.Yield != nil {
+				h.Yield()
+			}
+			return goja.Undefined()
+		},
+	}
+	for _, kind := range []string{"image", "audio", "generatedImage"} {
+		kind := kind
+		helpers[kind] = func(call goja.FunctionCall) goja.Value {
+			item, err := mediaItem(kind, call.Argument(0).Export())
+			if err != nil {
+				panic(vm.NewTypeError(err.Error()))
+			}
+			if h := hooksFrom(ctx); h.Output != nil {
+				if err := h.Output(item); err != nil {
+					panic(vm.NewGoError(err))
+				}
+			} else {
+				panic(vm.NewTypeError("media output is unavailable in this execution"))
+			}
+			return goja.Undefined()
+		}
 	}
 	for name, fn := range helpers {
 		if err := vm.Set(name, fn); err != nil {
@@ -330,6 +452,9 @@ func encodeArguments(vm *goja.Runtime, value goja.Value) (json.RawMessage, error
 	encoded, err := json.Marshal(value.Export())
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", i18n.D("参数没法转成 JSON"), err)
+	}
+	if len(encoded) > maxScriptBytes {
+		return nil, errors.New("tool arguments exceed 1 MiB")
 	}
 	if len(encoded) == 0 || encoded[0] != '{' {
 		return nil, i18n.E("工具参数必须是一个对象")
@@ -446,7 +571,19 @@ func describe(value goja.Value) string {
 }
 
 func isExit(value goja.Value) bool {
-	return value != nil && strings.Contains(value.String(), errExit.Error())
+	if value == nil {
+		return false
+	}
+	object, ok := value.(*goja.Object)
+	if !ok {
+		return false
+	}
+	wrapped := object.Get("value")
+	if wrapped == nil {
+		return false
+	}
+	err, ok := wrapped.Export().(error)
+	return ok && errors.Is(err, errExit)
 }
 
 // scriptError 把 goja 的错误翻成模型能据此改代码的话。

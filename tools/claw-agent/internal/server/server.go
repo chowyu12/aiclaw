@@ -588,6 +588,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		return
 	}
 	s.submissionMu.Lock()
+	var previous *agent.Session
 	if existing := s.session(params.SessionID); existing != nil {
 		if params.Refresh != nil && params.Refresh.RecoveryModel != nil {
 			s.submissionMu.Unlock()
@@ -627,6 +628,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 			s.writeError(f.ID, codeInternal, err.Error())
 			return
 		}
+		previous = existing
 		s.dropSession(params.SessionID)
 	}
 	// Slow MCP mounting must not block submissions to unrelated sessions.
@@ -638,6 +640,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 		s.writeError(f.ID, codeInternal, err.Error())
 		return
 	}
+	session.KeepCodeModeState(previous)
 	s.options.Logf("恢复会话 %s：挂 MCP %dms（%s）+ 其余 %dms = 共 %dms",
 		params.SessionID, session.MountMS(), describeDials(session.MCPDials()),
 		time.Since(loadStarted).Milliseconds()-session.MountMS(), time.Since(loadStarted).Milliseconds())
