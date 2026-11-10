@@ -32,7 +32,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - run: npm run build -w @aiclaw/agent-client
       - run: npm run build:main -w @aiclaw/desktop
       - name: Installer and controller contracts
@@ -75,7 +75,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - run: npm run build -w @aiclaw/agent-client
       - run: npm run build:main -w @aiclaw/desktop
       - run: node scripts/stage-computer-runtime.mjs

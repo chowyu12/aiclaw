@@ -31,7 +31,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci
+      - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - name: Download Electron for desktop smoke
         run: npm run setup:electron
       - name: Go format, vet, no-cgo probe
@@ -71,7 +71,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - run: npm run setup:electron
       - name: Import the fixed signing identity
         env:
@@ -114,7 +114,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-      - run: npm ci
+      - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - name: Import the fixed signing identity
         env:
           AICLAW_MAC_SIGNING_P12_BASE64: ${{ secrets.AICLAW_MAC_SIGNING_P12_BASE64 }}
@@ -147,7 +147,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci
+      - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - uses: actions/download-artifact@v4
         with:
           name: native-computer-runtime
@@ -189,7 +189,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: package-lock.json
-      - run: npm ci
+      - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - name: Test system shell execution on Windows
         run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-command-runner.ts
       - uses: actions/download-artifact@v4
