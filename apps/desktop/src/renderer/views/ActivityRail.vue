@@ -2,10 +2,7 @@
 import { computed } from "vue";
 import { actions, store } from "../store";
 import { t } from "../i18n";
-import BrandLogo from "./BrandLogo.vue";
 
-defineProps<{ sessionsOpen: boolean }>();
-defineEmits<{ sessions: [] }>();
 
 const SHORTCUTS = [
   { view: "providers", label: "模型服务", icon: "M8 3v3m8-3v3M8 18v3m8-3v3M3 8h3m-3 8h3m12-8h3m-3 8h3M6 6h12v12H6ZM9 9h6v6H9Z" },
@@ -24,7 +21,7 @@ const updateLabel = computed(() => {
     if (store.updateProgress >= 0) return t("下载 {percent}%", { percent: store.updateProgress });
     return store.updateReceived > 0 ? t("下载 {size} MB", { size: (store.updateReceived / 1048576).toFixed(1) }) : t("连接中…");
   }
-  // 窄图标栏显示简短入口，完整版本和阶段保留在悬停说明里。
+  // 就绪后保留图标入口，完整版本和阶段在悬停说明里。
   if (store.updateReady) return t("重启更新");
   return update.canInstall ? t("更新到 {version}", { version: update.latest }) : t("新版 {version}", { version: update.latest });
 });
@@ -52,13 +49,8 @@ const updateTitle = computed(() => {
 
 <template>
   <nav class="activity-rail" :aria-label="t('应用导航')">
-    <div class="rail-brand"><BrandLogo compact /></div>
-    <button :aria-label="t('会话列表')" :title="t('会话列表')" :aria-expanded="sessionsOpen" aria-controls="session-sidebar" @click="$emit('sessions')">
-      <span v-if="Object.values(store.live).some(session => session.unread)" class="rail-unread" role="status" :aria-label="t('未读')" :title="t('未读')"></span>
-      <svg class="home-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v2h-2v8h-5v-6h-4v6H5v-8H3Z"/></svg>
-    </button>
     <button v-for="item in SHORTCUTS" :key="item.view" :data-view="item.view" :aria-label="t(item.label)" :title="t(item.label)" :aria-pressed="store.view === item.view" @click="actions.setView(item.view)">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon"/></svg>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="item.icon"/></svg><span>{{ t(item.label) }}</span>
     </button>
     <div class="rail-bottom">
       <button v-if="store.update?.hasUpdate" class="rail-update" :aria-label="updateTitle" :title="updateTitle" :disabled="store.updating || store.updateDownloading" @click="actions.installUpdate()">
@@ -66,14 +58,22 @@ const updateTitle = computed(() => {
       </button>
       <button data-view="settings" :aria-label="t('设置')" :title="t('设置')" :aria-pressed="store.view !== 'chat' && !SHORTCUTS.some(item => item.view === store.view)" @click="actions.setView('settings')">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/><circle cx="8" cy="6" r="2"/><circle cx="16" cy="12" r="2"/><circle cx="10" cy="18" r="2"/></svg>
+        <span>{{ t('设置') }}</span>
       </button>
     </div>
   </nav>
 </template>
 
 <style scoped>
-.activity-rail{display:flex;flex-direction:column;align-items:center;gap:12px;flex:0 0 56px;width:56px;padding:17px 8px 10px;border-right:1px solid var(--chrome-rule);background:var(--rail);z-index:22}
-.rail-unread{position:absolute;right:4px;top:4px;width:7px;height:7px;border-radius:50%;background:#0878e8}.activity-rail button{position:relative}
-.rail-brand{margin-bottom:8px}.activity-rail button{display:grid;place-items:center;flex:none;width:36px;height:36px;padding:8px;border:0;border-radius:9px;background:transparent;color:var(--ink-2);cursor:pointer}.activity-rail button:hover,.activity-rail button[aria-expanded=true],.activity-rail button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent)}.activity-rail button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.activity-rail button:disabled{opacity:.4;cursor:default}.activity-rail svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}.activity-rail .home-icon{fill:currentColor;stroke:none}.activity-rail circle{fill:var(--rail)}
-.rail-bottom{margin-top:auto;display:flex;flex-direction:column;align-items:center;gap:10px}.activity-rail .rail-update{width:44px;padding:6px 0;height:auto;min-height:44px;gap:3px;color:var(--accent)}.activity-rail .rail-update:disabled{opacity:1;cursor:progress}.rail-update-label{font-size:10px;max-width:42px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.activity-rail { display:flex; flex-direction:column; gap:2px; flex:none; width:100%; padding:9px 9px 12px; border-top:1px solid var(--chrome-rule); background:transparent; }
+.activity-rail button { display:flex; align-items:center; gap:10px; width:100%; min-height:31px; padding:6px 10px; border:0; border-radius:7px; background:transparent; color:var(--ink-2); cursor:pointer; text-align:left; font-size:12px; }
+.activity-rail button:hover,.activity-rail button[aria-pressed=true] { background:var(--hover); color:var(--ink); }
+.activity-rail button:focus-visible { outline:2px solid var(--accent); outline-offset:-2px; }
+.activity-rail button:disabled { opacity:.5; cursor:default; }
+.activity-rail svg { width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; stroke-linejoin:round; }
+.activity-rail circle { fill:var(--sidebar); }
+.rail-bottom { display:flex; flex-direction:column; gap:2px; }
+.activity-rail .rail-update { color:var(--accent); }
+.activity-rail .rail-update:disabled { opacity:1; cursor:progress; }
+.rail-update-label { font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 </style>

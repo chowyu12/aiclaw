@@ -14,6 +14,7 @@ app.whenReady().then(async()=>{
  const profiles=profileSpecs();
  check('desktop offers exactly default strict and allow-all policies',profiles.map(p=>p.id).join('|')==='auto|always|bypass'&&profiles[0].label==='默认');
  let directoryPicks=0;const documentDirectory=()=>win && projectDirectoryMode ? ['/tmp/first','/tmp/second'][directoryPicks++ % 2] : '/tmp/smoke';let projectDirectoryMode=false;
+ let welcomeMode=false,usageFails=false;const usageReads=[];
  let goal=null,forked=false;const sends=[],forks=[],recoveries=[];let sessionTitle='Workflow test',sessionWorkspace='/tmp/smoke',renameFails=false;const renameCalls=[];
  let mcpServers=[{id:'remote',label:'remote',url:'https://fixture.example/mcp',transport:'http',enabled:false,oauth:true}],authState='needs_login';const authCalls=[],scheduleInputs=[];let tasks=[],schedulesFail=false;
  let pending=[{requestId:'q',state:'queued',payload:{text:'queued input'},turnId:'t1',createdAt:1},{requestId:'u',state:'uncertain',payload:{text:'uncertain input'},turnId:'t2',createdAt:2}];
@@ -50,6 +51,7 @@ app.whenReady().then(async()=>{
  handle('memoryImportRead',()=>importFixture);
  handle('memoryRead',(_e,id)=>{memoryReads.push(id);if(memoryFails)throw Error('memory read unavailable');return {global:{path:'/fixture/.aiclaw/memory.md',content:editedGlobal??('- 全局偏好 '+memoryRevision+'\n<script>never execute</script>'),exists:true,error:''},workspace:id?{path:id==='other'?'/other/smoke/.aiclaw/memory.md':'/tmp/smoke/.aiclaw/memory.md',content:editedWorkspaces.get(id)??(id==='other'?'':'- 工作区约定'),exists:editedWorkspaces.has(id)||id!=='other',error:''}:null};});
  handle('memorySave',(_e,input)=>{memorySaves.push(input);if(memoryConflict)throw Error('记忆已被其他操作修改，请刷新后再编辑。');if(input.scope==='global')editedGlobal=input.content;else editedWorkspaces.set(input.sessionId,input.content);return {path:input.scope==='global'?'/fixture/.aiclaw/memory.md':'/other/smoke/.aiclaw/memory.md',content:input.content,exists:true,error:''};});
+ handle('usageSummary',(_e,days)=>{usageReads.push(days);if(usageFails)throw Error('fixture usage unavailable');const now=new Date(),day=[now.getFullYear(),String(now.getMonth()+1).padStart(2,'0'),String(now.getDate()).padStart(2,'0')].join('-');return {since:Date.now()-364*86400000,firstAt:Date.now()-86400000,totals:{input:1200,output:300,total:1500,modelCalls:2,modelFailed:0,toolCalls:1,toolFailed:0,sessions:1},days:[{day,input:1200,output:300,modelCalls:2,toolCalls:1}],models:[],tools:[],skills:[],sessions:[]};});
  handle('sessionContext',(_e,id)=>{contextReads.push(id);if(resumeGate?.id===id&&resumeGate.pending){beforeRestoreContextReads.push(id);throw Error('restore the session first');}return contextFixture;});
  handle('workspaceFiles',(_e,input)=>{browseReads.push(input);return {root:'/tmp/smoke',truncated:false,entries:input.query?[{name:'example.sql',path:'src/example.sql',absolutePath:'/tmp/smoke/example.sql',directory:false}]:input.path?[{name:'example.sql',path:'src/example.sql',absolutePath:'/tmp/smoke/example.sql',directory:false}]:[{name:'src',path:'src',absolutePath:'/tmp/smoke/src',directory:true},{name:'report.md',path:'report.md',absolutePath:'/tmp/smoke/report.md',directory:false}]};});
  let updatePreparations=0,prepareHold=false,finishPrepare;handle('updatePrepare',()=>{updatePreparations++;if(prepareHold)return new Promise(resolve=>{finishPrepare=resolve;});return {ready:false,version:'99.0.0',detail:''};});
@@ -89,8 +91,8 @@ app.whenReady().then(async()=>{
  let commandHistory=false;const resumeFailures=new Set(),resumeModels=new Map(),resumeCalls=[];
  handle('sessionConfigure',async(_e,input)=>{configureCalls.push(input);try{if(configureGate)await configureGate;if(configureFails)throw Error('fixture model switch failed');contextFixture={...contextFixture,model:input.model,window:input.contextWindow||0,lastInputTokens:0};return {tools:[],mcpStatus:{}};}finally{configureSettled++;}});
  handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
- handle('sessionResume',async(_e,id)=>{resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论\n\n![猫](generated/cat.png) [狗](generated/dog.webp) [缺失图片](generated/missing.png)',at:Date.now()},...(id==='s'&&commandHistory?[{id:'command-user',kind:'userMessage',text:'Test commands'},{id:'command-answer',kind:'agentMessage',text:'运行 `python3 sum.py`。\n\n```bash\nprintf foo\n```\n\n```python\nprint(1)\n```\n\n```console\n$ ls\nexample.txt\n```\n\n```sh\npython3 sum.py\n```'}]:[])]});});
- handle('sessionWork',(_e,id)=>({goal:id==='s'?goal:null,pending:id==='s'?[...pending,...queuedInputs]:[],queuedRequestIds:queueAuto&&id==='s'?queuedInputs.map(p=>p.requestId):[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
+ handle('sessionResume',async(_e,id)=>{if(welcomeMode)return {sessionId:id,workspace:sessionWorkspace,tools:[],mcpStatus:{},model:'test',providerId:1,history:[]};resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\nWord：[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论\n\n![猫](generated/cat.png) [狗](generated/dog.webp) [缺失图片](generated/missing.png)',at:Date.now()},...(id==='s'&&commandHistory?[{id:'command-user',kind:'userMessage',text:'Test commands'},{id:'command-answer',kind:'agentMessage',text:'运行 `python3 sum.py`。\n\n```bash\nprintf foo\n```\n\n```python\nprint(1)\n```\n\n```console\n$ ls\nexample.txt\n```\n\n```sh\npython3 sum.py\n```'}]:[])]});});
+ handle('sessionWork',(_e,id)=>(welcomeMode ? {goal:null,pending:[],queuedRequestIds:[]} : {goal:id==='s'?goal:null,pending:id==='s'?[...pending,...queuedInputs]:[],queuedRequestIds:queueAuto&&id==='s'?queuedInputs.map(p=>p.requestId):[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
  handle('changesList',(_e,id)=>{changeReads.push(id);return id==='s'?changes:[];});
  handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
  handle('goalUpdate',(_e,id,update)=>{Object.assign(goal,update);return goal;});
@@ -115,11 +117,14 @@ app.whenReady().then(async()=>{
  await js("localStorage.setItem('aiclaw:session-grouping','groups');localStorage.removeItem('aiclaw:pinned-workspaces');localStorage.removeItem('aiclaw:session-sidebar-width')");
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
  await wait("document.querySelectorAll('.bucket').length===3");
- check('studio opens with navigation and the conversation sidebar visible by default',await wait("document.querySelector('.activity-rail')?.getBoundingClientRect().width===56 && document.querySelector('.sidebar').getBoundingClientRect().width===300 && document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').getAttribute('aria-expanded')==='true' && !!document.querySelector('.chat-header')"));
- check('window title area keeps native controls clear and content below its drag region',await js("(()=>{const bar=document.querySelector('.window-titlebar'),sidebar=document.querySelector('.sidebar').getBoundingClientRect();return navigator.userAgent.includes('Macintosh') ? !!bar && bar.getBoundingClientRect().bottom<=sidebar.top && getComputedStyle(bar).getPropertyValue('-webkit-app-region')==='drag' && getComputedStyle(bar).borderBottomWidth==='0px' : !bar})()"));
+ check('studio opens with navigation and the conversation sidebar visible by default',await wait("document.querySelector('.sidebar')?.contains(document.querySelector('.activity-rail')) && document.querySelector('.activity-rail').getBoundingClientRect().width===240 && document.querySelector('.sidebar').getBoundingClientRect().width===240 && document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').getAttribute('aria-expanded')==='true' && !!document.querySelector('.chat-header')"));
+ check('window title area keeps native controls clear and content below its drag region',await js("(()=>{const bar=document.querySelector('.window-titlebar'),sidebar=document.querySelector('.sidebar').getBoundingClientRect();return navigator.userAgent.includes('Macintosh') ? !!bar && bar.getBoundingClientRect().bottom<=document.querySelector('.brand').getBoundingClientRect().top && bar.getBoundingClientRect().right<=document.querySelector('.pane').getBoundingClientRect().left && getComputedStyle(bar).getPropertyValue('-webkit-app-region')==='drag' && getComputedStyle(bar).borderBottomWidth==='0px' : !bar})()"));
  check('compact navigation offers one settings entry and no memory shortcut or version text',await js("document.querySelectorAll('.rail-bottom > button').length===1 && !!document.querySelector('.rail-bottom [data-view=settings]') && !document.querySelector('.activity-rail button[aria-label=\"记忆\"]') && !document.querySelector('.rail-version')"));
  for(const [view,label] of [['providers','模型服务'],['skills','技能'],['schedules','定时任务']]){
+  if(await js("getComputedStyle(document.querySelector('.activity-rail')).display==='none'")) await js("document.querySelector('.sidebar .head .new').click()");
+  check('returning to chat restores footer shortcuts before '+view,await wait("getComputedStyle(document.querySelector('.activity-rail')).display!=='none'"));
   await js(`document.querySelector('.activity-rail [data-view="${view}"]').click()`);
+  check('settings hides duplicate footer shortcuts for '+view,await wait("getComputedStyle(document.querySelector('.activity-rail')).display==='none' && !!document.querySelector('.sidebar .list .item.active')"));
   check('navigation shortcut opens '+view+' settings with one active entry',await wait(`document.querySelector('.page h2')?.textContent.trim()===${JSON.stringify(label)} && document.querySelector('.activity-rail [data-view="${view}"]').getAttribute('aria-pressed')==='true' && document.querySelectorAll('.activity-rail [aria-pressed="true"]').length===1`));
   if(view==='providers'){
    await js("document.querySelector('.disclose').click()");
@@ -143,8 +148,8 @@ app.whenReady().then(async()=>{
   }
 
  }
- await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
- check('home returns from settings shortcuts to the current conversation',await wait("!!document.querySelector('.composer') && document.querySelector('.sidebar').getBoundingClientRect().width===300 && document.querySelector('.chat-header')?.textContent.includes('Workflow test')"));
+ await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");
+ check('home returns from settings shortcuts to the current conversation',await wait("!!document.querySelector('.composer') && document.querySelector('.sidebar').getBoundingClientRect().width===240 && document.querySelector('.chat-header')?.textContent.includes('Workflow test')"));
  check('missing theme defaults to white even on a dark system',await (async()=>{const previous=nativeTheme.themeSource;nativeTheme.themeSource='dark';const result=await wait("document.documentElement.dataset.theme==='white' && getComputedStyle(document.body).backgroundColor==='rgb(255, 255, 255)'");nativeTheme.themeSource=previous;return result;})());
  const {ConfigStore}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/config.js')).href);
  const themeDirectory=require('node:fs').mkdtempSync(join(app.getPath('temp'),'aiclaw-theme-config-'));
@@ -172,7 +177,7 @@ app.whenReady().then(async()=>{
    await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
    writeFileSync('/tmp/aiclaw-modern-settings.png',(await win.webContents.capturePage()).toPNG());
    await win.loadFile(join(desktop,'dist/renderer/index.html'));
-   check('modern theme restores on reload and styles the composer without resizing navigation',await wait("document.documentElement.dataset.theme==='modern' && !!document.querySelector('.composer') && getComputedStyle(document.querySelector('.composer')).backgroundImage.includes('linear-gradient') && getComputedStyle(document.querySelector('.composer')).borderRadius==='18px' && getComputedStyle(document.querySelector('.sidebar .item .title')).fontSize==='14px'"));
+   check('modern theme restores on reload and styles the composer without resizing navigation',await wait("document.documentElement.dataset.theme==='modern' && !!document.querySelector('.composer') && getComputedStyle(document.querySelector('.composer')).backgroundImage.includes('linear-gradient') && parseFloat(getComputedStyle(document.querySelector('.composer')).borderRadius)>=14 && getComputedStyle(document.querySelector('.sidebar .item .title')).fontSize==='12px'"));
    await wait("![...document.querySelectorAll('.artifact-note')].some(e=>e.textContent.includes('正在读取'))");
    await js("Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");
    await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
@@ -194,7 +199,7 @@ app.whenReady().then(async()=>{
  check('failed theme save keeps the previous theme and selected option',await wait("document.querySelector('.error-bar')?.textContent.includes('config write failed') && !document.querySelector('[data-theme-option=green]').disabled")&&await js("document.documentElement.dataset.theme==='sand' && document.querySelector('[data-theme-option=sand]').getAttribute('aria-pressed')==='true'"));
  configWriteFails=false;await click('知道了');
  await js("document.querySelector('[data-theme-option=white]').click()");
- check('white restores original neutral colors and corner size',await wait("document.documentElement.dataset.theme==='white' && getComputedStyle(document.body).backgroundColor==='rgb(255, 255, 255)' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='rgb(247, 248, 250)' && getComputedStyle(document.querySelector('.theme-settings section')).borderRadius==='14px'"));
+ check('white restores original neutral colors and corner size',await wait("document.documentElement.dataset.theme==='white' && getComputedStyle(document.body).backgroundColor==='rgb(255, 255, 255)' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='rgb(238, 240, 243)' && getComputedStyle(document.querySelector('.theme-settings section')).borderRadius==='14px'"));
  check('theme page includes font and conversation text size with original defaults',await js("document.querySelector('[data-font-setting]').value==='system' && document.querySelector('[data-font-size-setting]').value==='14' && document.querySelectorAll('[data-font-setting] option').length===5"));
  for(const [font,family] of [['pingfang','PingFang SC'],['yahei','Microsoft YaHei'],['mono','SF Mono'],['system','-apple-system'],['songti','Songti SC']]){
   await js(`(()=>{const select=document.querySelector('[data-font-setting]');select.value='${font}';select.dispatchEvent(new Event('change',{bubbles:true}))})()`);
@@ -205,8 +210,8 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.font-preview').scrollIntoView({block:'center'})");
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-theme-font-settings.png',(await win.webContents.capturePage()).toPNG());
- await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
- check('conversation font size applies to messages and input without scaling navigation',await wait("getComputedStyle(document.querySelector('.msg.agent')).fontSize==='18px' && getComputedStyle(document.querySelector('.composer textarea')).fontSize==='18px'")&&await js("getComputedStyle(document.querySelector('.sidebar .item .title')).fontSize==='14px'"));
+ await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");
+ check('conversation font size applies to messages and input without scaling navigation',await wait("getComputedStyle(document.querySelector('.msg.agent')).fontSize==='18px' && getComputedStyle(document.querySelector('.composer textarea')).fontSize==='18px'")&&await js("getComputedStyle(document.querySelector('.sidebar .item .title')).fontSize==='12px'"));
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
  check('font and size remain selected after reload',await wait("!!document.querySelector('.composer') && getComputedStyle(document.querySelector('.composer textarea')).fontSize==='18px' && getComputedStyle(document.body).fontFamily.includes('Songti SC')"));
  await openThemes();
@@ -219,7 +224,7 @@ app.whenReady().then(async()=>{
  await js("(()=>{const select=document.querySelector('[data-font-size-setting]');select.value='14';select.dispatchEvent(new Event('change',{bubbles:true}))})()");
  check('original font and size can be restored',await wait("document.querySelector('[data-font-setting]').value==='system' && document.querySelector('[data-font-size-setting]').value==='14' && document.documentElement.style.getPropertyValue('--conversation-font-size')==='14px'"));
 
- await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
+ await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");
  await wait("!!document.querySelector('.composer')");
 
  win.webContents.send(IPC.onQuestion,{id:'markdown-question',sessionId:'s',question:'**Choose** `mode` [Docs](https://example.com/help)',multiSelect:false,options:[{label:'**Safe** mode',description:'Use `read-only` <script>bad</script>'}]});
@@ -229,7 +234,7 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
  await wait("[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='网络专项诊断')");await click('网络专项诊断');
  check('network diagnostics has a reachable settings entry and displays report',await wait("document.querySelector('.report')?.textContent.includes('PASS HTTP')"));
- await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");await wait("!!document.querySelector('.composer')");
+ await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");await wait("!!document.querySelector('.composer')");
 
  const sidebarDrag = async deltaX => {
   const point=await js("(()=>{const r=document.querySelector('.sidebar-resizer').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:100}})()");
@@ -241,45 +246,46 @@ app.whenReady().then(async()=>{
   await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  };
  await sidebarDrag(80);
- check('dragging the sidebar edge resizes the docked layout and saves the width',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===380 && localStorage.getItem('aiclaw:session-sidebar-width')==='380' && !document.querySelector('.sidebar').classList.contains('resizing')")&&await js("document.querySelector('.sidebar').getBoundingClientRect().right<=document.querySelector('.chat').getBoundingClientRect().left"));
+ check('dragging the sidebar edge resizes the docked layout and saves the width',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===320 && localStorage.getItem('aiclaw:session-sidebar-width')==='320' && !document.querySelector('.sidebar').classList.contains('resizing')")&&await js("document.querySelector('.sidebar').getBoundingClientRect().right<=document.querySelector('.chat').getBoundingClientRect().left"));
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
- check('sidebar width survives renderer reload',await wait("document.querySelector('.sidebar')?.getBoundingClientRect().width===380 && document.querySelectorAll('.bucket').length===3"));
+ check('sidebar width survives renderer reload',await wait("document.querySelector('.sidebar')?.getBoundingClientRect().width===320 && document.querySelectorAll('.bucket').length===3"));
  await js("document.querySelector('.sidebar-resizer').dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}))");
  check('keyboard resizing respects the maximum width',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===480 && document.querySelector('.sidebar-resizer').getAttribute('aria-valuenow')==='480'"));
  win.setSize(900,900);
- check('a smaller window limits sidebar width and keeps room for the chat',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===344 && document.querySelector('.pane').getBoundingClientRect().width>=500"));
+ check('a smaller window limits sidebar width and keeps room for the chat',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===396 && document.querySelector('.pane').getBoundingClientRect().width>=500"));
  win.setSize(1200,900);
  check('growing the window restores the preferred sidebar width',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===480"));
  await js("document.querySelector('.sidebar-resizer').dispatchEvent(new KeyboardEvent('keydown',{key:'Home',bubbles:true,cancelable:true}));document.querySelector('.sidebar-resizer').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}))");
- check('separator keyboard controls adjust width in small increments',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===230"));
+ check('separator keyboard controls adjust width in small increments',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===210"));
  await sidebarDrag(-1000);
- check('dragging past the left limit keeps the sidebar readable',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===220"));
+ check('dragging past the left limit keeps the sidebar readable',await wait("document.querySelector('.sidebar').getBoundingClientRect().width===200"));
  await js("localStorage.removeItem('aiclaw:session-sidebar-width')");
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
- await wait("document.querySelector('.sidebar')?.getBoundingClientRect().width===300 && document.querySelectorAll('.bucket').length===3");
- await js("document.querySelector('.sidebar button[aria-label=\"收起会话列表\"]').click()");
+ await wait("document.querySelector('.sidebar')?.getBoundingClientRect().width===240 && document.querySelectorAll('.bucket').length===3");
+ await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");
  await wait("document.querySelector('.sidebar').getClientRects().length===0");
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
  await wait("document.querySelector('.sidebar .head .new').textContent.includes('返回对话')");
  await js("document.querySelector('.sidebar .head .new').click()");
  check('returning from settings preserves a manually collapsed conversation sidebar',await wait("document.querySelector('.sidebar').classList.contains('is-chat') && document.querySelector('.sidebar').getClientRects().length===0"));
  const chatBeforeDrawer=await js("document.querySelector('.chat').getBoundingClientRect().width");
- const openSessions=async()=>{if(await js("document.querySelector('.sidebar').getClientRects().length===0")){await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");await wait("document.querySelector('.sidebar').getClientRects().length>0");}};
+ const openSessions=async()=>{if(await js("document.querySelector('.sidebar').getClientRects().length===0")){await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");await wait("document.querySelector('.sidebar').getClientRects().length>0");}};
  await openSessions();
- check('docked sidebar reserves its own width and focuses new chat',await js("document.activeElement===document.querySelector('.sidebar .head .new') && document.querySelector('.sidebar').getBoundingClientRect().right<=document.querySelector('.chat').getBoundingClientRect().left+1 && !document.querySelector('.sidebar-dismiss')")&&await js("document.querySelector('.chat').getBoundingClientRect().width")===chatBeforeDrawer-300);
+ check('docked sidebar reserves its own width and focuses new chat',await js("document.activeElement===document.querySelector('.sidebar .head .new') && document.querySelector('.sidebar').getBoundingClientRect().right<=document.querySelector('.chat').getBoundingClientRect().left+1 && !document.querySelector('.sidebar-dismiss')")&&await js("document.querySelector('.chat').getBoundingClientRect().width")===chatBeforeDrawer-240);
  await js("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
- check('Escape in the sidebar closes it and returns focus to navigation',await wait("document.querySelector('.sidebar').getClientRects().length===0 && document.activeElement===document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]')"));
+ check('Escape in the sidebar closes it and returns focus to navigation',await wait("document.querySelector('.sidebar').getClientRects().length===0 && document.activeElement===document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]')"));
  await openSessions();
  await js("document.querySelector('.composer textarea').focus()");
  check('chat remains interactive without dismissing the docked sidebar',await js("document.activeElement===document.querySelector('.composer textarea') && document.querySelector('.sidebar').getClientRects().length>0"));
- await js("document.querySelector('.sidebar button[aria-label=\"收起会话列表\"]').click()");
+ await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");
  check('closing the sidebar restores the chat width',await wait("document.querySelector('.sidebar').getClientRects().length===0")&&await js("document.querySelector('.chat').getBoundingClientRect().width")===chatBeforeDrawer);
  await openSessions();
 
- check('Codex-style sidebar uses a flat new-chat entry and projects heading without duplicate status',await js("document.querySelector('.sidebar').getBoundingClientRect().width===300 && document.querySelector('.brand strong').textContent==='AIClaw' && document.querySelector('.list-heading > span').textContent==='项目' && !document.querySelector('.sidebar .search') && !document.querySelector('.sidebar .foot') && getComputedStyle(document.querySelector('.sidebar .new')).borderTopStyle==='none'"));
+ check('Codex-style sidebar uses a flat new-chat entry and projects heading without duplicate status',await js("document.querySelector('.sidebar').getBoundingClientRect().width===240 && document.querySelector('.brand strong').textContent==='AIClaw' && document.querySelector('.list-heading > span').textContent==='项目' && !document.querySelector('.sidebar .search') && !document.querySelector('.sidebar .foot') && getComputedStyle(document.querySelector('.sidebar .new')).borderTopStyle==='none'"));
  await js("document.querySelector('.sidebar .search-toggle').click()");
+ check('search replaces the header collapse button without a separate search row',await js("!!document.querySelector('.sidebar .brand .search-toggle') && !document.querySelector('.sidebar .head .search-toggle') && !document.querySelector('.sidebar button[aria-label=\"收起会话列表\"]')"));
  check('header search opens a centered command palette without changing sidebar groups',await wait("document.activeElement===document.querySelector('.command-search input')")&&await js("document.querySelector('.session-command-palette').getAttribute('role')==='dialog' && document.querySelector('.session-command-palette').getBoundingClientRect().width>500 && document.querySelectorAll('.bucket').length===3"));
- check('new chat fills its row and project creation remains on the projects heading',await js("document.querySelectorAll('.sidebar .head button').length===1 && !!document.querySelector('.list-heading button[aria-label=\"新建项目\"]') && document.querySelector('.sidebar .head .new').getBoundingClientRect().width>250"));
+ check('new chat fills its row and project creation remains on the projects heading',await js("document.querySelectorAll('.sidebar .head button').length===1 && !!document.querySelector('.list-heading button[aria-label=\"新建项目\"]') && document.querySelector('.sidebar .head .new').getBoundingClientRect().width>200"));
  await js("document.querySelector('.command-search input').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}))");
  check('command palette arrow keys move the active option',await js("document.querySelector('[role=option][aria-selected=true]').getAttribute('data-command')==='rename'"));
  await js("document.querySelector('.command-close').focus();document.querySelector('.command-close').dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}))");
@@ -294,7 +300,7 @@ app.whenReady().then(async()=>{
  await wait("!!document.querySelector('.command-search input')");
  await js("document.querySelector('.command-search input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
  check('Escape dismisses search before the conversation sidebar',await wait("!document.querySelector('.session-command-palette') && document.querySelector('.sidebar').getClientRects().length>0 && document.activeElement===document.querySelector('.sidebar .search-toggle')"));
- check('sidebar rows retain readable text and align with project names',await js("(()=>{const row=document.querySelector('.bucket .item .title'),name=document.querySelector('.bucket-name');return getComputedStyle(row).fontSize==='14px' && Math.abs(row.getBoundingClientRect().left-name.getBoundingClientRect().left)<3})()"));
+ check('sidebar rows retain readable text and align with project names',await js("(()=>{const row=document.querySelector('.bucket .item .title'),name=document.querySelector('.bucket-name');return parseFloat(getComputedStyle(row).fontSize)>=12 && Math.abs(row.getBoundingClientRect().left-name.getBoundingClientRect().left)<3})()"));
  check('child-agent counts stay on one line and retain accessible labels',await js("(()=>{const toggle=document.querySelector('.agents-toggle');return toggle.getAttribute('aria-label').includes('个子 agent') && toggle.closest('.item').getBoundingClientRect().height<=36})()"));
  check('sidebar uses only workspaces and general chats even with an old grouping preference',await js("!document.querySelector('.grouping') && !document.querySelector('.head button[title=\"新建分组\"]') && !document.querySelector('.item-actions button[title=\"移动到分组\"]') && [...document.querySelectorAll('.bucket-name')].map(b=>b.textContent.trim()).join('|')==='smoke|smoke|普通会话' && document.querySelectorAll('.bucket-detail').length===2"));
  check('channel and scheduled chats join their workspace with source labels and child agents stay nested',await js("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count').textContent==='3' && [...document.querySelectorAll('.source-label')].map(b=>b.textContent).sort().join('|')==='定时任务|渠道会话' && !!document.querySelector('.agents-toggle')"));
@@ -330,16 +336,16 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.command-backdrop').click()");
  check('clicking the backdrop dismisses the palette and leaves workspace groups intact',await wait("!document.querySelector('.session-command-palette') && document.querySelectorAll('.bucket').length===3"));
  await wait("document.querySelectorAll('.bucket').length===3 && !!document.querySelector('.composer .chip')");
- await js("document.querySelector('.sidebar button[aria-label=\"收起会话列表\"]')?.click()");
+ await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]')?.click()");
  await js("document.querySelector('.composer .chip[data-policy]').click()");
  check('approval menu renders three policies with Default selected',await wait("document.querySelectorAll('.menu .menu-item').length===3")&&await js("document.querySelector('.menu .picked .menu-name').textContent.trim()==='默认'&&!document.querySelector('.menu').textContent.includes('无人值守')&&!document.querySelector('.menu').textContent.includes('AI 判断')"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-approval-profiles.png',(await win.webContents.capturePage()).toPNG());
  await js("document.querySelector('.composer .chip[data-policy]').click()");
- await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('smoke')).click()");
+ await js("[...document.querySelectorAll('.composer .chip,.composer-context .chip')].find(b=>b.textContent.includes('smoke')).click()");
  await click('恢复默认目录');
  check('resetting workspace moves the chat to the home aiclaw directory',await wait("document.querySelector('[data-bucket-id=\"workspace:/fixture/home/aiclaw\"] .item.active')"));
- await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('aiclaw')).click()");
+ await js("[...document.querySelectorAll('.composer .chip,.composer-context .chip')].find(b=>b.textContent.includes('aiclaw')).click()");
  await click('选择目录…');
  check('choosing workspace immediately restores the matching workspace bucket',await wait("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count')?.textContent==='3'"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
@@ -438,9 +444,9 @@ app.whenReady().then(async()=>{
  check('provider fallback updates the active reasoning selector',await wait("document.querySelector('.reasoning-picker select').value===''"));
  reasoningFails=false;await js("document.querySelector('.composer .model-button').click()");await click('知道了');
  win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'s',tools:['read_file','remote__new'],mcpStatus:{remote:'已挂载 1 个工具'},foldedTools:[]}});
- check('MCP catalog notification updates the active tools indicator',await wait("[...document.querySelectorAll('.composer .chip')].some(b=>b.textContent.includes('工具 2'))"));
+ check('MCP catalog notification updates the active tools indicator',await wait("[...document.querySelectorAll('.composer .chip,.composer-context .chip')].some(b=>b.textContent.includes('工具 2'))"));
  win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'other-workspace',tools:[],mcpStatus:{},foldedTools:[]}});
- check('background MCP catalog notification cannot replace the current session tools',await js("[...document.querySelectorAll('.composer .chip')].some(b=>b.textContent.includes('工具 2'))"));
+ check('background MCP catalog notification cannot replace the current session tools',await js("[...document.querySelectorAll('.composer .chip,.composer-context .chip')].some(b=>b.textContent.includes('工具 2'))"));
  win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'s',tools:[],mcpStatus:{},foldedTools:[]}});
  await draft('@');check('session mentions still open their own picker',await wait("!!document.querySelector('.mention-menu:not(.skill-menu)') && !document.querySelector('.skill-menu')"));await draftKey('Escape');await draft('');
  check('work panel rendered',await wait("!!document.querySelector('.work-panel') && [...document.querySelectorAll('.work-panel article')].some(a=>a.textContent.includes('uncertain input'))"));
@@ -1051,7 +1057,7 @@ app.whenReady().then(async()=>{
  check('unreadable schedule storage is visible and blocks editing instead of looking empty',await wait("document.querySelector('.schedule-read-error')?.textContent.includes('original preserved')")&&await js("document.querySelector('.page .add button').disabled && [...document.querySelectorAll('.page article button,.page article input[type=checkbox]')].filter(e=>!e.classList.contains('link')).every(e=>e.disabled)"));
  schedulesFail=false;await js("document.querySelector('.schedule-read-error button').click()");
  check('schedule read retry clears the error after storage is repaired',await wait("!document.querySelector('.schedule-read-error') && !document.querySelector('.page .add button').disabled"));
- await js("document.querySelector('.activity-rail [aria-controls=\"session-sidebar\"]').click()");
+ await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");
  const callsBeforeRestart=resumeCalls.filter(id=>id==='general').length;
  win.webContents.send(IPC.onRuntimeStatus,{state:'failed',detail:'fixture runtime exited'});
  await wait("document.querySelector('.error-bar')?.textContent.includes('fixture runtime exited')");
@@ -1152,6 +1158,32 @@ app.whenReady().then(async()=>{
  check('explicit resume clears stopped state without replaying actions',await wait("!document.querySelector('.computer-control-bar')")&&computerActions.at(-1)==='resume');
  computerState={mode:'ready',active:null,watching:1};win.webContents.send(IPC.onComputerStatus,computerState);
  check('observation-only desktop use also exposes pause and stop',await wait("document.querySelector('.computer-control-bar')?.textContent.includes('正在观察窗口')"));
+
+ computerState={mode:'ready',active:null,watching:0};
+ config.theme='white';config.language='zh-CN';
+ await win.reload();await wait("!!document.querySelector('.composer')");await openSessions();
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-workspace-chat.png',(await win.webContents.capturePage()).toPNG());
+ welcomeMode=true;
+ win.setSize(1440,900);
+ await win.reload();
+ check('empty chats show the workspace welcome card with 365 actual calendar days',await wait("!!document.querySelector('.workspace-welcome') && document.querySelectorAll('.calendar-day:not(.outside)').length===365"));
+ check('one sidebar contains projects and all primary settings entries',await js("document.querySelector('.sidebar').contains(document.querySelector('.activity-rail')) && document.querySelector('.pane').getBoundingClientRect().left===document.querySelector('.sidebar').getBoundingClientRect().right && parseFloat(getComputedStyle(document.querySelector('.pane')).borderTopLeftRadius)>=12"));
+ check('workspace and tools sit below the input card with menus still available',await js("!!document.querySelector('.composer-context .workspace-chip') && document.querySelector('.composer-context').getBoundingClientRect().top>=document.querySelector('.composer').getBoundingClientRect().bottom"));
+ check('welcome does not prefetch usage or invent credits',usageReads.length===0&&await js("!document.querySelector('.activity-card').textContent.includes('Credits') && !!document.querySelector('.calendar-day[data-level=\"4\"]')"));
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-workspace-home.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.querySelectorAll('.activity-tabs button')[1].click()");
+ check('usage tab requests the past year and renders the recorded tokens',await wait("document.querySelector('.activity-total').textContent.includes('tokens') && !!document.querySelector('.calendar-day[data-level=\"4\"]')")&&usageReads.at(-1)===365);
+ usageFails=true;await win.reload();await wait("!!document.querySelector('.workspace-welcome')");
+ await js("document.querySelectorAll('.activity-tabs button')[1].click()");
+ check('usage errors remain visible instead of being rendered as zero activity',await wait("document.querySelector('.activity-note[role=alert]')?.textContent.includes('fixture usage unavailable')")&&await js("![...document.querySelectorAll('.calendar-day:not(.outside)')].some(cell=>cell.dataset.level==='0')"));
+ usageFails=false;await js("document.querySelector('.activity-note button').click()");
+ check('usage retry recovers the calendar without leaving the workspace',await wait("!document.querySelector('.activity-note[role=alert]') && document.querySelector('.activity-total').textContent.includes('tokens')"));
+ config.theme='modern';await win.reload();await wait("!!document.querySelector('.workspace-welcome') && document.documentElement.dataset.theme==='modern'");
+ check('workspace layout and heatmap adapt to the dark modern theme',await js("getComputedStyle(document.documentElement).colorScheme==='dark' && document.querySelector('.sidebar').contains(document.querySelector('.activity-rail'))"));
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ writeFileSync('/tmp/aiclaw-workspace-home-dark.png',(await win.webContents.capturePage()).toPNG());
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);

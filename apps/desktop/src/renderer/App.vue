@@ -37,7 +37,7 @@ function toggleSessions(): void {
 function closeSessions(): void {
   if (store.view !== "chat" || !sessionsOpen.value) return;
   sessionsOpen.value = false;
-  void nextTick(() => document.querySelector<HTMLButtonElement>('.activity-rail [aria-controls="session-sidebar"]')?.focus());
+  void nextTick(() => document.querySelector<HTMLButtonElement>('.sidebar-toggle')?.focus());
 }
 
 onMounted(async () => {
@@ -72,12 +72,19 @@ onMounted(() => {
 
 <template>
   <!-- 按语言设 key：切换语言时整棵树重新挂载一次，纯函数算出来的文案也跟着换。 -->
-  <div :key="locale" class="shell" :class="{ mac: isMac }">
-    <div v-if="isMac" class="window-titlebar"><span>AIClaw</span></div>
-    <ActivityRail :sessions-open="sessionsOpen && store.view === 'chat'" @sessions="toggleSessions" />
-    <SessionSidebar v-show="sessionsOpen || store.view !== 'chat'" id="session-sidebar" @close="closeSessions" @keydown.esc="closeSessions" />
+  <div :key="locale" class="shell" :class="{ mac: isMac, 'sidebar-collapsed': !sessionsOpen && store.view === 'chat' }">
+    <div v-if="isMac" class="window-titlebar" aria-hidden="true"></div>
+    <SessionSidebar v-show="sessionsOpen || store.view !== 'chat'" id="session-sidebar" @keydown.esc="closeSessions"><ActivityRail v-show="store.view === 'chat'" /></SessionSidebar>
 
     <main class="pane">
+      <header class="workspace-toolbar">
+        <button class="sidebar-toggle" :aria-label="t('会话列表')" :title="t('会话列表')" :aria-expanded="sessionsOpen && store.view === 'chat'" aria-controls="session-sidebar" @click="toggleSessions">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg>
+          <span v-if="Object.values(store.live).some(session => session.unread)" class="rail-unread" role="status" :aria-label="t('未读')" :title="t('未读')"></span>
+        </button>
+        <span class="workspace-mode">{{ store.view === 'chat' ? t('工作台') : t('设置') }}</span>
+        <button v-if="!sessionsOpen && store.view === 'chat'" class="toolbar-settings" :aria-label="t('设置')" :title="t('设置')" @click="actions.setView('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18 M8 3v6M16 9v6M10 15v6"/></svg></button>
+      </header>
       <ComputerControlBar />
       <div v-if="store.error" class="error-bar">
         <span>{{ store.error }}</span>
@@ -111,10 +118,22 @@ onMounted(() => {
   position: relative;
   display: flex;
   height: 100vh;
+  background: var(--sidebar);
 }
 
-.shell.mac { padding-top: 34px; }
-.window-titlebar { position:absolute; inset:0 0 auto; height:34px; display:flex; align-items:center; padding-left:84px; background:var(--surface); color:var(--muted); font-size:12px; user-select:none; -webkit-app-region:drag; }
+.shell.mac { padding-top: 0; }
+.shell.mac.sidebar-collapsed .workspace-toolbar { padding-left:84px; }
+.shell.mac :deep(.sidebar) { padding-top: 36px; }
+.window-titlebar { position:absolute; left:0; top:0; width:78px; height:34px; z-index:30; user-select:none; -webkit-app-region:drag; }
+.workspace-toolbar { display:flex; align-items:center; gap:10px; height:38px; flex:none; padding:0 12px; color:var(--muted); -webkit-app-region:drag; }
+.workspace-toolbar button { position:relative; display:grid; place-items:center; width:28px; height:28px; padding:5px; border:0; border-radius:6px; background:none; color:var(--muted); cursor:pointer; -webkit-app-region:no-drag; }
+.workspace-toolbar button:hover { background:var(--hover); color:var(--ink); }
+.workspace-toolbar svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; }
+.workspace-mode { margin:auto; padding:2px 9px; border-radius:var(--r-full); background:var(--surface-2); color:var(--ink-2); font-size:10px; }
+.workspace-toolbar::after { content:""; width:28px; }
+.workspace-toolbar:has(.toolbar-settings)::after { display:none; }
+.rail-unread { position:absolute; right:1px; top:1px; width:6px; height:6px; border-radius:50%; background:#0878e8; }
+
 
 .pane {
   display: flex;
@@ -122,6 +141,12 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  margin: 2px 3px 3px 0;
+  border: 1px solid var(--chrome-rule);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 2px 12px rgb(16 22 26 / 4%);
+  overflow: hidden;
 }
 
 .content {

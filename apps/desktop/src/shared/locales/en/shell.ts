@@ -1,5 +1,21 @@
 /** 英文词典：shell 这一组界面（中文原文 → 英文）。 */
 export const shell: Record<string, string> = {
+  "搜索": "Search",
+  "工作台": "Workspace",
+  "今天想完成什么？": "What would you like to get done?",
+  "在": "In",
+  "使用": "with",
+  "选择工作区": "Choose workspace",
+  "活动记录": "Activity",
+  "当前列表内，近一年创建 {n} 个会话": "{n} chats created in the past year in the current list",
+  "近一年已记录 {n} tokens": "{n} tokens recorded in the past year",
+  "无用量记录": "No usage recorded",
+  "{day}：创建 {n} 个会话": "{day}: {n} chats created",
+  "基于当前会话列表的创建时间": "Creation dates from the current chat list",
+  "显示已记录的模型 token 用量": "Recorded model token usage",
+  "还没有用量记录": "No usage recorded yet",
+  "读取用量失败：{error}": "Could not load usage: {error}",
+
   "选择": "Select",
   "打开": "Open",
   "当前": "Current",

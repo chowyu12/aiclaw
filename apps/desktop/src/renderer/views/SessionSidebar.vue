@@ -5,18 +5,18 @@ import { locale, t } from "../i18n";
 import { describeError } from "../errors";
 import { workspaceName, projectBuckets } from "../workspace-buckets";
 import ProjectEditor from "./ProjectEditor.vue";
+import BrandLogo from "./BrandLogo.vue";
 import SessionRename from "./SessionRename.vue";
 import SessionCommandPalette from "./SessionCommandPalette.vue";
 import type { SessionSummaryView } from "../../shared/types";
-defineEmits<{ close: [] }>();
 
-const WIDTH_KEY = "aiclaw:session-sidebar-width", MIN_WIDTH = 220, DEFAULT_WIDTH = 300;
+const WIDTH_KEY = "aiclaw:session-sidebar-width", MIN_WIDTH = 200, DEFAULT_WIDTH = 240;
 const preferredWidth = ref(DEFAULT_WIDTH), windowWidth = ref(window.innerWidth), resizing = ref(false);
 try {
   const saved = Number(localStorage.getItem(WIDTH_KEY));
   if (Number.isFinite(saved) && saved >= MIN_WIDTH && saved <= 480) preferredWidth.value = saved;
 } catch { /* Layout remains usable when storage is unavailable. */ }
-const maxWidth = computed(() => Math.min(480, Math.max(MIN_WIDTH, windowWidth.value - 56 - 500)));
+const maxWidth = computed(() => Math.min(480, Math.max(MIN_WIDTH, windowWidth.value - 504)));
 const sidebarWidth = computed(() => Math.min(maxWidth.value, Math.max(MIN_WIDTH, preferredWidth.value)));
 let drag: { pointerId: number; startX: number; width: number } | null = null;
 function rememberWidth(): void {
@@ -326,10 +326,10 @@ function when(iso: string): string {
 <template>
   <aside class="sidebar" :class="{ 'is-chat': store.view === 'chat', resizing }" :style="{'--session-sidebar-width': `${sidebarWidth}px`}">
     <div class="brand">
-      <strong>{{ store.view === 'chat' ? 'AIClaw' : t('设置') }}</strong>
+      <strong><BrandLogo compact size="sm" />{{ store.view === 'chat' ? 'AIClaw' : t('设置') }}</strong>
       <div v-if="store.view === 'chat'" class="sidebar-header-actions">
+
         <button ref="searchButton" class="icon tiny search-toggle" :aria-label="t('搜索会话与内容')" :title="`${t('搜索与快捷操作')} (${commandShortcutHint})`" :aria-expanded="searchOpen" aria-controls="command-results" aria-haspopup="dialog" @click="openCommands"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
-        <button class="icon tiny" :aria-label="t('收起会话列表')" :title="t('收起会话列表')" @click="$emit('close')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
       </div>
     </div>
 
@@ -513,6 +513,8 @@ function when(iso: string): string {
       </div>
     </template>
 
+    <slot />
+
     <SessionCommandPalette v-if="searchOpen" :navigation="NAV" :return-focus="commandReturn" @close="searchOpen = false" @new-chat="newCurrentProjectChat()" @new-project="editProject()" />
 
     <div v-if="store.view === 'chat'" class="sidebar-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="session-sidebar" :aria-label="t('调整会话列表宽度')" :title="t('拖动调整会话列表宽度')" :aria-valuemin="MIN_WIDTH" :aria-valuemax="maxWidth" :aria-valuenow="sidebarWidth" @pointerdown="startResize" @pointermove="moveResize" @pointerup="finishResize" @pointercancel="finishResize" @lostpointercapture="finishResize" @keydown="resizeKey" />
@@ -528,10 +530,10 @@ function when(iso: string): string {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 248px;
-  flex: 0 0 248px;
+  width: var(--session-sidebar-width, 240px);
+  flex: 0 0 var(--session-sidebar-width, 240px);
   min-height: 0;
-  border-right: 1px solid var(--chrome-rule);
+  border-right: 0;
   background: var(--sidebar);
 }
 
@@ -540,19 +542,23 @@ function when(iso: string): string {
   display:flex;
   align-items:center;
   justify-content:space-between;
-  min-height:60px;
-  padding:16px 18px 8px;
+  min-height:42px;
+  padding:8px 16px;
+  -webkit-app-region:drag;
 }
-.brand strong { font-size:18px; font-weight:500; letter-spacing:-.3px; }
+.brand strong { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:550; letter-spacing:-.2px; }
+.brand :deep(.mark) { width:19px; height:19px; }
+.brand button { -webkit-app-region:no-drag; }
 .sidebar-header-actions{display:flex;align-items:center;gap:9px}.sidebar-header-actions .icon{width:26px;height:28px;box-shadow:none;color:var(--muted)}.sidebar-header-actions .icon:hover{background:var(--hover);color:var(--ink)}.sidebar-header-actions svg,.new svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
-.sidebar.is-chat{width:var(--session-sidebar-width,300px);flex-basis:var(--session-sidebar-width,300px);background:var(--sidebar)}
+.sidebar.is-chat{width:var(--session-sidebar-width,240px);flex-basis:var(--session-sidebar-width,240px);background:var(--sidebar)}
 .sidebar.resizing{user-select:none}.sidebar-resizer{position:absolute;top:0;bottom:0;right:-4px;width:8px;z-index:3;cursor:col-resize;touch-action:none}.sidebar-resizer::after{content:"";position:absolute;top:50%;left:3px;width:2px;height:64px;transform:translateY(-50%);border-radius:2px;background:var(--accent);opacity:0;transition:opacity .15s ease}.sidebar-resizer:hover::after,.sidebar-resizer:focus-visible::after,.resizing .sidebar-resizer::after{opacity:1}.sidebar-resizer:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
-.list-heading{display:flex;align-items:center;padding:12px 18px 2px;color:var(--muted);font-size:13px}
+.list-heading{display:flex;align-items:center;padding:10px 16px 4px;color:var(--muted);font-size:11px}
 
 .head {
   display: flex;
-  gap: 6px;
-  padding: 0 10px 6px;
+  flex-direction:column;
+  gap: 2px;
+  padding: 0 9px 6px;
 }
 
 .new {
@@ -565,7 +571,7 @@ function when(iso: string): string {
   border-radius: var(--r-md);
   background: transparent;
   color: var(--ink);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 400;
   cursor: pointer;
   transition: background-color 0.12s, color 0.12s;
@@ -866,4 +872,7 @@ function when(iso: string): string {
   opacity: 1;
 }
 
+
+.sidebar.is-chat .bucket-name { font-size:12px; }
+.sidebar.is-chat .title { font-size:12px; }
 </style>

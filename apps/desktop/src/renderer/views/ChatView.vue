@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import WorkPanel from "./WorkPanel.vue";
+import WorkspaceWelcome from "./WorkspaceWelcome.vue";
 import PromptPresets from "./PromptPresets.vue";
 import { applyPreset, presetCandidates } from "../../shared/presets";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
@@ -724,8 +725,8 @@ const forking = ref(false);
 
 <template>
   <PromptPresets v-if="presetsOpen" :draft="presetDraft" @close="presetsOpen=false; input?.focus()" />
-  <div class="chat">
-    <header class="chat-header" :aria-label="t('对话')"><strong class="chat-session-title" :title="sessionTitle">{{ sessionTitle }}</strong><span class="chat-workspace" :title="workspaceTitle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg>{{ workspaceLabel }}</span></header>
+  <div class="chat" :class="{ 'is-empty': store.timeline.length === 0 }">
+    <header v-if="store.timeline.length > 0" class="chat-header" :aria-label="t('对话')"><strong class="chat-session-title" :title="sessionTitle">{{ sessionTitle }}</strong><span class="chat-workspace" :title="workspaceTitle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7V5h6l2 2h10v13H3Z"/></svg>{{ workspaceLabel }}</span></header>
     <div v-if="!configured && !store.sessionId" class="gate">
       <h2>{{ t("先完成配置") }}</h2>
       <p>{{ t("到「模型服务」页添加一个端点、填上 Key、写上模型名，再回来选一个默认模型。") }}</p>
@@ -752,7 +753,7 @@ const forking = ref(false);
       </div>
 
       <template v-else>
-        <div ref="scroller" class="stream">
+        <div ref="scroller" class="stream" :class="{ 'is-welcome': !store.timeline.length && !store.loadingSession && !store.sessionLoadError }">
           <WorkPanel />
           <p v-if="forkError" role="alert">{{ forkError }}</p>
           <!-- 切会话时先切过去、历史随后到：这几秒里要有话说，不能是「还没有内容」，
@@ -764,9 +765,7 @@ const forking = ref(false);
             <p>{{ store.sessionLoadError }}</p>
             <button class="ghost" @click="actions.openSession(store.sessionId)">{{ t("重试") }}</button>
           </div>
-          <p v-else-if="store.timeline.length === 0" class="blank">
-            {{ t("这个会话还没有内容。说点什么开始。") }}
-          </p>
+          <WorkspaceWelcome v-else-if="store.timeline.length === 0" :workspace="workspaceLabel" :model="store.model" @workspace="chooseWorkspace" @model="openModelMenu" />
 
           <!-- 按原始顺序展示进展正文与工具活动，细节默认折叠。 -->
           <template v-for="turn in turns" :key="turn.key">
@@ -1019,64 +1018,6 @@ const forking = ref(false);
                   {{ t("附件") }}
                 </button>
 
-                <!-- 工作区按会话设。摆在这里而不是配置页：它是「这次要在哪儿
-                     干活」，属于会话，而且随时会改。 -->
-                <button class="chip" :title="workspaceTitle" @click="workspaceOpen = !workspaceOpen">
-                  <span class="chip-icon">▣</span>
-                  {{ workspaceLabel }}
-                </button>
-                <div v-if="workspaceOpen" class="menu" @click.stop>
-                  <div class="menu-head"><span>{{ t("会话工作区") }}</span></div>
-                  <div class="menu-note pad">
-                    {{
-                      store.sessionInfo?.workspace
-                        ? store.sessionInfo.workspace
-                        : t("没有设置。相对路径按主目录解析，任何写入都会先问你一次。")
-                    }}
-                  </div>
-                  <button class="menu-item" @click="chooseWorkspace()">{{ t("选择目录…") }}</button>
-                  <button
-                    v-if="store.sessionInfo?.workspace"
-                    class="menu-item"
-                    @click="clearWorkspace()"
-                  >
-                    {{ t("恢复默认目录") }}
-                  </button>
-                </div>
-                <!-- 工具数是「这次能用什么」最直接的一个数；有挂载失败时标红。 -->
-                <button
-                  class="chip"
-                  :class="{ bad: failedMounts.length > 0 }"
-                  @click="statusOpen = !statusOpen"
-                >
-                  <span class="chip-icon">{{ failedMounts.length > 0 ? "!" : "·" }}</span>
-                  {{ t("工具 {n}", { n: toolCount }) }}
-                </button>
-                <div v-if="statusOpen" class="menu status-menu" @click.stop>
-                  <div class="menu-head"><span>{{ t("这个会话挂上了什么") }}</span></div>
-                  <div class="status-row">
-                    <span class="menu-name">{{ t("内置工具与插件") }}</span>
-                    <span class="menu-note">{{ (store.sessionInfo?.tools ?? []).join(t("、")) || t("无") }}</span>
-                  </div>
-                  <!-- 代码模式：模型面前只有 exec 一个工具，但下面这些在脚本里
-                       都能 tools.xxx() 调到。不列出来用户会以为 MCP 没挂上。 -->
-                  <div v-if="folded.length > 0" class="status-row">
-                    <span class="menu-name">{{ t("收进 exec 的工具（{n}）", { n: folded.length }) }}</span>
-                    <span class="menu-note">{{ folded.join(t("、")) }}</span>
-                  </div>
-                  <div v-if="(store.sessionInfo?.skills ?? []).length > 0" class="status-row">
-                    <span class="menu-name">{{ t("技能") }}</span>
-                    <span class="menu-note">{{ (store.sessionInfo?.skills ?? []).join(t("、")) }}</span>
-                  </div>
-                  <div v-for="[name, status] in mounts" :key="name" class="status-row">
-                    <span class="menu-name" :class="{ bad: mountFailed(status) }">{{ name }}</span>
-                    <span class="menu-note">{{ status }}</span>
-                  </div>
-                  <p v-if="mounts.length === 0" class="menu-note pad">
-                    {{ t("没有挂载任何 MCP server。到「MCP」页添加。") }}
-                  </p>
-                </div>
-
                 <button class="chip" :disabled="store.policyChanging" :data-policy="store.config?.profile" @click="policyOpen = !policyOpen">
                   <span class="chip-icon">!</span>
                   {{ policy?.label ?? t("审批") }}
@@ -1186,7 +1127,66 @@ const forking = ref(false);
               </div>
             </div>
           </div>
+          <div class="composer-context">
+                <!-- 工作区按会话设。摆在这里而不是配置页：它是「这次要在哪儿
+                     干活」，属于会话，而且随时会改。 -->
+                <button class="chip workspace-chip" :title="workspaceTitle" @click="workspaceOpen = !workspaceOpen">
+                  <span class="chip-icon">▣</span>
+                  {{ workspaceLabel }}
+                </button>
+                <div v-if="workspaceOpen" class="menu" @click.stop>
+                  <div class="menu-head"><span>{{ t("会话工作区") }}</span></div>
+                  <div class="menu-note pad">
+                    {{
+                      store.sessionInfo?.workspace
+                        ? store.sessionInfo.workspace
+                        : t("没有设置。相对路径按主目录解析，任何写入都会先问你一次。")
+                    }}
+                  </div>
+                  <button class="menu-item" @click="chooseWorkspace()">{{ t("选择目录…") }}</button>
+                  <button
+                    v-if="store.sessionInfo?.workspace"
+                    class="menu-item"
+                    @click="clearWorkspace()"
+                  >
+                    {{ t("恢复默认目录") }}
+                  </button>
+                </div>
+                <!-- 工具数是「这次能用什么」最直接的一个数；有挂载失败时标红。 -->
+                <button
+                  class="chip"
+                  :class="{ bad: failedMounts.length > 0 }"
+                  @click="statusOpen = !statusOpen"
+                >
+                  <span class="chip-icon">{{ failedMounts.length > 0 ? "!" : "·" }}</span>
+                  {{ t("工具 {n}", { n: toolCount }) }}
+                </button>
+                <div v-if="statusOpen" class="menu status-menu" @click.stop>
+                  <div class="menu-head"><span>{{ t("这个会话挂上了什么") }}</span></div>
+                  <div class="status-row">
+                    <span class="menu-name">{{ t("内置工具与插件") }}</span>
+                    <span class="menu-note">{{ (store.sessionInfo?.tools ?? []).join(t("、")) || t("无") }}</span>
+                  </div>
+                  <!-- 代码模式：模型面前只有 exec 一个工具，但下面这些在脚本里
+                       都能 tools.xxx() 调到。不列出来用户会以为 MCP 没挂上。 -->
+                  <div v-if="folded.length > 0" class="status-row">
+                    <span class="menu-name">{{ t("收进 exec 的工具（{n}）", { n: folded.length }) }}</span>
+                    <span class="menu-note">{{ folded.join(t("、")) }}</span>
+                  </div>
+                  <div v-if="(store.sessionInfo?.skills ?? []).length > 0" class="status-row">
+                    <span class="menu-name">{{ t("技能") }}</span>
+                    <span class="menu-note">{{ (store.sessionInfo?.skills ?? []).join(t("、")) }}</span>
+                  </div>
+                  <div v-for="[name, status] in mounts" :key="name" class="status-row">
+                    <span class="menu-name" :class="{ bad: mountFailed(status) }">{{ name }}</span>
+                    <span class="menu-note">{{ status }}</span>
+                  </div>
+                  <p v-if="mounts.length === 0" class="menu-note pad">
+                    {{ t("没有挂载任何 MCP server。到「MCP」页添加。") }}
+                  </p>
+                </div>
 
+          </div>
 </footer>
       </template>
     </template>
@@ -1214,10 +1214,10 @@ const forking = ref(false);
   background: var(--ground);
 
   /* 消息、步骤与输入框共用栏宽；并排阅读时避免重复的内边距挤窄正文。 */
-  --content-width: min(880px, 100% - 40px);
+  --content-width: min(720px, 100% - 48px);
 }
 
-.chat-header { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:58px; flex:none; margin:0 20px; padding:12px 0; border-bottom:1px solid var(--chrome-rule); }
+.chat-header { display:flex; align-items:center; justify-content:space-between; gap:18px; min-height:40px; flex:none; margin:0 24px; padding:4px 0 10px; border-bottom:0; }
 .chat-session-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; font-size:13px; font-weight:500; }
 .chat-workspace { display:flex; align-items:center; gap:7px; min-width:0; max-width:44%; color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .chat-workspace svg { width:15px; height:15px; flex:none; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linejoin:round; }
@@ -1244,8 +1244,9 @@ const forking = ref(false);
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 24px 0 8px;
+  padding: 20px 0 8px;
 }
+.stream.is-welcome { display:flex; flex-direction:column; padding:0 0 16px; }
 
 .blank {
   margin: 48px auto;
@@ -1722,7 +1723,7 @@ const forking = ref(false);
 
 .composer-wrap {
   position: relative;
-  padding: 10px 0 18px;
+  padding: 10px 0 8px;
 }
 
 .backdrop {
@@ -1736,12 +1737,16 @@ const forking = ref(false);
   max-width: var(--content-width);
   margin: 0 auto;
   border: 1px solid var(--rule-strong);
-  border-radius: var(--r-lg);
+  border-radius: 16px;
   background: var(--surface);
-  box-shadow: none;
+  box-shadow: 0 2px 8px rgb(16 22 26 / 3%);
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+
+.composer-context { position:relative; display:flex; align-items:center; gap:9px; max-width:var(--content-width); min-width:0; margin:6px auto 0; color:var(--muted); }
+.composer-context .chip { max-width:65%; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; padding:2px 4px; font-size:11px; }
+.composer-context .menu { bottom:100%; }
 .composer:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px var(--accent-soft);
