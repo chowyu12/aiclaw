@@ -1,5 +1,19 @@
 /** 英文词典：shell 这一组界面（中文原文 → 英文）。 */
 export const shell: Record<string, string> = {
+  "选择": "Select",
+  "打开": "Open",
+  "当前": "Current",
+  "导航": "Navigation",
+  "应用": "App",
+  "会话": "Chats",
+  "归档会话": "Archive chat",
+  "在当前项目中开始新对话": "Start a new chat in the current project",
+  "归档后可在设置中恢复": "Restore archived chats from Settings",
+  "为项目配置工作区目录": "Set up workspace directories for a project",
+  "搜索与快捷操作": "Search and quick actions",
+  "搜索会话或操作…": "Search chats or actions…",
+  "没有匹配的会话或操作": "No matching chats or actions",
+
   "置顶": "Pin",
   "取消置顶": "Unpin",
   "已置顶": "Pinned",

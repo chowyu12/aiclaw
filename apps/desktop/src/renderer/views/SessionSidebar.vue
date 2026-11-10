@@ -3,9 +3,10 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store } from "../store";
 import { locale, t } from "../i18n";
 import { describeError } from "../errors";
-import { workspaceBuckets, workspaceName, projectBuckets } from "../workspace-buckets";
+import { workspaceName, projectBuckets } from "../workspace-buckets";
 import ProjectEditor from "./ProjectEditor.vue";
 import SessionRename from "./SessionRename.vue";
+import SessionCommandPalette from "./SessionCommandPalette.vue";
 import type { SessionSummaryView } from "../../shared/types";
 defineEmits<{ close: [] }>();
 
@@ -78,41 +79,25 @@ const NAV = computed(
     ] as const,
 );
 
-/**
- * 搜索关键词。防抖 200ms 再打内核——每个按键都查一次的话，
- * 打「销售」两个字期间会发出四五次请求，而结果只有最后一次有用。
- */
 /** 这个会话里有没有等你回答的问题。 */
 function waiting(sessionId: string): boolean {
   return store.questions.some((question) => question.sessionId === sessionId);
 }
 
-const keyword = ref("");
-const searchOpen = ref(false), searchInput = ref<HTMLInputElement>(), searchButton = ref<HTMLButtonElement>();
-async function toggleSearch(): Promise<void> {
-  searchOpen.value = !searchOpen.value;
-  if (!searchOpen.value) keyword.value = "";
-  await nextTick();
-  if (searchOpen.value) searchInput.value?.focus();
-  else searchButton.value?.focus();
+const searchOpen = ref(false), searchButton = ref<HTMLButtonElement>(), commandReturn = ref<HTMLElement>();
+const commandShortcutHint = navigator.userAgent.includes("Macintosh") ? "⌘K" : "Ctrl+K";
+function openCommands(): void { commandReturn.value = searchButton.value; searchOpen.value = true; }
+function commandShortcut(event: KeyboardEvent): void {
+  if (event.defaultPrevented || event.isComposing || event.altKey || event.shiftKey || !(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
+  if (document.querySelector('[aria-modal="true"]')) return;
+  event.preventDefault(); commandReturn.value = document.activeElement instanceof HTMLElement ? document.activeElement : undefined; searchOpen.value = true;
 }
-let searchTimer: ReturnType<typeof setTimeout> | undefined;
-watch(keyword, (value) => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => void actions.searchSessions(value), 200);
-});
-const searching = computed(() => keyword.value.trim().length > 0);
-
-const workspaceLabels = computed(() => workspaceBuckets(store.sessions));
-function workspaceLabel(session: SessionSummaryView): string {
-  const path = session.workdir?.trim();
-  if (!path) return t("普通会话");
-  const bucket = workspaceLabels.value.find(bucket => bucket.path === path);
-  return bucket?.detail ? `${bucket.name} · ${bucket.detail}` : workspaceName(path);
-}
+onMounted(() => window.addEventListener("keydown", commandShortcut));
+onUnmounted(() => window.removeEventListener("keydown", commandShortcut));
+watch(() => store.view, () => { searchOpen.value = false; });
 
 const renamingSession = ref("");
-watch(() => [store.view, keyword.value], () => { renamingSession.value = ""; });
+watch(() => [store.view, searchOpen.value], () => { renamingSession.value = ""; });
 watch(() => store.sessions.map(session => session.id), ids => {
   if (renamingSession.value && !ids.includes(renamingSession.value)) renamingSession.value = "";
 });
@@ -158,7 +143,7 @@ const menuElement = ref<HTMLElement | null>(null);
 let menuTrigger: HTMLElement | null = null;
 const creatingWorkspace = ref("");
 const archivingWorkspace = ref("");
-watch(() => [store.view, keyword.value], () => { workspaceMenu.value = null; });
+watch(() => [store.view, searchOpen.value], () => { workspaceMenu.value = null; });
 
 async function openWorkspaceMenu(bucket: Bucket, event: MouseEvent): Promise<void> {
   if (workspaceMenu.value?.id === bucket.id) { closeWorkspaceMenu(); return; }
@@ -343,7 +328,7 @@ function when(iso: string): string {
     <div class="brand">
       <strong>{{ store.view === 'chat' ? 'AIClaw' : t('设置') }}</strong>
       <div v-if="store.view === 'chat'" class="sidebar-header-actions">
-        <button ref="searchButton" class="icon tiny search-toggle" :aria-label="t('搜索会话与内容')" :title="t('搜索会话与内容')" :aria-expanded="searchOpen" aria-controls="session-search" @click="toggleSearch"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
+        <button ref="searchButton" class="icon tiny search-toggle" :aria-label="t('搜索会话与内容')" :title="`${t('搜索与快捷操作')} (${commandShortcutHint})`" :aria-expanded="searchOpen" aria-controls="command-results" aria-haspopup="dialog" @click="openCommands"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg></button>
         <button class="icon tiny" :aria-label="t('收起会话列表')" :title="t('收起会话列表')" @click="$emit('close')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg></button>
       </div>
     </div>
@@ -353,20 +338,13 @@ function when(iso: string): string {
         <button class="new" :disabled="store.runtime.state !== 'ready'" @click="newCurrentProjectChat()">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7M10 14l1-4L19 2l3 3-8 8Z"/></svg>{{ t("新对话") }}
         </button>
-        <button class="icon" :title="t('新建项目')" :aria-label="t('新建项目')" @click="editProject()">＋</button>
       </template>
       <button v-else class="new" @click="actions.setView('chat')">
         <span class="plus">‹</span> {{ t("返回对话") }}
       </button>
     </div>
 
-    <!-- 搜索只在对话态出现：设置态那个列表是固定的四项，搜它没有意义。 -->
-    <div v-if="store.view === 'chat' && searchOpen" id="session-search" class="search" @keydown.esc.prevent.stop="toggleSearch">
-      <input ref="searchInput" v-model="keyword" :aria-label="t('搜索会话与内容')" :placeholder="t(`搜索会话与内容`)" />
-      <button v-if="keyword" class="icon tiny" :title="t(`清空`)" @click="keyword = ''">×</button>
-    </div>
-
-    <div v-if="store.view === 'chat' && !searching" class="list-heading">{{ t('项目') }}</div>
+    <div v-if="store.view === 'chat'" class="list-heading"><span>{{ t('项目') }}</span><button class="icon tiny project-create" :title="t('新建项目')" :aria-label="t('新建项目')" @click="editProject()">＋</button></div>
 
     <!-- 同一个列表位置，两种内容：对话态是会话，设置态是导航。
          导航复用会话行的样式，因为它们在视觉上就该是一回事。 -->
@@ -382,45 +360,6 @@ function when(iso: string): string {
           <div class="title">{{ nav.label }}</div>
           <div class="meta">{{ nav.note }}</div>
         </div>
-      </div>
-    </div>
-
-    <!-- 搜索态下不分组：分组是「平时怎么归档」，而搜索是「现在要找哪一条」，
-         把 3 个命中拆进 5 个分组里反而更难看清。 -->
-    <div v-else-if="searching" class="list">
-      <p v-if="store.sessionSearch.loading" class="empty">{{ t("搜索中…") }}</p>
-      <p v-else-if="store.sessionSearch.results.length === 0" class="empty">
-        {{ t("没有匹配「{keyword}」的会话。标题和对话正文都找过了。", { keyword }) }}
-      </p>
-      <div
-        v-for="session in store.sessionSearch.results"
-        :key="session.id"
-        class="item"
-        :class="{ active: session.id === store.sessionId }"
-        @click="actions.openSession(session.id)"
-      >
-        <div class="item-main">
-          <div class="title">
-            <span v-if="waiting(session.id)" class="asking" :title="t(`模型在等你回答一个问题`)">{{ t("待回答") }}</span>
-            <span v-else-if="store.live[session.id]?.busy" class="running" :title="t(`正在执行`)"></span>
-            <span v-if="sourceLabel(session)" class="source-label">{{ sourceLabel(session) }}</span>
-            {{ session.title || t("未命名会话") }}
-          </div>
-          <!-- 命中片段是搜索结果里最有用的一行：一列「未命名会话」挑不出来，
-               看见命中的那句话就能认出是哪次。 -->
-          <div v-if="session.snippet" class="snippet">{{ session.snippet }}</div>
-          <div class="meta workspace-label" :title="session.workdir">{{ workspaceLabel(session) }}</div>
-          <div class="meta">
-            {{ when(session.updatedAt) }}
-            <template v-if="session.turnCount"> · {{ session.turnCount === 1 ? t("1 轮") : t("{n} 轮", { n: session.turnCount }) }}</template>
-          </div>
-        </div>
-        <div class="item-actions" @click.stop>
-            <button class="icon tiny" :title="t(`重命名会话`)" :aria-label="t(`重命名会话`)" :disabled="!!renamingSession" @click="renamingSession = session.id">
-              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 2 4 4-7.5 7.5-4.5.5.5-4.5Z M8.5 3.5l4 4" /></svg>
-            </button>
-        </div>
-        <SessionRename v-if="renamingSession === session.id" :session-id="session.id" :title="session.title || ''" @close="renamingSession = ''" />
       </div>
     </div>
 
@@ -574,6 +513,8 @@ function when(iso: string): string {
       </div>
     </template>
 
+    <SessionCommandPalette v-if="searchOpen" :navigation="NAV" :return-focus="commandReturn" @close="searchOpen = false" @new-chat="newCurrentProjectChat()" @new-project="editProject()" />
+
     <div v-if="store.view === 'chat'" class="sidebar-resizer" role="separator" tabindex="0" aria-orientation="vertical" aria-controls="session-sidebar" :aria-label="t('调整会话列表宽度')" :title="t('拖动调整会话列表宽度')" :aria-valuemin="MIN_WIDTH" :aria-valuemax="maxWidth" :aria-valuenow="sidebarWidth" @pointerdown="startResize" @pointermove="moveResize" @pointerup="finishResize" @pointercancel="finishResize" @lostpointercapture="finishResize" @keydown="resizeKey" />
   </aside>
 </template>
@@ -606,7 +547,7 @@ function when(iso: string): string {
 .sidebar-header-actions{display:flex;align-items:center;gap:9px}.sidebar-header-actions .icon{width:26px;height:28px;box-shadow:none;color:var(--muted)}.sidebar-header-actions .icon:hover{background:var(--hover);color:var(--ink)}.sidebar-header-actions svg,.new svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
 .sidebar.is-chat{width:var(--session-sidebar-width,300px);flex-basis:var(--session-sidebar-width,300px);background:var(--sidebar)}
 .sidebar.resizing{user-select:none}.sidebar-resizer{position:absolute;top:0;bottom:0;right:-4px;width:8px;z-index:3;cursor:col-resize;touch-action:none}.sidebar-resizer::after{content:"";position:absolute;top:50%;left:3px;width:2px;height:64px;transform:translateY(-50%);border-radius:2px;background:var(--accent);opacity:0;transition:opacity .15s ease}.sidebar-resizer:hover::after,.sidebar-resizer:focus-visible::after,.resizing .sidebar-resizer::after{opacity:1}.sidebar-resizer:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
-.list-heading{padding:12px 18px 2px;color:var(--muted);font-size:13px}
+.list-heading{display:flex;align-items:center;padding:12px 18px 2px;color:var(--muted);font-size:13px}
 
 .head {
   display: flex;
@@ -672,19 +613,7 @@ function when(iso: string): string {
   padding: 0;
 }
 
-.search {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 14px 7px;
-}
-
-.search input {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 9px;
-  font-size: 13px;
-}
+.project-create { margin-left: auto; }
 
 .workspace-actions { display: flex; gap: 2px; opacity: 0; pointer-events: none; }
 .bucket-head:hover .workspace-actions, .bucket-head:focus-within .workspace-actions, .workspace-actions.open { opacity: 1; pointer-events: auto; }

@@ -32,7 +32,7 @@ const isMac = navigator.userAgent.includes("Macintosh");
 function toggleSessions(): void {
   if (store.view !== "chat") { actions.setView("chat"); sessionsOpen.value = true; }
   else sessionsOpen.value = !sessionsOpen.value;
-  if (sessionsOpen.value) void nextTick(() => (document.querySelector<HTMLElement>(".sidebar .search input") ?? document.querySelector<HTMLElement>(".sidebar .head .new"))?.focus());
+  if (sessionsOpen.value) void nextTick(() => document.querySelector<HTMLElement>(".sidebar .head .new")?.focus());
 }
 function closeSessions(): void {
   if (store.view !== "chat" || !sessionsOpen.value) return;

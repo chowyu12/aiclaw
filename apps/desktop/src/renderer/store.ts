@@ -108,6 +108,7 @@ const state = reactive({
   sessions: [] as SessionSummaryView[],
   /** 会话搜索。关键词为空时界面用 sessions，不看这里。 */
   sessionSearch: {
+    error: "",
     keyword: "",
     results: [] as SessionSummaryView[],
     loading: false,
@@ -562,6 +563,7 @@ export const actions = {
    */
   async searchSessions(keyword: string): Promise<void> {
     state.sessionSearch.keyword = keyword;
+    state.sessionSearch.error = "";
     if (!keyword.trim()) {
       state.sessionSearch.results = [];
       state.sessionSearch.loading = false;
@@ -573,7 +575,7 @@ export const actions = {
       // 打字很快，回来的可能是上一个关键词的结果。对不上就丢掉。
       if (state.sessionSearch.keyword === keyword) state.sessionSearch.results = found;
     } catch (error) {
-      state.error = describeError(error);
+      if (state.sessionSearch.keyword === keyword) state.sessionSearch.error = describeError(error);
     } finally {
       if (state.sessionSearch.keyword === keyword) state.sessionSearch.loading = false;
     }
