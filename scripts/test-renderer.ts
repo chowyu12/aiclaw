@@ -229,9 +229,8 @@ test("真实形状的一段回答", () => {
   ].join("\n");
 
   const html = renderMarkdown(source);
-  // 目录也是路径，点了就在访达里打开——这正是用户下一步想做的事。
-  assert.ok(html.includes('data-file-path="/Users/x/Workspace"'), html);
-  assert.ok(html.includes('<span class="file-name">Workspace</span>'), html);
+  assert.ok(html.includes("<code>/Users/x/Workspace</code>"), html);
+  assert.ok(!html.includes('class="file-card"'), html);
   assert.ok(html.includes("<ul>"), html);
   assert.equal((html.match(/<li>/g) ?? []).length, 2, html);
   // 反引号和列表符号不该以原样出现在输出里——那正是没渲染的样子。
@@ -470,14 +469,25 @@ test("文件名渲染成可点的", () => {
   for (const text of ["双色球最近30期开奖号码.md", "package.json", "src/main/index.ts", "~/Desktop/a.png"]) {
     assert.ok(looksLikePath(text), `${text} 应当被认成路径`);
   }
-  const html = renderMarkdown("文档已生成：`报表.md`（工作区根目录）");
+  const html = renderMarkdown("`报表.md`");
   assert.match(html, /class="file-card"/);
   assert.match(html, /报表\.md/);
 });
 
+test("标题中的行内路径保持完整代码文本，不转换成文件控件", () => {
+  for (const level of ["#", "###", "######"]) {
+    for (const path of ["~/Library/Caches/go-build", "/Users/user/Library/Caches/go-build", "reports/report.md"]) {
+      const doc = new JSDOM(renderMarkdown(`${level} \`${path}\` 占用对比`)).window.document;
+      assert.equal(doc.querySelector(".file-card"), null);
+      assert.equal(doc.querySelector("h3 code,h5 code,h6 code")?.textContent, path);
+      assert.match(doc.body.textContent!, /占用对比/);
+    }
+  }
+});
+
 test("回复里的文件路径显示文件卡片，保留打开路径但不显示目录", () => {
   const path = "/Users/user/reports/行业分析 2025.md";
-  const dom = new JSDOM(renderMarkdown(`文件：\`${path}\``));
+  const dom = new JSDOM(renderMarkdown(`\`${path}\``));
   const card = dom.window.document.querySelector(".file-card")!;
   assert.equal(card.getAttribute("data-file-path"), path);
   assert.equal(card.querySelector(".file-name")?.textContent, "行业分析 2025.md");
@@ -491,21 +501,29 @@ test("回复里的文件路径显示文件卡片，保留打开路径但不显�
   assert.equal(link.window.document.querySelector(".file-format")?.textContent, "Word");
 });
 
-test("句中和括号内的文件引用保持行内，独立文件保留完整卡片", () => {
+test("只将独立文件引用渲染成卡片，句中和表格引用保留文本", () => {
   for (const reference of ["`/Applications/AIClaw Computer Use.app`", "[AIClaw Computer Use.app](/Applications/AIClaw%20Computer%20Use.app)"]) {
-    const source = `代理运行状态（${reference}），之前已经拉起。`;
-    const doc = new JSDOM(renderMarkdown(source)).window.document;
-    const card = doc.querySelector(".file-card")!;
-    assert.equal(card.getAttribute("data-file-inline"), "true");
-    assert.equal(card.getAttribute("data-file-path"), "/Applications/AIClaw Computer Use.app");
-    assert.ok(card.querySelector(".file-ref"));
-    assert.equal(card.querySelector(".file-open-trigger")?.getAttribute("aria-haspopup"), "menu");
-    assert.match(doc.querySelector("p")!.textContent!, /代理运行状态（.*），之前已经拉起。/);
-    const standalone = new JSDOM(renderMarkdown(reference)).window.document;
-    assert.equal(standalone.querySelector(".file-card")?.hasAttribute("data-file-inline"), false);
-    const table = new JSDOM(renderMarkdown(`| 应用 |\n| --- |\n| ${reference} |`)).window.document;
-    assert.equal(table.querySelector("td .file-card")?.getAttribute("data-file-inline"), "true");
+    for (const source of [
+      `代理运行状态（${reference}），之前已经拉起。`,
+      `文件：${reference}`,
+      `${reference} 占用对比`,
+      `### ${reference}`,
+      `| 应用 |\n| --- |\n| ${reference} |`,
+    ]) {
+      const doc = new JSDOM(renderMarkdown(source)).window.document;
+      assert.equal(doc.querySelector(".file-card,.file-open-trigger,a[href]"), null, source);
+      assert.ok(doc.body.textContent?.includes("AIClaw Computer Use.app"), source);
+    }
+    for (const source of [reference, `- ${reference}`]) {
+      const standalone = new JSDOM(renderMarkdown(source)).window.document;
+      const card = standalone.querySelector(".file-card")!;
+      assert.equal(card.getAttribute("data-file-path"), "/Applications/AIClaw Computer Use.app");
+      assert.equal(card.hasAttribute("data-file-inline"), false);
+    }
   }
+  const multiple = new JSDOM(renderMarkdown("`a.md` 和 `b.md`，不是附件列表。"));
+  assert.equal(multiple.window.document.querySelector(".file-card"), null);
+  assert.deepEqual([...multiple.window.document.querySelectorAll("code")].map(node => node.textContent), ["a.md", "b.md"]);
 });
 
 test("生成文件卡片将文件名和路径作为数据转义，不允许注入额外控件", async () => {
@@ -531,7 +549,7 @@ test("含斜杠的字段列表、日期和仓库名保留行内代码与完整�
 test("明确路径前缀仍可打开无扩展名的文件或目录", () => {
   for (const text of ["/Users/user/Workspace", "./README", "../reports", "~/Desktop", String.raw`C:\Users\user\report`, "C:/Users/user/report", String.raw`\\server\share\report`, "generated/report.md", "src/main.ts"]) {
     assert.equal(looksLikePath(text), true, text);
-    const source = `文件：\`${text}\``;
+    const source = `\`${text}\``;
     const doc = new JSDOM(renderMarkdown(source)).window.document;
     assert.equal(doc.querySelector(".file-card")?.getAttribute("data-file-path"), text);
   }
@@ -649,18 +667,18 @@ test("question Markdown renders formatting without images, HTML, files or nested
 });
 
 
-test("Python 可执行路径和运行命令保持行内代码，脚本路径仍可打开", () => {
+test("句中的 Python 路径、脚本名和命令都保持行内代码", () => {
  const source = "实际使用的是 `/usr/bin/python3`，系统还有 `python3`。脚本 `sum1to100.py`，运行 `python3 sum1to100.py`。";
  const doc = new JSDOM(renderMarkdown(source)).window.document;
- assert.deepEqual([...doc.querySelectorAll("code")].map(node => node.textContent), ["/usr/bin/python3", "python3", "python3 sum1to100.py"]);
- assert.deepEqual([...doc.querySelectorAll(".file-card")].map(node => node.getAttribute("data-file-path")), ["sum1to100.py"]);
+ assert.deepEqual([...doc.querySelectorAll("code")].map(node => node.textContent), ["/usr/bin/python3", "python3", "sum1to100.py", "python3 sum1to100.py"]);
+ assert.deepEqual([...doc.querySelectorAll(".file-card")].map(node => node.getAttribute("data-file-path")), []);
  assert.equal(looksLikePath("/opt/python3 sum1to100.py"), false);
  assert.equal(looksLikePath("我的 报表.xlsx"), true);
 });
 
 
 test("终端命令、普通代码和文件引用分别渲染", () => {
- const source = "运行 `python3 sum1to100.py`，变量 `count + 1`，文件 `sum1to100.py`。\n\n```bash\npython3 sum1to100.py\n```\n\n```python\nprint(1)\n```";
+ const source = "运行 `python3 sum1to100.py`，变量 `count + 1`，文件 `sum1to100.py`。\n\n`sum1to100.py`\n\n```bash\npython3 sum1to100.py\n```\n\n```python\nprint(1)\n```";
  const doc = new JSDOM(renderMarkdown(source)).window.document;
  assert.equal(doc.querySelector("code.command-inline")?.textContent, "python3 sum1to100.py");
  assert.ok([...doc.querySelectorAll("code:not(.command-inline)")].some(node => node.textContent === "count + 1"));

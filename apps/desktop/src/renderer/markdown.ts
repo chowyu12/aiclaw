@@ -175,10 +175,7 @@ md.renderer.rules.fence = (tokens, index) => {
 };
 
 /**
- * 行内代码里如果是个文件路径，渲染成可点的。
- *
- * 模型写完文件会说「已生成 `双色球最近30期开奖号码.md`」，而用户要做的下一件
- * 事十有八九就是打开它看看——在没有这条之前他得自己去 Finder 里找。
+ * 独占段落的行内文件路径渲染成卡片；句中、标题和表格中的引用保留代码文本。
  *
  * 判断只看形状（末尾是扩展名，或者有明确路径前缀），**不看文件存不存在**——渲染层不该
  * 去碰文件系统。真正的判断在主进程：路径按会话工作区解析、必须真的存在、
@@ -187,8 +184,8 @@ md.renderer.rules.fence = (tokens, index) => {
  */
 md.renderer.rules.code_inline = (tokens, index) => {
   const text = tokens[index]!.content;
-  if (!looksLikePath(text)) return `<code${isCommand(text) ? ' class="command-inline"' : ""}>${md.utils.escapeHtml(text)}</code>`;
-  return fileCard(text, tokens[index]!.meta?.fileInline === true || tokens.some((token, i) => i !== index && token.content.trim().length > 0));
+  if (!tokens[index]!.meta?.standaloneFile || !looksLikePath(text)) return `<code${isCommand(text) ? ' class="command-inline"' : ""}>${md.utils.escapeHtml(text)}</code>`;
+  return fileCard(text);
 };
 
 // Local Markdown links use the same host-validated file action as inline paths.
@@ -196,9 +193,10 @@ md.core.ruler.after("inline", "local-file-cards", state => {
   for (const [blockIndex, token] of state.tokens.entries()) {
     const children = token.children;
     if (!children) continue;
-    const tableCell = ["th_open", "td_open"].includes(state.tokens[blockIndex - 1]?.type ?? "");
-    if (tableCell) for (const child of children) {
-      if (child.type === "code_inline") child.meta = { ...child.meta, fileInline: true };
+    const paragraph = state.tokens[blockIndex - 1]?.type === "paragraph_open";
+    const content = children.filter(child => child.type !== "text" || child.content.trim());
+    if (paragraph && content.length === 1 && content[0]!.type === "code_inline") {
+      content[0]!.meta = { ...content[0]!.meta, standaloneFile: true };
     }
     for (let i = 0; i < children.length; i++) {
       if (children[i]!.type !== "link_open") continue;
@@ -206,10 +204,17 @@ md.core.ruler.after("inline", "local-file-cards", state => {
       if (!isLocalFileLink(href)) continue;
       const end = children.findIndex((child, index) => index > i && child.type === "link_close");
       if (end < 0) continue;
+      if (!paragraph || children.some((child, index) => (index < i || index > end) && (child.type !== "text" || child.content.trim()))) {
+        // Keep the label, but do not turn a sentence fragment into a file action.
+        children.splice(end, 1);
+        children.splice(i, 1);
+        i--;
+        continue;
+      }
       let path = href;
       try { path = decodeURIComponent(href); } catch { /* Keep literal paths with percent signs. */ }
       const card = new state.Token("html_inline", "", 0);
-      card.content = fileCard(path, tableCell || children.some((child, index) => (index < i || index > end) && child.content.trim().length > 0));
+      card.content = fileCard(path);
       children.splice(i, end - i + 1, card);
     }
   }
