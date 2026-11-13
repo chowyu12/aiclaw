@@ -37,3 +37,5 @@ docs/swagger.yaml
 # Independent macOS Computer Use build
 /apps/desktop/computer-use/
 /apps/desktop/computer-use-development/
+
+/apps/desktop/cua-driver/

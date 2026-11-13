@@ -1,4 +1,6 @@
-# AIClaw 原生桌面控制
+# AIClaw 原生桌面控制（历史方案）
+
+> 此独立 App 方案已由 [内嵌 Cua Driver](cua-driver.md) 替代。以下内容保留为历史实现记录，不是当前运行入口。
 
 AIClaw 当前产品工具在 **macOS 14.4 及以上**通过自有 Swift 应用 **AIClaw Computer Use.app** 执行桌面控制。Electron 宿主负责模型循环、审批与操作后的验证；独立原生进程负责应用发现、AX 元素、窗口截图和输入。Windows/Linux 自有执行层、用户目录安装同步及 22 个产品工具注册已接入开发分支。Linux 当前支持 X11，Wayland 明确拒绝；完整安装包启动验收见下方验证状态。
 

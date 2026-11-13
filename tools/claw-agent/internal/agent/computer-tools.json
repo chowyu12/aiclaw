@@ -1,262 +1,9 @@
 [
   {
-    "name": "computer_click",
-    "action": "click",
-    "readOnly": false,
-    "description": "Click an element by index or pixel coordinates from screenshot. Use the latest observation_id and element_index. Verify the returned post-action state. If an error says the outcome is unknown, observe again before deciding whether to retry.",
-    "schema": {
-      "type": "object",
-      "required": [
-        "app",
-        "observation_id"
-      ],
-      "properties": {
-        "click_count": {
-          "description": "Number of clicks. Defaults to 1",
-          "type": "integer"
-        },
-        "x": {
-          "type": "number",
-          "description": "X coordinate in screenshot pixel coordinates"
-        },
-        "mouse_button": {
-          "description": "Mouse button to click. Defaults to left.",
-          "type": "string",
-          "enum": [
-            "left",
-            "right",
-            "middle"
-          ]
-        },
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "element_index": {
-          "type": "string",
-          "description": "Element index to click"
-        },
-        "y": {
-          "type": "number",
-          "description": "Y coordinate in screenshot pixel coordinates"
-        },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
-        },
-        "key": {
-          "type": "string",
-          "description": "Optional modifier combination: shift, ctrl, alt, super (use + between modifiers)."
-        },
-        "duration": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 10,
-          "description": "Seconds to hold the mouse button before release."
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        },
-        "interaction_mode": {
-          "type": "string",
-          "enum": [
-            "foreground",
-            "background"
-          ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
-        }
-      },
-      "additionalProperties": false
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
-    "name": "computer_query",
-    "action": "query",
-    "readOnly": true,
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ],
-    "description": "Fast targeted accessibility lookup (no full tree or screenshot). Prefer this to clicking through lists when the control text or role is known. The app must already run. Returned indexes authorize only matched element actions in this turn. A truncated empty search does not prove absence. For settable text fields use computer_set_value instead of trying to establish keyboard focus.",
-    "schema": {
-      "required": [
-        "app"
-      ],
-      "properties": {
-        "text": {
-          "description": "Match text in the control's title, description or value (up to 1000 UTF-16 code units). Case-insensitive substring unless exact is true. Long fields are bounded and reported as truncated.",
-          "type": "string"
-        },
-        "exact": {
-          "description": "Require a complete text match instead of a substring. Defaults to false. No substring retry.",
-          "type": "boolean"
-        },
-        "max_nodes": {
-          "type": "integer",
-          "description": "Node/queue cap for AX traversal. Defaults to 500; capped at 5000. Search has a 2-second cooperative deadline.",
-          "minimum": 1
-        },
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "limit": {
-          "minimum": 1,
-          "type": "integer",
-          "description": "Maximum matches to return. Defaults to 20; capped at 100."
-        },
-        "role": {
-          "description": "Native accessibility role from this platform: macOS AXTextField/AXTextArea/AXButton, Windows Edit/Button, or Linux text/push button. Use roles returned by observation, not localized labels.",
-          "type": "string"
-        },
-        "window_id": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 4294967295,
-          "description": "Native window_id from a prior observation/query. Search this window explicitly; omit to use the current app window."
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    }
-  },
-  {
-    "name": "computer_drag",
-    "action": "drag",
-    "readOnly": false,
-    "description": "Drag between screenshot pixel coordinates in the explicitly observed app window. Uses foreground event delivery and may move the system pointer. Verify the returned post-action state; never replay uncertain input.",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "from_x": {
-          "description": "Start X coordinate",
-          "type": "number"
-        },
-        "to_y": {
-          "type": "number",
-          "description": "End Y coordinate"
-        },
-        "from_y": {
-          "description": "Start Y coordinate",
-          "type": "number"
-        },
-        "app": {
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
-          "type": "string"
-        },
-        "to_x": {
-          "type": "number",
-          "description": "End X coordinate"
-        },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        },
-        "interaction_mode": {
-          "type": "string",
-          "enum": [
-            "foreground",
-            "background"
-          ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
-        }
-      },
-      "required": [
-        "app",
-        "from_x",
-        "from_y",
-        "to_x",
-        "to_y",
-        "observation_id"
-      ],
-      "additionalProperties": false
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
-    "name": "computer_screenshot",
-    "action": "get_app_state",
-    "readOnly": true,
-    "description": "Observe the app window and get observation_id. macOS defaults to a fast screenshot without a full AX tree; use computer_query to find named controls. Set include_ax=true only when you need a complete accessibility tree. After an action the returned screenshot already verifies its result; do not immediately repeat this read unless it is incomplete or the UI changed.",
-    "schema": {
-      "required": [
-        "app"
-      ],
-      "properties": {
-        "include_screenshot": {
-          "description": "Capture and return a screenshot. False skips capture and encoding; screenshot-coordinate actions require a fresh screenshot.",
-          "type": "boolean",
-          "default": true
-        },
-        "text_limit": {
-          "description": "Maximum text characters to return. Use \"max\" for full text. Defaults to 500.",
-          "anyOf": [
-            {
-              "minimum": 1,
-              "type": "integer"
-            },
-            {
-              "enum": [
-                "max"
-              ],
-              "type": "string"
-            }
-          ]
-        },
-        "max_tree_depth": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Maximum accessibility tree depth to render. Defaults to 64."
-        },
-        "include_ax": {
-          "description": "Include full accessibility tree. macOS defaults to false for speed; computer_query finds controls directly. Other platforms default to true.",
-          "type": "boolean"
-        },
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "max_tree_nodes": {
-          "description": "Maximum accessibility tree nodes to render. Defaults to 1200.",
-          "type": "integer",
-          "minimum": 1
-        },
-        "window_id": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 4294967295,
-          "description": "Native window_id from a prior observation/query. Search this window explicitly; omit to use the current app window."
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
     "name": "computer_list_apps",
     "action": "list_apps",
     "readOnly": true,
-    "description": "List the apps on this computer. Returns the set of apps that are currently running, as well as any that have been used in the last 14 days, including details on usage frequency.",
+    "description": "List macOS apps — both currently running and installed-but-not-running — with per-app state flags: Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
     "schema": {
       "additionalProperties": false,
       "properties": {},
@@ -266,164 +13,138 @@
       "darwin",
       "windows",
       "linux"
-    ]
+    ],
+    "backgroundDelivery": false
   },
   {
-    "name": "computer_secondary_action",
-    "action": "perform_secondary_action",
-    "readOnly": false,
-    "description": "Invoke a secondary accessibility action exposed by an element. Use the latest observation_id and element_index. Verify the returned post-action state. If an error says the outcome is unknown, observe again before deciding whether to retry.",
+    "name": "computer_list_windows",
+    "action": "list_windows",
+    "readOnly": true,
+    "description": "List top-level windows known to WindowServer, including off-screen ones (minimized, other Space, hidden): layer-0 only without `pid`, every layer with `pid`. Use it to find a `pid` and `window_id` for get_window_state; filter with `app` or `pid`, because an unfiltered call lists every window on the host. AppKit-internal helper windows and the driver's own overlay are omitted. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
     "schema": {
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "app",
-        "element_index",
-        "action",
-        "observation_id"
-      ],
       "properties": {
-        "action": {
-          "type": "string",
-          "description": "Secondary accessibility action name"
-        },
-        "element_index": {
-          "type": "string",
-          "description": "Element identifier"
-        },
         "app": {
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
+          "description": "Only windows of apps whose name contains this text (case-insensitive), or whose bundle id equals it. Prefer this or `pid` over an unfiltered call, which returns every window on the host.",
           "type": "string"
         },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        "on_screen_only": {
+          "description": "Drop windows not on the current Space.",
+          "type": "boolean"
         },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        },
-        "interaction_mode": {
-          "type": "string",
-          "enum": [
-            "foreground",
-            "background"
-          ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
+        "pid": {
+          "description": "Only this pid's windows, on every layer.",
+          "type": "integer",
+          "minimum": 1
         }
-      }
+      },
+      "type": "object"
     },
     "platforms": [
       "darwin",
       "windows",
       "linux"
-    ]
+    ],
+    "backgroundDelivery": false
   },
   {
-    "name": "computer_key",
-    "action": "press_key",
-    "readOnly": false,
-    "description": "Press a supported key or combination, such as a, Return, Tab, super+c or Left, using the latest observation_id. macOS background mode requires a fresh screenshot proving the unchanged focused editable field, text, selection, process and window; only plain/Shift keys are supported, with no Cmd/Ctrl/Alt shortcuts. Key dispatch does not prove application consumption. Verify resulting state; an unknown outcome requires a new observation before deciding whether to retry.",
+    "name": "computer_get_window_state",
+    "action": "get_window_state",
+    "readOnly": true,
+    "description": "Snapshot a window: the accessibility tree plus a screenshot. By default the tree is ONE compact Markdown rendering (`tree_format:\"markdown\"`): a row `[N]` is addressed with `element_token` `<snapshot_id>:N`, where `snapshot_id` is in the response header and in structuredContent. `tree_format:\"elements\"` returns the structured `elements` array instead (`element_index`, `element_token`, `role`, `label`, `value`, `actions`, `frame`, `parent_index`, `depth`); `\"both\"` returns both (about twice the size). Pass the token to click, type_text, press_key, etc. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
     "schema": {
-      "type": "object",
       "additionalProperties": false,
-      "required": [
-        "app",
-        "key",
-        "observation_id"
-      ],
       "properties": {
-        "app": {
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled.",
-          "type": "string"
+        "display_only": {
+          "description": "Default false. With include_accessibility_tree:false, returns pixels for display without registering an action capture or replacing the agent snapshot. The image cannot ground input actions.",
+          "type": "boolean"
         },
-        "key": {
-          "type": "string",
-          "description": "Key or key combination to press"
+        "full_output": {
+          "description": "Default false. Set true to restore the previous full response: both `elements` and `tree_markdown`, all metadata, and the platform's own walk limits unless max_elements / max_depth are passed. Does not combine with `since`.",
+          "type": "boolean"
         },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
+        "include_accessibility_tree": {
+          "description": "Default true. False skips the AX walk and returns the screenshot plus window metadata. Both this and include_screenshot false is an error.",
+          "type": "boolean"
         },
-        "duration": {
-          "type": "number",
+        "include_screenshot": {
+          "description": "Default true. False returns the tree only (saves image tokens and latency); screenshot_out_file still forces a capture.",
+          "type": "boolean"
+        },
+        "max_depth": {
+          "description": "Cap on walk depth. Default 25.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_dimension": {
+          "description": "Optional cap on the returned screenshot's long edge, in pixels (aspect ratio preserved) — the cheap path for a small preview / thumbnail. Applied on top of the session/global max_image_dimension ceiling; the tighter of the two wins. Omit for the configured default.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_elements": {
+          "description": "Cap on AX nodes walked (depth-first; markdown and elements truncate together). Default 250 (2 000 with full_output:true); the response states when the tree was cut.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "max_image_dimension": {
+          "description": "Per-call override for the returned screenshot's long edge in pixels. An explicit value wins over the session/global setting; 0 returns native resolution. Omit to preserve configured behavior.",
           "minimum": 0,
-          "maximum": 10,
-          "description": "Seconds to hold the key before release."
+          "type": "integer"
         },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
+        "pid": {
+          "description": "Target process ID.",
+          "type": "integer",
+          "minimum": 1
         },
-        "interaction_mode": {
-          "type": "string",
-          "enum": [
-            "foreground",
-            "background"
-          ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
-        }
-      }
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
-    "name": "computer_scroll",
-    "action": "scroll",
-    "readOnly": false,
-    "description": "Scroll an element in a direction by a number of pages. Use the latest observation_id and element_index. Verify the returned post-action state. If an error says the outcome is unknown, observe again before deciding whether to retry.",
-    "schema": {
-      "additionalProperties": false,
-      "properties": {
-        "pages": {
-          "description": "Number of pages to scroll. Fractional values are supported. Defaults to 1",
-          "type": "number"
-        },
-        "element_index": {
-          "type": "string",
-          "description": "Element identifier"
-        },
-        "direction": {
-          "description": "Scroll direction: up, down, left, or right",
+        "query": {
+          "description": "Case-insensitive substring filter: returns matching rows plus ancestors; element_index values are not renumbered. Try this before a full read.",
           "type": "string"
         },
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
-        },
-        "x": {
-          "type": "number",
-          "description": "Screenshot pixel x for coordinate scroll; use with y instead of element_index."
-        },
-        "y": {
-          "type": "number",
-          "description": "Screenshot pixel y for coordinate scroll; use with x instead of element_index."
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        },
-        "interaction_mode": {
+        "screenshot_format": {
           "type": "string",
           "enum": [
-            "foreground",
-            "background"
+            "png"
+          ]
+        },
+        "screenshot_quality": {
+          "description": "JPEG quality, 1-95, with screenshot_format:\"jpeg\" only. Default 85.",
+          "maximum": 95,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "since": {
+          "description": "A `snapshot_id` from an earlier get_window_state of the same window, or \"latest\" for this window's most recent read with the same query/max_elements/max_depth. Use it on every re-read after acting. Returns only what changed against that snapshot: `+` added rows, `~` changed rows, `-` removed rows (removed ids are the old snapshot's), or `no change`. Falls back to a full read when the snapshot is unknown, expired, belongs to another window, or was read with a different query/max_elements/max_depth; `since_status` says which. The response still carries a NEW snapshot_id and its element_tokens; rows not listed keep their previous [N] unless a `reindexed:` line says otherwise.",
+          "type": "string"
+        },
+        "timeout_ms": {
+          "default": 1000,
+          "description": "Wall-clock budget in milliseconds for the accessibility-tree walk (default 1000, min 100, max 120000). Bounds the WHOLE walk. When the budget runs out the tool returns the PARTIAL tree it has, flagged with `truncated: true`, `truncation_reason`, `nodes_visited`, `nodes_pending` and `elements_complete: false`; retry with a larger value (e.g. 5000) or narrow with `query` / `max_depth`.",
+          "maximum": 120000,
+          "minimum": 100,
+          "type": "integer"
+        },
+        "tree_format": {
+          "description": "Which tree representation to return. Default \"markdown\": the compact `tree_markdown` only, where a row `[N]` is addressed with element_token `<snapshot_id>:N`. \"elements\": the structured `elements` array only (per-element element_token, frame, parent_index, value). \"both\": the two together, as before; roughly doubles the size.",
+          "enum": [
+            "markdown",
+            "elements",
+            "both"
           ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
+          "type": "string"
+        },
+        "verbose": {
+          "description": "Default false. Set true to include the `_note` string and the full `background_input` capability report (macOS), which are omitted by default to save context.",
+          "type": "boolean"
+        },
+        "window_id": {
+          "description": "Target window ID from list_windows.",
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
-        "app",
-        "direction",
-        "observation_id"
+        "pid",
+        "window_id"
       ],
       "type": "object"
     },
@@ -431,101 +152,1029 @@
       "darwin",
       "windows",
       "linux"
-    ]
+    ],
+    "backgroundDelivery": false
+  },
+  {
+    "name": "computer_invoke_menu",
+    "action": "invoke_menu",
+    "readOnly": false,
+    "description": "Resolve an exact application-menu path one live native level at a time and invoke its final item through accessibility APIs. Missing, ambiguous, disabled, or structurally mismatched segments fail closed; this tool never falls back to pixels. Menu paths and refusals: `get_guide({topic:\"menus\"})`. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "description": "Exact, immediate-child application menu path to resolve and invoke through\nthe operating system's accessibility API. Path labels are matched after\ntrimming surrounding whitespace and otherwise remain case-sensitive. On\nmacOS, three periods in a label also match the ellipsis character that\nnative menu titles use (`Save As...` finds `Save As…`).",
+      "properties": {
+        "path": {
+          "description": "Menu labels from the top-level menu to the item, e.g. `[\"File\", \"Save As...\"]`\n(1 to 16 labels).",
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        },
+        "pid": {
+          "description": "Process ID of the application that owns the menu.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "window_id": {
+          "description": "Window ID from list_windows whose menu is invoked.",
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "path",
+        "pid",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_click",
+    "action": "click",
+    "readOnly": false,
+    "description": "Click a target pid. Prefer `element_token` (from get_window_state): it identifies one snapshot element, works on backgrounded, minimized or off-Space windows, and moves no cursor or focus. Use `x, y` only for canvas / video / WebGL / custom-drawn surfaces missing from the AX tree. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "description": "AX action: press (default), show_menu, pick, confirm, cancel, open, show_alternate_ui, show_default_ui. show_alternate_ui reveals hover-only controls on an element that lists it, without the pointer.",
+          "type": "string"
+        },
+        "button": {
+          "description": "Mouse button. Default left.",
+          "enum": [
+            "left",
+            "right",
+            "middle"
+          ],
+          "type": "string"
+        },
+        "capture_id": {
+          "description": "Optional capture ID from get_window_state or get_desktop_state. With x,y it is consumed atomically; stale or mismatched captures are refused.",
+          "type": "string"
+        },
+        "count": {
+          "description": "Click count (pixel path only). Default 1.",
+          "type": "integer"
+        },
+        "element_token": {
+          "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row `[11]` of a read whose snapshot_id is s0000002a is \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). Returns an explicit stale error naming the current snapshots once a newer read supersedes it.",
+          "pattern": "^s[0-9a-f]{8}:[0-9]+$",
+          "type": "string"
+        },
+        "from_zoom": {
+          "description": "x and y are in the last zoom image for this pid.",
+          "type": "boolean"
+        },
+        "modifier": {
+          "description": "Modifier keys: cmd, shift, option/alt, ctrl.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "description": "Target process ID. Optional with element_token (it carries the pid).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
+          "enum": [
+            "default",
+            "none"
+          ],
+          "type": "string"
+        },
+        "window_id": {
+          "description": "Target window ID. Omit with element_token.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "description": "X in screenshot pixels (get_window_state PNG, or get_desktop_state PNG for a desktop target).",
+          "type": "number"
+        },
+        "y": {
+          "description": "Y in screenshot pixels from the image selected by target.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pid",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_double_click",
+    "action": "double_click",
+    "readOnly": false,
+    "description": "Double-click at (x, y) or on an AX element identified by element_token. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "element_token": {
+          "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row `[11]` of a read whose snapshot_id is s0000002a is \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). Returns an explicit stale error naming the current snapshots once a newer read supersedes it.",
+          "pattern": "^s[0-9a-f]{8}:[0-9]+$",
+          "type": "string"
+        },
+        "pid": {
+          "description": "Target process ID. Optional with element_token (the token carries the pid).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
+          "enum": [
+            "default",
+            "none"
+          ],
+          "type": "string"
+        },
+        "window_id": {
+          "description": "CGWindowID. Omit when element_token is supplied (the token carries it).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "description": "Screen X coordinate (pixel path).",
+          "type": "number"
+        },
+        "y": {
+          "description": "Screen Y coordinate (pixel path).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pid",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_right_click",
+    "action": "right_click",
+    "readOnly": false,
+    "description": "Right-click against a target pid. Two addressing modes: Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "element_token": {
+          "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row `[11]` of a read whose snapshot_id is s0000002a is \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). Returns an explicit stale error naming the current snapshots once a newer read supersedes it.",
+          "pattern": "^s[0-9a-f]{8}:[0-9]+$",
+          "type": "string"
+        },
+        "modifier": {
+          "description": "Modifier keys held during the right-click: cmd/shift/option/ctrl. Pixel path only.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "description": "Target process ID. Optional with element_token (the token carries the pid).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
+          "enum": [
+            "default",
+            "none"
+          ],
+          "type": "string"
+        },
+        "window_id": {
+          "description": "CGWindowID. Omit when element_token is supplied (the token carries it).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "description": "X in window-local screenshot pixels. Must be provided together with y.",
+          "type": "number"
+        },
+        "y": {
+          "description": "Y in window-local screenshot pixels. Must be provided together with x.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pid",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_type_text",
+    "action": "type_text",
+    "readOnly": false,
+    "description": "Insert text via `AXSetAttribute(kAXSelectedText)` into the element given by `element_token`, or the pid's focused element. Does not press keys: use `press_key` / `hotkey` for Return, Escape, arrows. If AX insertion is unsupported (Chromium/Electron), it falls back to CGEvent typing when the route fits the transport budget; longer routes are refused with a safe chunk size. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_ms": {
+          "description": "Ms between characters in the CGEvent fallback. Default 0: characters go in batched key events, fast. Set a positive value for one paced key per character (debounced search boxes).",
+          "maximum": 200,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "element_token": {
+          "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row `[11]` of a read whose snapshot_id is s0000002a is \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). Returns an explicit stale error naming the current snapshots once a newer read supersedes it.",
+          "pattern": "^s[0-9a-f]{8}:[0-9]+$",
+          "type": "string"
+        },
+        "pid": {
+          "description": "Target process ID.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
+          "enum": [
+            "default",
+            "none"
+          ],
+          "type": "string"
+        },
+        "text": {
+          "description": "Text to insert.",
+          "type": "string"
+        },
+        "window_id": {
+          "description": "Window ID. Omit with element_token.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "description": "Screenshot-pixel X of the field (get_window_state PNG, as in click). With y and no element_token, pixel-clicks to focus, then types.",
+          "type": "number"
+        },
+        "y": {
+          "description": "Screenshot-pixel Y (see x).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pid",
+        "text",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_press_key",
+    "action": "press_key",
+    "readOnly": false,
+    "description": "Press and release one key. `delivery_mode` as in click/type_text.\n- `background` (default): posts to the pid without raising the window; with `element_token` it focuses that element first.\n- `foreground`: fronts the exact window (needs `window_id`), sends a real HID key transition (Chromium content, inline editors, menu equivalents), then restores the prior app. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "element_token": {
+          "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row `[11]` of a read whose snapshot_id is s0000002a is \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). Returns an explicit stale error naming the current snapshots once a newer read supersedes it.",
+          "pattern": "^s[0-9a-f]{8}:[0-9]+$",
+          "type": "string"
+        },
+        "key": {
+          "description": "Key name.",
+          "type": "string"
+        },
+        "modifiers": {
+          "description": "cmd, shift, option/alt, ctrl, fn.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "description": "Target process ID.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
+          "enum": [
+            "default",
+            "none"
+          ],
+          "type": "string"
+        },
+        "window_id": {
+          "description": "Target window; required for foreground. Does not raise by itself.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "description": "Screenshot-pixel X: pixel-click to focus, then send the key. With y, no element_token.",
+          "type": "number"
+        },
+        "y": {
+          "description": "Screenshot-pixel Y (see x).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "key",
+        "pid",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_hotkey",
+    "action": "hotkey",
+    "readOnly": false,
+    "description": "Press a key combination — e.g. `[\"cmd\", \"c\"]` for Copy, `[\"cmd\", \"shift\", \"4\"]` for screenshot selection. Follows the same `delivery_mode` ladder as click/type_text — it does NOT raise the window by default:\n• `background` (default): post the combo to the target pid WITHOUT fronting or raising it — uses the macOS 14+ auth-message envelope so Chromium/Electron accept it as trusted live input. With an AX target, focus that exact element first. No top-level focus steal. `window_id` here only targets the combo; it does not raise. Background key events never reach a native app's menus, so when the combo is a menu item's key equivalent (cmd+s, cmd+w, ...) and the app is not in front, that menu item runs through accessibility instead (a disabled Save is saved through the app's scripting interface and verified on disk); a menu item macOS keeps disabled in the background is refused with `background_unavailable`. With serve --no-automation-prompts, scripting without granted consent refuses with `automation_consent_required`, without keyboard fallback.\n• `foreground`: briefly front the window (NSMenu path, < 1 ms via SLPSSetFrontProcessWithOptions) so native menu key-equivalents (Cmd+Z, Cmd+W) dispatch, then restore the prior frontmost — the explicit escalation for menu-bar shortcuts on non-Chromium apps that ignore a background combo. With an AX target or x,y, the focused field receives the chord through the foreground HID queue (needed by native Chromium fields such as the omnibox). Requires window_id. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "element_token": {
+          "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row `[11]` of a read whose snapshot_id is s0000002a is \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). Returns an explicit stale error naming the current snapshots once a newer read supersedes it.",
+          "pattern": "^s[0-9a-f]{8}:[0-9]+$",
+          "type": "string"
+        },
+        "keys": {
+          "description": "Modifier(s) and one non-modifier key, e.g. [\"cmd\", \"c\"].",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "type": "array"
+        },
+        "pid": {
+          "description": "Target process ID. Required with x, y; optional with element_token (the token carries the pid).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
+          "enum": [
+            "default",
+            "none"
+          ],
+          "type": "string"
+        },
+        "window_id": {
+          "description": "Target window. Required for delivery_mode:\"foreground\" (the NSMenu activation needs a window). Does NOT itself raise the window — raising is gated on delivery_mode.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "description": "Screenshot-pixel X — the element px action form: pixel-click there to focus, then send the combo (so e.g. Cmd+V pastes into that field). Pass with y. Use for Chromium/Electron surfaces the background combo can't reach.",
+          "type": "number"
+        },
+        "y": {
+          "description": "Screenshot-pixel Y (see x).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "keys",
+        "pid",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
   },
   {
     "name": "computer_set_value",
     "action": "set_value",
     "readOnly": false,
-    "description": "Set the value of a settable accessibility element. Use the latest observation_id and element_index. Verify the returned post-action state. If an error says the outcome is unknown, observe again before deciding whether to retry.",
+    "description": "Set an element's value by `element_token`. A popup button / select dropdown: selects the menu item whose title or value matches `value` (case-insensitive). Safari `<select>` is set through the DOM; AppKit and Chromium popups list items only while open, so the menu is opened, the item pressed and the menu closed again (in the background the user's front window keeps key focus). An unknown value lists the options. Any other element: writes AXValue (sliders, steppers, date pickers, native text fields). Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
     "schema": {
+      "additionalProperties": false,
       "properties": {
-        "element_index": {
-          "type": "string",
-          "description": "Element identifier"
-        },
-        "value": {
-          "description": "Value to assign",
+        "element_token": {
+          "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row `[11]` of a read whose snapshot_id is s0000002a is \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). Returns an explicit stale error naming the current snapshots once a newer read supersedes it.",
+          "pattern": "^s[0-9a-f]{8}:[0-9]+$",
           "type": "string"
         },
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        "pid": {
+          "description": "Target process ID. Optional with element_token (the token carries the pid).",
+          "type": "integer",
+          "minimum": 1
         },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
-        },
-        "autosubmit_search_fields": {
-          "type": "boolean",
-          "default": false,
-          "description": "If true and the field is a search field, press Return after setting it. Defaults to false."
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        },
-        "interaction_mode": {
-          "type": "string",
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
           "enum": [
-            "foreground",
-            "background"
+            "default",
+            "none"
           ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
+          "type": "string"
+        },
+        "value": {
+          "description": "New value, coerced to the element's type.",
+          "type": "string"
+        },
+        "window_id": {
+          "description": "Window ID. Omit with element_token.",
+          "type": "integer",
+          "minimum": 1
         }
       },
-      "additionalProperties": false,
-      "type": "object",
       "required": [
-        "app",
-        "element_index",
+        "pid",
         "value",
-        "observation_id"
-      ]
+        "window_id"
+      ],
+      "type": "object"
     },
     "platforms": [
       "darwin",
       "windows",
       "linux"
-    ]
+    ],
+    "backgroundDelivery": false
   },
   {
-    "name": "computer_type",
-    "action": "type_text",
+    "name": "computer_scroll",
+    "action": "scroll",
     "readOnly": false,
-    "description": "Insert literal text at the current editable focus using the latest observation_id. macOS interaction_mode=background requires a fresh screenshot with background_keyboard_ready (include_ax=true for complete focus evidence), unchanged text/selection, and at most 16000 UTF-16 units. Cocoa uses public PID-directed Unicode events; web plain fields use explicit AX literal insertion preserving surrounding text, and web text areas must be empty. Nonempty rich text areas are refused. These routes do not guarantee arbitrary app consumption; verify resulting text before submitting. No automatic retry or foreground fallback.",
+    "description": "Scroll the target pid.\n- Targeted wheel: pass `element_token` (preferred) or window-local `x, y`. Sends a real wheel event at that point, so it scrolls whatever is under it. The only way to scroll nested `overflow:auto` regions in web views.\n- Keystroke: no target, just pid + direction. PageDown/PageUp (by='page') or arrows (by='line') on the focused scroller. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
     "schema": {
-      "required": [
-        "app",
-        "text",
-        "observation_id"
-      ],
       "additionalProperties": false,
-      "type": "object",
       "properties": {
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
+        "amount": {
+          "description": "Wheel notches or key repetitions, clamped to the maximum. Default 3.",
+          "maximum": 50,
+          "minimum": 1,
+          "type": "integer"
         },
-        "text": {
-          "type": "string",
-          "description": "Literal text to type"
-        },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        },
-        "interaction_mode": {
-          "type": "string",
+        "by": {
+          "description": "Scroll granularity. Default: line.",
           "enum": [
-            "foreground",
-            "background"
+            "line",
+            "page"
           ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
+          "type": "string"
+        },
+        "direction": {
+          "description": "Scroll direction.",
+          "enum": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ],
+          "type": "string"
+        },
+        "element_token": {
+          "description": "Element handle `<snapshot_id>:<row>` from get_window_state: row `[11]` of a read whose snapshot_id is s0000002a is \"s0000002a:11\" (also in `structuredContent.elements[].element_token`). Returns an explicit stale error naming the current snapshots once a newer read supersedes it.",
+          "pattern": "^s[0-9a-f]{8}:[0-9]+$",
+          "type": "string"
+        },
+        "pid": {
+          "description": "Target process ID. Required unless scope is \"desktop\" or element_token is supplied.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
+          "enum": [
+            "default",
+            "none"
+          ],
+          "type": "string"
+        },
+        "window_id": {
+          "description": "Window ID. Required with x/y; optional with element_token.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "x": {
+          "description": "Window-local screenshot X (get_window_state PNG). With y, wheel-scrolls at that point; needs window_id.",
+          "type": "number"
+        },
+        "y": {
+          "description": "Window-local screenshot Y.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "direction",
+        "pid",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_drag",
+    "action": "drag",
+    "readOnly": false,
+    "description": "Press-drag-release gesture from (from_x, from_y) to (to_x, to_y) in window-local screenshot pixels — the same space get_window_state returns. Top-left origin of the target's window. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "button": {
+          "description": "Mouse button used for the drag. Default: left.",
+          "enum": [
+            "left",
+            "right",
+            "middle"
+          ],
+          "type": "string"
+        },
+        "duration_ms": {
+          "description": "Wall-clock duration of the drag path between mouseDown and mouseUp. Default: 500.",
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "from_x": {
+          "description": "Drag-start X in window-local screenshot pixels. Top-left origin.",
+          "type": "number"
+        },
+        "from_y": {
+          "description": "Drag-start Y in window-local screenshot pixels. Top-left origin.",
+          "type": "number"
+        },
+        "from_zoom": {
+          "description": "When true, coordinates are in the last zoom image for this pid; driver maps back to window coordinates.",
+          "type": "boolean"
+        },
+        "modifier": {
+          "description": "Modifier keys held across the entire gesture: cmd/shift/option/ctrl.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pid": {
+          "description": "Target process ID.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "post_action_wait": {
+          "description": "Whether the result waits for the post-action window-change report (default \"default\": up to 300 ms for a new window, menu, dialog or foreground change). \"none\" returns as soon as the input is delivered and says window changes were not observed; the watch keeps running in the background and a change it sees is reported on the next action's result. Only paths that already observe window changes are affected; for example a right_click that does not watch is unchanged.",
+          "enum": [
+            "default",
+            "none"
+          ],
+          "type": "string"
+        },
+        "steps": {
+          "description": "Number of intermediate mouseDragged events linearly interpolated along the path. Default: 20.",
+          "maximum": 200,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "to_x": {
+          "description": "Drag-end X in window-local screenshot pixels.",
+          "type": "number"
+        },
+        "to_y": {
+          "description": "Drag-end Y in window-local screenshot pixels.",
+          "type": "number"
+        },
+        "window_id": {
+          "description": "CGWindowID for the window the pixel coordinates were measured against. Optional only when pid owns exactly one eligible top-level window; otherwise the action refuses with ambiguous_window_target.",
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "from_x",
+        "from_y",
+        "pid",
+        "to_x",
+        "to_y",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_run_steps",
+    "action": "run_steps",
+    "readOnly": false,
+    "description": "The default way to act: run one or more action tools in ONE call, in order, stop at the first failure, and (with `observe`) get what changed in the same response. Use it whenever you know the next action(s) and would otherwise re-read the window after them: fill three fields, click, and see the result in one call instead of five. Even a single step plus `observe:{}` replaces an action call followed by a get_window_state call. Each step is `{tool, args}` where `tool` is one of click, double_click, right_click, set_value, type_text, press_key, hotkey, scroll, drag, move_cursor and `args` are exactly that tool's arguments. `pid` and `window_id` (or `app`/`window`) on run_steps itself are the default window of every step that names none. Reads (get_window_state, zoom) do not run between steps: one there is skipped; a get_window_state last is the `observe`, a zoom last runs after it. Steps pass the same checks as direct calls. Element tokens and element_index values come from a get_window_state read before the batch; a step that changes the UI can invalidate later element targets, so put element-targeted actions before the actions that reshuffle the window, or target later steps by role/name. A token that went stale is retried once on the element with the same role and label, if exactly one matches. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "delay_ms": {
+          "description": "Pause between steps in milliseconds (not after the last). Default 0.",
+          "maximum": 2000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observe": {
+          "description": "Optional end-of-batch observation: arguments for ONE get_window_state call. `pid` and `window_id` default to those of the last step that names both. Defaults to since=\"latest\" (only what changed since your last read of that window with the same query/max_elements/max_depth; a full read when there is none), include_screenshot=false and max_elements=250; pass include_screenshot=true to see the window, or since=null for a full read. Omit to read nothing. {} observes the last window.",
+          "type": "object"
+        },
+        "pid": {
+          "description": "Default pid for steps that name no window (a step's own pid/window_id/app/window wins).",
+          "type": "integer",
+          "minimum": 1
+        },
+        "steps": {
+          "description": "Ordered {tool,args,wait_for?,expect?} actions on this exact window. Stop at the first failure. Never set per-step routing, delivery mode or session.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "args": {
+                "description": "Arguments for that tool, as in a direct call, optionally with role/name/nth/app/window to name the target instead of pid/window_id/element_token.",
+                "type": "object"
+              },
+              "expect": {
+                "description": "Up to 4 checks that must hold after the action: {role?, name?, text?, gone?, value?, value_contains?, enabled?, selected?, app?, window?, timeout_ms?}. Default timeout 2000 ms.",
+                "items": {
+                  "type": "object"
+                },
+                "maxItems": 4,
+                "type": "array"
+              },
+              "timeout_ms": {
+                "description": "How long a named target may take to appear. Default 3000.",
+                "maximum": 10000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "tool": {
+                "description": "Action tool to run.",
+                "enum": [
+                  "click",
+                  "double_click",
+                  "right_click",
+                  "set_value",
+                  "type_text",
+                  "press_key",
+                  "hotkey",
+                  "scroll",
+                  "drag"
+                ],
+                "type": "string"
+              },
+              "wait_for": {
+                "description": "Check that must hold before the action: {role?, name?, text?, gone?, app?, window?, timeout_ms?}. Default timeout 5000 ms.",
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "type": "array"
+        },
+        "window_id": {
+          "description": "Default window_id for steps that name no window, with `pid`.",
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "pid",
+        "steps",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": true
+  },
+  {
+    "name": "computer_verify_state",
+    "action": "verify_state",
+    "readOnly": true,
+    "description": "Deterministically verify bounded predicates against one exact window. The driver evaluates structured window/accessibility state and may return the final screenshot as uninterpreted visual evidence for a multimodal caller. Predicate results are satisfied, unsatisfied, or unknown; unknown never implies success. Accessibility projections are conservative: absence remains unknown unless the observed search domain is proven exhaustive. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "expect": {
+          "description": "One to eight predicates, combined with logical AND.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "element": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "exists": {
+                    "description": "Assert that at least one trusted element matches the selector.\n\nElement walks are not yet exhaustive on every platform, so absence\ncannot be proven. `false` is rejected instead of returning an\nindefinitely-unknown predicate.",
+                    "type": "boolean"
+                  },
+                  "selected": {
+                    "type": "boolean"
+                  },
+                  "selector": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "label_contains": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "role": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [],
+                    "type": "object"
+                  },
+                  "value_equals": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "selector"
+                ],
+                "type": "object"
+              },
+              "window": {
+                "additionalProperties": false,
+                "properties": {
+                  "bounds": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "height": {
+                        "type": "number"
+                      },
+                      "tolerance_px": {
+                        "maximum": 100,
+                        "minimum": 0,
+                        "type": "number"
+                      },
+                      "width": {
+                        "type": "number"
+                      },
+                      "x": {
+                        "type": "number"
+                      },
+                      "y": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "x",
+                      "y",
+                      "width",
+                      "height"
+                    ],
+                    "type": "object"
+                  },
+                  "exists": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            },
+            "required": [],
+            "type": "object"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "type": "array"
+        },
+        "include_screenshot": {
+          "description": "Return the final window screenshot as image content for a multimodal\ncaller. The driver does not interpret that image.",
+          "type": "boolean"
+        },
+        "pid": {
+          "description": "Exact process whose window may be observed.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "stable_samples": {
+          "default": 2,
+          "description": "Consecutive satisfied samples required before returning success.",
+          "maximum": 5,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "timeout_ms": {
+          "default": 5000,
+          "description": "Bounded wait. Zero performs one sample.",
+          "maximum": 10000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "window_id": {
+          "description": "Exact native window identifier.",
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "expect",
+        "pid",
+        "window_id"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": false
+  },
+  {
+    "name": "computer_zoom",
+    "action": "zoom",
+    "readOnly": true,
+    "description": "Capture a cropped JPEG of a window region (x1,y1)–(x2,y2) in screenshot pixel coordinates, with 20% padding added on each side. The output image is at most 500 px wide. Corners, not a size: x1,y1 is the top-left and x2,y2 the bottom-right (x,y,width,height is also accepted and converted). Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "pid": {
+          "description": "Optional target pid. When omitted, the driver resolves the unique current snapshot for this session and window.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "window_id": {
+          "description": "CGWindowID from list_windows.",
+          "type": "integer",
+          "minimum": 1
+        },
+        "x1": {
+          "description": "Left edge of region in screenshot pixels.",
+          "type": "number"
+        },
+        "x2": {
+          "description": "Right edge of region in screenshot pixels.",
+          "type": "number"
+        },
+        "y1": {
+          "description": "Top edge of region in screenshot pixels.",
+          "type": "number"
+        },
+        "y2": {
+          "description": "Bottom edge of region in screenshot pixels.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pid",
+        "window_id",
+        "x1",
+        "x2",
+        "y1",
+        "y2"
+      ],
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": false
+  },
+  {
+    "name": "computer_check_permissions",
+    "action": "check_permissions",
+    "readOnly": true,
+    "description": "Report TCC permission status for Accessibility and Screen Recording. By default also raises the system permission dialogs for any missing grants — Apple's request APIs are no-ops when the grant is already active, so this is safe to call repeatedly. Pass {\"prompt\": false} for a purely read-only status check. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": false
+  },
+  {
+    "name": "computer_launch_app",
+    "action": "launch_app",
+    "readOnly": false,
+    "description": "Launch a macOS app in the background — the target does NOT come to the foreground. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "bundle_id": {
+          "description": "App bundle identifier, e.g. com.apple.calculator. Preferred over name.",
+          "type": "string"
+        },
+        "creates_new_application_instance": {
+          "description": "When true, force a new app instance even if already running (open -n). Use for concurrent multi-agent/multi-session work so each session gets an isolated instance + window instead of sharing one — on single-instance apps (e.g. Calculator) every caller otherwise gets the same window and the sessions clobber each other.",
+          "type": "boolean"
+        },
+        "name": {
+          "description": "App display name, or absolute path to a .app bundle (e.g. launch_path from list_apps). Used only when bundle_id is absent.",
+          "type": "string"
+        },
+        "urls": {
+          "description": "Optional file paths or URLs to open with the app (e.g. a folder path for Finder).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "platforms": [
+      "darwin",
+      "windows",
+      "linux"
+    ],
+    "backgroundDelivery": false
+  },
+  {
+    "name": "computer_wait_new_window",
+    "action": "wait_new_window",
+    "readOnly": true,
+    "description": "Wait up to timeout_ms for one new ordinary window of the given pid, excluding the window IDs already returned by computer_list_windows. Return candidates; if multiple appear, inspect them before acting. Never assume an off-screen or helper window is the document.",
+    "schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pid",
+        "exclude_window_ids"
+      ],
+      "properties": {
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "exclude_window_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 10000
         }
       }
     },
@@ -533,277 +1182,7 @@
       "darwin",
       "windows",
       "linux"
-    ]
-  },
-  {
-    "name": "computer_select_text",
-    "action": "select_text",
-    "readOnly": false,
-    "description": "Select exact Unicode text or place the caret before/after it on macOS. Use a current screenshot/query element index. Prefix/suffix disambiguate repeated text; ambiguous, changed or unverifiable text fails without keyboard fallback.",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
-        },
-        "element_index": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        },
-        "prefix": {
-          "type": "string"
-        },
-        "suffix": {
-          "type": "string"
-        },
-        "selection": {
-          "type": "string",
-          "enum": [
-            "text",
-            "cursor_before",
-            "cursor_after"
-          ]
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        },
-        "interaction_mode": {
-          "type": "string",
-          "enum": [
-            "foreground",
-            "background"
-          ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
-        }
-      },
-      "required": [
-        "app",
-        "observation_id",
-        "element_index",
-        "text"
-      ],
-      "additionalProperties": false
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
-    "name": "computer_paste",
-    "action": "paste",
-    "readOnly": false,
-    "description": "Paste text, Markdown rendered as rich text, or HTML into the current focused field. Requires a screenshot observation. The native app temporarily uses the pasteboard, restores all previous formats after input, and preserves a newer user copy. Verify the returned app state; never replay an uncertain paste.",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "observation_id": {
-          "type": "string",
-          "description": "Copy observation_id from this app's latest computer_screenshot, computer_query or action result in this turn. Old observations and indexes cannot be reused."
-        },
-        "text": {
-          "type": "string",
-          "maxLength": 2000000
-        },
-        "format": {
-          "type": "string",
-          "enum": [
-            "text",
-            "md",
-            "html"
-          ],
-          "default": "text"
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        },
-        "interaction_mode": {
-          "type": "string",
-          "enum": [
-            "foreground",
-            "background"
-          ],
-          "description": "Defaults to foreground. Strict background supports semantic AX click, set_value without autosubmit, select_text, and secondary actions. On macOS, plain/Shift keys and bounded literal text also require a fresh screenshot proving the same focused editable field, text, selection, process and window; use include_ax=true and require background_keyboard_ready. Cmd/Ctrl/Alt shortcuts are refused. Windows/Linux background keyboard and type_text remain unsupported. No foreground/global-input fallback or automatic replay; verify the receipt and resulting state."
-        }
-      },
-      "required": [
-        "app",
-        "observation_id",
-        "text"
-      ],
-      "additionalProperties": false
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
-    "name": "computer_find_apps",
-    "action": "find_apps",
-    "readOnly": true,
-    "description": "Find installed or running applications by name or identifier. Returns exact IDs, paths and running state. Inventory may omit unindexed apps; discovery never launches apps.",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "text": {
-          "type": "string"
-        },
-        "limit": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 100,
-          "default": 100
-        }
-      },
-      "required": [],
-      "additionalProperties": false
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
-    "name": "computer_start_app",
-    "action": "start_app",
-    "readOnly": false,
-    "description": "Launch an exact macOS bundle ID or Windows/Linux launch_id from discovery, then observe its verified running window. Does not require a previous observation. A running process alone does not prove the app is ready; inspect the returned snapshot.",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        }
-      },
-      "required": [
-        "app"
-      ],
-      "additionalProperties": false
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
-    "name": "computer_stop_app",
-    "action": "stop_app",
-    "readOnly": false,
-    "description": "Request normal quit of an exact macOS bundle ID or Windows/Linux PID. Unsaved document dialogs may block exit; the result reports whether exit was verified. Never force terminates. Invalidates earlier observations.",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        }
-      },
-      "required": [
-        "app"
-      ],
-      "additionalProperties": false
-    },
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ]
-  },
-  {
-    "name": "computer_modify_app",
-    "action": "modify_app",
-    "readOnly": false,
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
     ],
-    "description": "Activate or deactivate an exact discovered application. This changes foreground focus and invalidates prior observations. No previous observation is required.",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "app": {
-          "type": "string",
-          "description": "Exact app identifier from computer_find_apps/computer_list_apps: macOS bundle ID or Windows/Linux PID; start_app uses the discovered launch_id on Windows/Linux. AIClaw Computer Use owns the observed target window. Self/helper/approval UI cannot be controlled."
-        },
-        "modification": {
-          "type": "string",
-          "enum": [
-            "activate",
-            "deactivate"
-          ]
-        },
-        "verify_after": {
-          "type": "boolean",
-          "description": "Defaults to true: capture post-action state. Set false for deterministic intermediate steps in exec; old observations are invalidated and you must query/observe again before another input. Capture and verify at decision points and completion. Never replay input after uncertain results."
-        }
-      },
-      "required": [
-        "app",
-        "modification"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "computer_frontmost_window",
-    "action": "frontmost_window",
-    "readOnly": true,
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ],
-    "description": "Read the current foreground application and frontmost window metadata. This does not authorize input; observe the intended app before interacting.",
-    "schema": {
-      "type": "object",
-      "properties": {},
-      "required": [],
-      "additionalProperties": false
-    }
-  },
-  {
-    "name": "computer_permissions",
-    "action": "permission_status",
-    "readOnly": true,
-    "platforms": [
-      "darwin",
-      "windows",
-      "linux"
-    ],
-    "description": "Read Accessibility and Screen Recording permission status of AIClaw Computer Use.app. Does not grant permissions.",
-    "schema": {
-      "type": "object",
-      "properties": {},
-      "required": [],
-      "additionalProperties": false
-    }
+    "backgroundDelivery": false
   }
 ]

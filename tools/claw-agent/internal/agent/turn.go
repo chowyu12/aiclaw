@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
@@ -56,6 +57,9 @@ func (s *Session) RunTurn(
 	requestID, _ := parent.Value(inputRequestKey{}).(string)
 	ctx, cancel := context.WithCancel(parent)
 	ctx = context.WithValue(ctx, skillUsageKey{}, s.newSkillUsage(turnID))
+	ctx = context.WithValue(ctx, computerBackgroundOnlyKey{}, computerBackgroundOnly(text))
+	ctx = context.WithValue(ctx, computerActivityKey{}, &atomic.Bool{})
+	ctx = context.WithValue(ctx, computerRememberAllowedKey{}, computerRememberAllowed(text))
 	s.mu.Lock()
 	if generation, automatic := parent.Value(wakeReservationKey{}).(uint64); automatic && (parent.Err() != nil || s.wakeStopped || generation != s.wakeGeneration) {
 		s.mu.Unlock()

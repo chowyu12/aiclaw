@@ -4,9 +4,9 @@ on:
     tags: ["v*"]
     branches: [master]
     paths:
-      - 'tools/computer-use/**'
+      - 'tools/cua-driver/**'
       - 'tools/claw-agent/internal/agent/computer-tools.json'
-      - 'scripts/build-computer-runtime.mjs'
+      - 'scripts/stage-computer-runtime.mjs'
       - 'scripts/mac-signing.mjs'
       - '.github/workflows/release.yml'
   workflow_dispatch:
@@ -62,7 +62,7 @@ jobs:
           xvfb-run --auto-servernum npm run smoke:desktop
 
   computer-contract:
-    name: Independent macOS Computer Use
+    name: Embedded Cua Driver
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -73,36 +73,10 @@ jobs:
           cache: npm
       - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - run: npm run setup:electron
-      - name: Import the fixed signing identity
-        env:
-          AICLAW_MAC_SIGNING_P12_BASE64: ${{ secrets.AICLAW_MAC_SIGNING_P12_BASE64 }}
-          AICLAW_MAC_SIGNING_PASSWORD: ${{ secrets.AICLAW_MAC_SIGNING_PASSWORD }}
-        run: node scripts/mac-signing.mjs --setup
-      - name: Fingerprint native runtime inputs
-        id: native-inputs
-        run: echo "fingerprint=$(node scripts/build-computer-runtime.mjs --universal --fingerprint)" >> "$GITHUB_OUTPUT"
-      # Master seeds the default-branch cache; tags can restore it across releases.
-      # The builder verifies the pinned signer and signed input fingerprint on hits.
-      - uses: actions/cache@v4
-        with:
-          path: apps/desktop/computer-use
-          key: native-computer-${{ steps.native-inputs.outputs.fingerprint }}
+      - run: node scripts/stage-computer-runtime.mjs
       - run: npm run test:computer-native
-      - run: node scripts/build-computer-runtime.mjs --development
       - run: npm run build -w @aiclaw/agent-client && npm run build:main -w @aiclaw/desktop
-      # Permission-free real IPC handshake. Live input needs an interactive Mac.
       - run: npx --no-install electron scripts/smoke-computer.cjs
-      - run: npx --no-install electron scripts/smoke-computer-listener-auth.cjs
-      - run: npx --no-install electron scripts/smoke-computer-lifecycle.cjs
-      # Only production trusts the pinned signed AIClaw client. Development
-      # has a separate output and an exact local Electron CDHash pin.
-      - run: node scripts/build-computer-runtime.mjs --universal
-      - run: tar -czf native-computer-runtime.tar.gz -C apps/desktop computer-use
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-computer-runtime
-          path: native-computer-runtime.tar.gz
-          if-no-files-found: error
 
   mac-sign:
     needs: package
@@ -133,8 +107,7 @@ jobs:
 
   package:
     needs: [test, computer-contract]
-    # Linux cross-packages the host; the independently built universal macOS
-    # Computer Use app is transferred from the macOS contract job.
+    # Each target stages its checksum-pinned upstream executable and SDK library.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,10 +121,6 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
-      - uses: actions/download-artifact@v4
-        with:
-          name: native-computer-runtime
-      - run: tar -xzf native-computer-runtime.tar.gz -C apps/desktop
       - name: Package all four targets
         # scripts/package-app.mjs takes the version from GITHUB_REF_NAME when
         # it is a v* tag, so the Release version always matches the tag.

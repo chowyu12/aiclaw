@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
@@ -454,6 +455,9 @@ func (s *Session) loadMemory(config protocol.SessionStartParams) {
 		Effect: tools.EffectExternal,
 		Schema: rememberSchema(),
 		Handler: func(ctx context.Context, args json.RawMessage, env *tools.Env) (string, error) {
+			if active, ok := ctx.Value(computerActivityKey{}).(*atomic.Bool); ok && active.Load() && ctx.Value(computerRememberAllowedKey{}) != true {
+				return "", fmt.Errorf("Do not save computer task observations to long-term memory unless the user explicitly requests it.")
+			}
 			var input struct {
 				Text  string `json:"text"`
 				Scope string `json:"scope"`
@@ -956,7 +960,7 @@ func buildSystemPrompt(
 		)
 	}
 	if config.EnableComputerUse {
-		builder.WriteString("Computer Use: execute deterministic steps sequentially with await, never Promise.all for desktop state. Read computer_app_policy for app-specific guidance and background capability limits. computer_watch_start/next/stop provide turn-scoped polling updates without action authority; explicitly query/observe before input. In code mode combine query, matched element action, and fresh query in one exec. Set verify_after=false for intermediate actions to avoid automatic screenshots; every action invalidates prior observations. Query returns JSON on its first line and observation_id on a following line; read both and stop if matches are missing, ambiguous or truncated. Use computer_screenshot at visual decision points and completion. Stop on errors, denied approval or uncertain results; never replay input automatically. Return to the model when visual judgment is needed.\n")
+		builder.WriteString("Computer Use prefers background operation. Describe only the specific tools needed for the next action; never enumerate and describe every tool. Do not save task observations to long-term memory unless explicitly requested. If the user prohibits foreground operation, use only background actions and stop on refusal. On screen_locked or repeated empty full accessibility reads, stop immediately and report; do not poll, sleep, relaunch, kill processes, or bypass via shell. Batch deterministic actions, use narrow state reads without screenshots unless visual evidence is needed, and observe only at decision points. For text replacement, when the complete current value is freshly observed and the user authorized editing that entire field, prefer computing the exact intended value from that snapshot and using computer_set_value once, then verify the complete value. Preserve all other text; do not use this approach for partial, truncated, or concurrently changing values. Avoid cursor-relative arrow counting for line edits: line numbers include titles and wrapping can differ. For ordered navigation-key batches followed by a final observation, use post_action_wait none on intermediate plain or shift-arrow presses; retain waits for actions that can change windows. Unless the user prohibits foreground operation, when an action or batch step is explicitly rejected as unsupported in the background, the host or driver automatically attempts that step in the foreground without asking the user; it restores the previous window when safe. Never request approval or ask the user whether to permit that fallback. Do not invoke global desktop input, bring-to-front, clipboard or arbitrary scripts yourself. Discover exact pid/window_id using computer_list_windows; use computer_get_window_state with a narrow query, tree_format=elements for structured element_tokens, and since=latest diffs. Prefer computer_run_steps for deterministic sequential actions with wait_for/expect and one final observe; stop on partial failure. Use the explicit {tool,args} spelling for batch steps and one exact window per batch. computer_list_windows and computer_get_window_state return JSON strings: use JSON.parse(result).data for structured windows, snapshot_id and element tokens; do not invent token values. Before creating a window record existing window IDs, then use computer_wait_new_window to wait for new titled windows rather than inspecting untitled helpers. Use computer_invoke_menu with an exact menu path for menu commands such as Save; a sent shortcut is not proof of a save. On no observable effect stop and report the limitation; never repeat the same input automatically. Driver owns per-turn snapshots and an independent AIClaw cursor. If a batch partially fails, do not replay it; observe its result and call only a remaining action if appropriate. Do not substitute shell/osascript/global input. Never replay uncertain input. Verify semantic effects at decision points and completion.\n")
 	}
 	if registry.Len() > 0 {
 		fmt.Fprintf(&builder, "Available tools: %s.\n", strings.Join(registry.Names(), ", "))

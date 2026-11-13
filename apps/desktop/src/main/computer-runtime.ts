@@ -12,7 +12,7 @@ const run = promisify(execFile);
 export const COMPUTER_USE_VERSION = "1";
 export const COMPUTER_PROTOCOL = "AIClawComputerUseIPC-1";
 export interface ComputerTool { name: string; inputSchema: { properties: Record<string, unknown>; required?: string[] } }
-export interface ComputerToolResult { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean }
+export interface ComputerToolResult { structuredContent?: Record<string, unknown>; content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean }
 export interface ComputerRuntime {
   tools: ComputerTool[];
   nativeCapture?: boolean;
@@ -213,7 +213,6 @@ export class ComputerNativeRuntime implements ComputerRuntime {
 }
 
 export async function createComputerRuntime(): Promise<ComputerRuntime> {
-  if (process.platform === "darwin") return ComputerNativeRuntime.create();
-  const { ComputerPortableRuntime } = await import("./computer-portable-runtime.js");
-  return ComputerPortableRuntime.create();
+  const { CuaRuntime } = await import("./cua-runtime.js");
+  return CuaRuntime.create();
 }

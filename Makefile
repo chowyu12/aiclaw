@@ -63,21 +63,14 @@ build-go: $(AGENT_BIN) ## 编译 claw-agent
 # 实现，正是为此选的。make nocgo 守着这条。
 # Tool schemas are embedded into the Go binary; changing only JSON must rebuild
 # the kernel too, otherwise make dev advertises an older computer-use contract.
-$(AGENT_BIN): $(GO_SOURCES) go.mod $(AGENT_DIR)/internal/agent/computer-tools.json $(AGENT_DIR)/internal/agent/computer-host-tools.json
+$(AGENT_BIN): $(GO_SOURCES) go.mod $(AGENT_DIR)/internal/agent/computer-tools.json
 	CGO_ENABLED=0 go build -o $(AGENT_BIN) ./tools/claw-agent
 
-test-computer-native: ## Verify native input and selection pure logic
+test-computer-native: ## Verify Cua background policy, MCP leases and cancellation
 	npm run test:computer-native
 
-ifeq ($(shell uname -s),Darwin)
-# The builder fingerprints native inputs, toolchain and signer; unchanged apps
-# are reused without recompilation or re-signing, including across host releases.
-build-computer: ## Build or reuse the independent macOS Computer Use app
-	node scripts/build-computer-runtime.mjs --development
-else
-build-computer: ## Stage the independent Windows/Linux Computer Use service
+build-computer: ## Stage the pinned official Cua Driver
 	node scripts/stage-computer-runtime.mjs
-endif
 
 build-desktop: deps build-client build-computer ## 编译 Electron 主进程与渲染层
 	cd $(DESKTOP) && npm run build
@@ -192,11 +185,11 @@ define cross_build
 endef
 
 package-mac: deps build-client build-desktop ## 打 macOS arm64 包（未签名）
-	@if [ "$$(uname -s)" = Darwin ]; then node scripts/build-computer-runtime.mjs --universal; fi
+	@if [ "$$(uname -s)" = Darwin ]; then node scripts/stage-computer-runtime.mjs; fi
 	$(call cross_build,darwin,arm64,darwin,arm64,)
 
 package-mac-intel: deps build-client build-desktop ## 打 macOS x64 包（未签名）
-	@if [ "$$(uname -s)" = Darwin ]; then node scripts/build-computer-runtime.mjs --universal; fi
+	@if [ "$$(uname -s)" = Darwin ]; then node scripts/stage-computer-runtime.mjs; fi
 	$(call cross_build,darwin,x64,darwin,amd64,)
 
 package-win: deps build-client build-desktop ## 打 Windows x64 包（exe 图标与版本信息由 resedit 写，不需要 wine）

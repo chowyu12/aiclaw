@@ -1,5 +1,9 @@
 /** 英文词典：plugins 这一组界面（中文原文 → 英文）。 */
 export const plugins: Record<string, string> = {
+  "AIClaw 正在前台操作": "AIClaw is working in the foreground",
+  "使用 Cua Driver 优先在后台操作指定窗口。后台不支持时会自动临时切到前台执行，并在适合时恢复原窗口。独立 AIClaw 光标标记操作位置，可随时暂停或停止。macOS 使用 AIClaw 已有的辅助功能和屏幕录制权限。": "Cua Driver prefers background operation. If an action requires the foreground, AIClaw temporarily brings the target forward and restores the previous window when safe. An independent AIClaw cursor marks actions; pause or stop at any time. On macOS, the embedded driver uses AIClaw’s Accessibility and Screen Recording permissions.",
+  "AIClaw 正在后台操作": "AIClaw is working in the background",
+  "使用 Cua Driver 在后台操作指定窗口，不抢前台焦点、不移动用户鼠标。后台不支持的动作会停止，不会自动切换前台。独立 AIClaw 光标标记操作位置，可随时暂停或停止。macOS 使用 AIClaw 已有的辅助功能和屏幕录制权限。": "Cua Driver operates an exact window in the background without taking focus or moving your pointer. Unsupported background actions stop without foreground fallback. An independent AIClaw cursor marks actions; pause or stop at any time. On macOS, the embedded driver uses AIClaw’s Accessibility and Screen Recording permissions.",
   "更新后从下一条消息生效。": "Changes apply from the next message.",
   "开启全部放行后，此外部会话可直接写文件、执行命令，无需逐次确认。确认仅向你信任的会话开放这些能力？": "Full access lets this external conversation write files and run commands without individual confirmation. Grant these capabilities only to a conversation you trust. Continue?",
   "审批模式": "Approval mode",

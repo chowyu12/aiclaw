@@ -13,9 +13,8 @@ import { ConfigStore, type McpServer } from "./config.js";
 import { SkillManager } from "./skills.js";
 import { SessionManager } from "./session.js";
 import { ManagedRuntimes } from "./managed-runtimes.js";
-import { syncPortableComputerRuntime } from "./computer-portable-install.js";
 import { ComputerOverlay } from "./computer-overlay.js";
-import { ComputerNativeRuntime } from "./computer-runtime.js";
+import { bundledCuaExecutable } from "./cua-runtime.js";
 import { ConfigurationAssistant } from "./app-config.js";
 import { Scheduler } from "./scheduler.js";
 import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
@@ -834,18 +833,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!globalShortcut.register(computerStopShortcut, () => {
       void sessions.controlComputer("stop").catch(error => logApp(`停止桌面操作失败：${String(error)}`));
     })) logApp("桌面停止快捷键已被占用，请使用应用内停止按钮");
-    if (process.platform === "darwin") {
-      void ComputerNativeRuntime.create()
-        .then(async runtime => {
-          try { await runtime.setupPermissions(); logApp("Computer Use 已同步并检查权限"); }
-          finally { await runtime.close(); }
-        })
-        .catch(error => logApp(`Computer Use 启动权限检查失败：${String(error)}`));
-    } else if (process.platform === "linux" || process.platform === "win32") {
-      void syncPortableComputerRuntime()
-        .then(runtime => logApp(`Computer Use 已同步：${runtime.directory}`))
-        .catch(error => logApp(`Computer Use 同步失败：${String(error)}`));
-    }
+    void bundledCuaExecutable().catch(error => logApp(`内置 Cua Driver 未就绪：${String(error)}`));
     runtimes.start();
     void sessions.syncBrowserBridge();
     scheduler.start();
@@ -858,13 +846,17 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== "darwin") app.quit();
   });
 
-  app.on("before-quit", () => {
+  let quitting = false;
+  app.on("before-quit", event => {
+    if (quitting) return;
+    event.preventDefault();
+    quitting = true;
     globalShortcut.unregister(computerStopShortcut);
     computerOverlay?.dispose();
     // 让 claw-agent 有机会落盘会话再退出。
     commands.stopAll();
     scheduler.stop();
     runtimes.stop();
-    void sessions.stop();
+    void sessions.stop().finally(() => app.quit());
   });
 }

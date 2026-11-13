@@ -222,15 +222,16 @@ type BrowserResult struct {
 type ComputerAction string
 
 const (
-	ComputerScreenshot ComputerAction = "get_app_state"
+	ComputerScreenshot ComputerAction = "get_window_state"
 	ComputerClick      ComputerAction = "click"
 )
 
 type ComputerRequestParams struct {
-	SessionID string          `json:"sessionId"`
-	TurnID    string          `json:"turnId"`
-	Action    ComputerAction  `json:"action"`
-	Arguments json.RawMessage `json:"arguments"`
+	SessionID      string          `json:"sessionId"`
+	TurnID         string          `json:"turnId"`
+	Action         ComputerAction  `json:"action"`
+	Arguments      json.RawMessage `json:"arguments"`
+	BackgroundOnly bool            `json:"backgroundOnly,omitempty"`
 }
 
 type ComputerResult struct {

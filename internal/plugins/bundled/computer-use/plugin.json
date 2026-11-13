@@ -2,8 +2,8 @@
   "schema_version": 1,
   "id": "aiclaw.computer-use",
   "name": "Computer Use",
-  "version": "0.4.0",
-  "description": "通过 AIClaw 自有执行层观察、点击及输入，支持无障碍控件与截图。每轮先观察目标应用，动作后重新观察，并遵循当前会话的审批策略。支持 macOS 14.4+、Windows 和 Linux X11；macOS 需授予辅助功能与屏幕录制权限，Linux 暂不支持 Wayland。",
+  "version": "0.5.0",
+  "description": "通过内嵌 Cua Driver 优先在后台操作指定窗口；后台不支持时自动临时切到前台，并在适合时恢复原窗口。独立光标显示执行位置，支持批量动作、状态校验及暂停/停止。macOS 使用 AIClaw 主 App 权限。",
   "author": "aiclaw",
   "permissions": [
     "computer.control",

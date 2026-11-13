@@ -1,0 +1,28 @@
+{
+  "version": "0.49.0",
+  "repository": "trycua/cua",
+  "tag": "cua-driver-rs-v0.49.0",
+  "license": "MIT",
+  "assets": {
+    "darwin": {
+      "name": "cua-driver-rs-0.49.0-darwin-universal.tar.gz",
+      "sha256": "133fa1e733aade95d947e70f6df48c941aa58719fce78f1eff3cc149b74ffd9c"
+    },
+    "linux-x64": {
+      "name": "cua-driver-rs-0.49.0-linux-x86_64.tar.gz",
+      "sha256": "51a1fa153c571f462892831bcf320ac023e9bd0f0873de2b506f9da93f6d8446"
+    },
+    "linux-arm64": {
+      "name": "cua-driver-rs-0.49.0-linux-arm64.tar.gz",
+      "sha256": "39fc965b7cbacce334b6e69c31cfb2ad5d09a6113ea2492a37b6647d6f12e54e"
+    },
+    "win32-x64": {
+      "name": "cua-driver-rs-0.49.0-windows-x86_64.zip",
+      "sha256": "8aaec7236bef31b8ad53137245591ce0fb041a93cbee6286da309d03c3c3d833"
+    },
+    "win32-arm64": {
+      "name": "cua-driver-rs-0.49.0-windows-arm64.zip",
+      "sha256": "e608df94dfab546f56ad53e71cd949af5cee0be05198ccbecdea1a16641be009"
+    }
+  }
+}

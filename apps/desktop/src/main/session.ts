@@ -235,7 +235,7 @@ export class SessionManager extends EventEmitter {
     client.on("appConfig", (action) => this.emit("appConfig", action));
     // 模型要建、列、删定时任务：调度器在主进程，交给它。
     client.on("schedule", (action) => this.emit("schedule", action));
-    // 宿主控制审批与会话；独立 AIClaw Computer Use app 持有原生权限并执行操作。
+    // 宿主控制审批与会话；内嵌 Cua Driver 继承主 App 权限并在后台执行操作。
     // 浏览器窗口是宿主的：加载、点、填、截图都在这边做，内核只发请求。
     client.on("browser", async ({ request, respond, fail }) => {
       try {

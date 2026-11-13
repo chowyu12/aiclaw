@@ -3,6 +3,7 @@ export interface ComputerControlActivity {
   sessionId: string;
   turnId: string;
   action: string;
+  foreground?: boolean;
   app: string;
   displayName?: string;
   windowId?: number;
@@ -24,5 +25,5 @@ export interface ComputerDiagnostics {
 }
 export type ComputerControlAction = "pause" | "resume" | "stop";
 
-const observationActions = new Set(["list_apps", "find_apps", "frontmost_window", "permission_status", "get_app_state", "query", "watch_start", "watch_next", "watch_stop", "app_policy"]);
+const observationActions = new Set(["get_window_state", "list_windows", "verify_state", "zoom", "check_permissions", "list_apps", "find_apps", "frontmost_window", "permission_status", "get_app_state", "query", "watch_start", "watch_next", "watch_stop", "app_policy"]);
 export function computerActionIsObservation(action: string): boolean { return observationActions.has(action); }

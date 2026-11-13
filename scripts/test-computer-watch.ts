@@ -102,22 +102,17 @@ test("watch scope, cancellation, idle expiry and capture failure fail closed", a
   await idle.watches.close();
 });
 
-test("capture uses a separate connection and never invalidates action observations", async t => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
-  const h = harness(), controller = new ComputerController(h.runtime);
-  const call = (action: string, args = {}) => controller.perform({ sessionId: "chat", turnId: "turn", action, arguments: args });
+test("Cua state diffs and batched observation replace host capture polling", async () => {
+  const calls: {action:string;args:any}[]=[];
+  const controller=new ComputerController(async()=>({tools:[],call:async(action,args)=>{calls.push({action,args});return{content:[{type:"text",text:"state diff"}]};},close:async()=>{}}));
   try {
-    const started = JSON.parse((await call("watch_start", { app, interval_ms: 500 })).text);
-    const query = await call("query", { app, text: "input" });
-    const observation_id = query.text.match(/observation_id: ([\w-]+)/)![1];
-    t.mock.timers.tick(500); await flush();
-    await call("set_value", { app, observation_id, element_index: "1", value: "after", verify_after: false });
-    assert.equal(h.calls.find(item => item.action === "query")?.connection, 2);
-    assert.equal(h.calls.filter(item => item.action === "get_app_state")[1]?.connection, 1);
-    const waiting = assert.rejects(call("watch_next", { watch_id: started.watch_id, after_sequence: 1 }), /stopped/);
-    await controller.finishTurn("chat", "turn"); await waiting;
-    assert.equal(h.counts().closed, 2);
-  } finally { await controller.close(); }
+    const call=(action:string,args:any)=>controller.perform({sessionId:"chat",turnId:"turn",action,arguments:args});
+    await call("get_window_state",{pid:123,window_id:456,include_screenshot:false});
+    await call("get_window_state",{pid:123,window_id:456,since:"latest",include_screenshot:false});
+    await call("run_steps",{pid:123,window_id:456,steps:[{tool:"set_value",args:{role:"textfield",name:"Input",value:"after"}}],observe:{}});
+    assert.equal(calls.length,3);assert.equal(calls[1]!.args.since,"latest");assert.deepEqual(calls[2]!.args.observe,{screenshot_format:"png"});
+    await assert.rejects(call("watch_start",{app}),/Unsupported Cua operation/);
+  }finally{await controller.close();}
 });
 
 test("subscription startup cannot survive a finished turn or changing process", async t => {

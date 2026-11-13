@@ -190,7 +190,7 @@ test("活动摘要只汇总已完成的操作，运行和失败不冒充成功",
     step("run", { title: "exec · 验证修复", state: "running" }),
     step("write", { title: "write_file", state: "failed" }),
   ])[0]!.steps;
-  assert.equal(activitySummary(steps), "读取了 1 项内容\n有操作失败\n正在执行：验证修复");
+  assert.equal(activitySummary(steps), "读取了 1 项内容 · 有操作失败 · 正在执行：验证修复");
   assert.equal(activitySummary([{ ...steps[0]!, step: "llm", state: "running" }]), "正在思考…");
   assert.equal(activitySummary([{ ...steps[0]!, step: "llm", state: "failed" }]), "处理失败");
 });
@@ -210,4 +210,23 @@ test("活动行直接描述工具做了什么，保留在进展说明之间", ()
 test("code-mode 活动摘要不把 exec 包装与子工具重复计数", () => {
   const steps = groupTurns([user("u"), step("exec", { title: "exec · 查询文件" }), step("child", { title: "read_file", parentId: "exec" }), step("wait", { title: "wait" })])[0]!.steps;
   assert.equal(activitySummary(steps), "读取了 1 项内容");
+});
+
+test("桌面执行摘要汇总参数，失败和运行状态仍可见", () => {
+  const steps = groupTurns([user("u"),
+    step("one", {title:"computer_get_window_state · include_screenshot=false max_elements=80 pid=123 window_id=456"}),
+    step("two", {title:"computer_run_steps · delay_ms=250 steps=[map[args:...]] pid=123"}),
+    step("command", {title:"run_command · osascript -e tell application System Events"}),
+    step("failure", {title:"computer_click · pid=123 window_id=456",state:"failed"}),
+    step("running", {title:"computer_get_window_state · pid=123 window_id=456",state:"running"}),
+  ])[0]!.steps;
+  const summary = activitySummary(steps);
+  assert.equal(summary, "桌面操作 2 次 · 执行了 1 组操作 · 有操作失败 · 正在处理…");
+  assert.doesNotMatch(summary, /pid=|window_id|osascript|steps=/);
+  assert.equal(steps[0]!.title, "computer_get_window_state · include_screenshot=false max_elements=80 pid=123 window_id=456");
+});
+
+test("活动摘要保留少量可读步骤并合并其余项目", () => {
+  const steps = groupTurns([user("u"), ...["检查配置", "读取数据", "分析结果", "生成报告"].map((title, i) => step(`s${i}`, {title:`exec · ${title}`}))])[0]!.steps;
+  assert.equal(activitySummary(steps), "检查配置 · 读取数据 · 其他 2 项操作");
 });

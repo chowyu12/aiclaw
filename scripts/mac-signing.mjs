@@ -108,14 +108,9 @@ export function verifyMacBundle(bundle, identifier, signing=loadMacSigning()) {
 }
 export async function signMacApplication(app, signing=loadMacSigning()) {
   const {sign}=await import("@electron/osx-sign");
-  const helper=join(app,"Contents/Resources/app/computer-use/AIClaw Computer Use.app");
-  const binary=join(helper,"Contents/MacOS/AIClawComputerUse");
-  const before=existsSync(binary)?createHash("sha256").update(readFileSync(binary)).digest("hex"):undefined;
-  if (before) verifyMacBundle(helper,"com.github.chowyu12.aiclaw.computer-use",signing);
   await sign({app,identity:signing.identity,keychain:signing.keychain,identityValidation:false,
     timestamp:signing.selfSigned?"none":undefined,preAutoEntitlements:false,preEmbedProvisioningProfile:false,
     ignore:file=>{
-      if (file.includes("/computer-use/AIClaw Computer Use.app")) return true;
       if (!lstatSync(file).isFile()) return false;
       const fd=openSync(file,"r"), magic=Buffer.alloc(4);
       try {readSync(fd,magic,0,4,0);} finally {closeSync(fd);}
@@ -123,7 +118,6 @@ export async function signMacApplication(app, signing=loadMacSigning()) {
     },
     optionsForFile:()=>({hardenedRuntime:!signing.selfSigned,entitlements:join(repo,"tools/computer-use/electron-entitlements.plist")})});
   verifyMacBundle(app,"com.github.chowyu12.aiclaw",signing);
-  if (before && createHash("sha256").update(readFileSync(binary)).digest("hex")!==before) throw Error("Main app signing modified the cached Computer Use signature");
 }
 if (process.argv[1] && realpathSync(process.argv[1])===fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--setup")) setupMacSigning();

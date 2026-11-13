@@ -1,39 +1,191 @@
-/** Stage our own platform service; preserve the already-built macOS signature. */
+/** Pin the upstream embedded Driver. No upstream installer,
+ * agent auto-connect, telemetry setup, PATH changes or permission prompts. */
 import { createHash } from "node:crypto";
-import { cp, access, readFile, mkdir } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import {
+  cp,
+  readFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  rename,
+  access,
+} from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 export async function stageComputerHostDependencies({ repo, destination }) {
-  // The browser entry is a standalone Markdown parser with no transitive
-  // runtime imports. Ship only that entry, its package metadata and license.
-  const parser = join(destination,"node_modules/markdown-it");
-  await mkdir(join(parser,"dist/browser"),{recursive:true});
-  for (const name of ["package.json","LICENSE","dist/browser/markdown-it.esm.min.mjs"]) {
-    await cp(join(repo,"node_modules/markdown-it",name),join(parser,name));
+  // Same-process SDK owns daemon lifetime and parent-liveness, not tool dispatch.
+  for (const name of ["@trycua/cua-driver", "@ubjs/core", "@ubjs/node"]) {
+    await cp(
+      join(repo, "node_modules", name),
+      join(destination, "node_modules", name),
+      { recursive: true },
+    );
   }
 }
-export async function stageComputerRuntime({ repo, destination, platform, arch }) {
-  if (platform !== "darwin") {
-    const files = {linux:["service.py","x11.py","clipboard.py"],win32:["Service.ps1","Native.cs","Clipboard.cs"]}[platform];
-    if (!files) throw Error(`Unsupported Computer Use platform: ${platform}`);
-    const directory = join(destination,"computer-use",platform);
-    await mkdir(directory,{recursive:true});
-    for (const name of files) await cp(join(repo,"tools/computer-use",platform === "win32" ? "windows" : "linux",name),join(directory,name));
-    await cp(join(repo,"tools/claw-agent/internal/agent/computer-tools.json"),join(directory,"Tools.json"));
-    return;
+export async function stageComputerRuntime({
+  repo,
+  destination,
+  platform,
+  arch,
+}) {
+  const manifest = JSON.parse(
+    await readFile(join(repo, "tools/cua-driver/runtime.json"), "utf8"),
+  );
+  const asset =
+    manifest.assets[platform === "darwin" ? platform : `${platform}-${arch}`];
+  if (!asset) throw Error(`Unsupported Cua Driver target: ${platform}-${arch}`);
+  const root = join(repo, "build/cua-driver", asset.sha256);
+  try {
+    const cached = JSON.parse(
+      await readFile(join(root, "runtime.json"), "utf8"),
+    );
+    if (
+      cached.version !== manifest.version ||
+      cached.sha256 !== asset.sha256 ||
+      !cached.files
+    )
+      throw Error(
+        "Unverified Cua cache; remove build/cua-driver and stage again",
+      );
+    for (const [name, expected] of Object.entries(cached.files)) {
+      const digest = createHash("sha256")
+        .update(await readFile(join(root, name)))
+        .digest("hex");
+      if (digest !== expected) throw Error(`Damaged Cua cache: ${name}`);
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    await mkdir(dirname(root), { recursive: true });
+    const temporary = await mkdtemp(join(dirname(root), "stage-"));
+    try {
+      const archive = join(temporary, asset.name);
+      // Bounded retries and timeout; never fetch an unpinned latest release.
+      execFileSync(
+        "curl",
+        [
+          "--fail",
+          "--location",
+          "--retry",
+          "3",
+          "--max-time",
+          "300",
+          "--output",
+          archive,
+          `https://github.com/${manifest.repository}/releases/download/${manifest.tag}/${asset.name}`,
+        ],
+        { stdio: "inherit" },
+      );
+      const digest = createHash("sha256")
+        .update(await readFile(archive))
+        .digest("hex");
+      if (digest !== asset.sha256) throw Error("Cua Driver checksum mismatch");
+      const extracted = join(temporary, "extracted");
+      await mkdir(extracted);
+      execFileSync(
+        asset.name.endsWith(".zip") ? "unzip" : "tar",
+        asset.name.endsWith(".zip")
+          ? ["-q", archive, "-d", extracted]
+          : ["-xzf", archive, "-C", extracted],
+      );
+      const { readdir, writeFile } = await import("node:fs/promises");
+      const entries = await readdir(extracted);
+      const source =
+        entries.length === 1 && entries[0].startsWith("cua-driver-rs-")
+          ? join(extracted, entries[0])
+          : extracted;
+      await cp(source, join(temporary, "runtime"), { recursive: true });
+      await cp(
+        join(repo, "tools/claw-agent/internal/agent/computer-tools.json"),
+        join(temporary, "runtime/tools.json"),
+      );
+      const files = {};
+      for (const name of await readdir(join(temporary, "runtime"))) {
+        if (
+          !/^(cua-driver(?:\.exe)?|libcua_driver_sdk\.(?:dylib|so)|cua_driver_sdk\.dll|cua_driver_node_runtime\.node|LICENSE|THIRD_PARTY_NOTICES\.md)$/.test(
+            name,
+          )
+        )
+          continue;
+        files[name] = createHash("sha256")
+          .update(await readFile(join(temporary, "runtime", name)))
+          .digest("hex");
+      }
+      await writeFile(
+        join(temporary, "runtime/runtime.json"),
+        JSON.stringify({
+          version: manifest.version,
+          asset: asset.name,
+          sha256: asset.sha256,
+          files,
+        }),
+      );
+      await rename(join(temporary, "runtime"), root);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
   }
-  const name = "AIClaw Computer Use.app";
-  const source = join(repo, "apps/desktop/computer-use", name);
-  await access(join(source, "Contents/MacOS/AIClawComputerUse")).catch(() => { throw Error("Missing AIClaw Computer Use.app; build on macOS with node scripts/build-computer-runtime.mjs --universal or download the CI native artifact"); });
-  const build = JSON.parse(await readFile(join(repo, "apps/desktop/computer-use/AIClaw Computer Use.build.json"), "utf8"));
-  const sealed = JSON.parse(await readFile(join(source,"Contents/Resources/Build.json"),"utf8"));
-  if (build.authenticationProfile !== "production" || sealed.authenticationProfile !== "production") throw Error("Refusing to package a development Computer Use helper; build --universal for production");
-  if (!build.architectures.includes(arch) || build.protocolVersion !== "AIClawComputerUseIPC-1") throw Error("Native Computer Use bundle does not match the package architecture/protocol");
-  const digest = createHash("sha256").update(await readFile(join(source, "Contents/MacOS/AIClawComputerUse"))).digest("hex");
-  if (digest !== build.executableSHA256) throw Error("Native Computer Use executable differs from its build identity");
-  await cp(source, join(destination, "computer-use", name), { recursive: true });
+  const target = join(destination, "cua-driver");
+  await rm(target, { recursive: true, force: true });
+  await mkdir(target, { recursive: true });
+  for (const name of [
+    platform === "win32" ? "cua-driver.exe" : "cua-driver",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "runtime.json",
+  ]) {
+    await cp(join(root, name), join(target, name));
+  }
+  // The SDK's platform module is supplied by the same verified release archive.
+  const platformName = platform === "win32" ? "win32" : platform;
+  const suffix =
+    platform === "linux" ? "-gnu" : platform === "win32" ? "-msvc" : "";
+  const module = join(
+    destination,
+    "node_modules/@trycua",
+    `cua-driver-${platformName}-${arch}${suffix}`,
+  );
+  await mkdir(module, { recursive: true });
+  const library =
+    platform === "darwin"
+      ? "libcua_driver_sdk.dylib"
+      : platform === "win32"
+        ? "cua_driver_sdk.dll"
+        : "libcua_driver_sdk.so";
+  for (const name of [library, "cua_driver_node_runtime.node"])
+    await cp(join(root, name), join(module, name));
+  const { writeFile } = await import("node:fs/promises");
+  await writeFile(
+    join(module, "package.json"),
+    JSON.stringify({
+      name: `@trycua/cua-driver-${platformName}-${arch}${suffix}`,
+      version: manifest.version,
+      license: "MIT AND MPL-2.0",
+    }),
+  );
+  await cp(
+    join(root, "THIRD_PARTY_NOTICES.md"),
+    join(module, "THIRD_PARTY_NOTICES.md"),
+  );
+  await cp(
+    join(repo, "tools/cua-driver/node-runtime-NOTICE.md"),
+    join(module, "node-runtime-NOTICE.md"),
+  );
+  // Refresh host contract even on a cached artifact.
+  await cp(
+    join(repo, "tools/claw-agent/internal/agent/computer-tools.json"),
+    join(target, "tools.json"),
+  );
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (
+  process.argv[1] &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
   const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  await stageComputerRuntime({repo,destination:join(repo,"apps/desktop"),platform:process.platform,arch:process.arch});
+  await stageComputerRuntime({
+    repo,
+    destination: join(repo, "apps/desktop"),
+    platform: process.platform,
+    arch: process.arch,
+  });
 }

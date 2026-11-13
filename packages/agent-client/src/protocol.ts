@@ -496,6 +496,7 @@ export interface ComputerRequestParams {
   turnId: string;
   action: string;
   arguments: Record<string, unknown>;
+  backgroundOnly?: boolean;
 }
 
 export interface ComputerResult {

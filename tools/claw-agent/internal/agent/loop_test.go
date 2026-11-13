@@ -769,7 +769,7 @@ func TestScreenshotBecomesAnImageMessageNotAToolResult(t *testing.T) {
 	// 一条 user 消息送进去。
 	png := []byte{0x89, 0x50, 0x4e, 0x47}
 	model := &fakeModel{script: []string{
-		sseToolCalls([3]string{"c1", "computer_screenshot", `{"app":"com.example.fixture"}`}),
+		sseToolCalls([3]string{"c1", "computer_get_window_state", `{"pid":123,"window_id":456}`}),
 		sseText("我看到了。"),
 	}}
 	session := computerSession(t, model, protocol.ApprovalBypass)
@@ -814,7 +814,7 @@ func TestScreenshotBecomesAnImageMessageNotAToolResult(t *testing.T) {
 func TestComputerActionsAreGatedByApproval(t *testing.T) {
 	// 点一下鼠标可能是「点开设置」，也可能是「确认转账」，从坐标上看不出区别。
 	model := &fakeModel{script: []string{
-		sseToolCalls([3]string{"c1", "computer_click", `{"app":"com.example.fixture","observation_id":"o1","x":100,"y":200}`}),
+		sseToolCalls([3]string{"c1", "computer_click", `{"pid":123,"window_id":456,"x":100,"y":200}`}),
 		sseText("好的。"),
 	}}
 	session := computerSession(t, model, protocol.ApprovalOnWrite)
@@ -833,7 +833,7 @@ func TestComputerActionsAreGatedByApproval(t *testing.T) {
 func TestScreenshotDoesNotRequireApprovalUnderOnWrite(t *testing.T) {
 	// 截屏只是看，不改变任何东西。每次看都要点一下确认会让这功能没法用。
 	model := &fakeModel{script: []string{
-		sseToolCalls([3]string{"c1", "computer_screenshot", `{"app":"com.example.fixture"}`}),
+		sseToolCalls([3]string{"c1", "computer_get_window_state", `{"pid":123,"window_id":456}`}),
 		sseText("看到了。"),
 	}}
 	session := computerSession(t, model, protocol.ApprovalOnWrite)
@@ -881,7 +881,7 @@ func TestComputerFailureIsFedBackNotFatal(t *testing.T) {
 	// 宿主拒绝（没授权、最前面是自己）要让模型看见原因并改做法，
 	// 不是让整轮失败。
 	model := &fakeModel{script: []string{
-		sseToolCalls([3]string{"c1", "computer_click", `{"app":"com.example.fixture","observation_id":"o1","x":10,"y":10}`}),
+		sseToolCalls([3]string{"c1", "computer_click", `{"pid":123,"window_id":456,"x":10,"y":10}`}),
 		sseText("那我换个办法。"),
 	}}
 	session := computerSession(t, model, protocol.ApprovalBypass)

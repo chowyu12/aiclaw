@@ -56,11 +56,12 @@ try {
   try {
     for(let attempt=0;attempt<100;attempt++) {
       readiness=await evaluate(`(async()=>{
+        if(!process.resourcesPath) return false;
         const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
         let electron;
         try {electron=require('electron');} catch {return false;}
         const {app,BrowserWindow}=electron;
-        if(!app.isReady()) return false;
+        if(!app?.isReady?.()) return false;
         const window=BrowserWindow.getAllWindows()[0];
         if(!window||window.webContents.isLoading()) return false;
         return window.webContents.executeJavaScript('Boolean(window.aiclaw?.plugins && document.querySelector("#app")?.children.length)');
@@ -69,34 +70,40 @@ try {
       await pause(100);
     }
     assert.equal(readiness,true,"Packaged renderer and preload must load");
-    let installedBeforeTool=false;
-    for(let attempt=0;attempt<100;attempt++) {
-      installedBeforeTool=await evaluate(`(()=>{
-        const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
-        const fs=require('node:fs'),path=require('node:path');
-        const root=path.join(require('node:os').homedir(),'.aiclaw/computer-use');
-        if(process.platform==='darwin') return fs.existsSync(path.join(root,'AIClaw Computer Use.app/Contents/_CodeSignature/CodeResources'));
-        const platformRoot=path.join(root,process.platform);
-        return fs.existsSync(platformRoot)&&fs.readdirSync(platformRoot).some(name=>/^[a-f0-9]{64}$/.test(name)&&fs.existsSync(path.join(platformRoot,name,'Tools.json')));
-      })()`);
-      if(installedBeforeTool) break;
-      await pause(100);
-    }
-    assert.equal(installedBeforeTool,true,"Startup must synchronize the runtime before any Computer Use tool call");
     const receipt=await evaluate(`(async()=>{
       const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
+      const path=require('node:path'),fs=require('node:fs');
+      const root=path.join(process.resourcesPath,'app/cua-driver');
+      if(fs.existsSync(path.join(root,'CuaDriver.app')))throw Error('An independent app must not be bundled');
       const {createComputerRuntime}=require(process.resourcesPath+'/app/dist/main/computer-runtime.js');
       const runtime=await createComputerRuntime();
       try {
-        const result=await runtime.call('permission_status',{});
-        if(result.isError) throw Error(JSON.stringify(result));
-        const status=JSON.parse(result.content[0].text);
-        const runtimeDirectory=process.platform==='darwin'?require(process.resourcesPath+'/app/dist/main/computer-install.js').installedComputerBundle():status.runtime_directory;
-        return {tools:runtime.tools.length,status,runtimeDirectory,resources:process.resourcesPath};
-      } finally {await runtime.close();}
+        const result=await runtime.call('check_permissions',{prompt:false});
+        if(result.isError)throw Error(JSON.stringify(result));
+        const status=result.structuredContent;
+        if(process.platform==='darwin'&&(status?.source?.attribution!=='host'||status.source.embedded!==true))throw Error('Expected host-owned TCC permissions');
+        const identity=await runtime.call('health_report',{include:['bundle_identity']});
+        return {tools:runtime.tools.length,status,identity:identity.structuredContent,resources:process.resourcesPath};
+      }finally{await runtime.close();}
     })()`);
-    assert.equal(receipt.tools,18);
-    assert.ok(receipt.runtimeDirectory?.startsWith(join(home,".aiclaw/computer-use")),"Packaged runtime must execute from the isolated user installation");
+    assert.ok(receipt.tools>=17);
+    if(process.platform==='darwin'){
+      assert.equal(receipt.status.source.host_bundle_id,'com.github.chowyu12.aiclaw');
+      const identity=receipt.identity.checks.find(check=>check.name==='bundle_identity');
+      assert.equal(identity.status,'pass');
+      assert.equal(identity.data.bundle_identifier,'com.github.chowyu12.aiclaw');
+      assert.equal(identity.data.parent_process_id,receipt.status.source.responsible_ppid);
+    }
+    if(process.env.AICLAW_CUA_BACKGROUND_TEST==="1") {
+      const {backgroundFixtureChecks}=await import("./cua-background-fixture.mjs");
+      console.log(JSON.stringify(await backgroundFixtureChecks(evaluate)));
+    }
+    if(process.env.AICLAW_CUA_TEXTEDIT_TEST==="1") {
+      const {textEditChecks}=await import("./cua-textedit-fixture.mjs");
+      const result=await textEditChecks(evaluate);
+      console.log(JSON.stringify({textedit_fixture:result}));
+      if(result.error||result.save_error||!result.save_panel) throw Error("TextEdit background save test did not complete");
+    }
     let mainWindowCloseVerified = false;
     if (process.platform !== "darwin") {
       clearTimeout(watchdog);
@@ -121,7 +128,7 @@ try {
       assert.equal(child.exitCode,0,"Closing the main window must exit even when a hidden control window exists");
       mainWindowCloseVerified=true;
     }
-    console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,startup_installed_before_tool:true,user_runtime_installed:true,source_identity_handshake:true,...(mainWindowCloseVerified?{main_window_close_exits_naturally:true,hidden_auxiliary_does_not_prevent_exit:true}:{}),...receipt}));
+    console.log(JSON.stringify({passed:true,packaged_executable:executable,renderer_and_preload:true,shipped_modules_loaded:true,embedded_host_permission_identity:true,...(mainWindowCloseVerified?{main_window_close_exits_naturally:true,hidden_auxiliary_does_not_prevent_exit:true}:{}),...receipt}));
   } finally {clearTimeout(watchdog);}
 } catch(error) {
   throw Error(`${String(error)}\nPackaged stderr:\n${stderr}`);
@@ -132,30 +139,5 @@ try {
     if(child.exitCode===null) {child.kill("SIGKILL");await pause(100);}
   }
   child?.stderr.destroy(); child?.unref();
-  if (process.platform === "darwin") {
-    // LaunchServices owns the resident helper. Stop only this test's exact
-    // canonical executable before deleting its private HOME; never use its
-    // shared bundle ID, force-kill, or leave a running unlinked test generation.
-    let expected;
-    try { expected=await realpath(join(home,".aiclaw/computer-use/AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse")); }
-    catch(error) { if(error.code!=="ENOENT") throw error; }
-    if(expected) {
-      assert.equal(expected,join(await realpath(home),".aiclaw/computer-use/AIClaw Computer Use.app/Contents/MacOS/AIClawComputerUse"),"Refuse helper cleanup outside the canonical private HOME");
-      const rows=execFileSync("/bin/ps",["-axo","pid=,uid=,comm="],{encoding:"utf8"}).split("\n");
-      for(const row of rows) {
-        const match=row.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/);
-        if(!match || Number(match[2])!==process.getuid() || match[3]!==expected) continue;
-        const pid=Number(match[1]);
-        const current=()=>{
-          try { const value=execFileSync("/bin/ps",["-p",String(pid),"-o","uid=,comm="],{encoding:"utf8",stdio:["ignore","pipe","ignore"]}).trim().match(/^(\d+)\s+(.+)$/);return value && Number(value[1])===process.getuid() && value[2]===expected; }
-          catch { return false; }
-        };
-        if(!current()) continue;
-        try { process.kill(pid,"SIGTERM"); } catch(error) { if(error.code!=="ESRCH") throw error; }
-        for(let attempt=0;attempt<40 && current();attempt++) await pause(50);
-        assert.ok(!current(),"The owned packaged helper did not terminate normally; its HOME was preserved");
-      }
-    }
-  }
   await rm(home,{recursive:true,force:true,maxRetries:10,retryDelay:200});
 }

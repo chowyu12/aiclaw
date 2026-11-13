@@ -1,403 +1,480 @@
-import { createHash, randomUUID } from "node:crypto";
-import { basename } from "node:path";
+import type {
+  ComputerRequestParams,
+  ComputerResult,
+} from "@aiclaw/agent-client";
+import {
+  createComputerRuntime,
+  type ComputerRuntime,
+  type ComputerToolResult,
+} from "./computer-runtime.js";
 import { setTimeout as pause } from "node:timers/promises";
-import type { ComputerRequestParams, ComputerResult } from "@aiclaw/agent-client";
-import { createComputerRuntime, type ComputerRuntime, type ComputerToolResult } from "./computer-runtime.js";
-import { ComputerWatches } from "./computer-watch.js";
-import { computerAppPolicy } from "./computer-policy.js";
-import MarkdownIt from "markdown-it/browser";
-import { computerActionIsObservation, type ComputerControlAction, type ComputerControlActivity, type ComputerControlState, type ComputerDiagnostics } from "../shared/computer-control.js";
-
-const pasteMarkdown = new MarkdownIt({ html: false });
-
-const ARGUMENTS: Record<string, string[]> = {
-  app_policy: ["app"],
-  watch_start: ["app", "window_id", "interval_ms"], watch_next: ["watch_id", "after_sequence", "wait_ms"], watch_stop: ["watch_id"],
-  find_apps: ["text", "limit"], start_app: ["app"], stop_app: ["app"], modify_app: ["app", "modification"], frontmost_window: [], permission_status: [],
-  query: ["app", "text", "role", "exact", "limit", "max_nodes", "window_id"],
-  select_text: ["app", "element_index", "text", "prefix", "suffix", "selection"],
-  paste: ["app", "text", "format"],
-  list_apps: [], get_app_state: ["app", "include_ax", "include_screenshot", "text_limit", "max_tree_nodes", "max_tree_depth", "window_id"],
-  click: ["app", "element_index", "x", "y", "click_count", "mouse_button", "key", "duration"],
-  drag: ["app", "from_x", "from_y", "to_x", "to_y"],
-  press_key: ["app", "key", "duration"], type_text: ["app", "text"],
-  scroll: ["app", "element_index", "x", "y", "direction", "pages"],
-  set_value: ["app", "element_index", "value", "autosubmit_search_fields"], perform_secondary_action: ["app", "element_index", "action"],
-};
-
-type Observation = { id: string; pixels: boolean; ax: boolean; queryIndices?: Set<string>; screenshotHash?: string; windowID?: number };
-class ComputerToolError extends Error {}
-function screenshotHash(state: ComputerResult): string | undefined {
-  return state.imageBase64 ? createHash("sha256").update(state.imageBase64).digest("hex") : undefined;
+import { createHash } from "node:crypto";
+import { backgroundCuaArguments, cuaToolSpecs } from "./cua-policy.js";
+import type {
+  ComputerControlAction,
+  ComputerControlActivity,
+  ComputerControlState,
+  ComputerDiagnostics,
+} from "../shared/computer-control.js";
+type Snapshot = { scope:string; fingerprint:string };
+type Session = { runtime: ComputerRuntime; turn: string; observed: Map<string,Snapshot>; lastAction?: { key:string; target:string; baseline?:Snapshot; changed:boolean } };
+class ComputerRefusal extends Error {}
+class ComputerDriverError extends Error {}
+async function beforeDeadline<T>(promise:Promise<T>, remainingMs:number):Promise<T> {
+  let timer:ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise,new Promise<never>((_,reject)=>{
+      timer=setTimeout(()=>reject(Error("Window discovery timed out; the driver request was cancelled.")),Math.max(1,remainingMs));
+    })]);
+  } finally { if(timer) clearTimeout(timer); }
 }
-type Session = { runtime: ComputerRuntime; turn: string; observations: Map<string, Observation>; policies: Set<string> };
-
+function stateFingerprint(data: Record<string,unknown>): string {
+  const volatile=new Set(["snapshot_id","element_token","invalidated_snapshot_ids","since_status","capture_id","screenshot","screenshot_base64"]);
+  function semantic(value:unknown):unknown {
+    if(Array.isArray(value)) return value.map(semantic);
+    if(value && typeof value === "object") return Object.fromEntries(Object.entries(value).filter(([key])=>!volatile.has(key)).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,semantic(item)]));
+    return value;
+  }
+  return createHash("sha256").update(JSON.stringify(semantic(data))).digest("hex");
+}
+function stableAction(value:unknown):unknown {
+  if(Array.isArray(value)) return value.map(stableAction);
+  if(value && typeof value === "object") return Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,stableAction(item)]));
+  return value;
+}
+function resultText(action:string, result:ComputerToolResult, output:ComputerResult):ComputerResult {
+  if (!["list_windows","get_window_state","wait_new_window","launch_app"].includes(action) || !result.structuredContent) return output;
+  const data={...result.structuredContent};
+  for(const key of ["screenshot","screenshot_base64","image","image_base64"]) delete data[key];
+  // The original readable text is retained; callers can parse identifiers and tokens as JSON.
+  return {...output,text:JSON.stringify({text:output.text,data})};
+}
+function backgroundRefused(result: ComputerToolResult): boolean {
+  const text = result.content?.filter(item => item.type === "text").map(item => item.text ?? "").join("\n") ?? "";
+  const detail = result.structuredContent as {escalation?:{recommended?:string};refusal?:{escalation?:{recommended?:string}}} | undefined;
+  return !!result.isError && (detail?.escalation?.recommended === "foreground" || detail?.refusal?.escalation?.recommended === "foreground" || /disabled while the app is in the background|background_unavailable|Retry (?:this action )?with delivery_mode:"foreground"/i.test(text));
+}
 function observation(result: ComputerToolResult): ComputerResult {
-  if (!Array.isArray(result?.content)) throw Error("AIClaw Computer Use returned an invalid result");
-  const text = result.content.filter(item => item.type === "text").map(item => item.text ?? "").join("\n");
-  if (result.isError) throw new ComputerToolError(text || "AIClaw Computer Use refused the operation");
-  if (!text.trim()) throw Error("AIClaw Computer Use returned an empty result; outcome is unknown");
-  const image = result.content.find(item => item.type === "image");
-  if (image && (image.mimeType !== "image/png" || !image.data)) throw Error("AIClaw Computer Use returned an invalid PNG screenshot");
+  if (!Array.isArray(result?.content)) throw Error("Invalid Cua result");
+  const text = result.content
+    .filter((item) => item.type === "text")
+    .map((item) => item.text ?? "")
+    .join("\n");
+  if (result.isError) {
+    throw new ComputerDriverError(text || "Cua refused the operation");
+  }
+  if (!text.trim()) throw Error("Empty Cua result; outcome unknown");
+  const image = result.content.find((item) => item.type === "image");
+  if (image && (image.mimeType !== "image/png" || !image.data))
+    throw Error("Invalid Cua PNG screenshot");
   return { text, ...(image ? { imageBase64: image.data } : {}) };
 }
-
-/** AIClaw owns approval and turn scope; the independent native app owns native execution,
- * permissions, target-window snapshots and element indexes. Each chat gets an
- * independent IPC connection; all desktop operations remain ordered.
- */
+/** Turn leases own Driver snapshots and independent AIClaw cursors. Host stop
+ * revokes the lease immediately; it never queues behind a pending batch. */
 export class ComputerController {
   private sessions = new Map<string, Session>();
+  private lastActions = new Map<string, NonNullable<Session["lastAction"]>>();
   private turns = new Map<string, boolean>();
-  private queue: Promise<unknown> = Promise.resolve();
-  private readonly createRuntime: () => Promise<ComputerRuntime>;
-  private readonly watches: ComputerWatches;
-  private mode: ComputerControlState["mode"] = "ready";
-  private generation = 0;
-  private active: ComputerControlActivity | null = null;
-  private targetActivity: ComputerControlActivity | null = null;
-  private boundsRuntime?: { generation: number; runtime: ComputerRuntime };
+  private blockedTurns = new Map<string, string>();
+  private emptyReads = new Map<string, number>();
   private connections = new Set<ComputerRuntime>();
   private listeners = new Set<(state: ComputerControlState) => void>();
-  constructor(createRuntime: () => Promise<ComputerRuntime> = createComputerRuntime) {
-    this.createRuntime = createRuntime;
-    this.watches = new ComputerWatches(() => this.connect(), () => this.publish(), () => { void this.setControl("pause"); });
-  }
 
+  private async callWithForegroundFallback(runtime:ComputerRuntime, action:string, args:Record<string,unknown>, check:()=>void):Promise<ComputerToolResult> {
+    const result=await runtime.call(action,args);
+    const text=result.content?.filter(item=>item.type==="text").map(item=>item.text??"").join("\n") ?? "";
+    const refused=backgroundRefused(result);
+    if (/screen_locked/i.test(text)) return result;
+    if(!refused || action==="run_steps" || args.delivery_mode!=="background") return result;
+    check();
+    if(this.active) {this.active.foreground=true;this.publish();}
+    const mark=(response:ComputerToolResult):ComputerToolResult => ({...response,content:[{type:"text",text:"Temporary foreground execution was used."},...response.content]});
+    if(action!=="invoke_menu") return mark(await runtime.call(action,{...args,delivery_mode:"foreground"}));
+
+    // macOS menu actions require the application itself to be foreground.
+    // Resolve the user's current window before changing focus; restore only if
+    // the target still has focus, so a later user switch is never overridden.
+    let activePid:number|undefined, priorWindow:number|undefined, warning="";
+    try {
+      const apps=await runtime.call("list_apps",{});
+      observation(apps);
+      const active=(apps.structuredContent?.apps as Array<Record<string,unknown>> | undefined)?.find(app=>app.active===true);
+      if(Number.isSafeInteger(active?.pid)) activePid=Number(active?.pid);
+      if(activePid && activePid!==args.pid) {
+        const windows=await runtime.call("list_windows",{pid:activePid});
+        observation(windows);
+        const candidates=(windows.structuredContent?.windows as Array<Record<string,unknown>> | undefined)?.filter(w=>w.layer===0&&w.is_on_screen===true&&Number.isSafeInteger(w.window_id)&&typeof w.z_index==="number") ?? [];
+        candidates.sort((a,b)=>Number(b.z_index)-Number(a.z_index));
+        priorWindow=candidates[0]?.window_id as number | undefined;
+      }
+      if(!activePid || activePid!==args.pid && !priorWindow) warning=" The previous foreground window could not be identified and may not be restored.";
+    } catch {
+      warning=" The previous foreground window could not be identified and may not be restored.";
+    }
+    check();
+    let response:ComputerToolResult;
+    try {
+      const activated=await runtime.call("bring_to_front",{pid:args.pid,window_id:args.window_id});
+      observation(activated);
+      check();
+      response=await runtime.call(action,{...args,delivery_mode:"foreground"});
+      // AppKit may add an ellipsis to a menu label when the app becomes
+      // active. Retry only a unique matching label after the driver confirms
+      // the original path was not found, before any menu item was invoked.
+      const message=response.content?.filter(item=>item.type==="text").map(item=>item.text??"").join("\n") ?? "";
+      if(response.isError && /path segment .* was not found under /i.test(message) && Array.isArray(args.path)) {
+        const items=message.split("Items there:")[1]?.split("\n")[0] ?? "";
+        const labels=[...items.matchAll(/"([^"\n]+)"/g)].map(match=>match[1]!);
+        const normalize=(label:string)=>label.trim().replace(/(?:…|\.\.\.)$/,"");
+        const path=args.path as string[], original=path[path.length-1];
+        const matches=labels.filter(label=>original && label!==original && normalize(label)===normalize(original));
+        if(matches.length===1) {
+          check();
+          response=await runtime.call(action,{...args,path:[...path.slice(0,-1),matches[0]],delivery_mode:"foreground"});
+        }
+      }
+    } finally {
+      if(priorWindow && activePid) {
+        const restore=async (connection:ComputerRuntime) => {
+          const now=await connection.call("list_apps",{});
+          observation(now);
+          const current=(now.structuredContent?.apps as Array<Record<string,unknown>> | undefined)?.find(app=>app.active===true);
+          if(current?.pid===args.pid) {
+            const targetWindows=await connection.call("list_windows",{pid:args.pid});
+            observation(targetWindows);
+            const visible=(targetWindows.structuredContent?.windows as Array<Record<string,unknown>> | undefined)?.filter(w=>w.layer===0&&w.is_on_screen===true&&Number.isSafeInteger(w.window_id)&&typeof w.z_index==="number") ?? [];
+            visible.sort((a,b)=>Number(b.z_index)-Number(a.z_index));
+            if(visible[0]?.window_id===args.window_id) observation(await connection.call("bring_to_front",{pid:activePid,window_id:priorWindow}));
+            else warning=" The active window changed during execution; the previous window was not restored.";
+          }
+          else if(!current) warning=" The previous foreground window could not be verified and was not restored.";
+        };
+        try { await restore(runtime); }
+        catch {
+          try {
+            const recovery=await this.createRuntime();
+            try { await restore(recovery); } finally { await recovery.close(); }
+          } catch { warning=" The previous foreground window could not be restored."; }
+        }
+      }
+    }
+    const output=mark(response!);
+    if(warning) output.content.unshift({type:"text",text:warning.trim()});
+    return output;
+  }
+  private queue: Promise<unknown> = Promise.resolve();
+  private generation = 0;
+  private mode: ComputerControlState["mode"] = "ready";
+  private active: ComputerControlActivity | null = null;
+  private readonly createRuntime: () => Promise<ComputerRuntime>;
+  private readonly permissionSetup: () => Promise<void>;
+  constructor(
+    createRuntime: () => Promise<ComputerRuntime> = createComputerRuntime,
+    permissionSetup: () => Promise<void> = async () => {
+      if (process.platform === "darwin") {
+        const { requestMacOSPermissions } = await import(
+          "@trycua/cua-driver/electron"
+        );
+        requestMacOSPermissions();
+      }
+    },
+  ) {
+    this.createRuntime = createRuntime;
+    this.permissionSetup = permissionSetup;
+  }
   getStatus(): ComputerControlState {
-    const active = this.active ?? this.targetActivity;
-    return { mode: this.mode, active: active ? { ...active, ...(this.targetActivity?.app === active.app && this.targetActivity.sessionId === active.sessionId && this.targetActivity.turnId === active.turnId ? { displayName: this.targetActivity.displayName, windowId: this.targetActivity.windowId, pid: this.targetActivity.pid, frame: this.targetActivity.frame ? { ...this.targetActivity.frame } : undefined } : {}) } : null, watching: this.watches.size };
+    return {
+      mode: this.mode,
+      active: this.active ? { ...this.active } : null,
+      watching: 0,
+    };
   }
-  subscribe(listener: (state: ComputerControlState) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
-  private publish(): void { for (const listener of this.listeners) listener(this.getStatus()); }
-  affectedSessions(): string[] { return [...new Set([...this.turns].filter(([, active]) => active).map(([key]) => JSON.parse(key)[0] as string))]; }
-  private checkGeneration(generation: number): void {
-    if (this.mode !== "ready" || generation !== this.generation) throw Error("Computer Use was paused or stopped. Resume explicitly, then observe again; no queued input was replayed.");
+  subscribe(listener: (state: ComputerControlState) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
-  private async connect(): Promise<ComputerRuntime> {
-    const generation = this.generation;
-    this.checkGeneration(generation);
+  private publish(): void {
+    for (const listener of this.listeners) listener(this.getStatus());
+  }
+  affectedSessions(): string[] {
+    return [
+      ...new Set(
+        [...this.turns]
+          .filter(([, active]) => active)
+          .map(([key]) => JSON.parse(key)[0] as string),
+      ),
+    ];
+  }
+  private check(generation: number, key?: string): void {
+    if (this.mode !== "ready" || generation !== this.generation)
+      throw Error(
+        "Computer Use was paused or stopped; resume explicitly and observe again. No input was replayed.",
+      );
+    if (key && !this.turns.get(key))
+      throw Error(
+        "Computer Use turn has ended; no queued operation was dispatched",
+      );
+  }
+  private async connect(
+    generation: number,
+    key?: string,
+  ): Promise<ComputerRuntime> {
     const runtime = await this.createRuntime();
-    try { this.checkGeneration(generation); }
-    catch (error) { await runtime.close(); throw error; }
+    try {
+      this.check(generation, key);
+    } catch (error) {
+      await runtime.close();
+      throw error;
+    }
     this.connections.add(runtime);
     const close = runtime.close.bind(runtime);
     let closing: Promise<void> | undefined;
     runtime.close = () => {
       this.connections.delete(runtime);
-      return closing ??= close();
+      return (closing ??= close());
     };
     return runtime;
   }
-  async setControl(action: ComputerControlAction): Promise<ComputerControlState> {
-    if (!["pause", "resume", "stop"].includes(action)) throw Error("Unknown desktop control action");
+  async setControl(
+    action: ComputerControlAction,
+  ): Promise<ComputerControlState> {
+    if (!["pause", "resume", "stop"].includes(action))
+      throw Error("Unknown desktop control action");
     if (action === "resume") {
-      if (this.mode !== "ready") { this.mode = "ready"; this.active = null; this.targetActivity = null; this.publish(); }
+      if (this.mode !== "ready") {
+        this.mode = "ready";
+        this.active = null;
+        this.publish();
+      }
       return this.getStatus();
     }
     this.mode = action === "pause" ? "paused" : "stopped";
     this.generation++;
-    if (action === "stop") for (const key of this.turns.keys()) this.turns.set(key, false);
-    for (const session of this.sessions.values()) session.observations.clear();
-    this.sessions.clear(); this.active = null;
-    if (action === "stop") this.targetActivity = null;
-    this.boundsRuntime = undefined;
-    // Never queue the stop behind the input it must cancel. A new generation
-    // can proceed after resume even if a broken old backend never settles.
+    if (action === "stop")
+      for (const key of this.turns.keys()) this.turns.set(key, false);
+    this.sessions.clear();
+    this.active = null;
     this.queue = Promise.resolve();
-    const closing = [...this.connections].map(runtime => runtime.close());
-    const watches = this.watches.close();
     this.publish();
-    await Promise.allSettled([...closing, watches]);
+    await Promise.allSettled(
+      [...this.connections].map((runtime) => runtime.close()),
+    );
     return this.getStatus();
+  }
+  perform(request: ComputerRequestParams): Promise<ComputerResult> {
+    // Reject unsafe arguments before creating any driver or queuing side effects.
+    let args: Record<string, unknown>;
+    try {
+      args = backgroundCuaArguments(request.action, request.arguments);
+      this.check(this.generation);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    if (!request.sessionId || !request.turnId)
+      return Promise.reject(Error("Computer session and turn are required"));
+    const generation = this.generation,
+      key = JSON.stringify([request.sessionId, request.turnId]);
+    if (request.backgroundOnly && request.action === "run_steps") args.foreground_fallback = false;
+    if (!this.turns.has(key)) this.turns.set(key, true);
+    const operation = this.queue.then(async () => {
+      this.check(generation, key);
+      const blocked = this.blockedTurns.get(key);
+      if (blocked) throw new ComputerRefusal(blocked);
+      const target=JSON.stringify([args.pid,args.window_id]);
+      const mutating=["click","double_click","right_click","hotkey","invoke_menu","run_steps"].includes(request.action);
+      const identityArgs={...args};
+      if(request.action === "hotkey" || request.action === "press_key") delete identityArgs.element_token;
+      const actionKey=JSON.stringify(stableAction([request.action,identityArgs]));
+      const previous=this.lastActions.get(key);
+      if(mutating && previous?.key===actionKey && !previous.changed)
+        throw new ComputerRefusal("The same input was already dispatched and no changed state was verified. Stop and inspect the target; do not repeat it automatically.");
+      let session = this.sessions.get(request.sessionId);
+      if (session?.turn !== request.turnId) {
+        await session?.runtime.close();
+        session = undefined;
+      }
+      if (!session) {
+        const runtime = await this.connect(generation, key);
+        session = { runtime, turn: request.turnId, observed:new Map() };
+        this.sessions.set(request.sessionId, session);
+      }
+      this.check(generation, key);
+      const activity: ComputerControlActivity = {
+        sessionId: request.sessionId,
+        turnId: request.turnId,
+        action: request.action,
+        app:
+          typeof args.bundle_id === "string"
+            ? args.bundle_id
+            : `PID ${args.pid ?? ""}`,
+        pid: typeof args.pid === "number" ? args.pid : undefined,
+        windowId:
+          typeof args.window_id === "number" ? args.window_id : undefined,
+      };
+      this.active = activity;
+      this.publish();
+      try {
+        let result:ComputerToolResult;
+        if (request.action === "wait_new_window") {
+          const excluded = new Set(args.exclude_window_ids as number[]), deadline = Date.now() + Number(args.timeout_ms ?? 3000);
+          let candidates: unknown[] = [];
+          do {
+            this.check(generation,key);
+            const snapshot = await beforeDeadline(session.runtime.call("list_windows",{pid:args.pid}),deadline-Date.now());
+            observation(snapshot);
+            const windows = snapshot.structuredContent?.windows;
+            if (!Array.isArray(windows)) throw Error("Cua did not return structured window data");
+            candidates = windows.filter((value: unknown) => {
+              if (!value || typeof value !== "object") return false;
+              const window = value as Record<string,unknown>;
+              return Number.isSafeInteger(window.window_id) && !excluded.has(Number(window.window_id)) && window.layer === 0 && typeof window.title === "string" && !!window.title.trim();
+            });
+            if(candidates.length) break;
+            if(Date.now() < deadline) await pause(Math.min(200,deadline-Date.now()));
+          } while(Date.now() < deadline);
+          result={content:[{type:"text",text:candidates.length ? "New window candidates found; confirm the target before acting." : "No new ordinary titled window appeared before the timeout. Do not repeat the action automatically."}],structuredContent:{windows:candidates,timed_out:!candidates.length}};
+        } else {
+          session.lastAction=this.lastActions.get(key);
+          if(mutating) { session.lastAction={key:actionKey,target,baseline:session.observed.get(target),changed:false}; this.lastActions.set(key,session.lastAction); }
+          result = request.backgroundOnly
+            ? await session.runtime.call(request.action,args)
+            : await this.callWithForegroundFallback(session.runtime,request.action,args,()=>this.check(generation,key));
+          if (request.backgroundOnly && backgroundRefused(result)) {
+            const reason = "Computer Use stopped: this action requires foreground operation, which the user prohibited. Do not retry, use shell alternatives, or perform further desktop actions; report the blocker.";
+            this.blockedTurns.set(key, reason);
+            throw new ComputerRefusal(reason);
+          }
+          if (request.action === "get_window_state" && !result.isError && args.query === undefined && args.since === undefined && args.include_accessibility_tree !== false && (Array.isArray(result.structuredContent?.elements) || typeof result.structuredContent?.total_element_count === "number")) {
+            const empty = result.structuredContent?.total_element_count === 0 || (result.structuredContent?.total_element_count === undefined && Array.isArray(result.structuredContent?.elements) && result.structuredContent.elements.length === 0);
+            const count = empty ? (this.emptyReads.get(key) ?? 0) + 1 : 0;
+            this.emptyReads.set(key, count);
+            if (count >= 3) {
+              const reason = "Computer Use stopped: three consecutive full window reads returned no accessibility elements. The desktop may be locked or unavailable; stop retrying and report the limitation.";
+              this.blockedTurns.set(key, reason);
+              throw new ComputerRefusal(reason);
+            }
+          }
+          if(request.action==="get_window_state" && result.structuredContent && !result.isError && args.since === undefined) {
+            const scope=JSON.stringify([args.query??null,args.max_depth??null,args.max_elements??null,args.tree_format??null,args.include_accessibility_tree??null]);
+            const snapshot={scope,fingerprint:stateFingerprint(result.structuredContent)};
+            session.observed.set(target,snapshot);
+            if(session.lastAction?.target===target && session.lastAction.baseline?.scope===scope && session.lastAction.baseline.fingerprint!==snapshot.fingerprint) session.lastAction.changed=true;
+          }
+        }
+        let output = observation(result);
+        if (result.structuredContent?.self_activation_suppressed === false)
+          throw Error("The target app did not stay in the background; automation stopped. Do not automatically relaunch it.");
+        this.check(generation, key);
+        if (request.action === "run_steps" && result.structuredContent?.ok === false) output.verificationFailed = true;
+        output=resultText(request.action,result,output);
+        return output;
+      } catch (error) {
+        if (error instanceof ComputerDriverError && /screen_locked/i.test(error.message)) {
+          const reason = "Computer Use stopped: the driver reported screen_locked (locked screen or screen saver). Ask the user to unlock before a new turn; do not wait or retry.";
+          this.blockedTurns.set(key, reason);
+          throw new ComputerRefusal(reason);
+        }
+        if (error instanceof ComputerRefusal) throw error;
+        if (error instanceof ComputerDriverError && request.action !== "run_steps" && /element_token is stale/i.test(error.message)) {
+          // A rejected stale token was not dispatched. The next fresh token may be used.
+          this.lastActions.delete(key); session.lastAction=undefined; throw error;
+        }
+        if (this.sessions.get(request.sessionId) === session)
+          this.sessions.delete(request.sessionId);
+        await session.runtime.close();
+        throw Error(
+          `${String(error)}. Do not replay uncertain input; obtain a fresh window state before deciding what to do next.`,
+        );
+      } finally {
+        if (this.active === activity) {
+          this.active = null;
+          this.publish();
+        }
+      }
+    });
+    this.queue = operation.catch(() => {});
+    return operation;
+  }
+  // Cua owns its click-through agent cursor; the host no longer polls AX bounds
+  // every 250 ms or draws a second competing target overlay.
+  async windowBounds(
+    _activity: ComputerControlActivity,
+  ): Promise<NonNullable<ComputerControlActivity["frame"]> | null> {
+    return null;
   }
   async diagnostics(): Promise<ComputerDiagnostics> {
     let runtime: ComputerRuntime | undefined;
     try {
       runtime = await this.createRuntime();
-      const result = observation(await runtime.call("permission_status", {}));
-      const status = JSON.parse(result.text);
-      const accessibility = typeof status.accessibilityTrusted === "boolean" ? status.accessibilityTrusted : null;
-      const screenCapture = typeof status.screenCaptureGranted === "boolean" ? status.screenCaptureGranted : null;
-      return { platform: process.platform, available: true, accessibility, screenCapture, toolCount: runtime.tools.length,
-        message: process.platform === "win32" ? "Windows 无法操作权限更高的窗口。" : process.platform === "linux" ? "支持 Linux X11，暂不支持 Wayland。" : accessibility && screenCapture ? "桌面操作权限已就绪。" : "请开启辅助功能和屏幕录制权限。" };
+      const result = await runtime.call("check_permissions", { prompt: false });
+      const data =
+        result.structuredContent ?? JSON.parse(observation(result).text);
+      return {
+        platform: process.platform,
+        available: true,
+        accessibility:
+          typeof data.accessibility === "boolean" ? data.accessibility : null,
+        screenCapture:
+          typeof data.screen_recording === "boolean"
+            ? data.screen_recording
+            : null,
+        toolCount: cuaToolSpecs.length,
+        message: "Cua Driver：仅后台窗口操作，使用独立 AIClaw 光标。",
+      };
     } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
-      const legacy = code === "COMPUTER_LEGACY_BUSY" ? "旧版桌面会话尚未结束，请先停止旧会话后重新检查。" : code === "COMPUTER_LEGACY_UNVERIFIED" ? "旧版桌面服务无法验证。请在活动监视器中退出 AIClawComputerUse，再重新检查。" : undefined;
-      return { platform: process.platform, available: false, accessibility: null, screenCapture: null, toolCount: 0,
-        message: legacy ?? (process.platform === "linux" ? "桌面服务不可用，请检查 X11 会话和系统无障碍组件。" : "桌面服务未能连接，请重新检测或重启应用。") };
-    } finally { await runtime?.close(); }
+      return {
+        platform: process.platform,
+        available: false,
+        accessibility: null,
+        screenCapture: null,
+        toolCount: 0,
+        message: `Cua Driver 不可用：${String(error)}`,
+      };
+    } finally {
+      await runtime?.close();
+    }
   }
   async showPermissionSetup(): Promise<ComputerDiagnostics> {
-    if (process.platform === "darwin") {
-      const runtime = await this.createRuntime();
-      try {
-        if (!("setupPermissions" in runtime) || typeof runtime.setupPermissions !== "function") throw Error("Permission setup is unavailable");
-        await runtime.setupPermissions();
-      } finally { await runtime.close(); }
-    }
+    await this.permissionSetup();
     return this.diagnostics();
   }
-
-  async windowBounds(activity: ComputerControlActivity): Promise<NonNullable<ComputerControlActivity["frame"]> | null> {
-    const generation = this.generation, current = this.getStatus().active;
-    if (this.mode !== "ready" || !activity.windowId || !current || current.windowId !== activity.windowId || current.app !== activity.app || current.sessionId !== activity.sessionId || current.turnId !== activity.turnId) return null;
-    const app = this.target(activity.app);
-    if (!this.boundsRuntime || this.boundsRuntime.generation !== generation) this.boundsRuntime = { generation, runtime: await this.connect() };
-    const runtime = this.boundsRuntime.runtime;
-    try {
-      this.checkGeneration(generation);
-      const data = JSON.parse(observation(await runtime.call("query", { app, window_id: activity.windowId, text: "__aiclaw_bounds__", max_nodes: 1, limit: 1 })).text);
-      this.checkGeneration(generation);
-      const frame = this.frame(data.window_frame);
-      if (data.window_id !== activity.windowId || activity.pid && data.pid !== activity.pid || !frame) throw Error("Target window identity changed");
-      return frame;
-    } catch {
-      if (this.boundsRuntime?.runtime === runtime) this.boundsRuntime = undefined;
-      await runtime.close();
-      if (generation === this.generation && this.targetActivity?.sessionId === activity.sessionId && this.targetActivity.turnId === activity.turnId && this.targetActivity.windowId === activity.windowId) {
-        this.targetActivity = null; this.sessions.get(activity.sessionId)?.observations.delete(app); this.publish();
-      }
-      return null;
-    }
-  }
-
-  private frame(value: unknown): NonNullable<ComputerControlActivity["frame"]> | null {
-    if (!value || typeof value !== "object") return null;
-    const frame = value as Record<string, unknown>;
-    if (!["x", "y", "width", "height"].every(key => typeof frame[key] === "number" && Number.isFinite(frame[key])) || Number(frame.width) <= 0 || Number(frame.height) <= 0) return null;
-    return { x: Number(frame.x), y: Number(frame.y), width: Number(frame.width), height: Number(frame.height) };
-  }
-
-  private rememberTarget(result: ComputerResult, request: ComputerRequestParams): void {
-    try {
-      const parsed = JSON.parse(result.text.split("\n")[0]!);
-      const data = parsed.metadata ?? parsed;
-      const frame = this.frame(data.window_frame);
-      if (!frame || !Number.isSafeInteger(data.window_id) || data.window_id <= 0) return;
-      this.targetActivity = { sessionId: request.sessionId, turnId: request.turnId, app: String(request.arguments.app), action: "waiting", ...(typeof data.app_name === "string" ? { displayName: data.app_name.replace(/[\r\n\0]/g, " ").trim().slice(0, 120) } : {}), windowId: data.window_id, ...(Number.isSafeInteger(data.pid) ? { pid: data.pid } : {}), frame };
-      this.publish();
-    } catch { /* Some operations have no target-window metadata. */ }
-  }
-
-  perform(request: ComputerRequestParams): Promise<ComputerResult> {
-    const generation = this.generation;
-    if (this.mode !== "ready") return Promise.reject(Error("Computer Use is paused or stopped. Resume it explicitly before observing or sending input."));
-    const key = JSON.stringify([request.sessionId, request.turnId]);
-    if (!this.turns.has(key)) this.turns.set(key, true);
-    // Waiting for a sampled change must not block desktop actions or stop requests.
-    if (request.action === "watch_next") return this.execute(request, generation);
-    const operation = this.queue.then(async () => {
-      this.checkGeneration(generation);
-      const activity = { sessionId: request.sessionId, turnId: request.turnId, action: request.action, app: typeof request.arguments?.app === "string" ? request.arguments.app : "" };
-      this.active = activity; this.publish();
-      try { return await this.execute(request, generation); }
-      finally { if (this.active === activity) { this.active = null; this.publish(); } }
-    });
-    this.queue = operation.catch(() => {});
-    return operation;
-  }
-
-  private async execute(request: ComputerRequestParams, generation: number): Promise<ComputerResult> {
-    this.checkGeneration(generation);
-    const { action, sessionId, turnId } = request;
-    const key = JSON.stringify([sessionId, turnId]);
-    if (!this.turns.get(key)) throw Error("Computer Use turn has ended; no queued operation was dispatched");
-    if (!Object.hasOwn(ARGUMENTS, action)) throw Error(`Unsupported computer operation: ${action}`);
-    if (!sessionId || !turnId) throw Error("Computer session and turn are required");
-    const input = request.arguments;
-    if (!input || typeof input !== "object" || Array.isArray(input)) throw Error("Computer arguments must be an object");
-    const read = computerActionIsObservation(action);
-    const lifecycle = ["start_app", "stop_app", "modify_app"].includes(action);
-    const hostArguments = read ? [] : lifecycle ? ["observation_id", "verify_after"] : ["observation_id", "verify_after", "interaction_mode"];
-    for (const key of Object.keys(input)) {
-      if (!ARGUMENTS[action]!.includes(key) && !hostArguments.includes(key)) throw Error(`Unsupported computer argument: ${key}`);
-    }
-    if (input.verify_after !== undefined && typeof input.verify_after !== "boolean") throw Error("verify_after must be a boolean");
-    if (input.interaction_mode !== undefined && !["foreground", "background"].includes(String(input.interaction_mode))) throw Error("interaction_mode must be foreground or background");
-    const args = { ...input }; delete args.observation_id; delete args.verify_after;
-    // An intentional app quit must stop its observation before the native
-    // stream reports a lost target and pauses the desktop session.
-    if (action === "stop_app" || action === "modify_app" && args.modification === "deactivate") await this.watches.stop(sessionId, turnId);
-    if (action === "watch_next") return this.watches.next(sessionId, turnId, args);
-    if (action === "watch_stop") return this.watches.stop(sessionId, turnId, args);
-    if (action === "query" && ![args.text, args.role].some(value => typeof value === "string" && value.trim())) throw Error("computer_query requires text or role");
-    if (args.window_id !== undefined && (!Number.isSafeInteger(args.window_id) || Number(args.window_id) < 1 || Number(args.window_id) > 0xffffffff)) throw Error("window_id must be an integer from 1 to 4294967295");
-    if (action === "paste" && (typeof args.text !== "string" || args.text.length > 2_000_000 || !["text", "md", "html"].includes(String(args.format ?? "text")))) throw Error("paste requires text up to 2000000 characters and format text, md or html");
-    let app = ["list_apps", "find_apps", "frontmost_window", "permission_status"].includes(action) ? "" : this.target(args.app, action === "start_app");
-    if (app) args.app = app;
-    if (action === "app_policy") return { text: JSON.stringify(computerAppPolicy(app)) };
-    if (action === "watch_start") {
-      const result = await this.watches.start(sessionId, turnId, args, () => this.turns.get(key) === true && generation === this.generation && this.mode === "ready");
-      this.checkGeneration(generation); this.rememberTarget(result, request);
-      return result;
-    }
-    let session = this.sessions.get(sessionId);
-    if (session && session.turn !== turnId) {
-      if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId); await session.runtime.close(); session = undefined;
-    }
-    // Do not start a service for an unobserved input, including after a crash.
-    const previous = session?.observations.get(app);
-    if (!read && !lifecycle) {
-      const latest = session?.observations.get(app);
-      if (!latest || input.observation_id !== latest.id) throw Error("Observe this app with computer_screenshot or computer_query in this turn and use its latest observation_id");
-      if (latest.queryIndices && (args.element_index === undefined || !["click", "set_value", "select_text", "scroll", "perform_secondary_action"].includes(action))) throw Error("Query observations authorize matched element actions only; take a screenshot before keyboard or coordinate actions");
-      if (latest.queryIndices && !latest.queryIndices.has(String(args.element_index))) throw Error("Element index was not returned by this query; query the control again");
-      if (args.element_index !== undefined && !latest.ax) throw Error("Element actions require an accessibility observation");
-      if ((args.x !== undefined || action === "drag") && !latest.pixels) throw Error("Coordinate actions require a fresh screenshot");
-    }
-    if (!session) {
-      const runtime = await this.connect();
-      session = { runtime, turn: turnId, observations: new Map(), policies: new Set() };
-      this.sessions.set(sessionId, session);
-    }
-    this.checkGeneration(generation);
-    if (!this.turns.get(key)) { if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId); await session.runtime.close(); throw Error("Computer Use turn ended during startup; no operation was dispatched"); }
-    const targetedQueries = session.runtime.tools.some(tool => tool.name === "query");
-    if (action === "get_app_state" && args.include_ax === undefined) args.include_ax = !targetedQueries;
-    const native = session.runtime.tools.find(tool => tool.name === action);
-    if (!native) throw Error(`AIClaw Computer Use does not support ${action} on ${process.platform}`);
-    // Portable services consume HTML. Keep conversion in the host, using the
-    // shipped parser, while macOS retains its native Markdown conversion.
-    const formats = (native.inputSchema.properties.format as { enum?: unknown[] } | undefined)?.enum;
-    if (action === "paste" && args.format === "md" && Array.isArray(formats) && !formats.includes("md") && formats.includes("html")) {
-      const rendered = pasteMarkdown.render(String(args.text));
-      if (rendered.length > 2_000_000) throw Error("Rendered Markdown exceeds the paste text limit");
-      args.text = rendered; args.format = "html";
-    }
-    for (const key of Object.keys(args)) {
-      if (!Object.hasOwn(native.inputSchema.properties, key)) throw Error(`AIClaw Computer Use does not support ${action}.${key}`);
-    }
-    for (const key of native.inputSchema.required ?? []) {
-      if (args[key] === undefined || args[key] === null) throw Error(`Missing computer argument: ${key}`);
-    }
-    // The native connection owns one current window/element table. Switching
-    // apps invalidates the prior app too, even within this chat and turn.
-    if (!read && app) for (const other of this.sessions.values()) if (other !== session) other.observations.delete(app);
-    if (app) session.observations.clear();
-    let output: ComputerResult;
-    try { output = observation(await session.runtime.call(action, args)); }
-    catch (error) {
-      // A timed-out proxy can still have dispatched input. Drop the connection
-      // and every observation; reconnect only for an explicit later observation.
-      // A native tool-error response is still a healthy IPC connection.
-      if (!(error instanceof ComputerToolError)) { if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId); await session.runtime.close(); }
-      throw Error(`${String(error)}${read ? "" : ". Outcome may be unknown; query the intended semantic control again with computer_query, or take a fresh screenshot. Do not automatically repeat input or submission."}`);
-    }
-    this.checkGeneration(generation);
-    let launchUnverified = false;
-    if (action === "start_app" && process.platform !== "darwin") {
-      try {
-        const receipt = JSON.parse(output.text);
-        if (receipt.verified === true && typeof receipt.app === "string" && /^[1-9][0-9]*$/.test(receipt.app)) app = this.target(receipt.app);
-        else launchUnverified = true;
-      } catch { launchUnverified = true; }
-      if (launchUnverified) output.text += "\nLaunch was requested but its running window is not verified. Discover the app and observe it explicitly; do not replay launch automatically.";
-    }
-    const remember = (state: ComputerResult, pixels: boolean, ax: boolean) => {
-      if (pixels && !state.imageBase64) throw Error("AIClaw Computer Use returned no app screenshot. Grant Accessibility and Screen Recording to AIClaw Computer Use.app, then observe again. Do not guess coordinates.");
-      let windowID: number | undefined;
-      try { const meta = JSON.parse(state.text.split("\n")[0]!); if (Number.isSafeInteger(meta.window_id)) windowID = meta.window_id; } catch {}
-      const id = randomUUID(); session.observations.set(app, { id, pixels: !!state.imageBase64, ax, screenshotHash: screenshotHash(state), windowID });
-      state.text += `\nobservation_id: ${id}`;
-    };
-    if (action === "query") {
-      let data;
-      try { data = JSON.parse(output.text); } catch { throw Error("AIClaw Computer Use returned invalid query JSON"); }
-      if (!data || !Array.isArray(data.matches) || data.matches.length > 100 || data.matches.some((match: { index: unknown }) => !match || !Number.isSafeInteger(match.index) || Number(match.index) < 0)) throw Error("AIClaw Computer Use returned invalid query matches");
-      const id = randomUUID();
-      session.observations.set(app, { id, pixels: false, ax: true, queryIndices: new Set(data.matches.map((match: { index: number }) => String(match.index))), screenshotHash: previous?.screenshotHash, windowID: Number.isSafeInteger(data.window_id) ? data.window_id : undefined });
-      output.text += `\nobservation_id: ${id}\nUse only indexes returned by this query. Truncated searches do not establish that missing controls are absent.`;
-    }
-    if (action === "get_app_state") remember(output, args.include_screenshot !== false, args.include_ax !== false);
-    if (["query", "get_app_state"].includes(action)) this.rememberTarget(output, request);
-    if (!read && input.verify_after === false) {
-      output.text += "\nPost-action screenshot deferred. Dispatch is not proof of completion. Old observations and indexes are invalid; query or observe again before the next input, and verify the intended effect at decision points and completion.";
-    }
-    if (!read && action !== "stop_app" && input.verify_after !== false && !launchUnverified) {
-      try {
-        let state: ComputerResult;
-        for (let attempt = 0; ; attempt++) {
-          this.checkGeneration(generation);
-          try {
-            state = observation(await session.runtime.call("get_app_state", { app, include_ax: !targetedQueries, ...(previous?.windowID && !lifecycle ? { window_id: previous.windowID } : {}) }));
-            this.checkGeneration(generation);
-            break;
-          } catch (error) {
-            // Event delivery is asynchronous. Retry only transient read-back,
-            // never the input, while the target window settles.
-            if (!(error instanceof ComputerToolError) || attempt >= 2 || !/no accessible windows|moved during capture|no longer capturable/.test(error.message)) throw error;
-            await pause(100);
-          }
-        }
-        remember(state, true, !targetedQueries);
-        this.rememberTarget(state, request);
-        if (previous?.screenshotHash && previous.screenshotHash === screenshotHash(state)) state.text += "\nScreenshot unchanged from the previous observation. Dispatch is not proof of progress; query the intended control before deciding whether another input is appropriate.";
-        if (targetedQueries) state.text += "\nThis is a screenshot-only verification. Use computer_query for the next semantic control; old element indexes are invalid.";
-        output.text += `\nPost-action app observation (verify the intended change before continuing):\n${state.text}`;
-        output.imageBase64 = state.imageBase64;
-      } catch (error) {
-        session.observations.delete(app);
-        if (!(error instanceof ComputerToolError)) { if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId); await session.runtime.close(); }
-        output.text += `\nInput was dispatched, but verification failed: ${String(error)}. Outcome is unknown; observe again. Do not automatically replay input.`;
-        output.verificationFailed = true;
-      }
-    }
-    this.checkGeneration(generation);
-    if (["query", "get_app_state"].includes(action) && !session.policies.has(app)) {
-      session.policies.add(app);
-      const policy = computerAppPolicy(app);
-      if (policy.policy_id !== "generic") output.text += `\napp_specific_instructions: ${JSON.stringify(policy)}`;
-    }
-    return output;
-  }
-
-  private target(value: unknown, launching = false): string {
-    if (typeof value !== "string" || !value.trim()) throw Error("An explicit app identifier is required");
-    const app = value.trim();
-    if (launching && process.platform !== "darwin" && /^launch:[a-z0-9_.-]+$/i.test(app)) return app;
-    if (app === String(process.pid)) throw Error("Refusing to operate AIClaw or its approval controls");
-    const leaf = basename(app.replaceAll("\\", "/")).toLowerCase();
-    if (/^(aiclaw|electron|aiclawcomputeruse|aiclaw computer use)(\.app|\.exe)?$/.test(leaf) || /^(com\.github\.chowyu12\.aiclaw|com\.github\.chowyu12\.aiclaw\.computer-use|com\.electron|com\.github\.electron)(\.|$)/i.test(app)) {
-      throw Error("Refusing to operate AIClaw, its helper or approval controls");
-    }
-    if (process.platform === "darwin" && !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(app)) throw Error("Use the exact bundle identifier from computer_list_apps; fuzzy names and paths are not accepted");
-    if (process.platform !== "darwin" && (!/^[1-9][0-9]*$/.test(app) || !Number.isSafeInteger(Number(app)))) throw Error("Use the exact app PID from computer_list_apps; fuzzy names and paths are not accepted");
-    return app;
-  }
-
   async finishTurn(sessionId: string, turnId: string): Promise<void> {
-    const key = JSON.stringify([sessionId, turnId]);
-    if (this.turns.has(key)) this.turns.set(key, false);
+    const key=JSON.stringify([sessionId, turnId]);
+    this.turns.set(key, false);
+    this.lastActions.delete(key);
+    this.blockedTurns.delete(key);
+    this.emptyReads.delete(key);
     const session = this.sessions.get(sessionId);
-    if (session?.turn === turnId) this.sessions.delete(sessionId);
-    if (this.active?.sessionId === sessionId && this.active.turnId === turnId) this.active = null;
-    if (this.targetActivity?.sessionId === sessionId && this.targetActivity.turnId === turnId) this.targetActivity = null;
-    const bounds = !this.targetActivity ? this.boundsRuntime : undefined;
-    if (bounds) this.boundsRuntime = undefined;
-    const closing = session?.turn === turnId ? session.runtime.close() : Promise.resolve();
-    this.publish();
-    await Promise.all([closing, bounds?.runtime.close(), this.watches.stop(sessionId, turnId)]);
+    if (session?.turn === turnId) {
+      this.sessions.delete(sessionId);
+      await session.runtime.close();
+    }
+    if (this.active?.sessionId === sessionId && this.active.turnId === turnId) {
+      this.active = null;
+      this.publish();
+    }
   }
-
   async releaseSession(sessionId: string): Promise<void> {
-    for (const key of this.turns.keys()) if (JSON.parse(key)[0] === sessionId) this.turns.set(key, false);
-    const session = this.sessions.get(sessionId); this.sessions.delete(sessionId);
-    if (this.active?.sessionId === sessionId) this.active = null;
-    if (this.targetActivity?.sessionId === sessionId) this.targetActivity = null;
-    const bounds = !this.targetActivity ? this.boundsRuntime : undefined;
-    if (bounds) this.boundsRuntime = undefined;
-    const closing = session?.runtime.close();
-    // Keep ended-turn tombstones until already queued requests have observed them.
-    void this.queue.finally(() => {
-      for (const [key, active] of this.turns) if (!active && JSON.parse(key)[0] === sessionId) this.turns.delete(key);
-    }).catch(() => {});
-    this.publish();
-    await Promise.all([closing, bounds?.runtime.close(), this.watches.releaseSession(sessionId)]);
+    for (const key of this.turns.keys())
+      if (JSON.parse(key)[0] === sessionId) {
+        this.turns.set(key, false);
+        this.lastActions.delete(key);
+        this.blockedTurns.delete(key);
+        this.emptyReads.delete(key);
+      }
+    const session = this.sessions.get(sessionId);
+    this.sessions.delete(sessionId);
+    await session?.runtime.close();
+    if (this.active?.sessionId === sessionId) {
+      this.active = null;
+      this.publish();
+    }
   }
-
   async close(): Promise<void> {
     await this.setControl("stop");
     this.turns.clear();
+    this.lastActions.clear();
+    this.blockedTurns.clear();
+    this.emptyReads.clear();
   }
 }

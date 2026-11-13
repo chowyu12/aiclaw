@@ -6,8 +6,10 @@ import { computerActionIsObservation } from "../../shared/computer-control";
 const visible = computed(() => store.computer.mode !== "ready" || !!store.computer.active || store.computer.watching > 0);
 const status = computed(() => store.computer.mode === "paused" ? t("桌面操作已暂停")
   : store.computer.mode === "stopped" ? t("桌面操作已停止")
+  : store.computer.active?.foreground ? t("AIClaw 正在前台操作")
+  : store.computer.active?.action === "run_steps" ? t("AIClaw 正在操作桌面")
   : store.computer.active?.action === "waiting" ? t("AIClaw 已连接目标窗口")
-  : store.computer.active && !computerActionIsObservation(store.computer.active.action) ? t("AIClaw 正在操作桌面") : t("AIClaw 正在观察窗口"));
+  : store.computer.active && !computerActionIsObservation(store.computer.active.action) ? t("AIClaw 正在后台操作") : t("AIClaw 正在观察窗口"));
 </script>
 
 <template>

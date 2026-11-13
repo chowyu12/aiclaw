@@ -35,6 +35,8 @@ export const chat: Record<string, string> = {
   "处理失败": "Processing failed",
   "执行过程": "Work process",
   "读取了 {n} 项内容": "Read {n} items",
+  "桌面操作 {n} 次": "Desktop actions: {n}",
+  "其他 {n} 项操作": "{n} other actions",
   "执行了 {n} 组操作": "Executed {n} batches",
   "正在执行：{action}": "Running: {action}",
   "用时 {n} 秒": "Worked for {n} s",

@@ -479,7 +479,7 @@ async function pollWeChat(): Promise<void> {
               </li>
             </ul>
             <p v-if="isComputerUse(plugin)" class="note warn">
-              {{ t("桌面操作支持 macOS 14.4+、Windows 和 Linux X11，范围不限于工作目录。部分操作会切换前台并移动鼠标。AIClaw 的窗口与审批控件禁止操作，动作遵循当前会话的审批策略。macOS 需给 AIClaw Computer Use.app 授予辅助功能和屏幕录制权限；Windows 无法控制更高权限的窗口；Linux 需系统 Python、PyGObject 与 AT-SPI，暂不支持 Wayland。") }}
+              {{ t("使用 Cua Driver 优先在后台操作指定窗口。后台不支持时会自动临时切到前台执行，并在适合时恢复原窗口。独立 AIClaw 光标标记操作位置，可随时暂停或停止。macOS 使用 AIClaw 已有的辅助功能和屏幕录制权限。") }}
             </p>
           </div>
 
