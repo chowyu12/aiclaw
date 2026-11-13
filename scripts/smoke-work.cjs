@@ -1168,27 +1168,17 @@ app.whenReady().then(async()=>{
 
  computerState={mode:'ready',active:{sessionId:'s',turnId:'desktop-t',action:'get_app_state',app:'com.example.fixture'},watching:0};
  win.webContents.send(IPC.onComputerStatus,computerState);
- check('desktop control bar shows global active target',await wait("document.querySelector('.computer-control-bar')?.textContent.includes('com.example.fixture')"));
+ check('active desktop operations do not display a chat banner',await js("!document.querySelector('.computer-control-bar')"));
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
- check('desktop controls remain visible in settings',await wait("!!document.querySelector('.computer-settings')")&&await js("!!document.querySelector('.computer-control-bar')"));
+ check('desktop settings hide pause and stop controls',await wait("!!document.querySelector('.computer-settings')")&&await js("![...document.querySelectorAll('.computer-settings button')].some(b=>['暂停桌面操作','停止桌面操作'].includes(b.textContent))"));
  await js("[...document.querySelectorAll('.computer-settings button')].find(button=>button.textContent==='检查状态').click()");
  check('desktop settings checks actual permission diagnostics on request',await wait("document.querySelector('.computer-settings')?.textContent.includes('未允许')")&&computerChecks===1);
  await win.webContents.executeJavaScript("[...document.querySelectorAll('.computer-settings button')].find(button=>button.textContent==='打开授权引导').click()",true);
  check('desktop permission setup requires an explicit user action',await wait("!document.querySelector('.computer-settings button:disabled')")&&computerSetups===1);
- await js("[...document.querySelectorAll('.computer-control-bar button')].find(button=>button.textContent==='暂停桌面操作').click()");
- check('desktop pause changes host control state',await wait("document.querySelector('.computer-control-bar')?.dataset.mode==='paused'")&&computerActions.at(-1)==='pause');
- for(let i=0;i<70&&await js('navigator.userActivation.isActive');i++)await new Promise(resolve=>setTimeout(resolve,100));
- const resumeCount=computerActions.filter(action=>action==='resume').length;
- await js("[...document.querySelectorAll('.computer-control-bar button')].find(button=>button.textContent==='恢复桌面操作').click()");
- check('synthetic clicks cannot resume blocked desktop control',await wait("document.querySelector('.error-bar')?.textContent.includes('direct user action')")&&computerActions.filter(action=>action==='resume').length===resumeCount);
- await js("[...document.querySelectorAll('.computer-control-bar button')].find(button=>button.textContent==='停止桌面操作').click()");
- check('global desktop stop stays available while paused',await wait("document.querySelector('.computer-control-bar')?.dataset.mode==='stopped'")&&computerActions.at(-1)==='stop');
- await win.reload();
- check('desktop stop status survives renderer reload',await wait("document.querySelector('.computer-control-bar')?.dataset.mode==='stopped'"));
- await win.webContents.executeJavaScript("document.querySelector('.computer-control-bar button').click()",true);
- check('explicit resume clears stopped state without replaying actions',await wait("!document.querySelector('.computer-control-bar')")&&computerActions.at(-1)==='resume');
- computerState={mode:'ready',active:null,watching:1};win.webContents.send(IPC.onComputerStatus,computerState);
- check('observation-only desktop use also exposes pause and stop',await wait("document.querySelector('.computer-control-bar')?.textContent.includes('正在观察窗口')"));
+ computerState={mode:'stopped',active:null,watching:0};win.webContents.send(IPC.onComputerStatus,computerState);
+ check('stopped desktop control can still be resumed from settings',await wait("[...document.querySelectorAll('.computer-settings button')].some(b=>b.textContent==='恢复桌面操作')"));
+ await win.webContents.executeJavaScript("[...document.querySelectorAll('.computer-settings button')].find(b=>b.textContent==='恢复桌面操作').click()",true);
+ check('explicit resume clears stopped state without replaying actions',await wait("![...document.querySelectorAll('.computer-settings button')].some(b=>b.textContent==='恢复桌面操作')")&&computerActions.at(-1)==='resume');
 
  computerState={mode:'ready',active:null,watching:0};
  config.theme='white';config.language='zh-CN';

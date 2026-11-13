@@ -5,7 +5,6 @@ import ChatView from "./views/ChatView.vue";
 import SessionSidebar from "./views/SessionSidebar.vue";
 import ActivityRail from "./views/ActivityRail.vue";
 import ApprovalDialog from "./views/ApprovalDialog.vue";
-import ComputerControlBar from "./views/ComputerControlBar.vue";
 import { FONTS, normalizeFont, normalizeFontSize } from "../shared/typography";
 import { normalizeTheme } from "../shared/themes";
 import { locale, t } from "./i18n";
@@ -93,7 +92,6 @@ onMounted(() => {
         <button v-if="!sessionsOpen && store.view === 'chat'" class="toolbar-settings" :aria-label="t('设置')" :title="t('设置')" @click="actions.setView('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18 M8 3v6M16 9v6M10 15v6"/></svg></button>
         <button v-if="store.view === 'chat' && store.sessions.some(session => session.id !== store.sessionId && !session.archivedAt)" class="side-toggle" :aria-label="t('并排会话')" :title="t('并排会话')" :aria-pressed="!!store.sideSessionId" @click="openSide"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 4v16"/></svg></button>
       </header>
-      <ComputerControlBar />
       <div v-if="store.error" class="error-bar">
         <span>{{ store.error }}</span>
         <button @click="actions.clearError()">{{ t("知道了") }}</button>

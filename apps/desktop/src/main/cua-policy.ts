@@ -74,6 +74,7 @@ function fields(
 export function backgroundCuaArguments(
   action: string,
   input: unknown,
+  platform: NodeJS.Platform = process.platform,
 ): Record<string, unknown> {
   const spec = cuaToolSpecs.find((spec) => spec.action === action);
   if (!spec) throw Error(`Unsupported Cua operation: ${action}`);
@@ -201,11 +202,43 @@ export function backgroundCuaArguments(
       fields(observe, schema.properties);
       if ("pid" in observe || "window_id" in observe)
         throw Error("Cua observation must use the batch's window");
-      args.observe = { ...observe, screenshot_format: "png" };
+      args.observe = { ...observe };
+      if (platform === "darwin") (args.observe as Record<string, unknown>).screenshot_format = "png";
+      else delete (args.observe as Record<string, unknown>).screenshot_format;
     }
     args.foreground_fallback = true;
   }
+  if (platform === "win32") {
+    if (action === "get_window_state" && args.screenshot_quality !== undefined)
+      throw Error("Windows Cua screenshots are PNG and do not support screenshot_quality");
+    if (action === "run_steps" && (args.observe as Record<string, unknown> | undefined)?.screenshot_quality !== undefined)
+      throw Error("Windows Cua screenshots are PNG and do not support screenshot_quality");
+  }
+  if (platform === "linux") {
+    const adapt = (name: string, input: Record<string, unknown>) => {
+      if (name === "get_window_state" && input.screenshot_quality !== undefined)
+        throw Error("Linux Cua screenshots are PNG and do not support screenshot_quality");
+      if (name === "click" && input.action !== undefined)
+        throw Error("Linux Cua does not support selecting a click accessibility action");
+      if (name === "launch_app" && input.creates_new_application_instance === true)
+        throw Error("Linux Cua cannot guarantee a new application instance");
+      if (name === "launch_app") delete input.creates_new_application_instance;
+      if (input.post_action_wait === "default")
+        throw Error("Linux Cua does not support post_action_wait");
+      delete input.post_action_wait;
+    };
+    adapt(action, args);
+    if (action === "run_steps") {
+      for (const step of args.steps as Record<string, unknown>[]) {
+        if (step.args) adapt(String(step.tool), step.args as Record<string, unknown>);
+      }
+      if (args.observe) adapt("get_window_state", args.observe as Record<string, unknown>);
+    }
+  }
   if (spec.backgroundDelivery && action !== "run_steps") args.delivery_mode = "background";
-  if (action === "get_window_state") args.screenshot_format = "png";
+  if (action === "get_window_state") {
+    if (platform === "darwin") args.screenshot_format = "png";
+    else delete args.screenshot_format; // Linux and Windows return PNG without a format argument.
+  }
   return args;
 }

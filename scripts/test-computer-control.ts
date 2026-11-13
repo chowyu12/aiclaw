@@ -547,3 +547,23 @@ test("only intermediate navigation keys skip individual watches when batch obser
  const noObserve=backgroundCuaArguments("run_steps",{...target,steps:[arrow(),arrow()]});
  assert.equal((noObserve.steps as any[])[0].args.post_action_wait,undefined);
 });
+
+test("window captures use platform-supported PNG parameters", () => {
+ for (const platform of ["linux", "win32"] as const) {
+  const capture = backgroundCuaArguments("get_window_state", {...target, screenshot_format:"png"}, platform);
+  assert.equal(capture.screenshot_format,undefined);
+  const batch = backgroundCuaArguments("run_steps", {...target, steps:[{tool:"press_key",args:{key:"left"}}], observe:{screenshot_format:"png"}}, platform);
+  assert.equal((batch.observe as Record<string,unknown>).screenshot_format,undefined);
+ }
+ assert.equal(backgroundCuaArguments("get_window_state",target,"darwin").screenshot_format,"png");
+});
+
+test("Linux adapts unsupported options without weakening action guarantees", () => {
+ assert.throws(()=>backgroundCuaArguments("click",{...target,action:"AXPress"},"linux"),/does not support/);
+ assert.throws(()=>backgroundCuaArguments("launch_app",{bundle_id:"com.example.app",creates_new_application_instance:true},"linux"),/cannot guarantee/);
+ assert.throws(()=>backgroundCuaArguments("get_window_state",{...target,screenshot_quality:80},"linux"),/do not support/);
+ assert.throws(()=>backgroundCuaArguments("press_key",{...target,key:"left",post_action_wait:"default"},"linux"),/does not support/);
+ assert.equal(backgroundCuaArguments("press_key",{...target,key:"left",post_action_wait:"none"},"linux").post_action_wait,undefined);
+ const b=backgroundCuaArguments("run_steps",{...target,steps:[{tool:"press_key",args:{key:"left"}},{tool:"press_key",args:{key:"left"}}],observe:{}},"linux");
+ assert.equal((b.steps as any[])[0].args.post_action_wait,undefined);
+});

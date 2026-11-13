@@ -14,7 +14,16 @@ app.whenReady().then(async()=>{
    if(spec.action==="wait_new_window")continue;
    nativeCount++;
    const native=runtime.tools.find(tool=>tool.name===spec.action);if(!native)throw Error(`Missing Cua tool ${spec.action}`);
-   for(const field of Object.keys(spec.schema.properties))if(!native.inputSchema.properties[field])throw Error(`Missing ${spec.action}.${field}`);
+   for(const field of Object.keys(spec.schema.properties)){
+    // The host adapts or rejects these fields before dispatch to Linux.
+    if(process.platform === "linux" && (
+      (spec.action === "get_window_state" && ["screenshot_format","screenshot_quality"].includes(field)) ||
+      (spec.action === "click" && field === "action") ||
+      (spec.action === "launch_app" && field === "creates_new_application_instance") ||
+      field === "post_action_wait")) continue;
+    if(["screenshot_format","screenshot_quality"].includes(field) && spec.action === "get_window_state" && process.platform === "win32")continue;
+    if(!native.inputSchema.properties[field])throw Error(`Missing ${spec.action}.${field}`);
+   }
   }
   const result=await runtime.call("check_permissions",{prompt:false});
   const permissions=result.structuredContent;

@@ -23,17 +23,20 @@ async function check(setup = false): Promise<void> {
 
 <template>
   <section class="computer-settings">
-    <header><h2>{{ t("桌面控制") }}</h2><span>{{ mode }}</span></header>
-    <p>{{ t("控制状态对所有聊天生效。暂停或停止后，桌面操作不会继续执行。") }}</p>
-    <div class="computer-setting-actions">
-      <button v-if="store.computer.mode === 'ready'" @click="actions.controlComputer('pause')">{{ t("暂停桌面操作") }}</button>
-      <button v-else @click="actions.controlComputer('resume')">{{ t("恢复桌面操作") }}</button>
-      <button @click="actions.controlComputer('stop')">{{ t("停止桌面操作") }}</button>
+    <header class="computer-settings-header">
+      <div class="computer-settings-heading">
+        <h2>{{ t("桌面控制") }}</h2>
+
+      </div>
+      <span class="computer-mode" :data-mode="store.computer.mode"><span class="computer-mode-dot" aria-hidden="true"></span>{{ mode }}</span>
+    </header>
+    <div v-if="store.computer.mode !== 'ready'" class="computer-setting-actions">
+      <button @click="actions.controlComputer('resume')">{{ t("恢复桌面操作") }}</button>
     </div>
-    <dl>
-      <div><dt>{{ t("运行状态") }}</dt><dd>{{ diagnostics ? (diagnostics.available ? t("已就绪") : t("不可用")) : t("待检查") }}</dd></div>
-      <div><dt>{{ t("辅助功能") }}</dt><dd>{{ permission(diagnostics?.accessibility) }}</dd></div>
-      <div><dt>{{ t("屏幕访问") }}</dt><dd>{{ permission(diagnostics?.screenCapture) }}</dd></div>
+    <dl class="computer-status-list">
+      <div><dt>{{ t("运行状态") }}</dt><dd :data-state="diagnostics ? (diagnostics.available ? 'ok' : 'error') : 'unknown'">{{ diagnostics ? (diagnostics.available ? t("已就绪") : t("不可用")) : t("待检查") }}</dd></div>
+      <div><dt>{{ t("辅助功能") }}</dt><dd :data-state="diagnostics?.accessibility == null ? 'unknown' : diagnostics.accessibility ? 'ok' : 'error'">{{ permission(diagnostics?.accessibility) }}</dd></div>
+      <div><dt>{{ t("屏幕访问") }}</dt><dd :data-state="diagnostics?.screenCapture == null ? 'unknown' : diagnostics.screenCapture ? 'ok' : 'error'">{{ permission(diagnostics?.screenCapture) }}</dd></div>
     </dl>
     <p v-if="diagnostics?.message" class="computer-diagnostic-message" role="status">{{ t(diagnostics.message) }}</p>
     <p v-if="error" class="computer-diagnostic-error" role="alert">{{ error }}</p>
@@ -41,22 +44,36 @@ async function check(setup = false): Promise<void> {
       <button :disabled="checking" @click="check()">{{ checking ? t("正在检查…") : t("检查状态") }}</button>
       <button v-if="diagnostics?.platform === 'darwin'" :disabled="checking" @click="check(true)">{{ t("打开授权引导") }}</button>
     </div>
-    <p>{{ t("在「插件」中启用桌面操作。系统权限仍需你手动确认。") }}</p>
+    <p class="computer-settings-note">{{ t("在「插件」中启用桌面操作。系统权限仍需你手动确认。") }}</p>
   </section>
 </template>
 
 <style scoped>
-.computer-settings { padding:24px 0; border-top:1px solid var(--rule); }
-header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-h2 { font-size:15px; margin:0; }
-header span, p, dl { font-size:13px; }
-p { color:var(--muted); line-height:1.6; }
-.computer-setting-actions { display:flex; gap:8px; flex-wrap:wrap; }
-button { border:1px solid var(--rule); border-radius:6px; background:var(--surface); color:var(--ink); padding:7px 12px; cursor:pointer; font:inherit; font-size:13px; }
-button:disabled { opacity:.55; cursor:default; }
-button:hover:not(:disabled) { border-color:var(--accent); }
-dl { display:grid; gap:8px; margin:18px 0; }
-dl div { display:flex; gap:16px; }
-dt { width:90px; color:var(--muted); } dd { margin:0; }
-.computer-diagnostic-error { color:var(--danger, #c43e3e); }
+.computer-settings { padding: 22px; gap: 18px; }
+.computer-settings-header { display: flex; flex-direction: row; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.computer-settings-heading { min-width: 0; }
+h2 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 650; }
+p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.computer-settings-heading p { margin-top: 6px; }
+.computer-mode { display: inline-flex; flex: none; align-items: center; gap: 6px; padding: 5px 9px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 12px; line-height: 1; }
+.computer-mode-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.computer-mode[data-mode="ready"] .computer-mode-dot { background: var(--ok); }
+.computer-mode[data-mode="stopped"] .computer-mode-dot { background: var(--danger); }
+.computer-setting-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+button { min-height: 34px; padding: 7px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; font-size: 13px; transition: border-color .15s, background .15s; }
+button:disabled { opacity: .55; cursor: default; }
+button:hover:not(:disabled) { border-color: var(--accent); background: var(--surface-2); }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.computer-status-list { display: grid; gap: 0; margin: 0; padding: 2px 12px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface-2); font-size: 13px; }
+.computer-status-list div { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 38px; }
+.computer-status-list div + div { border-top: 1px solid var(--rule); }
+dt { color: var(--muted); }
+dd { margin: 0; color: var(--ink-2); text-align: right; }
+dd[data-state="ok"] { color: var(--ok); }
+dd[data-state="error"], .computer-diagnostic-error { color: var(--danger, #c43e3e); }
+.computer-settings-note { padding-top: 2px; }
+@media (max-width: 500px) {
+  .computer-settings { padding: 18px; }
+  .computer-settings-header { flex-wrap: wrap; }
+}
 </style>
