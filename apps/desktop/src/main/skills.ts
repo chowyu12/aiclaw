@@ -72,11 +72,11 @@ export class SkillManager {
     this.pluginSkills = skills;
   }
 
-  private discover(): FoundSkill[] {
+  private discover(workspace = this.workspace): FoundSkill[] {
     const found = discoverSkills({
       ownDir: this.dir,
       home: homedir(),
-      workdir: this.workspace,
+      workdir: workspace,
     });
     // 插件的排在自己目录之后、别处的之前：装了插件就是想用它带的技能。
     const extra: FoundSkill[] = this.pluginSkills.map((skill) => ({
@@ -94,11 +94,11 @@ export class SkillManager {
    * 不只是我们自己那个目录——Claude Code、Codex、npx 装的 CLI 用的是同一种
    * 技能格式，用户在那边装好的没有理由在这里看不见。发现逻辑在 skill-roots.ts。
    */
-  list(): SkillView[] {
+  list(workspace = this.workspace): SkillView[] {
     const off = this.disabledSet();
     const skills: SkillView[] = [];
 
-    const withMeta = this.discover().map((found) => ({
+    const withMeta = this.discover(workspace).map((found) => ({
       found,
       meta: parseFrontmatter(safeRead(join(found.dir, "SKILL.md"))),
     }));
@@ -127,8 +127,8 @@ export class SkillManager {
   }
 
   /** 挂给内核的技能目录：只给启用的。 */
-  enabledDirs(): string[] {
-    return this.list().filter((skill) => skill.enabled).map((skill) => skill.dir);
+  enabledDirs(workspace = this.workspace): string[] {
+    return this.list(workspace).filter((skill) => skill.enabled).map((skill) => skill.dir);
   }
 
   /** 启停一个技能。外部技能记在自己的配置里，不去动人家的目录。 */

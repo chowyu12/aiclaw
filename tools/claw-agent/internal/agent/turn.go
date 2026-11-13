@@ -603,6 +603,12 @@ func (s *Session) sample(
 	for attempt := 1; ; attempt++ {
 		s.refreshMCP(ctx, turnID, emitter)
 		response, err := s.callModel(ctx, turnID, emitter, steps, round)
+		if err != nil && response.Sampling != nil {
+			s.recordPhase(*response.Sampling)
+			if response.Content != "" && response.LocalItemID != "" {
+				s.recordPhase(protocol.Item{ID: response.LocalItemID, Kind: protocol.ItemAgentMessage, Text: response.Content, At: time.Now().UnixMilli()})
+			}
+		}
 		total.InputTokens += response.Usage.InputTokens
 		total.OutputTokens += response.Usage.OutputTokens
 		total.TotalTokens += response.Usage.TotalTokens

@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -182,4 +182,19 @@ test("旧目录 ~/.aiclaw/skills 的技能搬进 ~/.agents/skills，关着的记
   assert.ok(existsSync(join(from, "clash")), "没搬的留在原处");
   assert.deepEqual(JSON.parse(readFileSync(state, "utf8")).sort(), ["/elsewhere/skill", join(to, "quiet")].sort());
   assert.deepEqual(migrateSkillDir(from, to, state).moved, [], "再跑一遍什么都不动");
+});
+
+test("explicit workspace discovery does not change the main workspace skills",async()=>{
+ const {SkillManager}=await import('../apps/desktop/src/main/skills.ts');
+ const root=mkdtempSync(join(tmpdir(),'aiclaw-scoped-skills-'));
+ const a=join(root,'project-a'),b=join(root,'project-b');
+ skill(join(a,'.claude','skills','review-scope-a'),'review-scope-a');skill(join(b,'.claude','skills','review-scope-b'),'review-scope-b');
+ const manager=new SkillManager({skillsDir:join(root,'owned'),skillStatePath:join(root,'disabled.json')} as any);
+ try {
+  manager.setWorkspace(a);
+  assert.ok(manager.enabledDirs(b).some(path=>path.startsWith(b)));
+  assert.ok(!manager.enabledDirs(b).some(path=>path.startsWith(a)));
+  assert.ok(manager.list().some(item=>item.dir.startsWith(a)));
+  assert.ok(!manager.list().some(item=>item.dir.startsWith(b)));
+ } finally {rmSync(root,{recursive:true,force:true});}
 });

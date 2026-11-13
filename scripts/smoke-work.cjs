@@ -372,6 +372,18 @@ app.whenReady().then(async()=>{
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
 
 
+ // Background resumes must not select another project's workspace or skills.
+ const scopedManager=Object.create(SessionManager.prototype),scopeCalls=[];
+ const scopedSkills={workspace:'/project-a',setWorkspace(value){this.workspace=value;}};
+ scopedManager.workspace='/project-a';scopedManager.mounts={a:'mounted'};scopedManager.skills=scopedSkills;scopedManager.desktopSessions=new Set();
+ scopedManager.store={readConfig:()=>({model:'fixture'})};
+ scopedManager.buildRefresh=async workspace=>{scopeCalls.push(workspace);return {skillDirs:[workspace+'/skill']};};
+ scopedManager.client={running:true,sessionList:async()=>[{id:'project-b',workdir:'/project-b'}],sessionResume:async(_id,refresh)=>{if(refresh.skillDirs[0]!=='/project-b/skill')throw Error('wrong project skills');return {workspace:'/project-b',tools:[],mcpStatus:{b:'mounted'},model:'fixture'};},sessionHistory:async()=>[]};
+ await scopedManager.resumeSession('project-b',undefined,false);
+ check('background resume scopes refresh to the target without changing main workspace or skills',scopeCalls[0]==='/project-b'&&scopedManager.workspace==='/project-a'&&scopedSkills.workspace==='/project-a'&&!!scopedManager.mounts.a);
+ await scopedManager.resumeSession('project-b');
+ check('foreground resume explicitly selects its workspace and skills',scopedManager.workspace==='/project-b'&&scopedSkills.workspace==='/project-b'&&!!scopedManager.mounts.b);
+
  // Exercise scheduled-session routing through the real SessionManager method.
  const scheduledManager=Object.create(SessionManager.prototype),scheduledCalls=[];
  let scheduledSources=[],resumeError=false,turnError=false,createdScheduled=0;

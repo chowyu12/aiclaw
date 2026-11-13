@@ -53,7 +53,7 @@ const api = {
     changes: (id: string) => ipcRenderer.invoke(IPC.changesList, id),
     undo: (id: string, changeId: string) => ipcRenderer.invoke(IPC.changesUndo, id, changeId),
     start: (input?: unknown) => ipcRenderer.invoke(IPC.sessionStart, input),
-    resume: (sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}) => ipcRenderer.invoke(IPC.sessionResume, sessionId, recoveryModel),
+    resume: (sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}, activate = true) => ipcRenderer.invoke(IPC.sessionResume, sessionId, recoveryModel, activate),
     history: (sessionId: string) => ipcRenderer.invoke(IPC.sessionHistory, sessionId),
     send: (input: unknown) => ipcRenderer.invoke(IPC.sessionSend, input),
     interrupt: (sessionId: string) => ipcRenderer.invoke(IPC.sessionInterrupt, sessionId),

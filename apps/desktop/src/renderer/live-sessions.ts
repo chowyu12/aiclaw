@@ -78,6 +78,7 @@ export type TimelineEntry =
 /** 一个会话在渲染层的活动状态。 */
 export interface LiveSession {
   timeline: TimelineEntry[];
+  revision?: number;
   /** 有一轮在跑。发送那一刻置真，turn/completed 或出错置假。 */
   busy: boolean;
   /** A turn finished while this conversation was not visible. */
@@ -86,6 +87,19 @@ export interface LiveSession {
 
 export function newLive(timeline: TimelineEntry[] = []): LiveSession {
   return { timeline, busy: false };
+}
+
+/** Merge a delayed snapshot with events received while it was loading. */
+export function restoreSessionHistory(record: LiveSession, history: HistoryItemView[], revision: number): void {
+  const restored = restoreHistory(history);
+  if (!record.busy && (record.revision ?? 0) === revision) { record.timeline = restored; return; }
+  for (const entry of record.timeline) {
+    const index = restored.findIndex(item => item.id === entry.id ||
+      (item.kind === "user" && entry.kind === "user" && !!entry.requestId && item.requestId === entry.requestId));
+    if (index < 0) restored.push(entry);
+    else if (!(entry.kind === "user" && entry.pending)) restored[index] = entry;
+  }
+  record.timeline = restored;
 }
 
 /** 取一个会话的记录，没有就建。事件可能先于界面打开那个会话到达。 */
@@ -223,6 +237,7 @@ export function applyAgentEvent(
   const applied: Applied = { sessionId, method: payload.method, error: "" };
   if (!sessionId) return applied;
   const record = ensureLive(live, sessionId);
+  if (payload.method.startsWith("item/") || payload.method.startsWith("turn/") || payload.method === "error") record.revision = (record.revision ?? 0) + 1;
 
   switch (payload.method) {
     case "item/started": {

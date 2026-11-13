@@ -377,7 +377,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionRecover, (_event, id: string, requestId: string, action: "resume" | "dismiss" | "steer") => sessions.recoverSession(id, requestId, action));
   ipcMain.handle(IPC.changesList, (_event, id: string) => sessions.changesList(id));
   ipcMain.handle(IPC.changesUndo, (_event, id: string, changeId: string) => sessions.changesUndo(id, changeId));
-  ipcMain.handle(IPC.sessionResume, (_event, sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}) => sessions.resumeSession(sessionId, recoveryModel));
+  ipcMain.handle(IPC.sessionResume, (_event, sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}, activate = true) => sessions.resumeSession(sessionId, recoveryModel, activate));
   ipcMain.handle(IPC.sessionHistory, (_event, sessionId: string) => sessions.sessionHistory(sessionId));
   ipcMain.handle(IPC.sessionSend, (_event, input) => sessions.sendTurn(input));
   ipcMain.handle(IPC.sessionInterrupt, (_event, sessionId: string) => sessions.interrupt(sessionId));
@@ -552,7 +552,7 @@ function registerIpc(): void {
     readMedia(path, { base: await fileWorkspace(sessionId), protectedPaths: [store.dataDir] }),
   );
   ipcMain.handle(IPC.audioStage, (_event, input: { name: string; data: string }) =>
-    stageAudio(input.name, input.data),
+    stageAudio(input.name, input.data, join(store.dataDir, "attachments", "audio")),
   );
 
   ipcMain.handle(IPC.diagnosticsNetwork, () => sessions.networkDiagnostics());

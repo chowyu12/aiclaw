@@ -1470,8 +1470,17 @@ func TestPartialAnswerIsKeptWhenTheStreamFailsForGood(t *testing.T) {
 			agent = append(agent, item.Text)
 		}
 	}
-	if len(agent) != 1 || agent[0] != "北京到上海的航班" {
-		t.Errorf("最后一次的半截回答应进历史（只一条，不是每次重试一条）：%q", agent)
+	if len(agent) != maxModelRetries+1 {
+		t.Errorf("UI must retain each visible attempt: %q", agent)
+	}
+	var modelPartial []string
+	for _, m := range session.snapshotMessages() {
+		if m.Role == llm.RoleAssistant && m.Content != "" {
+			modelPartial = append(modelPartial, m.Content)
+		}
+	}
+	if len(modelPartial) != 1 || modelPartial[0] != "北京到上海的航班" {
+		t.Errorf("only final partial enters model context: %q", modelPartial)
 	}
 }
 

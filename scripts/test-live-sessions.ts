@@ -14,6 +14,7 @@ import {
   applyAgentEvent,
   ensureLive,
   restoreHistory,
+  restoreSessionHistory,
   type TimelineEntry,
   newLive,
   type LiveSession,
@@ -276,4 +277,21 @@ test("both visible panes suppress unread while settings hide both",()=>{
  for(const id of ['A','B','C']) {applyAgentEvent(live,event('turn/started',id),'A',['A','B']);applyAgentEvent(live,event('turn/completed',id),'A',['A','B']);}
  assert.equal(!!live.A!.unread,false);assert.equal(!!live.B!.unread,false);assert.equal(live.C!.unread,true);
  applyAgentEvent(live,event('turn/started','B'),'A',[]);applyAgentEvent(live,event('turn/completed','B'),'A',[]);assert.equal(live.B!.unread,true);
+});
+
+test("delayed history merges completed events and keeps authoritative user delivery", () => {
+ const live=fresh(), record=ensureLive(live,'race'), revision=record.revision??0;
+ applyAgentEvent(live,event('turn/started','race'),'race');
+ applyAgentEvent(live,event('item/completed','race',{item:{id:'fresh',kind:'agentMessage',text:'just finished'}}),'race');
+ applyAgentEvent(live,event('turn/completed','race'),'race');
+ restoreSessionHistory(record,[{id:'old',kind:'agentMessage',text:'old answer'}],revision);
+ assert.deepEqual(record.timeline.map(i=>i.id),['old','fresh']);assert.equal(record.busy,false);
+ const pending=newLive([{kind:'user',id:'optimistic',requestId:'request',text:'hi',pending:true}]);pending.busy=true;
+ restoreSessionHistory(pending,[{id:'confirmed',kind:'userMessage',requestId:'request',text:'hi'}],0);
+ assert.equal(pending.timeline.length,1);assert.equal(pending.timeline[0]?.id,'confirmed');
+});
+test("live streaming content wins over an older snapshot without duplicating its item",()=>{
+ const record=newLive([{kind:'agent',id:'m',text:'fresh delta',streaming:true}]);record.busy=true;
+ restoreSessionHistory(record,[{id:'old',kind:'agentMessage',text:'older'},{id:'m',kind:'agentMessage',text:'stale delta'}],0);
+ assert.deepEqual(record.timeline.map(i=>i.id),['old','m']);assert.equal((record.timeline[1] as {text:string}).text,'fresh delta');
 });

@@ -481,9 +481,10 @@ export class SessionManager extends EventEmitter {
   changesList(id: string) { return this.requireClient().changesList(id); }
   changesUndo(id: string, changeId: string) { return this.requireClient().changesUndo(id, changeId); }
 
-  async resumeSession(sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}): Promise<SessionInfo> {
+  async resumeSession(sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}, activate = true): Promise<SessionInfo> {
     const client = this.requireClient();
-    const refresh = await this.buildRefresh();
+    const workspace = (await this.listSessions()).find(session => session.id === sessionId)?.workdir ?? "";
+    const refresh = await this.buildRefresh(workspace);
     if (recoveryModel) {
       refresh.recoveryModel = { ...recoveryModel, baseUrl: "" };
       refresh.modelSeesImages = await this.modelSeesImages({ ...this.store.readConfig(), ...recoveryModel });
@@ -492,10 +493,11 @@ export class SessionManager extends EventEmitter {
     if (!sessionId.startsWith("c_")) this.desktopSessions.add(sessionId);
     // 端点与 Key 不用在这里对齐：会话记的是 providerId，内核恢复时按 id 到库里
     // 取**当前**的端点与 Key。用户改了端点，旧会话点开就是新地址。
-    this.mounts = result.mcpStatus ?? {};
-    // 技能发现要看这个会话的工作区（项目级 .claude/skills）。
-    this.workspace = result.workspace ?? "";
-    this.skills.setWorkspace(this.workspace);
+    if (activate) {
+      this.mounts = result.mcpStatus ?? {};
+      this.workspace = result.workspace ?? "";
+      this.skills.setWorkspace(this.workspace);
+    }
     return {
       sessionId,
       tools: result.tools,
@@ -676,7 +678,7 @@ export class SessionManager extends EventEmitter {
       disableSandbox: config.sandboxCommands === false,
       codeMode: config.codeMode === true,
       mcpServers,
-      skillDirs: this.skills.enabledDirs(),
+      skillDirs: this.skills.enabledDirs(workspace),
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
       enableEmail: contributions.email === true,
@@ -770,12 +772,12 @@ export class SessionManager extends EventEmitter {
    * 一个都挂不上，而界面上什么都不会说——用户只会得出「配了没用」。
    * 工作目录和模型不在里面，理由见 protocol 里 SessionRefresh 的说明。
    */
-  private async buildRefresh(): Promise<SessionRefresh> {
+  private async buildRefresh(workspace?: string): Promise<SessionRefresh> {
     const config = this.store.readConfig();
     const contributions = await this.contributions();
     return {
       mcpServers: await this.buildMcpServers(contributions),
-      skillDirs: this.skills.enabledDirs(),
+      skillDirs: this.skills.enabledDirs(workspace),
       memoryFile: this.store.memoryFile,
       enableComputerUse: contributions.computerUse,
       enableEmail: contributions.email === true,

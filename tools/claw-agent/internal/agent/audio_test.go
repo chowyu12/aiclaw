@@ -149,3 +149,109 @@ func TestUnknownAudioCapabilityUsesConfiguredSTT(t *testing.T) {
 		t.Fatalf("fallback failed %d %s", calls, note)
 	}
 }
+
+func TestAudioRejectionSurvivesAppendOnlyHistoryReloadAndFork(t *testing.T) {
+	ctx := context.Background()
+	s := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
+	s.config.Model.APIProtocol = model.APIChatCompletions
+	s.config.Model.Capabilities.AudioInput = "supported"
+	path := filepath.Join(t.TempDir(), "clip.wav")
+	if err := os.WriteFile(path, wavFixture(1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, audio := s.prepareAttachedAudio(ctx, []string{path})
+	s.messages = append(s.messages, llm.Message{ID: "audio-user", Role: llm.RoleUser, Content: "listen", Audio: audio})
+	db := newTestStore(t)
+	s.SetPersistence(db)
+	if err := s.Checkpoint(); err != nil {
+		t.Fatal(err)
+	}
+	s.recordAudioRejection(s.config.Model, s.audioMessages(s.config.Model), &llm.Error{Status: 400, Code: "invalid_audio"})
+	if err := s.Checkpoint(); err != nil {
+		t.Fatal(err)
+	}
+	// The immutable transcript still contains the original attachment. The rejection
+	// ledger must overlay it, including after the context snapshot drops old audio.
+	rows, err := db.Transcript(ctx, s.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original llm.Message
+	if err = json.Unmarshal(rows[0], &original); err != nil {
+		t.Fatal(err)
+	}
+	if len(original.Audio) != 1 || len(original.Audio[0].RejectedRoutes) != 0 {
+		t.Fatal("test must exercise immutable original history")
+	}
+	// Compact before reload so snapshot-only metadata cannot mask a missing ledger.
+	s.mu.Lock()
+	s.messages = []llm.Message{{ID: "summary", Role: llm.RoleUser, Content: "summary"}}
+	s.mu.Unlock()
+	if err := s.Save(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(ctx, db, s.ID, StaticKey("fixture"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer loaded.Close()
+	loaded.SetPersistence(db)
+	fork, err := loaded.ForkAt(ctx, "audio-fork", "audio-user", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fork.Close()
+	count := func(messages []llm.Message) int {
+		n := 0
+		for _, m := range messages {
+			n += len(m.Audio)
+		}
+		return n
+	}
+	if count(fork.audioMessages(fork.config.Model)) != 0 {
+		t.Fatal("fork replayed a confirmed rejected clip")
+	}
+	other := fork.config.Model
+	other.Model += "-other"
+	if count(fork.audioMessages(other)) != 1 {
+		t.Fatal("rejection incorrectly applies to another model")
+	}
+}
+
+func TestLegacyAudioRejectionIsImportedBeforeTranscriptFork(t *testing.T) {
+	ctx := context.Background()
+	s := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
+	s.config.Model.APIProtocol = model.APIChatCompletions
+	s.config.Model.Capabilities.AudioInput = "supported"
+	path := filepath.Join(t.TempDir(), "old.wav")
+	if err := os.WriteFile(path, wavFixture(1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_, audio := s.prepareAttachedAudio(ctx, []string{path})
+	s.messages = append(s.messages, llm.Message{ID: "legacy-audio", Role: llm.RoleUser, Content: "listen", Audio: audio})
+	db := newTestStore(t)
+	s.SetPersistence(db)
+	if err := s.Checkpoint(); err != nil {
+		t.Fatal(err)
+	}
+	// Simulate v3.11.1: only the canonical snapshot knows the clip was rejected.
+	s.messages[len(s.messages)-1].Audio[0].RejectedRoutes = []string{audioRoute(s.config.Model)}
+	if err := s.Save(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	s.audioRejections = nil
+	fork, err := s.ForkAt(ctx, "legacy-fork", "legacy-audio", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer fork.Close()
+	for _, m := range fork.audioMessages(fork.config.Model) {
+		if len(m.Audio) > 0 {
+			t.Fatal("legacy rejection lost during fork")
+		}
+	}
+	var saved []string
+	if err := db.State(ctx, s.ID, "audio-rejection:"+audioRejectionKey(audio[0]), &saved); err != nil || len(saved) != 1 {
+		t.Fatalf("legacy rejection not migrated %v %v", saved, err)
+	}
+}

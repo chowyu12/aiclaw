@@ -94,16 +94,17 @@ type Session struct {
 	UpdatedAt time.Time
 	Title     string
 
-	config       protocol.SessionStartParams
-	messages     []llm.Message
-	registry     *tools.Registry
-	codeModeBase *tools.Registry
-	codeRuntime  *codemode.Runtime
-	codeCells    *codemode.Cells
-	phaseTraces  map[string][]protocol.Item
-	codeTraceMu  sync.Mutex
-	codeTraces   map[string][]protocol.Item
-	mcpBindings  map[string]*mcpBinding
+	config          protocol.SessionStartParams
+	messages        []llm.Message
+	registry        *tools.Registry
+	codeModeBase    *tools.Registry
+	codeRuntime     *codemode.Runtime
+	codeCells       *codemode.Cells
+	phaseTraces     map[string][]protocol.Item
+	audioRejections map[string][]string
+	codeTraceMu     sync.Mutex
+	codeTraces      map[string][]protocol.Item
+	mcpBindings     map[string]*mcpBinding
 	// mcpKeys 是这个会话从连接池里借走的那些连接。Close 时归还，
 	// 最后一个用完的会话负责真正关掉它——见 mcppool.go。
 	mcpKeys []string
@@ -1369,7 +1370,13 @@ func (s *Session) Save(ctx context.Context, db *store.Store) error {
 	}); err != nil {
 		return err
 	}
-	return s.saveCodeTraces(ctx, db)
+	if err := s.saveCodeTraces(ctx, db); err != nil {
+		return err
+	}
+	if err := s.savePhaseTraces(ctx, db); err != nil {
+		return err
+	}
+	return s.saveAudioRejections(ctx, db)
 }
 
 // Load 从库里恢复一个会话并重新挂载工具。

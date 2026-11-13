@@ -1,5 +1,5 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { extname, isAbsolute, join, resolve } from "node:path";
 
 import { tr } from "../shared/i18n.js";
@@ -108,9 +108,9 @@ export function readMedia(
  * 的录音 base64 之后就超了，而超了的表现是「协议帧解析失败」——没人能从那句
  * 话联想到是附件太大。落盘之后协议里只有一个路径。
  *
- * 落在系统临时目录：这些文件转写完就没用了，不该混进用户的工作区。
+ * 保存在应用管理的附件目录；原生音频会被恢复和分叉后的历史继续引用。
  */
-export function stageAudio(name: string, base64: string): string {
+export function stageAudio(name: string, base64: string, directoryRoot: string): string {
   const data = Buffer.from(base64, "base64");
   if (data.length === 0) throw new Error(tr("音频是空的"));
   if (data.length > MAX_AUDIO_BYTES) {
@@ -121,9 +121,10 @@ export function stageAudio(name: string, base64: string): string {
     throw new Error(tr("不支持这种音频格式（{format}）", { format: extension || name }));
   }
   // 一次一个目录：同名文件不会互相覆盖，而用文件名加时间戳仍然可能撞上。
-  const directory = mkdtempSync(join(tmpdir(), "aiclaw-audio-"));
+  mkdirSync(directoryRoot, {recursive:true,mode:0o700});
+  const directory = mkdtempSync(join(directoryRoot, "audio-"));
   const path = join(directory, sanitize(name) || `audio${extension}`);
-  writeFileSync(path, data);
+  writeFileSync(path, data, {mode:0o600});
   return path;
 }
 

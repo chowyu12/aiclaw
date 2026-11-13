@@ -14,7 +14,17 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/tools"
 )
 
-func (s *Session) SetPersistence(db *store.Store) { s.db = db }
+func (s *Session) SetPersistence(db *store.Store) {
+	s.db = db
+	// Import legacy snapshot-only audio rejection metadata before any compaction.
+	for _, message := range s.snapshotMessages() {
+		for _, audio := range message.Audio {
+			if len(audio.RejectedRoutes) > 0 {
+				s.audioRejectionRoutes(audio)
+			}
+		}
+	}
+}
 
 // Checkpoint must succeed before another model request or tool batch starts.
 func (s *Session) Checkpoint() error {
@@ -84,10 +94,10 @@ func (s *Session) readHistoryMessages() ([]llm.Message, error) {
 				}
 				out = append(out, m)
 			}
-			return out, nil
+			return s.withAudioRejections(out), nil
 		}
 	}
-	return s.snapshotMessages(), nil
+	return s.withAudioRejections(s.snapshotMessages()), nil
 }
 func reusableMessage(m llm.Message) bool {
 	if m.Role == llm.RoleSystem {

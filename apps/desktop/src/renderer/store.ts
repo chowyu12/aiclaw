@@ -10,6 +10,7 @@ import {
   ensureLive,
   newLive,
   restoreHistory,
+  restoreSessionHistory,
   type LiveSession,
   type TimelineEntry,
 } from "./live-sessions";
@@ -372,6 +373,7 @@ export const actions = {
         cancelledHostRequests.clear();
         completedHostTurns.clear();
         sessionRestoreRequest++;
+        actions.closeSideSession();
         state.loadingSession = "";
         state.sessionInfo = null;
         state.configurations = [];
@@ -517,7 +519,8 @@ export const actions = {
     state.sessionLoadError = "";
     state.sessionId = sessionId;
     // 这个会话还没有任何记录时先建一个空的：界面要有东西可渲染。
-    ensureLive(state.live, sessionId);
+    const record = ensureLive(state.live, sessionId);
+    const revision = record.revision ?? 0;
     state.sessionInfo = null;
     state.loadingSession = sessionId;
     try {
@@ -528,18 +531,15 @@ export const actions = {
       state.model = info.model;
       state.providerId = info.providerId;
       void actions.refreshQueue(sessionId);
-      // 正在跑的会话用它自己的活动记录：内核给的历史只到上一条已完成的消息，
-      // 进行中的那几步只存在于事件流里，换成历史就把它们弄丢了。
-      // 没在跑的以内核的历史为准——那是权威的，也覆盖了这期间排队进去的输入。
-      if (!state.live[sessionId]?.busy) {
-        state.live[sessionId] = { ...newLive(restoreHistory(info.history ?? [])), unread: state.live[sessionId]?.unread };
-      }
+      // Merge events received during the RPC, even if their turn has already finished.
+      // An idle session with no new events can use the authoritative snapshot directly.
+      restoreSessionHistory(record, info.history ?? [], revision);
     } catch (error) {
       const reason = describeError(error);
       try {
         const history = await window.aiclaw.session.history(sessionId);
         if (state.sessionId === sessionId && request === sessionRestoreRequest) {
-          if (!state.live[sessionId]?.busy) state.live[sessionId] = { ...newLive(restoreHistory(history)), unread: state.live[sessionId]?.unread };
+          restoreSessionHistory(record, history, revision);
           state.sessionLoadError = t("当前为只读历史。恢复原服务后重试，或在下方选择其他模型继续：{error}", { error: reason });
         }
       } catch {
@@ -559,11 +559,12 @@ export const actions = {
     const request = ++sideRestoreRequest;
     state.fileBrowser = false; state.filePreview = null;
     state.sideSessionId = sessionId; state.sideLoading = true; state.sideSessionReady = false; state.sideError = "";
-    ensureLive(state.live, sessionId).unread = false;
+    const record = ensureLive(state.live, sessionId); record.unread = false;
+    const revision = record.revision ?? 0;
     try {
-      const info = await window.aiclaw.session.resume(sessionId) as SessionStartView;
+      const info = await window.aiclaw.session.resume(sessionId, undefined, false) as SessionStartView;
       if (request !== sideRestoreRequest) return;
-      if (!state.live[sessionId]?.busy) state.live[sessionId] = newLive(restoreHistory(info.history ?? []));
+      restoreSessionHistory(record, info.history ?? [], revision);
       state.sideSessionReady = true;
       void actions.refreshQueue(sessionId);
     } catch (error) {
@@ -571,7 +572,7 @@ export const actions = {
       state.sideError = describeError(error);
       try {
         const history = await window.aiclaw.session.history(sessionId);
-        if (request === sideRestoreRequest && !state.live[sessionId]?.busy) state.live[sessionId] = newLive(restoreHistory(history));
+        if (request === sideRestoreRequest) restoreSessionHistory(record, history, revision);
       } catch { /* Keep already received live evidence. */ }
     } finally { if (request === sideRestoreRequest) state.sideLoading = false; }
   },
@@ -629,6 +630,7 @@ export const actions = {
   async archiveSession(sessionId: string): Promise<void> {
     const changed = ((await window.aiclaw.session.archive(sessionId, true)) as string[] | undefined) ?? [sessionId];
     for (const id of changed) delete state.live[id];
+    if (changed.includes(state.sideSessionId)) actions.closeSideSession();
     if (changed.includes(state.sessionId)) {
       state.sessionId = "";
       state.sessionInfo = null;
@@ -654,6 +656,7 @@ export const actions = {
   async deleteSession(sessionId: string): Promise<void> {
     const removed = ((await window.aiclaw.session.remove(sessionId)) as string[] | undefined) ?? [sessionId];
     for (const id of removed) delete state.live[id];
+    if (removed.includes(state.sideSessionId)) actions.closeSideSession();
     if (removed.includes(state.sessionId)) {
       state.sessionId = "";
       state.sessionInfo = null;

@@ -128,8 +128,14 @@ func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
 			})
 			if message.Sampling != nil {
 				items[len(items)-1] = *message.Sampling
-				items[len(items)-1].Seq = seq
-				items[len(items)-1].Round = round
+				if items[len(items)-1].Seq == 0 {
+					items[len(items)-1].Seq = seq
+				}
+				if items[len(items)-1].Round == 0 {
+					items[len(items)-1].Round = round
+				}
+				seq = items[len(items)-1].Seq
+				round = items[len(items)-1].Round
 			}
 			if strings.TrimSpace(message.Content) != "" {
 				items = append(items, protocol.Item{

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -11,10 +12,12 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 )
 
 const audioBudgetMS int64 = 180_000
@@ -116,7 +119,7 @@ func (s *Session) audioMessages(config protocol.ModelConfig) []llm.Message {
 		for _, audio := range original {
 			reason := ""
 			switch {
-			case slices.Contains(audio.RejectedRoutes, route):
+			case slices.Contains(audio.RejectedRoutes, route) || slices.Contains(s.audioRejectionRoutes(audio), route):
 				reason = "previously rejected by this model route"
 			case !nativeAudio(config):
 				reason = "this model route does not accept native audio"
@@ -152,25 +155,122 @@ func (s *Session) recordAudioRejection(config protocol.ModelConfig, messages []l
 		return
 	}
 	// A request-level error cannot identify which of multiple clips was rejected.
-	var paths []string
+	var clips []llm.Audio
 	for _, m := range messages {
 		for _, a := range m.Audio {
-			paths = append(paths, a.Path)
+			clips = append(clips, a)
 		}
 	}
-	if len(paths) != 1 {
+	if len(clips) != 1 {
 		return
 	}
 	route := audioRoute(config)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for i := range s.messages {
 		s.messages[i].Audio = append([]llm.Audio(nil), s.messages[i].Audio...)
 		for j := range s.messages[i].Audio {
 			a := &s.messages[i].Audio[j]
-			if a.Path == paths[0] && !slices.Contains(a.RejectedRoutes, route) {
+			if a.Path == clips[0].Path && !slices.Contains(a.RejectedRoutes, route) {
 				a.RejectedRoutes = append(append([]string(nil), a.RejectedRoutes...), route)
 			}
 		}
 	}
+	s.mu.Unlock()
+	routes := append([]string(nil), s.audioRejectionRoutes(clips[0])...)
+	if !slices.Contains(routes, route) {
+		routes = append(routes, route)
+	}
+	key := audioRejectionKey(clips[0])
+	s.codeTraceMu.Lock()
+	defer s.codeTraceMu.Unlock()
+	if s.audioRejections == nil {
+		s.audioRejections = map[string][]string{}
+	}
+	s.audioRejections[key] = routes
+	if s.db != nil {
+		if err := s.db.PutState(context.Background(), s.ID, "audio-rejection:"+key, routes); err != nil {
+			s.mu.Lock()
+			s.persistenceErr = err
+			s.mu.Unlock()
+		}
+	}
+}
+func audioRejectionKey(audio llm.Audio) string {
+	if audio.SHA256 != "" {
+		return audio.SHA256
+	}
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(audio.Path)))
+}
+func (s *Session) audioRejectionRoutes(audio llm.Audio) []string {
+	key := audioRejectionKey(audio)
+	s.codeTraceMu.Lock()
+	defer s.codeTraceMu.Unlock()
+	if routes, ok := s.audioRejections[key]; ok {
+		return append([]string(nil), routes...)
+	}
+	routes := append([]string(nil), audio.RejectedRoutes...)
+	// Older snapshots stored rejection metadata only on messages; import it before
+	// compaction or append-only transcript reads can discard that mutable metadata.
+	for _, message := range s.snapshotMessages() {
+		for _, clip := range message.Audio {
+			if audioRejectionKey(clip) == key {
+				for _, route := range clip.RejectedRoutes {
+					if !slices.Contains(routes, route) {
+						routes = append(routes, route)
+					}
+				}
+			}
+		}
+	}
+	if s.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		var saved []string
+		err := s.db.State(ctx, s.ID, "audio-rejection:"+key, &saved)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			s.mu.Lock()
+			s.persistenceErr = err
+			s.mu.Unlock()
+		}
+		for _, route := range saved {
+			if !slices.Contains(routes, route) {
+				routes = append(routes, route)
+			}
+		}
+		if !slices.Equal(routes, saved) {
+			if err := s.db.PutState(ctx, s.ID, "audio-rejection:"+key, routes); err != nil {
+				s.mu.Lock()
+				s.persistenceErr = err
+				s.mu.Unlock()
+			}
+		}
+	}
+	if s.audioRejections == nil {
+		s.audioRejections = map[string][]string{}
+	}
+	s.audioRejections[key] = routes
+	return append([]string(nil), routes...)
+}
+func (s *Session) withAudioRejections(messages []llm.Message) []llm.Message {
+	for i := range messages {
+		messages[i].Audio = append([]llm.Audio(nil), messages[i].Audio...)
+		for j := range messages[i].Audio {
+			audio := &messages[i].Audio[j]
+			audio.RejectedRoutes = s.audioRejectionRoutes(*audio)
+		}
+	}
+	return messages
+}
+func (s *Session) saveAudioRejections(ctx context.Context, db *store.Store) error {
+	if s.db == db {
+		return nil
+	}
+	s.codeTraceMu.Lock()
+	defer s.codeTraceMu.Unlock()
+	for key, routes := range s.audioRejections {
+		if err := db.PutState(ctx, s.ID, "audio-rejection:"+key, routes); err != nil {
+			return err
+		}
+	}
+	return nil
 }
