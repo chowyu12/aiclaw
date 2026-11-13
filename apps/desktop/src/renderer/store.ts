@@ -57,6 +57,7 @@ export interface FilePreviewState {
 }
 let previewRequest = 0;
 let sessionRestoreRequest = 0;
+let sideRestoreRequest = 0;
 let computerRevision = 0;
 const queueRevisions = new Map<string, number>();
 
@@ -66,6 +67,10 @@ const state = reactive({
   runtime: { state: "stopped" } as RuntimeStatus,
   computer: { mode: "ready", active: null, watching: 0 } as ComputerControlState,
   sessionId: "",
+  sideSessionId: "",
+  sideLoading: false,
+  sideSessionReady: false,
+  sideError: "",
   queuedInputs: {} as Record<string, PendingSubmission[]>,
   queuedAutomatic: {} as Record<string, string[]>,
   fileBrowser: false,
@@ -286,7 +291,7 @@ export const actions = {
         queueRevisions.set(queued.sessionId, (queueRevisions.get(queued.sessionId) ?? 0) + 1);
         updateQueue(queued.sessionId, queued.pending ?? [], queued.queuedRequestIds);
       }
-      const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId, state.view === "chat" ? state.sessionId : "");
+      const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId, state.view === "chat" ? [state.sessionId, state.sideSessionId] : []);
       // 错误条是全局的：后台那个会话出错也要让人看见，不然它就静静地停了。
       if (applied.error) {
         const label = applied.sessionId === state.sessionId ? "" : t("{label}：", { label: sessionLabel(applied.sessionId) });
@@ -545,6 +550,32 @@ export const actions = {
     }
   },
 
+  closeSideSession(): void {
+    ++sideRestoreRequest;
+    state.sideSessionId = ""; state.sideLoading = false; state.sideSessionReady = false; state.sideError = "";
+  },
+
+  async openSideSession(sessionId: string): Promise<void> {
+    const request = ++sideRestoreRequest;
+    state.fileBrowser = false; state.filePreview = null;
+    state.sideSessionId = sessionId; state.sideLoading = true; state.sideSessionReady = false; state.sideError = "";
+    ensureLive(state.live, sessionId).unread = false;
+    try {
+      const info = await window.aiclaw.session.resume(sessionId) as SessionStartView;
+      if (request !== sideRestoreRequest) return;
+      if (!state.live[sessionId]?.busy) state.live[sessionId] = newLive(restoreHistory(info.history ?? []));
+      state.sideSessionReady = true;
+      void actions.refreshQueue(sessionId);
+    } catch (error) {
+      if (request !== sideRestoreRequest) return;
+      state.sideError = describeError(error);
+      try {
+        const history = await window.aiclaw.session.history(sessionId);
+        if (request === sideRestoreRequest && !state.live[sessionId]?.busy) state.live[sessionId] = newLive(restoreHistory(history));
+      } catch { /* Keep already received live evidence. */ }
+    } finally { if (request === sideRestoreRequest) state.sideLoading = false; }
+  },
+
   async refreshSessions(): Promise<void> {
     try {
       state.sessions = (await window.aiclaw.session.list()) as SessionSummaryView[];
@@ -718,8 +749,8 @@ export const actions = {
    * 读失败不进错误条：一张显示不出来的图旁边写一句原因就够了，不该盖住
    * 正在进行的对话。
    */
-  async readMedia(path: string): Promise<{ dataUrl: string; kind: "image" | "audio" }> {
-    return (await window.aiclaw.files.media(path)) as { dataUrl: string; kind: "image" | "audio" };
+  async readMedia(path: string, sessionId?: string): Promise<{ dataUrl: string; kind: "image" | "audio" }> {
+    return (await window.aiclaw.files.media(path, sessionId)) as { dataUrl: string; kind: "image" | "audio" };
   },
 
   async revealWorkspace(path: string): Promise<void> {
@@ -778,9 +809,10 @@ export const actions = {
     if (preview && !preview.loading && preview.sessionId === state.sessionId) await actions.openFile(preview.path, true);
   },
 
-  async openFile(path: string, refresh = false): Promise<void> {
+  async openFile(path: string, refresh = false, targetSessionId?: string): Promise<void> {
+    if (targetSessionId && targetSessionId !== state.sessionId) return actions.openSystemFile(path, targetSessionId);
     state.fileBrowser = false;
-    if (!fileLanguage(path) || !state.sessionId) return actions.openSystemFile(path);
+    if (!fileLanguage(path) || !state.sessionId) return actions.openSystemFile(path, state.sessionId);
     const existing = state.filePreviews.find(tab => tab.sessionId === state.sessionId && (tab.path === path || tab.referencePath === path));
     if (existing && !refresh) { actions.activateFilePreview(existing.request); return; }
     const sessionId = state.sessionId, request = ++previewRequest;
@@ -789,7 +821,7 @@ export const actions = {
       const result = await window.aiclaw.files.preview(path, sessionId) as TextFilePreview | null;
       const tab = state.filePreviews.find(tab => tab.request === request);
       if (!tab || sessionId !== state.sessionId) return;
-      if (!result) { actions.closePreviewTab(request); await actions.openSystemFile(path); return; }
+      if (!result) { actions.closePreviewTab(request); await actions.openSystemFile(path, sessionId); return; }
       putFilePreview({ ...tab, ...result, loading: false }, false);
     } catch (error) {
       const tab = state.filePreviews.find(tab => tab.request === request);
@@ -797,9 +829,9 @@ export const actions = {
     }
   },
 
-  async openSystemFile(path: string): Promise<void> {
+  async openSystemFile(path: string, sessionId?: string): Promise<void> {
     try {
-      const result = (await window.aiclaw.files.open(path)) as {
+      const result = (await window.aiclaw.files.open(path, sessionId)) as {
         ok: boolean;
         action: string;
         detail: string;
@@ -1357,12 +1389,13 @@ export const actions = {
     images: string[] = [],
     audio: { name: string; data: string }[] = [],
     references: { id: string; title: string }[] = [],
+    targetSessionId = "",
   ): Promise<boolean> {
-    if (state.policyChanging || state.sessionLoadError || state.loadingSession) return false;
+    if (targetSessionId ? targetSessionId !== state.sideSessionId || !state.sideSessionReady || state.sideLoading : state.policyChanging || state.sessionLoadError || state.loadingSession) return false;
     if (!text.trim() && images.length === 0 && audio.length === 0) return false;
     // 没有会话就先开一个。删掉当前会话之后运行时仍然是 ready，输入框还能打字，
     // 早先这里直接 return——发出去石沉大海，用户看不出发生了什么。
-    if (!state.sessionId) {
+    if (!state.sessionId && !targetSessionId) {
       try {
         await actions.newSession();
       } catch (error) {
@@ -1371,7 +1404,7 @@ export const actions = {
       }
     }
     // 记住发出去的是哪个会话：下面有几次 await，期间用户可能已经切走了。
-    const sessionId = state.sessionId;
+    const sessionId = targetSessionId || state.sessionId;
     const record = ensureLive(state.live, sessionId);
     const optimisticId = `user-${crypto.randomUUID()}`;
     const wasBusy = record.busy;
@@ -1418,8 +1451,8 @@ export const actions = {
     } catch (error) { state.error = describeError(error); }
   },
 
-  async interrupt(): Promise<void> {
-    if (state.sessionId) await window.aiclaw.session.interrupt(state.sessionId);
+  async interrupt(sessionId = state.sessionId): Promise<void> {
+    if (sessionId) await window.aiclaw.session.interrupt(sessionId);
   },
 
   async refreshQueue(sessionId = state.sessionId): Promise<void> {
@@ -1477,7 +1510,7 @@ export const actions = {
 
   setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived"): void {
     state.view = view;
-    if (view === "chat" && state.live[state.sessionId]) state.live[state.sessionId]!.unread = false;
+    if (view === "chat") for (const id of [state.sessionId, state.sideSessionId]) { if (state.live[id]) state.live[id]!.unread = false; }
   },
 
   clearError(): void {

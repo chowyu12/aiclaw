@@ -29,11 +29,9 @@ import (
 //     不还原的话，重开一个会话看到的步骤里只有工具，没有「谁决定调它们」，
 //     与这一轮正在跑时看到的对不上。
 //
-// 还原不出来的是耗时、TTFT 与 token：那些只存在于当轮的事件流里，存档里存的是
-// 给模型看的消息，没有这些数字。所以历史步骤不带时间——**宁可不显示，也不要
-// 编一个**，界面上那几个数字是用来判断「慢在等模型还是慢在跑工具」的。
+// New archives retain visible sampling evidence; legacy archives have no inferred timings.
 func (s *Session) History() []protocol.Item {
-	return s.withCodeTraces(renderHistory(s.historyMessages(), s.config.Model.Model))
+	return s.withPhases(s.withCodeTraces(renderHistory(s.historyMessages(), s.config.Model.Model)))
 }
 
 // StoredHistory reads a transcript without starting a model client or mounting tools.
@@ -57,7 +55,7 @@ func StoredHistory(ctx context.Context, db *store.Store, id string) ([]protocol.
 	if err != nil {
 		return nil, err
 	}
-	return s.withCodeTraces(renderHistory(messages, config.Model.Model)), nil
+	return s.withPhases(s.withCodeTraces(renderHistory(messages, config.Model.Model))), nil
 }
 
 func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
@@ -67,9 +65,11 @@ func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
 	artifacts := make(map[string][]string)
 	sources := make(map[string][]protocol.SearchSource)
 	content := make(map[string][]protocol.ToolContent)
+	metrics := make(map[string]*protocol.Item)
 	for _, message := range messages {
 		if message.Role == llm.RoleTool {
 			content[message.ToolCallID] = message.OutputContent
+			metrics[message.ToolCallID] = message.Sampling
 		}
 		if message.Role == llm.RoleTool {
 			results[message.ToolCallID] = message.Content
@@ -126,6 +126,11 @@ func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
 				Round:     round,
 				ToolCalls: len(message.ToolCalls),
 			})
+			if message.Sampling != nil {
+				items[len(items)-1] = *message.Sampling
+				items[len(items)-1].Seq = seq
+				items[len(items)-1].Round = round
+			}
 			if strings.TrimSpace(message.Content) != "" {
 				items = append(items, protocol.Item{
 					ID:   messageID(message, "msg", index),
@@ -153,6 +158,12 @@ func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
 					Summary:    summarizeCall(llm.ToolCall{Name: call.Name, Arguments: call.Arguments}),
 					Seq:        seq,
 				})
+				if saved := metrics[call.ID]; saved != nil {
+					last := &items[len(items)-1]
+					last.ID = saved.ID
+					last.StartedAt = saved.StartedAt
+					last.DurationMS = saved.DurationMS
+				}
 			}
 		}
 	}

@@ -17,6 +17,9 @@ register(
           if (error?.code === "ERR_MODULE_NOT_FOUND" && /^\\.{1,2}\\//.test(specifier) && specifier.endsWith(".js")) {
             return next(specifier.slice(0, -3) + ".ts", context);
           }
+          if (error?.code === "ERR_MODULE_NOT_FOUND" && /^\\.{1,2}\\//.test(specifier) && !/\\.[a-z]+$/i.test(specifier)) {
+            return next(specifier + ".ts", context);
+          }
           throw error;
         }
       }

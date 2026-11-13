@@ -32,16 +32,22 @@ type ContextStatus struct {
 	Records         []CompactionRecord `json:"records"`
 }
 
-// Text and tool-schema estimate only. It is not provider usage or billed tokens.
+// Text, tool-schema and bounded audio estimate. Not provider usage or billed tokens.
 func contextEstimate(messages []llm.Message, tools []llm.Tool) (int, bool) {
 	used, images := 0, false
+	var audioMS int64
 	for _, message := range messages {
 		used += approxTokens(message.Content) + 4
 		images = images || len(message.Images) > 0
+		// Conservative scheduling estimate; actual model billing remains authoritative.
+		for _, audio := range message.Audio {
+			audioMS += min(audio.DurationMS, audioBudgetMS)
+		}
 		for _, call := range message.ToolCalls {
 			used += approxTokens(call.Name) + approxTokens(call.Arguments)
 		}
 	}
+	used += int(min(audioMS, audioBudgetMS) * 32 / 1000)
 	schema, _ := json.Marshal(tools)
 	return used + approxTokens(string(schema)), images
 }

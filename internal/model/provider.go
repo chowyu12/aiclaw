@@ -42,6 +42,7 @@ const (
 
 // ModelCapabilities uses explicit tri-state values. Empty means unknown, not unsupported.
 type ModelCapabilities struct {
+	AudioInput       string `json:"audioInput,omitempty"`
 	Tools            string `json:"tools,omitempty"`
 	Vision           string `json:"vision,omitempty"`
 	Reasoning        string `json:"reasoning,omitempty"`

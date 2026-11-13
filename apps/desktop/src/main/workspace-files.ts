@@ -49,6 +49,11 @@ export async function workspaceFiles(base: string, path: string, query: string, 
     return {root,entries,truncated:names.length>1000};
   }
   const needle = query.trim().toLocaleLowerCase(), queue = [directory], seen = new Set<string>(), entries: WorkspaceFileEntry[] = [];
+  const rank = (item: WorkspaceFileEntry): number => {
+    const name = item.name.toLocaleLowerCase();
+    return name === needle ? 3 : name.includes(needle) ? 2 : 1;
+  };
+  const sorted = () => entries.sort((a,b)=>rank(b)-rank(a)||a.path.localeCompare(b.path)).slice(0,200);
   let scanned = 0;
   while (queue.length) {
     const dir = queue.shift()!;
@@ -58,7 +63,7 @@ export async function workspaceFiles(base: string, path: string, query: string, 
     try { children = await readdir(dir,{withFileTypes:true}); } catch { continue; }
     children.sort((a,b)=>a.name.localeCompare(b.name));
     for (const child of children) {
-      if (++scanned>5000 || entries.length>=200) return {root,entries,truncated:true};
+      if (++scanned>5000) return {root,entries:sorted(),truncated:true};
       if (child.isDirectory() && SEARCH_SKIP.has(child.name)) continue;
       const candidate = join(dir,child.name);
       if (child.isFile() && !relative(root,candidate).toLocaleLowerCase().includes(needle)) continue;
@@ -68,5 +73,5 @@ export async function workspaceFiles(base: string, path: string, query: string, 
       else if (item.path.toLocaleLowerCase().includes(needle)) entries.push(item);
     }
   }
-  return {root,entries,truncated:false};
+  return {root,entries:sorted(),truncated:entries.length>200};
 }

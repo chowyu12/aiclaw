@@ -45,10 +45,15 @@ export function buildComputerRuntime({ universal = false, development = false, o
   if (existsSync(metadataPath)) {
     const previous=JSON.parse(readFileSync(metadataPath,"utf8"));
     if (previous.fingerprint===fingerprint) {
-      verifyMacBundle(target,identifier,signing);
-      const sealed=JSON.parse(readFileSync(join(target,"Contents/Resources/Build.json"),"utf8"));
-      if (sealed.fingerprint!==fingerprint || hash(readFileSync(join(target,"Contents/MacOS/AIClawComputerUse")))!==previous.executableSHA256) throw Error("Cached native runtime identity changed; refusing reuse");
-      console.log(`Reused unchanged ${target} (${fingerprint})`); return target;
+      try {
+        verifyMacBundle(target,identifier,signing);
+        const sealed=JSON.parse(readFileSync(join(target,"Contents/Resources/Build.json"),"utf8"));
+        if (sealed.fingerprint!==fingerprint || hash(readFileSync(join(target,"Contents/MacOS/AIClawComputerUse")))!==previous.executableSHA256) throw Error("Cached native runtime identity changed; refusing reuse");
+        console.log(`Reused unchanged ${target} (${fingerprint})`); return target;
+      } catch (error) {
+        if (!development) throw error;
+        console.warn("Development Computer Use cache failed verification; rebuilding from source with the configured signer.");
+      }
     }
   }
   mkdirSync(output,{recursive:true});

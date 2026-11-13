@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { reactive } from "vue";
+import { computed, reactive } from "vue";
 import { actions } from "../store";
 import { describeError } from "../errors";
 import { locale, t } from "../i18n";
+import { turnTiming } from "../turn-timing";
 import type { Turn } from "../turns";
 
 /** Expandable technical details shared by activity summaries and the full execution log. */
 
-defineProps<{
+const props = defineProps<{
   turn: Turn;
+  sessionId?: string;
   open: boolean;
   /** 折叠条上的那行字，由 ChatView 按当轮状态算好传进来。 */
   summary: string;
@@ -19,6 +21,8 @@ defineProps<{
 }>();
 
 defineEmits<{ toggle: [] }>();
+const timing = computed(() => turnTiming(props.turn.steps));
+const phases = [ ['waiting','等待模型首字节'], ['model','模型生成'], ['tool','工具执行（含编排）'], ['approval','等待人工确认'], ['save','保存会话'], ['other','其他间隔'] ] as const;
 
 function stepLabel(kind: "llm" | "tool" | "notice"): string {
   // 与旁边的 "llm" 一样用小写短标签；词典里的「工具」是页面标题用的 "Tools"。
@@ -41,7 +45,7 @@ function loadArtifacts(step: { artifacts?: readonly string[] }): void {
     if (media[path] || !/\.(png|jpe?g|webp|gif|mp3|wav|ogg|m4a|aac|flac)$/i.test(path)) continue;
     media[path] = {};
     void actions
-      .readMedia(path)
+      .readMedia(path, props.sessionId)
       .then((file) => {
         media[path] = { dataUrl: file.dataUrl, kind: file.kind };
       })
@@ -93,6 +97,11 @@ function llmSubline(step: Turn["steps"][number]): string {
     </button>
 
     <div v-if="open" class="steps-body">
+      <details v-if="timing.total > 0" class="turn-timing">
+        <summary>{{ t('耗时诊断') }} · {{ formatDuration(timing.total) }}</summary>
+        <div v-for="[phase,label] in phases" :key="phase"><span>{{ t(label) }}</span><span>{{ formatDuration(timing.totals[phase]) }}</span></div>
+        <small>{{ t('按已记录阶段的墙钟时间计算，重叠步骤只计一次。') }}</small>
+      </details>
       <details v-for="step in turn.steps" :key="step.id" class="step" :data-state="step.state" :data-nested="!!step.parentId">
         <summary @click="loadArtifacts(step)">
           <div class="row">
@@ -137,6 +146,7 @@ function llmSubline(step: Turn["steps"][number]): string {
 </template>
 
 <style scoped>
+.turn-timing{padding:8px 10px;margin-bottom:8px;border:1px solid var(--rule);border-radius:8px;font-size:12px}.turn-timing>div{display:flex;justify-content:space-between;gap:12px;padding:3px 0}.turn-timing small{color:var(--muted)}
 .steps {
   /* 跟着对话正文一起变宽。这个变量定义在 ChatView 的 .chat 上——
      三处各写各的话，窗口一拉大它们就会错开，看着像没对齐。 */

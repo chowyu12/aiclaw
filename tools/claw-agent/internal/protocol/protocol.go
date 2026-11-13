@@ -990,6 +990,7 @@ type ToolContent struct {
 }
 
 type Item struct {
+	Phase     string        `json:"phase,omitempty"`
 	Content   []ToolContent `json:"content,omitempty"`
 	CallID    string        `json:"callId,omitempty"`
 	ParentID  string        `json:"parentId,omitempty"`

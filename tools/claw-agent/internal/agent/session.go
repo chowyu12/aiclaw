@@ -100,6 +100,7 @@ type Session struct {
 	codeModeBase *tools.Registry
 	codeRuntime  *codemode.Runtime
 	codeCells    *codemode.Cells
+	phaseTraces  map[string][]protocol.Item
 	codeTraceMu  sync.Mutex
 	codeTraces   map[string][]protocol.Item
 	mcpBindings  map[string]*mcpBinding

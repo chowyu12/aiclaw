@@ -96,11 +96,12 @@ func (s *Session) approvalReviewer(turnID string, emitter Emitter, client *llm.C
 func (s *Session) approvalWaiter(turnID string, emitter Emitter) func(context.Context, protocol.ApprovalRequestParams) (protocol.ApprovalResponse, error) {
 	return func(ctx context.Context, request protocol.ApprovalRequestParams) (protocol.ApprovalResponse, error) {
 		started := time.Now()
-		item := protocol.Item{ID: newID("approval_wait"), Kind: protocol.ItemNotice, Text: i18n.D("等待人工确认"), StartedAt: started.UnixMilli()}
+		item := protocol.Item{Phase: "approval", ID: newID("approval_wait"), Kind: protocol.ItemNotice, Text: i18n.D("等待人工确认"), StartedAt: started.UnixMilli()}
 		emitter.Notify(protocol.NotifyItemStarted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
 		defer func() {
 			item.Text = i18n.D("人工确认等待结束")
 			item.DurationMS = time.Since(started).Milliseconds()
+			s.recordPhase(item)
 			emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
 		}()
 		return emitter.RequestApproval(ctx, request)

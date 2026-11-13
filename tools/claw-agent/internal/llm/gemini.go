@@ -65,6 +65,13 @@ func encodeGemini(c *Client, req Request) (string, any, error) {
 			if m.Content != "" {
 				parts = append(parts, map[string]any{"text": m.Content})
 			}
+			for _, audio := range m.Audio {
+				mime := "audio/wav"
+				if audio.Format == "mp3" {
+					mime = "audio/mpeg"
+				}
+				parts = append(parts, map[string]any{"inlineData": map[string]string{"mimeType": mime, "data": base64.StdEncoding.EncodeToString(audio.Data)}})
+			}
 			for _, image := range m.Images {
 				parts = append(parts, map[string]any{"inlineData": map[string]string{"mimeType": "image/png", "data": base64.StdEncoding.EncodeToString(image)}})
 			}

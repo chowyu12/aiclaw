@@ -171,3 +171,14 @@ test("memory import deduplicates exact entries and preserves existing text", asy
   assert.equal(mergeMemoryImport("- Existing",["- New\n"]),"- Existing\n- New\n");
   assert.equal(memoryImportEntries("", "\n\n").length,0);
 });
+
+test("filename matches outrank more than 200 directory-only matches",async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'aiclaw-ranked-search-'));
+ try {
+  mkdirSync(join(dir,'a-needle'));mkdirSync(join(dir,'z'));
+  for(let i=0;i<205;i++)writeFileSync(join(dir,'a-needle',`${i}.txt`),'');
+  writeFileSync(join(dir,'z','needle.ts'),'');
+  const result=await workspaceFiles(dir,'','NEEDLE',[]);
+  assert.equal(result.entries[0]?.name,'needle.ts');assert.equal(result.entries.length,200);assert.equal(result.truncated,true);
+ } finally {rmSync(dir,{recursive:true,force:true});}
+});

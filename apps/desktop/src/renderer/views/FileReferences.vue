@@ -7,7 +7,7 @@ import { actions } from "../store";
 import { t } from "../i18n";
 
 defineEmits<{ loaded: [] }>();
-const props = defineProps<{ html: string; basePath?: string; sessionId?: string; runScope?: string }>();
+const props = defineProps<{ html: string; basePath?: string; sessionId?: string; runScope?: string; systemOnly?: boolean }>();
 const menu = ref<HTMLElement>();
 const content = ref<HTMLElement>();
 const codeTargets = shallowRef<{node: HTMLElement; code: string; language: string; runnable: boolean; key: string}[]>([]);
@@ -43,7 +43,7 @@ async function activate(event: MouseEvent | KeyboardEvent): Promise<void> {
   const raw = (card ?? reference)!.getAttribute("data-file-path") ?? reference?.textContent ?? "";
   const resolved = props.basePath ? previewReference(props.basePath, raw) : raw;
   const opener = target.closest<HTMLElement>(".file-open-trigger");
-  if (!opener) { close(); void actions.openFile(resolved); return; }
+  if (!opener) { close(); void (props.systemOnly ? actions.openSystemFile(resolved, props.sessionId) : actions.openFile(resolved, false, props.sessionId)); return; }
   if (trigger === opener && menu.value?.matches(":popover-open")) { close(); return; }
   close();
   trigger = opener;
@@ -70,7 +70,7 @@ function menuKey(event: KeyboardEvent): void {
 }
 function open(system: boolean): void {
   close(); trigger?.focus();
-  void (system ? actions.openSystemFile(path.value) : actions.openFile(path.value));
+  void (system ? actions.openSystemFile(path.value, props.sessionId) : actions.openFile(path.value, false, props.sessionId));
 }
 onMounted(() => { window.addEventListener("resize", close); document.addEventListener("scroll", close, true); });
 onUnmounted(() => { window.removeEventListener("resize", close); document.removeEventListener("scroll", close, true); });
@@ -80,13 +80,13 @@ onUnmounted(() => { window.removeEventListener("resize", close); document.remove
   <div class="file-references">
     <div ref="content" class="file-reference-content" @click="activate" @keydown="onKey" v-html="html" />
     <Teleport v-for="(target, index) in imageTargets" :key="JSON.stringify([sessionId, target.path, index])" :to="target.node">
-      <GeneratedImages :paths="[target.path]" :alt="target.alt" embedded @loaded="$emit('loaded')" />
+      <GeneratedImages :paths="[target.path]" :session-id="sessionId" :alt="target.alt" embedded @loaded="$emit('loaded')" />
     </Teleport>
     <Teleport v-for="target in codeTargets" :key="target.key" :to="target.node">
       <CodeBlock :code="target.code" :language="target.language" :runnable="target.runnable" :session-id="sessionId" :run-key="target.key" />
     </Teleport>
     <div ref="menu" popover="auto" class="file-open-menu" role="menu" :aria-label="t('打开方式')" :style="position" @keydown="menuKey">
-      <button v-if="fileLanguage(path)" role="menuitem" @click="open(false)">{{ t('在 AIClaw 中预览') }}</button>
+      <button v-if="!systemOnly && fileLanguage(path)" role="menuitem" @click="open(false)">{{ t('在 AIClaw 中预览') }}</button>
       <button role="menuitem" @click="open(true)">{{ t('用系统应用打开') }}</button>
     </div>
   </div>

@@ -155,6 +155,7 @@ func buildCompactedHistory(history []llm.Message, summary string) []llm.Message 
 		// 「用户要求过什么」，摘要里有。留着图会让压缩救不回这个会话。
 		message := kept[i]
 		message.Images = nil
+		message.Audio = nil
 		out = append(out, message)
 	}
 

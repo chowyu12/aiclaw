@@ -25,9 +25,21 @@ type ToolCall struct {
 //
 // ToolCallID 只在 RoleTool 上有值：Chat Completions 要求工具结果消息
 // 通过它关联回是哪一次调用，缺了上游会报 400。
+type Audio struct {
+	SHA256         string   `json:"sha256,omitempty"`
+	Path           string   `json:"path"`
+	Format         string   `json:"format"`
+	DurationMS     int64    `json:"durationMs"`
+	RejectedRoutes []string `json:"rejectedRoutes,omitempty"`
+	Data           []byte   `json:"-"`
+}
+
 type Message struct {
-	ID         string `json:",omitempty"`
-	RequestID  string `json:",omitempty"`
+	Audio []Audio `json:"audio,omitempty"`
+	// Sampling is local display evidence, never serialized by protocol adapters.
+	Sampling   *protocol.Item `json:"sampling,omitempty"`
+	ID         string         `json:",omitempty"`
+	RequestID  string         `json:",omitempty"`
 	Role       Role
 	Content    string
 	ToolCalls  []ToolCall
@@ -103,6 +115,7 @@ type Usage struct {
 
 // Response 是一轮模型调用的结果。
 type Response struct {
+	Sampling      *protocol.Item
 	LocalItemID   string
 	Content       string
 	ToolCalls     []ToolCall

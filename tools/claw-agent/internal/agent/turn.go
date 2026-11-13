@@ -8,6 +8,7 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -109,16 +110,16 @@ func (s *Session) RunTurn(
 	defer s.stopGoalClock()
 	emitter.Notify(protocol.NotifyTurnStarted, protocol.TurnNotification{SessionID: s.ID, TurnID: turnID})
 
-	// 音频先转成文字：模型读不了音频，而用户发过来就是希望它「听」到。
-	// 转写接在正文后面，界面上的那条消息仍是用户原话。
-	transcript := s.transcribeAttached(ctx, audioPaths)
+	// Resolve native audio capability first; otherwise use the configured STT role.
+	// Transcripts are model context; visible audio references remain in the user message.
+	transcript, audio := s.prepareAttachedAudio(ctx, audioPaths)
 	// 上一轮被中断时排着队的输入还在 pending 里：先放它们，再放这一条——历史里的
 	// 先后要和用户发送的先后一致（早先它们会被插到这一条后面）。
 	s.drainPending(ctx, turnID, emitter)
 	// 没有新输入的一轮：由邮箱里的消息开起来的（子 agent 完成、followup_task），
 	// 排着的那几条上面已经插进去了，不再补一条空的用户消息。
 	if text != "" || transcript != "" || len(images) > 0 || len(audioPaths) > 0 {
-		s.acceptUserInput(ctx, turnID, text, transcript, images, emitter, refs, requestID)
+		s.acceptUserInput(ctx, turnID, text, transcript, images, audio, emitter, refs, requestID)
 	}
 
 	s.addGoalContext()
@@ -154,6 +155,7 @@ func (s *Session) RunTurn(
 			completed.Error = err.Error()
 		}
 	}
+	saveStarted := time.Now()
 	if saveErr := s.Checkpoint(); saveErr != nil {
 		completed.Error = saveErr.Error()
 	} else if s.db != nil {
@@ -169,6 +171,14 @@ func (s *Session) RunTurn(
 			completed.Error = saveErr.Error()
 		}
 	}
+	saveItem := protocol.Item{ID: newID("save"), Kind: protocol.ItemNotice, Phase: "save", Text: i18n.D("保存会话"), StartedAt: saveStarted.UnixMilli(), DurationMS: time.Since(saveStarted).Milliseconds()}
+	s.recordPhase(saveItem)
+	s.mu.Lock()
+	if s.persistenceErr != nil {
+		completed.Error = s.persistenceErr.Error()
+	}
+	s.mu.Unlock()
+	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: saveItem})
 	emitter.Notify(protocol.NotifyTurnCompleted, completed)
 }
 
@@ -181,13 +191,18 @@ func (s *Session) RunTurn(
 // text 是用户原话，transcript 是附带音频的转写（没有就是空串）。两者分开传：
 // 界面上显示原话，进模型历史的是原话加转写与转述；存档里两份都留（Message.Shown），
 // 切回会话时还原的才是用户发的那一版。
-func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript string, images [][]byte, emitter Emitter, refs []protocol.ThreadRef, requestID string) {
+func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript string, images [][]byte, audio []llm.Audio, emitter Emitter, refs []protocol.ThreadRef, requestID string) {
 	if s.db != nil && requestID != "" {
 		if err := s.db.SetSubmission(context.Background(), s.ID, requestID, turnID, "running"); err != nil {
 			s.mu.Lock()
 			s.persistenceErr = err
 			s.mu.Unlock()
 			return
+		}
+	}
+	if len(audio) > 0 {
+		for _, a := range audio {
+			text += "\n[Audio: " + filepath.Base(a.Path) + "]"
 		}
 	}
 	userID := newID("user")
@@ -209,7 +224,7 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 		// 正文的 user 消息，常常当成「继续」接着做上一件事（见 interruptMarker）。
 		content = fmt.Sprintf("(The user sent %d image(s) with no text.)", len(images))
 	}
-	message := llm.Message{ID: userID, RequestID: requestID, Role: llm.RoleUser, Content: content, Images: images}
+	message := llm.Message{ID: userID, RequestID: requestID, Role: llm.RoleUser, Content: content, Images: images, Audio: audio}
 	if len(images) > 0 && !s.config.ModelSeesImages {
 		if described := s.describeImages(ctx, images); described != "" {
 			message.Content += described
@@ -333,8 +348,8 @@ func (s *Session) drainPending(ctx context.Context, turnID string, emitter Emitt
 			s.acceptAgentMail(turnID, input, emitter)
 			continue
 		}
-		transcript := s.transcribeAttached(ctx, input.audioPaths)
-		s.acceptUserInput(ctx, turnID, input.text, transcript, input.images, emitter, input.refs, input.requestID)
+		transcript, audio := s.prepareAttachedAudio(ctx, input.audioPaths)
+		s.acceptUserInput(ctx, turnID, input.text, transcript, input.images, audio, emitter, input.refs, input.requestID)
 	}
 }
 
@@ -440,8 +455,8 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		s.mu.Unlock()
 		cancelSample()
 		if steered {
-			if strings.TrimSpace(response.Content) != "" {
-				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content})
+			if strings.TrimSpace(response.Content) != "" || response.Sampling != nil {
+				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content, Sampling: response.Sampling})
 			}
 			continue
 		}
@@ -449,8 +464,8 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			// 最后一次采样断在半截（用户中断、重试用尽）：已经给用户看过的那段正文
 			// 记进历史——模型下一轮知道自己说到哪了，切回会话也还在。工具调用不记：
 			// 断在半截的调用没有结果，记了下一次请求就是 400。与 Codex 0.156 同一个修复。
-			if partial := strings.TrimSpace(response.Content); partial != "" {
-				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content})
+			if strings.TrimSpace(response.Content) != "" || response.Sampling != nil {
+				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content, Sampling: response.Sampling})
 			}
 			return total, err
 		}
@@ -458,8 +473,8 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		// A completed response can race with new input. Do not dispatch its stale
 		// tool calls; no tool-call message has entered history yet.
 		if s.hasPending() && ctx.Err() == nil {
-			if strings.TrimSpace(response.Content) != "" {
-				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content})
+			if strings.TrimSpace(response.Content) != "" || response.Sampling != nil {
+				s.appendMessage(llm.Message{ID: response.LocalItemID, Role: llm.RoleAssistant, Content: response.Content, Sampling: response.Sampling})
 			}
 			continue
 		}
@@ -469,6 +484,7 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 			Content:       response.Content,
 			ToolCalls:     response.ToolCalls,
 			ProviderState: response.ProviderState,
+			Sampling:      response.Sampling,
 		})
 
 		if len(response.ToolCalls) == 0 {
@@ -734,9 +750,10 @@ func (s *Session) callModel(
 		temperature = &value
 	}
 
+	messages := s.audioMessages(model)
 	response, err := client.Stream(ctx, llm.Request{
 		Model:               model.Model,
-		Messages:            s.snapshotMessages(),
+		Messages:            messages,
 		Tools:               s.llmTools(),
 		Temperature:         temperature,
 		MaxTokens:           model.MaxTokens,
@@ -771,6 +788,7 @@ func (s *Session) callModel(
 		}
 	})
 
+	s.recordAudioRejection(model, messages, err)
 	if thinkStart != 0 && thinking == 0 {
 		thinking = time.Since(llmStart) - thinkStart
 	}
@@ -781,27 +799,25 @@ func (s *Session) callModel(
 		Input: usage.InputTokens, Output: usage.OutputTokens, Total: usage.TotalTokens,
 		Failed: err != nil, DurationMS: time.Since(llmStart).Milliseconds(),
 	})
-	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{
-		SessionID: s.ID, TurnID: turnID,
-		Item: protocol.Item{
-			ID: llmItemID, Kind: protocol.ItemLLM,
-			Summary: model.Model, Model: model.Model,
-			Text:       strings.TrimSpace(reasoning.String()),
-			Seq:        llmSeq,
-			Round:      round,
-			StartedAt:  llmStart.UnixMilli(),
-			DurationMS: time.Since(llmStart).Milliseconds(),
-			TTFTMS:     ttft.Milliseconds(),
-			ThinkMS:    thinking.Milliseconds(),
-			ToolCalls:  len(response.ToolCalls),
-			Usage: &protocol.Usage{
-				InputTokens:  usage.InputTokens,
-				OutputTokens: usage.OutputTokens,
-				TotalTokens:  usage.TotalTokens,
-			},
-			ToolFailed: err != nil,
+	response.Sampling = &protocol.Item{
+		ID: llmItemID, Kind: protocol.ItemLLM,
+		Summary: model.Model, Model: model.Model,
+		Text:       strings.TrimSpace(reasoning.String()),
+		Seq:        llmSeq,
+		Round:      round,
+		StartedAt:  llmStart.UnixMilli(),
+		DurationMS: time.Since(llmStart).Milliseconds(),
+		TTFTMS:     ttft.Milliseconds(),
+		ThinkMS:    thinking.Milliseconds(),
+		ToolCalls:  len(response.ToolCalls),
+		Usage: &protocol.Usage{
+			InputTokens:  usage.InputTokens,
+			OutputTokens: usage.OutputTokens,
+			TotalTokens:  usage.TotalTokens,
 		},
-	})
+		ToolFailed: err != nil,
+	}
+	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: *response.Sampling})
 	if err != nil {
 		s.mu.Lock()
 		if s.config.Model == model {
@@ -896,7 +912,7 @@ func (s *Session) executeOne(
 		}
 		output += toolErrorResult(err.Error())
 	}
-	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: s.historyOutput(ctx, output), Artifacts: item.Artifacts, OutputContent: item.Content, Sources: item.Sources, At: time.Now().UnixMilli()}
+	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: s.historyOutput(ctx, output), Artifacts: item.Artifacts, OutputContent: item.Content, Sources: item.Sources, At: time.Now().UnixMilli(), Sampling: &protocol.Item{ID: item.ID, StartedAt: item.StartedAt, DurationMS: item.DurationMS}}
 	s.journalMessage(result)
 	return result
 }

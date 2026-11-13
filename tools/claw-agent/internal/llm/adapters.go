@@ -148,7 +148,11 @@ func (c *Client) ListModelsAndMetadata(ctx context.Context) ([]string, map[strin
 		}
 		if entry.Architecture.Inputs != nil {
 			cap.Vision = "unsupported"
+			cap.AudioInput = "unsupported"
 			for _, input := range *entry.Architecture.Inputs {
+				if input == "audio" {
+					cap.AudioInput = "supported"
+				}
 				if input == "image" {
 					cap.Vision = "supported"
 				}

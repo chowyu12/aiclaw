@@ -41,10 +41,15 @@ type wireMessage struct {
 }
 
 // contentPart 是多模态消息里的一段。带图时 content 从字符串变成这个的数组。
+type inputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
+}
 type contentPart struct {
-	Type     string    `json:"type"`
-	Text     string    `json:"text,omitempty"`
-	ImageURL *imageURL `json:"image_url,omitempty"`
+	InputAudio *inputAudio `json:"input_audio,omitempty"`
+	Type       string      `json:"type"`
+	Text       string      `json:"text,omitempty"`
+	ImageURL   *imageURL   `json:"image_url,omitempty"`
 }
 
 type imageURL struct {
@@ -123,7 +128,7 @@ func buildWireRequest(req Request) wireRequest {
 	for _, message := range req.Messages {
 		wire := wireMessage{Role: string(message.Role), ToolCallID: message.ToolCallID}
 		switch {
-		case len(message.Images) > 0:
+		case len(message.Images) > 0 || len(message.Audio) > 0:
 			// 有图就把 content 换成分段数组。图用 data URL 内联——
 			// 上游拿不到我们本机的文件，也不该为了一张截图去架一个图床。
 			parts := make([]contentPart, 0, len(message.Images)+1)
@@ -137,6 +142,9 @@ func buildWireRequest(req Request) wireRequest {
 						URL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(image),
 					},
 				})
+			}
+			for _, audio := range message.Audio {
+				parts = append(parts, contentPart{Type: "input_audio", InputAudio: &inputAudio{Data: base64.StdEncoding.EncodeToString(audio.Data), Format: audio.Format}})
 			}
 			wire.Content = parts
 		case message.Content == "" && len(message.ToolCalls) > 0:

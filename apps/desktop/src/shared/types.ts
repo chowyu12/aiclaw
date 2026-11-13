@@ -86,12 +86,17 @@ export interface HistoryItemView {
   toolResult?: string;
   toolFailed?: boolean;
   summary?: string;
-  /** 执行步骤的统计。还原出来的历史只有 seq / round / toolCalls，没有时间。 */
+  /** 执行步骤的统计。旧存档可能没有计时与用量。 */
   seq?: number;
   round?: number;
   toolCalls?: number;
   startedAt?: number;
   durationMs?: number;
+  phase?: "approval" | "save";
+  ttftMs?: number;
+  thinkMs?: number;
+  model?: string;
+  usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
 }
 
 /**
@@ -104,7 +109,7 @@ export interface ModelRouteView {
  apiProtocol: APIProtocol;
  source: string;
  sourceUrl?: string;
- capabilities: {tools?:string;vision?:string;reasoning?:string;reasoningEfforts?:string};
+ capabilities: {tools?:string;vision?:string;audioInput?:string;reasoning?:string;reasoningEfforts?:string};
 }
 
 export interface ProviderView {

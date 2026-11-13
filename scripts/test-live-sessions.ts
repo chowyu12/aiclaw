@@ -253,3 +253,27 @@ test("code-mode 子调用在实时事件与恢复历史中保留父步骤和失�
   assert.equal(restored.parentId, "exec");
   assert.equal(restored.durationMs, 12);
 });
+
+test("agent start text, deltas and authoritative completion merge once across tools", () => {
+ const live=fresh();
+ applyAgentEvent(live,event('item/started','A',{item:{id:'m',kind:'agentMessage',text:'Heading\n'}}),'A');
+ applyAgentEvent(live,event('item/delta','A',{itemId:'m',delta:'tail'}),'A');
+ applyAgentEvent(live,event('item/started','A',{item:{id:'m',kind:'agentMessage',text:'Heading\n'}}),'A');
+ assert.equal((live.A!.timeline[0] as {text:string}).text,'Heading\ntail');
+ applyAgentEvent(live,event('item/started','A',{item:{id:'tool',kind:'toolCall',toolName:'read_file'}}),'A');
+ applyAgentEvent(live,event('item/completed','A',{item:{id:'m',kind:'agentMessage',text:'## Corrected\nfinal'}}),'A');
+ const messages=live.A!.timeline.filter(i=>i.kind==='agent');assert.equal(messages.length,1);
+ assert.equal(messages[0]!.text,'## Corrected\nfinal');assert.equal(messages[0]!.streaming,false);
+});
+test("reasoning completion without start and restored sampling retain summary and timings",()=>{
+ const live=fresh(),item={id:'sampling',kind:'llm',text:'Visible summary',startedAt:1000,durationMs:500,ttftMs:200,toolFailed:true};
+ applyAgentEvent(live,event('item/completed','A',{item}),'A');
+ const step=live.A!.timeline[0];assert.ok(step?.kind==='step');assert.equal(step.detail,item.text);
+ const restored=restoreHistory([item])[0];assert.ok(restored?.kind==='step');assert.equal(restored.detail,item.text);assert.equal(restored.durationMs,500);assert.equal(restored.state,'failed');
+});
+test("both visible panes suppress unread while settings hide both",()=>{
+ const live=fresh();
+ for(const id of ['A','B','C']) {applyAgentEvent(live,event('turn/started',id),'A',['A','B']);applyAgentEvent(live,event('turn/completed',id),'A',['A','B']);}
+ assert.equal(!!live.A!.unread,false);assert.equal(!!live.B!.unread,false);assert.equal(live.C!.unread,true);
+ applyAgentEvent(live,event('turn/started','B'),'A',[]);applyAgentEvent(live,event('turn/completed','B'),'A',[]);assert.equal(live.B!.unread,true);
+});

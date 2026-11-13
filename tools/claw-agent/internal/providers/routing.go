@@ -72,11 +72,12 @@ type routeResolver struct {
 	metadata  map[string]model.ModelCapabilities
 	overrides map[string]model.APIProtocol
 	visions   map[string]bool
+	audios    map[string]bool
 	names     []string
 }
 
 func compileRoutes(p *model.Provider) *routeResolver {
-	r := &routeResolver{provider: p, profile: serviceProfile(p), overrides: modelOverrides(p), visions: map[string]bool{}}
+	r := &routeResolver{provider: p, profile: serviceProfile(p), overrides: modelOverrides(p), visions: map[string]bool{}, audios: map[string]bool{}}
 	var metadata catalogMetadata
 	if json.Unmarshal(p.ModelMetadata, &metadata) == nil && metadata.Profile == r.profile && metadata.BaseURL == p.BaseURL {
 		r.metadata = metadata.Models
@@ -85,6 +86,9 @@ func compileRoutes(p *model.Provider) *routeResolver {
 		parsed := protocol.ParseModelMark(entry)
 		r.names = append(r.names, parsed.Name)
 		for _, role := range parsed.Roles {
+			if role == protocol.RoleSTT {
+				r.audios[parsed.Name] = true
+			}
 			if role == protocol.RoleVision {
 				r.visions[parsed.Name] = true
 			}
@@ -119,6 +123,12 @@ func (r *routeResolver) resolve(name string) protocol.ModelRouteView {
 				route.Capabilities.ReasoningEfforts = "low,medium,high"
 			}
 		}
+	}
+	if (profile == "openai" || profile == "azure") && (name == "gpt-audio" || name == "gpt-audio-mini" || name == "gpt-4o-audio-preview") {
+		route.Capabilities.AudioInput = "supported"
+	}
+	if profile == "gemini" && r.audios[name] {
+		route.Capabilities.AudioInput = "supported"
 	}
 	// A gateway's own metadata takes precedence over built-in capability descriptions.
 	if caps, ok := r.metadata[name]; ok {

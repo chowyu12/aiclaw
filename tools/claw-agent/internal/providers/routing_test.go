@@ -52,7 +52,7 @@ func TestRoutingUsesServiceContractBeforeModelVendor(t *testing.T) {
 
 func TestOpenRouterMetadataStaysScopedAndPreservesManualModels(t *testing.T) {
 	ctx := context.Background()
-	body := `{"data":[{"id":"openai/gpt-6-astra","supported_parameters":["tools","reasoning"],"architecture":{"input_modalities":["text","image"]}},{"id":"text-only","supported_parameters":[],"architecture":{"input_modalities":["text"]}},{"id":"unknown"}]}`
+	body := `{"data":[{"id":"openai/gpt-6-astra","supported_parameters":["tools","reasoning"],"architecture":{"input_modalities":["text","image","audio"]}},{"id":"text-only","supported_parameters":[],"architecture":{"input_modalities":["text"]}},{"id":"unknown"}]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(body)) }))
 	defer srv.Close()
 	db, err := appdb.Open(filepath.Join(t.TempDir(), "app.db"))
@@ -70,12 +70,12 @@ func TestOpenRouterMetadataStaysScopedAndPreservesManualModels(t *testing.T) {
 	}
 	cfg := protocol.ModelConfig{ProviderID: p.ID, Model: "openai/gpt-6-astra"}
 	_, err = store.Resolve(ctx, &cfg)
-	if err != nil || cfg.APIProtocol != model.APIChatCompletions || cfg.Capabilities.Tools != "supported" || cfg.Capabilities.Vision != "supported" {
+	if err != nil || cfg.APIProtocol != model.APIChatCompletions || cfg.Capabilities.Tools != "supported" || cfg.Capabilities.Vision != "supported" || cfg.Capabilities.AudioInput != "supported" {
 		t.Fatal(cfg, err)
 	}
 	cfg.Model = "text-only"
 	_, _ = store.Resolve(ctx, &cfg)
-	if cfg.Capabilities.Tools != "unsupported" || cfg.Capabilities.Vision != "unsupported" {
+	if cfg.Capabilities.Tools != "unsupported" || cfg.Capabilities.Vision != "unsupported" || cfg.Capabilities.AudioInput != "unsupported" {
 		t.Fatal("explicit absence not preserved", cfg)
 	}
 	cfg.Model = "unknown"

@@ -539,15 +539,17 @@ function registerIpc(): void {
     if (!session) throw new Error(tr("找不到预览文件所属的会话。"));
     return readTextPreview(input.path, { base: session.workdir, protectedPaths: [store.dataDir] });
   });
-  ipcMain.handle(IPC.fileOpen, (_event, path: string) =>
-    openFromChat(path, {
-      base: sessions.currentWorkspace(),
-      protectedPaths: [store.dataDir],
-    }),
+  async function fileWorkspace(sessionId?: string): Promise<string> {
+    if (!sessionId) return sessions.currentWorkspace();
+    const session = (await sessions.listSessions()).find(session => session.id === sessionId && !session.archivedAt);
+    if (!session) throw new Error(tr("找不到预览文件所属的会话。"));
+    return session.workdir;
+  }
+  ipcMain.handle(IPC.fileOpen, async (_event, path: string, sessionId?: string) =>
+    openFromChat(path, { base: await fileWorkspace(sessionId), protectedPaths: [store.dataDir] }),
   );
-  // 内联显示产出物：路径同样来自模型输出，校验与打开走同一条线。
-  ipcMain.handle(IPC.fileMedia, (_event, path: string) =>
-    readMedia(path, { base: sessions.currentWorkspace(), protectedPaths: [store.dataDir] }),
+  ipcMain.handle(IPC.fileMedia, async (_event, path: string, sessionId?: string) =>
+    readMedia(path, { base: await fileWorkspace(sessionId), protectedPaths: [store.dataDir] }),
   );
   ipcMain.handle(IPC.audioStage, (_event, input: { name: string; data: string }) =>
     stageAudio(input.name, input.data),

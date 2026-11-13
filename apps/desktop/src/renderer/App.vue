@@ -11,6 +11,7 @@ import { normalizeTheme } from "../shared/themes";
 import { locale, t } from "./i18n";
 
 /** 「配完了」= 选好了默认模型（它所属的模型服务在库里带着端点与 Key）。 */
+const SideConversation = defineAsyncComponent(() => import("./views/SideConversation.vue"));
 const WorkspaceFiles = defineAsyncComponent(() => import("./views/WorkspaceFiles.vue"));
 const FilePreview = defineAsyncComponent(() => import("./views/FilePreview.vue"));
 const SettingsShell = defineAsyncComponent(() => import("./views/SettingsShell.vue"));
@@ -26,6 +27,12 @@ watch(() => [store.config?.theme, store.config?.font, store.config?.fontSize] as
   root.style.setProperty("--conversation-font-size", `${normalizeFontSize(fontSize)}px`);
 }, { immediate: true });
 
+watch(() => store.fileBrowser || !!store.filePreview, open => { if (open) actions.closeSideSession(); });
+function openSide(): void {
+  if (store.sideSessionId) { actions.closeSideSession(); return; }
+  const target = store.sessions.find(session => session.id !== store.sessionId && !session.archivedAt);
+  if (target) void actions.openSideSession(target.id);
+}
 const configured = computed(() => Boolean(store.config?.providerId && store.config.model));
 const sessionsOpen = ref(true);
 const isMac = navigator.userAgent.includes("Macintosh");
@@ -84,6 +91,7 @@ onMounted(() => {
         </button>
         <span class="workspace-mode">{{ store.view === 'chat' ? t('工作台') : t('设置') }}</span>
         <button v-if="!sessionsOpen && store.view === 'chat'" class="toolbar-settings" :aria-label="t('设置')" :title="t('设置')" @click="actions.setView('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18 M8 3v6M16 9v6M10 15v6"/></svg></button>
+        <button v-if="store.view === 'chat' && store.sessions.some(session => session.id !== store.sessionId && !session.archivedAt)" class="side-toggle" :aria-label="t('并排会话')" :title="t('并排会话')" :aria-pressed="!!store.sideSessionId" @click="openSide"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 4v16"/></svg></button>
       </header>
       <ComputerControlBar />
       <div v-if="store.error" class="error-bar">
@@ -95,6 +103,7 @@ onMounted(() => {
       <div class="content">
         <template v-if="store.view === 'chat'">
           <ChatView :configured="configured" />
+          <SideConversation v-if="store.sideSessionId" />
           <WorkspaceFiles v-if="store.fileBrowser" />
           <FilePreview v-else-if="store.filePreview && store.filePreview.sessionId === store.sessionId" :preview="store.filePreview" />
         </template>
@@ -131,6 +140,7 @@ onMounted(() => {
 .workspace-toolbar svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; }
 .workspace-mode { margin:auto; padding:2px 9px; border-radius:var(--r-full); background:var(--surface-2); color:var(--ink-2); font-size:10px; }
 .workspace-toolbar::after { content:""; width:28px; }
+.workspace-toolbar:has(.side-toggle)::after { display:none; }
 .workspace-toolbar:has(.toolbar-settings)::after { display:none; }
 .rail-unread { position:absolute; right:1px; top:1px; width:6px; height:6px; border-radius:50%; background:#0878e8; }
 

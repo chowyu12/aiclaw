@@ -14,6 +14,7 @@ if (process.platform === "darwin") {
     execFileSync(binary, [], { stdio: "inherit" });
     execFileSync(process.execPath,[join(repo,"scripts/test-native-capture.mjs")],{stdio:"inherit"});
     execFileSync(process.execPath,[join(repo,"scripts/test-mac-signing.mjs")],{stdio:"inherit"});
+    if (process.env.COMPUTER_USE_SIGN_IDENTITY!=="-") execFileSync(process.execPath,[join(repo,"scripts/test-computer-cache.mjs")],{stdio:"inherit"});
     if (process.env.COMPUTER_USE_SIGN_IDENTITY!=="-") {
       execFileSync(process.execPath,[join(repo,"scripts/test-computer-peer-auth.mjs")],{stdio:"inherit"});
       execFileSync(process.execPath,["--experimental-strip-types","--import",join(repo,"scripts/ts-resolve.mjs"),join(repo,"scripts/test-computer-listener-auth.mjs")],{stdio:"inherit"});

@@ -277,6 +277,7 @@ func TestTurnWithoutToolsEmitsMessageAndCompletes(t *testing.T) {
 		protocol.NotifyItemDelta,
 		protocol.NotifyItemCompleted, // llm
 		protocol.NotifyItemCompleted, // agentMessage
+		protocol.NotifyItemCompleted, // save phase
 		protocol.NotifyTurnCompleted,
 	}
 	if strings.Join(methods, ",") != strings.Join(want, ",") {

@@ -50,7 +50,7 @@ export function groupTurns(timeline: readonly TimelineEntry[]): Turn[] {
       current = { key: `lead-${entry.id}`, user: null, messages: [], steps: [], entries: [] };
       turns.push(current);
     }
-    current.entries.push(entry);
+    if (entry.kind !== "step" || !entry.phase) current.entries.push(entry);
     if (entry.kind === "step") current.steps.push(entry);
     else current.messages.push(entry);
   }

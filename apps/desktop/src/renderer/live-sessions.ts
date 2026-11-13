@@ -52,6 +52,7 @@ export type TimelineEntry =
       kind: "step";
       id: string;
       parentId?: string;
+      phase?: "approval" | "save";
       content?: readonly { type: string; url: string; hint?: string }[];
       /** llm：一次模型采样；tool：工具调用；notice：内核说的话。 */
       step: "llm" | "tool" | "notice";
@@ -109,6 +110,7 @@ type StepStats = Pick<
   Extract<TimelineEntry, { kind: "step" }>,
   | "content"
   | "parentId"
+  | "phase"
   | "seq"
   | "startedAt"
   | "durationMs"
@@ -186,6 +188,7 @@ export function stepStats(item: Record<string, unknown>): StepStats {
   return {
     content: Array.isArray(item.content) ? item.content as { type: string; url: string; hint?: string }[] : undefined,
     parentId: typeof item.parentId === "string" ? item.parentId : undefined,
+    phase: item.phase === "approval" || item.phase === "save" ? item.phase : undefined,
     seq: numberOr(item.seq),
     startedAt: numberOr(item.startedAt),
     durationMs: numberOr(item.durationMs),
@@ -213,7 +216,7 @@ export function applyAgentEvent(
   live: Record<string, LiveSession>,
   payload: AgentEventPayload,
   fallback: string,
-  visibleSessionId = fallback,
+  visibleSessionId: string | readonly string[] = fallback,
 ): Applied {
   const params = (payload.params ?? {}) as Record<string, unknown>;
   const sessionId = typeof params.sessionId === "string" && params.sessionId ? params.sessionId : fallback;
@@ -226,9 +229,12 @@ export function applyAgentEvent(
       const item = (params.item ?? {}) as Record<string, unknown>;
       const id = String(item.id ?? "");
       switch (item.kind) {
-        case "agentMessage":
-          upsertAgent(record, id);
+        case "agentMessage": {
+          const existing = findEntry(record, id);
+          const entry = upsertAgent(record, id);
+          if (!existing && entry.kind === "agent" && typeof item.text === "string") entry.text = item.text;
           return applied;
+        }
         case "toolCall":
           pushStep(record, id, "tool", describeTool(item), "running", "", stepStats(item));
           return applied;
@@ -309,7 +315,7 @@ export function applyAgentEvent(
           const title = typeof item.summary === "string" ? item.summary : tr("模型");
           const entry = findEntry(record, id);
           if (!entry || entry.kind !== "step") {
-            pushStep(record, id, "llm", title, item.toolFailed ? "failed" : "done", "", stats);
+            pushStep(record, id, "llm", title, item.toolFailed ? "failed" : "done", typeof item.text === "string" ? item.text : "", stats);
             return applied;
           }
           entry.state = item.toolFailed ? "failed" : "done";
@@ -353,7 +359,7 @@ export function applyAgentEvent(
       record.busy = true;
       return applied;
     case "turn/completed": {
-      if (record.busy && sessionId !== visibleSessionId && !INTERRUPTED.has(String(params.error ?? ""))) record.unread = true;
+      if (record.busy && !(typeof visibleSessionId === "string" ? sessionId === visibleSessionId : visibleSessionId.includes(sessionId)) && !INTERRUPTED.has(String(params.error ?? ""))) record.unread = true;
       record.busy = false;
       for (const entry of record.timeline) {
         if (entry.kind === "agent") entry.streaming = false;
@@ -448,8 +454,8 @@ export function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
           id: item.id,
           step: "llm",
           title: item.summary || tr("模型"),
-          detail: "",
-          state: "done",
+          detail: item.text ?? "",
+          state: item.toolFailed ? "failed" : "done",
           ...stepStats(item as unknown as Record<string, unknown>),
         });
         break;

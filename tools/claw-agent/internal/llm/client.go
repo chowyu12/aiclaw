@@ -91,11 +91,26 @@ func (c *Client) Stream(ctx context.Context, req Request, onDelta func(Delta)) (
 			req.ReasoningEffort = ""
 		}
 	}
-	req.Messages = normaliseHistory(req.Messages)
+	messages := make([]Message, 0, len(req.Messages))
+	for _, message := range req.Messages {
+		if message.Role == RoleAssistant && message.Content == "" && len(message.ToolCalls) == 0 && message.Sampling != nil {
+			continue
+		}
+		messages = append(messages, message)
+	}
+	req.Messages = normaliseHistory(messages)
 	if len(req.Tools) > 0 && c.capabilities.Tools == "unsupported" {
 		return Response{}, &Error{Status: 400, Message: "This model does not support tools; choose a tool-capable model"}
 	}
 	for _, m := range req.Messages {
+		if len(m.Audio) > 0 && (c.capabilities.AudioInput != "supported" || (c.protocol != model.APIChatCompletions && c.protocol != model.APIGemini)) {
+			return Response{}, &Error{Status: 400, Code: "unsupported_audio", Message: "This model route does not support native audio input"}
+		}
+		for _, audio := range m.Audio {
+			if len(audio.Data) == 0 || (audio.Format != "wav" && audio.Format != "mp3") {
+				return Response{}, &Error{Status: 400, Code: "invalid_audio", Message: "Native audio must contain WAV or MP3 data"}
+			}
+		}
 		if len(m.Images) > 0 && c.capabilities.Vision == "unsupported" {
 			return Response{}, &Error{Status: 400, Message: "This model does not support image input"}
 		}

@@ -5,7 +5,7 @@ import { describeError } from "../errors";
 import { t } from "../i18n";
 import { filename } from "../file-card";
 
-const props = defineProps<{ paths: string[]; embedded?: boolean; alt?: string }>();
+const props = defineProps<{ paths: string[]; sessionId?: string; embedded?: boolean; alt?: string }>();
 defineEmits<{ loaded: [] }>();
 const root = ref<HTMLElement | null>(null);
 const visible = ref(false);
@@ -34,14 +34,18 @@ onMounted(() => {
   if (root.value) observer.observe(root.value);
 });
 onUnmounted(() => observer?.disconnect());
-watch(() => [visible.value, props.paths] as const, () => {
+let revision = 0;
+watch(() => props.sessionId, () => { revision++; for (const path of Object.keys(media)) delete media[path]; });
+watch(() => [visible.value, props.paths, props.sessionId] as const, () => {
   if (!visible.value) return;
   for (const path of props.paths) {
     if (media[path]) continue;
     media[path] = {};
-    void actions.readMedia(path).then(file => {
+    const request = revision;
+    void actions.readMedia(path, props.sessionId).then(file => {
+      if (request !== revision) return;
       media[path] = file.kind === "image" ? { dataUrl: file.dataUrl } : { error: t("图片无法显示") };
-    }).catch(error => { media[path] = { error: describeError(error) }; });
+    }).catch(error => { if (request === revision) media[path] = { error: describeError(error) }; });
   }
 }, { deep: true });
 </script>
@@ -54,7 +58,7 @@ watch(() => [visible.value, props.paths] as const, () => {
       </button>
       <p v-else-if="media[path]?.error" class="image-error" role="status">{{ media[path]!.error }}</p>
       <p v-else class="image-loading">{{ t("正在读取…") }}</p>
-      <figcaption><button class="image-path" @click="actions.openFile(path)">{{ filename(path) }}</button></figcaption>
+      <figcaption><button class="image-path" @click="actions.openFile(path, false, sessionId)">{{ filename(path) }}</button></figcaption>
     </figure>
     <dialog ref="viewer" class="image-viewer" :aria-label="t('查看大图')" @click="closeBackdrop" @close="selected = ''">
       <button class="viewer-close" :aria-label="t('关闭图片预览')" @click="viewer?.close()">×</button>

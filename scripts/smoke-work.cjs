@@ -22,7 +22,7 @@ app.whenReady().then(async()=>{
  let configurationCards=[];const configurationReplies=[];
  let pluginFixtures=[],bindingFixtures=[];const channelAuthorizations=[];
  const pushQueue=()=>win.webContents.send(IPC.onAgentEvent,{method:'session/queueUpdated',params:{sessionId:'s',pending:queuedInputs,queuedRequestIds:queueAuto?queuedInputs.map(p=>p.requestId):[]}});
- const mediaReads=[],openedFiles=[],previewReads=[];let deferPreview=false,resolvePreview;
+ const mediaReads=[],mediaOwners=[],openedFiles=[],previewReads=[];let deferPreview=false,resolvePreview;
  const imageData='data:image/png;base64,'+readFileSync(join(desktop,'assets/logo-source.png')).toString('base64');
  const changes=[{id:'c',path:'/tmp/smoke/example.sql',before:'-- Users\nSELECT id FROM users WHERE active = 0;\n',after:'-- Users\nSELECT id, email FROM users WHERE active = 1;\n',state:'applied',conflict:false,turnId:'t1',createdAt:1},{id:'conflict',path:'/tmp/smoke/other.txt',before:'x',after:'y',state:'applied',conflict:true,turnId:'t2',createdAt:2}];
  const groups={groups:[{id:'g_saved',name:'原有分组'}],assignments:{s:'g_saved',scheduled:'__scheduled__',c_channel:'g_saved'},collapsed:{},seenAt:{}};
@@ -56,7 +56,7 @@ app.whenReady().then(async()=>{
  handle('workspaceFiles',(_e,input)=>{browseReads.push(input);return {root:'/tmp/smoke',truncated:false,entries:input.query?[{name:'example.sql',path:'src/example.sql',absolutePath:'/tmp/smoke/example.sql',directory:false}]:input.path?[{name:'example.sql',path:'src/example.sql',absolutePath:'/tmp/smoke/example.sql',directory:false}]:[{name:'src',path:'src',absolutePath:'/tmp/smoke/src',directory:true},{name:'report.md',path:'report.md',absolutePath:'/tmp/smoke/report.md',directory:false}]};});
  let updatePreparations=0,prepareHold=false,finishPrepare;handle('updatePrepare',()=>{updatePreparations++;if(prepareHold)return new Promise(resolve=>{finishPrepare=resolve;});return {ready:false,version:'99.0.0',detail:''};});
  let finishUpdate,updateInstalls=0;handle('updateInstall',()=>{updateInstalls++;return new Promise(resolve=>{finishUpdate=resolve;});});
- handle('fileMedia',(_e,path)=>{mediaReads.push(path);if(path==='generated/missing.png')throw Error('Image file missing');return {kind:'image',dataUrl:imageData};});
+ handle('fileMedia',(_e,path,sessionId)=>{mediaReads.push(path);mediaOwners.push({path,sessionId});if(path==='generated/missing.png')throw Error('Image file missing');return {kind:'image',dataUrl:imageData};});
  let previewWindowWidth=null;handle('filePreviewLayout',(_e,open)=>{if(open&&previewWindowWidth===null){previewWindowWidth=win.getBounds().width;win.setSize(previewWindowWidth+730,win.getBounds().height);}else if(!open&&previewWindowWidth!==null){win.setSize(previewWindowWidth,win.getBounds().height);previewWindowWidth=null;}});
  const htmlPreviewFixture='<!doctype html><html lang="zh-CN"><head><style>body{margin:0;background:#f5f6f8;color:#0f172a;font:15px sans-serif}.report-card{background:#eef4ff;padding:24px;margin:20px;border-radius:12px}</style><meta http-equiv="refresh" content="0;url=https://example.com/html-preview-probe-refresh"></head><body><article class="report-card"><h1>HTML 报告预览</h1><p>工作复盘报告</p><table><tr><td>已完成</td></tr></table></article><script>parent.document.body.dataset.htmlPreviewEscaped="yes"</script><img src="https://example.com/html-preview-probe-image" onerror="parent.pwned=1"></body></html>';
  let htmlPreviewNetworkRequests=0;
@@ -120,6 +120,17 @@ app.whenReady().then(async()=>{
  check('studio opens with navigation and the conversation sidebar visible by default',await wait("document.querySelector('.sidebar')?.contains(document.querySelector('.activity-rail')) && document.querySelector('.activity-rail').getBoundingClientRect().width===240 && document.querySelector('.sidebar').getBoundingClientRect().width===240 && document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').getAttribute('aria-expanded')==='true' && !!document.querySelector('.chat-header')"));
  check('window title area keeps native controls clear and content below its drag region',await js("(()=>{const bar=document.querySelector('.window-titlebar'),sidebar=document.querySelector('.sidebar').getBoundingClientRect();return navigator.userAgent.includes('Macintosh') ? !!bar && bar.getBoundingClientRect().bottom<=document.querySelector('.brand').getBoundingClientRect().top && bar.getBoundingClientRect().right<=document.querySelector('.pane').getBoundingClientRect().left && getComputedStyle(bar).getPropertyValue('-webkit-app-region')==='drag' && getComputedStyle(bar).borderBottomWidth==='0px' : !bar})()"));
  check('compact navigation offers one settings entry and no memory shortcut or version text',await js("document.querySelectorAll('.rail-bottom > button').length===1 && !!document.querySelector('.rail-bottom [data-view=settings]') && !document.querySelector('.activity-rail button[aria-label=\"记忆\"]') && !document.querySelector('.rail-version')"));
+ await js("document.querySelector('.side-toggle').click()");
+ check('side chat opens without replacing the main chat',await wait("!!document.querySelector('.side-conversation textarea:not(:disabled)') && document.querySelector('.chat-header').textContent.includes('Workflow test')"));
+ await js("(()=>{const input=document.querySelector('.side-conversation textarea');input.value='side-only draft';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.side-resize').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));})()");
+ check('side chat keyboard resize retains an independent draft',await js("document.querySelector('.side-conversation').getBoundingClientRect().width>=420 && document.querySelector('.side-conversation textarea').value==='side-only draft' && !document.querySelector('.composer textarea').value.includes('side-only draft')"));
+ await js("document.querySelector('.side-conversation .file-open-trigger').click()");
+ check('side file actions use their owning workspace and do not offer main-only previews',await wait("!!document.querySelector('.side-conversation .file-open-menu:popover-open')")&&await js("document.querySelector('.side-conversation .file-open-menu:popover-open').querySelectorAll('button').length===1")&&mediaOwners.some(entry=>entry.sessionId==='other'));
+ await js("document.querySelector('.side-conversation .file-open-menu:popover-open').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+
+ writeFileSync('/tmp/aiclaw-side-conversation.png',(await win.webContents.capturePage()).toPNG());
+ await js("document.querySelector('.side-conversation button[aria-label=\"关闭并排会话\"]').click()");
+ check('closing side chat restores the main pane without stopping it',await wait("!document.querySelector('.side-conversation') && !!document.querySelector('.composer')"));
  for(const [view,label] of [['providers','模型服务'],['skills','技能'],['schedules','定时任务']]){
   if(await js("getComputedStyle(document.querySelector('.activity-rail')).display==='none'")) await js("document.querySelector('.sidebar .head .new').click()");
   check('returning to chat restores footer shortcuts before '+view,await wait("getComputedStyle(document.querySelector('.activity-rail')).display!=='none'"));
@@ -342,10 +353,10 @@ app.whenReady().then(async()=>{
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-approval-profiles.png',(await win.webContents.capturePage()).toPNG());
  await js("document.querySelector('.composer .chip[data-policy]').click()");
- await js("[...document.querySelectorAll('.composer .chip,.composer-context .chip')].find(b=>b.textContent.includes('smoke')).click()");
+ await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('smoke')).click()");
  await click('恢复默认目录');
  check('resetting workspace moves the chat to the home aiclaw directory',await wait("document.querySelector('[data-bucket-id=\"workspace:/fixture/home/aiclaw\"] .item.active')"));
- await js("[...document.querySelectorAll('.composer .chip,.composer-context .chip')].find(b=>b.textContent.includes('aiclaw')).click()");
+ await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('aiclaw')).click()");
  await click('选择目录…');
  check('choosing workspace immediately restores the matching workspace bucket',await wait("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count')?.textContent==='3'"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
@@ -444,9 +455,9 @@ app.whenReady().then(async()=>{
  check('provider fallback updates the active reasoning selector',await wait("document.querySelector('.reasoning-picker select').value===''"));
  reasoningFails=false;await js("document.querySelector('.composer .model-button').click()");await click('知道了');
  win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'s',tools:['read_file','remote__new'],mcpStatus:{remote:'已挂载 1 个工具'},foldedTools:[]}});
- check('MCP catalog notification updates the active tools indicator',await wait("[...document.querySelectorAll('.composer .chip,.composer-context .chip')].some(b=>b.textContent.includes('工具 2'))"));
+ check('MCP catalog notification updates the active tools indicator',await wait("[...document.querySelectorAll('.composer .chip')].some(b=>b.textContent.includes('工具 2'))"));
  win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'other-workspace',tools:[],mcpStatus:{},foldedTools:[]}});
- check('background MCP catalog notification cannot replace the current session tools',await js("[...document.querySelectorAll('.composer .chip,.composer-context .chip')].some(b=>b.textContent.includes('工具 2'))"));
+ check('background MCP catalog notification cannot replace the current session tools',await js("[...document.querySelectorAll('.composer .chip')].some(b=>b.textContent.includes('工具 2'))"));
  win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'s',tools:[],mcpStatus:{},foldedTools:[]}});
  await draft('@');check('session mentions still open their own picker',await wait("!!document.querySelector('.mention-menu:not(.skill-menu)') && !document.querySelector('.skill-menu')"));await draftKey('Escape');await draft('');
  check('work panel rendered',await wait("!!document.querySelector('.work-panel') && [...document.querySelectorAll('.work-panel article')].some(a=>a.textContent.includes('uncertain input'))"));
@@ -1170,7 +1181,7 @@ app.whenReady().then(async()=>{
  await win.reload();
  check('empty chats show the workspace welcome card with 365 actual calendar days',await wait("!!document.querySelector('.workspace-welcome') && document.querySelectorAll('.calendar-day:not(.outside)').length===365"));
  check('one sidebar contains projects and all primary settings entries',await js("document.querySelector('.sidebar').contains(document.querySelector('.activity-rail')) && document.querySelector('.pane').getBoundingClientRect().left===document.querySelector('.sidebar').getBoundingClientRect().right && parseFloat(getComputedStyle(document.querySelector('.pane')).borderTopLeftRadius)>=12"));
- check('workspace and tools sit below the input card with menus still available',await js("!!document.querySelector('.composer-context .workspace-chip') && document.querySelector('.composer-context').getBoundingClientRect().top>=document.querySelector('.composer').getBoundingClientRect().bottom"));
+ check('workspace and tool controls stay inside the input card',await js("(()=>{const composer=document.querySelector('.composer'),box=composer.getBoundingClientRect(),workspace=composer.querySelector('.bar-left .workspace-chip'),tools=[...composer.querySelectorAll('.bar-left .chip')].find(b=>b.textContent.includes('工具'));return !document.querySelector('.composer-context')&&[workspace,tools].every(button=>{if(!button)return false;const rect=button.getBoundingClientRect();return rect.left>=box.left&&rect.right<=box.right&&rect.top>=box.top&&rect.bottom<=box.bottom;});})()"));
  check('welcome does not prefetch usage or invent credits',usageReads.length===0&&await js("!document.querySelector('.activity-card').textContent.includes('Credits') && !!document.querySelector('.calendar-day[data-level=\"4\"]')"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-workspace-home.png',(await win.webContents.capturePage()).toPNG());

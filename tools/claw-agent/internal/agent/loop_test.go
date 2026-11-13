@@ -455,6 +455,9 @@ func TestHistoryRebuildsTimeline(t *testing.T) {
 
 	var kinds []string
 	for _, item := range items {
+		if item.Phase != "" {
+			continue
+		}
 		kinds = append(kinds, string(item.Kind))
 	}
 	// 每条 assistant 消息还原成一个采样步骤，排在它引发的工具之前——
