@@ -48,7 +48,6 @@ const draft = computed({ get: () => draftFor(store.sessionId).text, set: value =
 const scroller = ref<HTMLElement | null>(null);
 const modelOpen = ref(false);
 const policyOpen = ref(false);
-const statusOpen = ref(false);
 
 async function scrollToEnd(): Promise<void> {
   await nextTick();
@@ -686,30 +685,6 @@ function stepsSummary(turn: Turn): string {
   return t("用时 {minutes} 分 {seconds} 秒", { minutes: Math.floor(seconds / 60), seconds: seconds % 60 });
 }
 
-/**
- * 挂载状态。
- *
- * 「MCP server 到底挂上了没有」原来只能靠模型自己说，而模型经常只捡它想说的讲。
- * 这里如实列出内核报回来的每一项：成功的写挂了几个工具，失败的把原因原样带出来。
- */
-const mounts = computed(() => {
-  const entries = Object.entries(store.sessionInfo?.mcpStatus ?? {});
-  // 失败的排前面：面板会滚动，把唯一需要动手的那条埋在下面等于没显示。
-  return entries.sort((a, b) => Number(mountFailed(b[1])) - Number(mountFailed(a[1])));
-});
-/**
- * 这一行是不是挂载失败。状态文字由内核按界面语言给出：中文带「失败」，英文带 "failed"
- * （"Failed to mount: …"）。两种都认——切换语言之后，已经开着的会话里还是旧语言的文字。
- */
-function mountFailed(status: string): boolean {
-  return status.includes("失败") || /\bfailed\b/i.test(status);
-}
-const failedMounts = computed(() =>
-  mounts.value.filter(([, status]) => mountFailed(status)),
-);
-/** 代码模式下收进 exec 的那些也算：它们在脚本里照样能调。 */
-const folded = computed(() => store.sessionInfo?.foldedTools ?? []);
-const toolCount = computed(() => (store.sessionInfo?.tools.length ?? 0) + folded.value.length);
 async function forkAt(itemId: string): Promise<void> {
   if (!store.sessionId || store.busy || forking.value) return;
   forking.value=true;forkError.value="";
@@ -907,9 +882,9 @@ const forking = ref(false);
           <!-- 透明背板：点菜单以外的任何地方都关掉它。没有它的话菜单开了
                就只能再点一次原按钮才关得掉，用户会以为界面卡住了。 -->
           <div
-            v-if="modelOpen || policyOpen || statusOpen || workspaceOpen"
+            v-if="modelOpen || policyOpen || workspaceOpen"
             class="backdrop"
-            @click="modelOpen = policyOpen = statusOpen = workspaceOpen = false"
+            @click="modelOpen = policyOpen = workspaceOpen = false"
           />
 
           <!-- 模型在等你回答的问题（ask_user）。在输入框上方而不是弹窗：上面模型做到
@@ -1042,40 +1017,6 @@ const forking = ref(false);
                     {{ t("恢复默认目录") }}
                   </button>
                 </div>
-                <!-- 工具数是「这次能用什么」最直接的一个数；有挂载失败时标红。 -->
-                <button
-                  class="chip"
-                  :class="{ bad: failedMounts.length > 0 }"
-                  @click="statusOpen = !statusOpen"
-                >
-                  <span class="chip-icon">{{ failedMounts.length > 0 ? "!" : "·" }}</span>
-                  {{ t("工具 {n}", { n: toolCount }) }}
-                </button>
-                <div v-if="statusOpen" class="menu status-menu" @click.stop>
-                  <div class="menu-head"><span>{{ t("这个会话挂上了什么") }}</span></div>
-                  <div class="status-row">
-                    <span class="menu-name">{{ t("内置工具与插件") }}</span>
-                    <span class="menu-note">{{ (store.sessionInfo?.tools ?? []).join(t("、")) || t("无") }}</span>
-                  </div>
-                  <!-- 代码模式：模型面前只有 exec 一个工具，但下面这些在脚本里
-                       都能 tools.xxx() 调到。不列出来用户会以为 MCP 没挂上。 -->
-                  <div v-if="folded.length > 0" class="status-row">
-                    <span class="menu-name">{{ t("收进 exec 的工具（{n}）", { n: folded.length }) }}</span>
-                    <span class="menu-note">{{ folded.join(t("、")) }}</span>
-                  </div>
-                  <div v-if="(store.sessionInfo?.skills ?? []).length > 0" class="status-row">
-                    <span class="menu-name">{{ t("技能") }}</span>
-                    <span class="menu-note">{{ (store.sessionInfo?.skills ?? []).join(t("、")) }}</span>
-                  </div>
-                  <div v-for="[name, status] in mounts" :key="name" class="status-row">
-                    <span class="menu-name" :class="{ bad: mountFailed(status) }">{{ name }}</span>
-                    <span class="menu-note">{{ status }}</span>
-                  </div>
-                  <p v-if="mounts.length === 0" class="menu-note pad">
-                    {{ t("没有挂载任何 MCP server。到「MCP」页添加。") }}
-                  </p>
-                </div>
-
                 <button class="chip" :disabled="store.policyChanging" :data-policy="store.config?.profile" @click="policyOpen = !policyOpen">
                   <span class="chip-icon">!</span>
                   {{ policy?.label ?? t("审批") }}
@@ -1827,31 +1768,6 @@ const forking = ref(false);
 }
 
 .chip[data-policy="bypass"] {
-  color: var(--danger);
-}
-
-.chip.bad {
-  color: var(--danger);
-}
-
-.status-menu {
-  left: 0;
-  min-width: 340px;
-  max-width: 460px;
-}
-
-.status-row {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  padding: 6px 10px;
-}
-
-.status-row + .status-row {
-  border-top: 1px solid var(--rule);
-}
-
-.menu-name.bad {
   color: var(--danger);
 }
 
