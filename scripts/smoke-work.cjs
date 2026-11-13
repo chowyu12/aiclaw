@@ -23,6 +23,7 @@ app.whenReady().then(async()=>{
  let pluginFixtures=[],bindingFixtures=[];const channelAuthorizations=[];
  const pushQueue=()=>win.webContents.send(IPC.onAgentEvent,{method:'session/queueUpdated',params:{sessionId:'s',pending:queuedInputs,queuedRequestIds:queueAuto?queuedInputs.map(p=>p.requestId):[]}});
  const mediaReads=[],mediaOwners=[],openedFiles=[],previewReads=[];let deferPreview=false,resolvePreview;
+ let releaseSideMedia;const sideMediaGate=new Promise(resolve=>{releaseSideMedia=resolve;});
  const imageData='data:image/png;base64,'+readFileSync(join(desktop,'assets/logo-source.png')).toString('base64');
  const changes=[{id:'c',path:'/tmp/smoke/example.sql',before:'-- Users\nSELECT id FROM users WHERE active = 0;\n',after:'-- Users\nSELECT id, email FROM users WHERE active = 1;\n',state:'applied',conflict:false,turnId:'t1',createdAt:1},{id:'conflict',path:'/tmp/smoke/other.txt',before:'x',after:'y',state:'applied',conflict:true,turnId:'t2',createdAt:2}];
  const groups={groups:[{id:'g_saved',name:'原有分组'}],assignments:{s:'g_saved',scheduled:'__scheduled__',c_channel:'g_saved'},collapsed:{},seenAt:{}};
@@ -56,7 +57,7 @@ app.whenReady().then(async()=>{
  handle('workspaceFiles',(_e,input)=>{browseReads.push(input);return {root:'/tmp/smoke',truncated:false,entries:input.query?[{name:'example.sql',path:'src/example.sql',absolutePath:'/tmp/smoke/example.sql',directory:false}]:input.path?[{name:'example.sql',path:'src/example.sql',absolutePath:'/tmp/smoke/example.sql',directory:false}]:[{name:'src',path:'src',absolutePath:'/tmp/smoke/src',directory:true},{name:'report.md',path:'report.md',absolutePath:'/tmp/smoke/report.md',directory:false}]};});
  let updatePreparations=0,prepareHold=false,finishPrepare;handle('updatePrepare',()=>{updatePreparations++;if(prepareHold)return new Promise(resolve=>{finishPrepare=resolve;});return {ready:false,version:'99.0.0',detail:''};});
  let finishUpdate,updateInstalls=0;handle('updateInstall',()=>{updateInstalls++;return new Promise(resolve=>{finishUpdate=resolve;});});
- handle('fileMedia',(_e,path,sessionId)=>{mediaReads.push(path);mediaOwners.push({path,sessionId});if(path==='generated/missing.png')throw Error('Image file missing');return {kind:'image',dataUrl:imageData};});
+ handle('fileMedia',async(_e,path,sessionId)=>{mediaReads.push(path);if(sessionId==='other')await sideMediaGate;mediaOwners.push({path,sessionId});if(path==='generated/missing.png')throw Error('Image file missing');return {kind:'image',dataUrl:imageData};});
  let previewWindowWidth=null;handle('filePreviewLayout',(_e,open)=>{if(open&&previewWindowWidth===null){previewWindowWidth=win.getBounds().width;win.setSize(previewWindowWidth+730,win.getBounds().height);}else if(!open&&previewWindowWidth!==null){win.setSize(previewWindowWidth,win.getBounds().height);previewWindowWidth=null;}});
  const htmlPreviewFixture='<!doctype html><html lang="zh-CN"><head><style>body{margin:0;background:#f5f6f8;color:#0f172a;font:15px sans-serif}.report-card{background:#eef4ff;padding:24px;margin:20px;border-radius:12px}</style><meta http-equiv="refresh" content="0;url=https://example.com/html-preview-probe-refresh"></head><body><article class="report-card"><h1>HTML 报告预览</h1><p>工作复盘报告</p><table><tr><td>已完成</td></tr></table></article><script>parent.document.body.dataset.htmlPreviewEscaped="yes"</script><img src="https://example.com/html-preview-probe-image" onerror="parent.pwned=1"></body></html>';
  let htmlPreviewNetworkRequests=0;
@@ -125,8 +126,14 @@ app.whenReady().then(async()=>{
  await js("(()=>{const input=document.querySelector('.side-conversation textarea');input.value='side-only draft';input.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('.side-resize').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));})()");
  check('side chat keyboard resize retains an independent draft',await js("document.querySelector('.side-conversation').getBoundingClientRect().width>=420 && document.querySelector('.side-conversation textarea').value==='side-only draft' && !document.querySelector('.composer textarea').value.includes('side-only draft')"));
  await js("document.querySelector('.side-conversation .file-open-trigger').click()");
- check('side file actions use their owning workspace and do not offer main-only previews',await wait("!!document.querySelector('.side-conversation .file-open-menu:popover-open')")&&await js("document.querySelector('.side-conversation .file-open-menu:popover-open').querySelectorAll('button').length===1")&&mediaOwners.some(entry=>entry.sessionId==='other'));
+ check('side file menu does not offer main-only previews',await wait("!!document.querySelector('.side-conversation .file-open-menu:popover-open')")&&await js("document.querySelector('.side-conversation .file-open-menu:popover-open').querySelectorAll('button').length===1"));
  await js("document.querySelector('.side-conversation .file-open-menu:popover-open').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+
+ check('side image stays pending while its media response is delayed',await js("!document.querySelector('.side-conversation .image-preview img')"));
+ if(!await wait("!!document.querySelector('.side-conversation .local-image')"))throw Error('side image placeholder unavailable');
+ await js("document.querySelector('.side-conversation .local-image').scrollIntoView({block:'center'})");
+ releaseSideMedia();
+ check('side image loads from its owning workspace after entering the viewport',await wait("!!document.querySelector('.side-conversation .image-preview img')")&&mediaOwners.some(entry=>entry.sessionId==='other'&&entry.path==='generated/cat.png'));
 
  writeFileSync('/tmp/aiclaw-side-conversation.png',(await win.webContents.capturePage()).toPNG());
  await js("document.querySelector('.side-conversation button[aria-label=\"关闭并排会话\"]').click()");
