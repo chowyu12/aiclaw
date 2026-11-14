@@ -100,6 +100,7 @@ export const IPC = {
   // 剪贴板里却什么都没有。
   clipboardWrite: "clipboard:write",
   updateCheck: "update:check",
+  updateReleases: "update:releases",
   updateInstall: "update:install",
   updatePrepare: "update:prepare",
 

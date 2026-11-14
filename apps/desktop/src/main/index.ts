@@ -20,6 +20,7 @@ import { Scheduler } from "./scheduler.js";
 import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
 import { normalizeLocale, setCurrentLocale, tr } from "../shared/i18n.js";
 import { Updater } from "./updater.js";
+import { fetchReleaseNotes } from "./release-notes.js";
 import { DiagnosticsLog, buildReport } from "./diagnostics.js";
 import { LogFile } from "./logfile.js";
 import { workspaceFiles } from "./workspace-files.js";
@@ -304,6 +305,7 @@ function registerIpc(): void {
     return true;
   });
   ipcMain.handle(IPC.updateCheck, () => updater.check());
+  ipcMain.handle(IPC.updateReleases, () => fetchReleaseNotes());
   // 下载进度往渲染层推：没有进度的话，用户点完「升级」看到的是一个不动的
   // 按钮，几十秒后应用突然退出——那不是慢，是没有反馈，但感觉比慢更糟。
   ipcMain.handle(IPC.updatePrepare, () =>

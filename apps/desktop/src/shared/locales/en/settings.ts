@@ -1,5 +1,18 @@
 /** 英文词典：settings 这一组界面（中文原文 → 英文）。 */
 export const settings: Record<string, string> = {
+  "关于": "About",
+  "版本信息与更新日志": "Version information and release notes",
+  "当前版本": "Current version",
+  "检查更新": "Check for updates",
+  "正在检查…": "Checking…",
+  "更新日志": "Release notes",
+  "正在加载更新日志…": "Loading release notes…",
+  "暂时无法加载更新日志": "Could not load release notes",
+  "暂无已发布的更新日志": "No published release notes",
+  "暂无更新说明": "No release notes",
+  "版本信息获取失败": "Could not load version information",
+  "查看发布页": "View release",
+
  "使用系统代理（重启本地运行时后生效）": "Use the system proxy (restart the runtime to apply)",
  "网络专项诊断": "Network diagnostics",
  "诊断中…": "Diagnosing…",

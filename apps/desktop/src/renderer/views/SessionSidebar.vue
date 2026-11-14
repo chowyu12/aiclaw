@@ -76,6 +76,7 @@ const NAV = computed(
       { id: "schedules", label: t("定时任务"), note: t("定时执行或在原会话持续跟进") },
       { id: "archived", label: t("已归档"), note: t("收起来的会话，可以恢复或彻底删除") },
       { id: "usage", label: t("用量"), note: t("token、模型调用、工具与技能") },
+      { id: "about", label: t("关于"), note: t("版本信息与更新日志") },
     ] as const,
 );
 
@@ -358,7 +359,6 @@ function when(iso: string): string {
       >
         <div class="item-main">
           <div class="title">{{ nav.label }}</div>
-          <div class="meta">{{ nav.note }}</div>
         </div>
       </div>
     </div>

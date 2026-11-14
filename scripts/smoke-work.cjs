@@ -70,6 +70,7 @@ app.whenReady().then(async()=>{
  handle('commandStop',(_e,input)=>{commandStops.push(input);setTimeout(()=>win.webContents.send(IPC.onCommand,{id:input.id,sessionId:input.sessionId,type:'exit',code:null,stopped:true}),0);return true;});
  handle('configRead',()=>config);handle('configWrite',async(_e,p)=>{if(configWriteFails)throw Error('config write failed');if(p.profile&&configGate)await configGate;return Object.assign(config,p);});handle('runtimeStart',()=>undefined);
  handle('diagnosticsNetwork',()=> 'PASS configuration\nPASS HTTP: Model catalog received.');handle('questionRespond',(_e,input)=>{questionReplies.push(input);});const questionReplies=[];
+ handle('updateReleases',()=>[{tag:'v3.11.4',publishedAt:'2026-11-14T00:00:00Z',body:'## Changes\n\n- Example fix',url:'https://github.com/chowyu12/aiclaw/releases/tag/v3.11.4'}]);
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
  handle('projectSave',(_e,input)=>{const project={...input,id:input.id||'p_fixture',directories:input.directories.map(path=>path.trim()).filter(Boolean)};const index=groups.groups.findIndex(p=>p.id===project.id);if(index<0)groups.groups.push(project);else groups.groups[index]=project;return groups;});
  handle('groupDelete',(_e,id)=>{groups.groups=groups.groups.filter(p=>p.id!==id);for(const key of Object.keys(groups.assignments))if(groups.assignments[key]===id)delete groups.assignments[key];return groups;});
@@ -1165,6 +1166,11 @@ app.whenReady().then(async()=>{
  check('single-directory project does not add a redundant directory selector',await wait("!!document.querySelector('[data-bucket-id=\"p_single\"]')")&&await js("!document.querySelector('[data-bucket-id=\"p_single\"] .project-directory')"));
  await js("document.querySelector('[data-bucket-id=\"p_single\"] button[aria-label=\"在此工作区新建会话\"]').click()");
  check('single-directory project still creates chats in its configured directory',await wait("document.querySelectorAll('[data-bucket-id=\"p_single\"] .item').length===1")&&startedWorkspaces.at(-1)==='/tmp/only');
+
+ await js("document.querySelector('.activity-rail [data-view=settings]').click()");
+ await wait("!!document.querySelector('.settings')");
+ await js("[...document.querySelectorAll('.sidebar .item')].find(e=>e.querySelector('.title')?.textContent.trim()==='关于').click()");
+ check('about settings display app version and published release notes',await wait("document.querySelector('.about-view')?.textContent.includes('work-smoke') && document.querySelector('.about-view')?.textContent.includes('v3.11.4') && document.querySelector('.about-view')?.textContent.includes('Example fix')"));
 
  computerState={mode:'ready',active:{sessionId:'s',turnId:'desktop-t',action:'get_app_state',app:'com.example.fixture'},watching:0};
  win.webContents.send(IPC.onComputerStatus,computerState);

@@ -64,7 +64,7 @@ const queueRevisions = new Map<string, number>();
 
 const state = reactive({
   /** 主区显示什么。放在 store 里是因为侧边栏底部的设置要切它，点会话又要切回来。 */
-  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived",
+  view: "chat" as "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived" | "about",
   runtime: { state: "stopped" } as RuntimeStatus,
   computer: { mode: "ready", active: null, watching: 0 } as ComputerControlState,
   sessionId: "",
@@ -1511,7 +1511,7 @@ export const actions = {
     if (index >= 0) state.approvals.splice(index, 1);
   },
 
-  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived"): void {
+  setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived" | "about"): void {
     state.view = view;
     if (view === "chat") for (const id of [state.sessionId, state.sideSessionId]) { if (state.live[id]) state.live[id]!.unread = false; }
   },

@@ -11,6 +11,7 @@ const MemoryView = defineAsyncComponent(() => import("./MemoryView.vue"));
 const SkillsView = defineAsyncComponent(() => import("./SkillsView.vue"));
 const UsageView = defineAsyncComponent(() => import("./UsageView.vue"));
 const SchedulesView = defineAsyncComponent(() => import("./SchedulesView.vue"));
+const AboutView = defineAsyncComponent(() => import("./AboutView.vue"));
 const ArchivedView = defineAsyncComponent(() => import("./ArchivedView.vue"));
 
 /**
@@ -34,4 +35,5 @@ const ArchivedView = defineAsyncComponent(() => import("./ArchivedView.vue"));
   <UsageView v-else-if="store.view === 'usage'" />
   <SchedulesView v-else-if="store.view === 'schedules'" />
   <ArchivedView v-else-if="store.view === 'archived'" />
+  <AboutView v-else-if="store.view === 'about'" />
 </template>

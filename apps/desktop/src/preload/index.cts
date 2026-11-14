@@ -179,6 +179,7 @@ const api = {
   update: {
     version: () => ipcRenderer.invoke(IPC.appVersion),
     check: () => ipcRenderer.invoke(IPC.updateCheck),
+    releases: () => ipcRenderer.invoke(IPC.updateReleases),
     install: () => ipcRenderer.invoke(IPC.updateInstall),
     prepare: () => ipcRenderer.invoke(IPC.updatePrepare),
   },
