@@ -110,7 +110,7 @@ test("Cua state diffs and batched observation replace host capture polling", asy
     await call("get_window_state",{pid:123,window_id:456,include_screenshot:false});
     await call("get_window_state",{pid:123,window_id:456,since:"latest",include_screenshot:false});
     await call("run_steps",{pid:123,window_id:456,steps:[{tool:"set_value",args:{role:"textfield",name:"Input",value:"after"}}],observe:{}});
-    assert.equal(calls.length,3);assert.equal(calls[1]!.args.since,"latest");assert.deepEqual(calls[2]!.args.observe,{screenshot_format:"png"});
+    assert.equal(calls.length,3);assert.equal(calls[1]!.args.since,"latest");assert.deepEqual(calls[2]!.args.observe,process.platform === "darwin" ? {screenshot_format:"png"} : {});
     await assert.rejects(call("watch_start",{app}),/Unsupported Cua operation/);
   }finally{await controller.close();}
 });

@@ -537,14 +537,14 @@ test("strict background refusal blocks subsequent desktop operations for the tur
 
 test("only intermediate navigation keys skip individual watches when batch observes final state", () => {
  const arrow=(extra:Record<string,unknown>={})=>({tool:"press_key",args:{key:"left",...extra}});
- const batch=backgroundCuaArguments("run_steps",{...target,steps:[arrow(),arrow({modifiers:["shift"]}),arrow({modifiers:["cmd"]}),arrow({post_action_wait:"default"}),arrow()],observe:{}});
+ const batch=backgroundCuaArguments("run_steps",{...target,steps:[arrow(),arrow({modifiers:["shift"]}),arrow({modifiers:["cmd"]}),arrow({post_action_wait:"default"}),arrow()],observe:{}},"darwin");
  const steps=batch.steps as any[];
  assert.equal(steps[0].args.post_action_wait,"none");
  assert.equal(steps[1].args.post_action_wait,"none");
  assert.equal(steps[2].args.post_action_wait,undefined);
  assert.equal(steps[3].args.post_action_wait,"default");
  assert.equal(steps[4].args.post_action_wait,undefined);
- const noObserve=backgroundCuaArguments("run_steps",{...target,steps:[arrow(),arrow()]});
+ const noObserve=backgroundCuaArguments("run_steps",{...target,steps:[arrow(),arrow()]},"darwin");
  assert.equal((noObserve.steps as any[])[0].args.post_action_wait,undefined);
 });
 
