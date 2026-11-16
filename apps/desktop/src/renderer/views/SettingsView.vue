@@ -29,6 +29,17 @@ const report = ref("");
 const reportOpen = ref(false);
 const copied = ref(false);
 const networkBusy = ref(false);
+const exporting = ref(false);
+const exportStatus = ref("");
+async function exportDiagnostics(): Promise<void> {
+  if (exporting.value) return;
+  exporting.value = true; exportStatus.value = "";
+  try {
+    const path = await window.aiclaw.diagnostics.export();
+    if (path) exportStatus.value = t("已导出：{path}", { path });
+  } catch (error) { exportStatus.value = describeError(error); }
+  finally { exporting.value = false; }
+}
 async function diagnoseNetwork(): Promise<void> {
   if (networkBusy.value) return;
   networkBusy.value = true;
@@ -686,11 +697,13 @@ async function purge(): Promise<void> {
         <button class="ghost" :disabled="networkBusy" @click="loadReport()">
           {{ reportOpen ? t("收起") : t("查看诊断信息") }}
         </button>
+        <button class="ghost" :disabled="exporting" @click="exportDiagnostics()">{{ exporting ? t("导出中…") : t("导出诊断 ZIP") }}</button>
         <button v-if="reportOpen" class="ghost" @click="copyReport()">
           {{ copied ? t("已复制") : t("复制") }}
         </button>
       </div>
       <p class="sub">{{ t("网络诊断仅检查已配置模型服务的连接与模型列表，不发送生成请求，不显示凭据或响应正文。") }}</p>
+      <p v-if="exportStatus" role="status" class="sub">{{ exportStatus }}</p>
       <pre v-if="reportOpen" class="report">{{ report }}</pre>
     </section>
 

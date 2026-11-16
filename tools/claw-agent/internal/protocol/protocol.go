@@ -875,6 +875,7 @@ type MCPToolInfo struct {
 }
 
 type SessionStartResult struct {
+	TurnID          string   `json:"turnId,omitempty"`
 	ReasoningEffort string   `json:"reasoningEffort"`
 	SessionID       string   `json:"sessionId"`
 	Tools           []string `json:"tools"`
@@ -941,6 +942,13 @@ type TurnStartResult struct {
 	 * TurnID 是该输入所属轮次；queue 模式开始处理时会发出 turn/started。
 	 */
 	Queued bool `json:"queued,omitempty"`
+}
+
+// TurnID scopes UI cancellation to the observed turn. Omission preserves the
+// explicit session-wide stop used by administrative callers.
+type TurnInterruptParams struct {
+	SessionID string `json:"sessionId"`
+	TurnID    string `json:"turnId,omitempty"`
 }
 
 type SessionIDParams struct {

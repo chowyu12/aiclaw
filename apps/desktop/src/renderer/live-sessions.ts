@@ -1,3 +1,4 @@
+import { imageDataURL } from "./attachments";
 /**
  * 每个会话自己的时间线与运行状态，以及把内核事件写进去的那段逻辑。
  *
@@ -81,6 +82,7 @@ export interface LiveSession {
   revision?: number;
   /** 有一轮在跑。发送那一刻置真，turn/completed 或出错置假。 */
   busy: boolean;
+  turnId?: string;
   /** A turn finished while this conversation was not visible. */
   unread?: boolean;
 }
@@ -371,9 +373,12 @@ export function applyAgentEvent(
       }
     }
     case "turn/started":
+      record.turnId = String(params.turnId ?? "");
       record.busy = true;
       return applied;
     case "turn/completed": {
+      if (record.turnId && params.turnId && record.turnId !== params.turnId) return applied;
+      record.turnId = undefined;
       if (record.busy && !(typeof visibleSessionId === "string" ? sessionId === visibleSessionId : visibleSessionId.includes(sessionId)) && !INTERRUPTED.has(String(params.error ?? ""))) record.unread = true;
       record.busy = false;
       for (const entry of record.timeline) {
@@ -439,7 +444,7 @@ export function restoreHistory(history: HistoryItemView[]): TimelineEntry[] {
           text: item.text ?? "",
           // 恢复出来的是裸 base64，界面要的是能直接塞进 <img> 的 data URL。
           // 内核那边统一成 JPEG，所以这里也按 JPEG 拼。
-          images: (item.images ?? []).map((data) => `data:image/jpeg;base64,${data}`),
+          images: (item.images ?? []).map((data) => imageDataURL(data)),
           at: item.at,
           references: item.references,
         });

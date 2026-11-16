@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"mime"
 	"strings"
 )
 
@@ -14,6 +15,8 @@ type OutputItem struct {
 	Text string `json:"text,omitempty"`
 	URL  string `json:"url,omitempty"`
 	Hint string `json:"hint,omitempty"`
+	Path string `json:"path,omitempty"`
+	MIME string `json:"mimeType,omitempty"`
 }
 
 type Hooks struct {
@@ -37,6 +40,20 @@ func mediaItem(kind string, value any) (OutputItem, error) {
 	case string:
 		item.URL = v
 	case map[string]any:
+		if _, ok := v["file_id"]; ok {
+			return item, errors.New("provider file_id is not portable; materialize it with the owning provider tool and emit a local audio file")
+		}
+		if path, ok := v["path"].(string); ok {
+			item.Path = path
+			item.MIME, _ = v["mimeType"].(string)
+			item.Hint, _ = v["output_hint"].(string)
+			mediaType, _, err := mime.ParseMediaType(item.MIME)
+			if kind != "audio" || strings.TrimSpace(path) == "" || len(path) > 4096 || strings.ContainsAny(path, "\x00\r\n") || err != nil || !strings.HasPrefix(mediaType, "audio/") {
+				return item, errors.New("local audio requires {path, mimeType: 'audio/...'}")
+			}
+			item.MIME = mediaType
+			return item, nil
+		}
 		key := "image_url"
 		if kind == "audio" {
 			key = "audio_url"

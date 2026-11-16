@@ -73,12 +73,13 @@ func (s *Session) RunTurn(
 		cancel()
 		return
 	}
-	if _, automatic := parent.Value(wakeReservationKey{}).(uint64); !automatic {
+	if _, automatic := parent.Value(wakeReservationKey{}).(uint64); !automatic && parent.Err() == nil {
 		s.wakeStopped = false
 	}
 	s.cancelTurn = cancel
 	s.finishing = false
 	s.currentTurn = turnID
+	s.interruptedTurn = ""
 	s.emitter = emitter
 	s.turnCount++
 	s.mu.Unlock()

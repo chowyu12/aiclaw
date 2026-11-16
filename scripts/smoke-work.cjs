@@ -4,7 +4,7 @@ const {join}=require('node:path');
 const {writeFileSync,readFileSync}=require('node:fs');
 const desktop=join(__dirname,'../apps/desktop');
 const {IPC}=require(join(desktop,'dist/shared/ipc.cjs'));
-app.setPath('userData',join(app.getPath('temp'),'aiclaw-work-smoke'));
+app.setPath('userData',join(app.getPath('temp'),`aiclaw-work-smoke-${process.pid}`));
 let win;
 const checks=[];
 function check(name,ok){checks.push({name,ok});console.log(`${ok?'ok':'FAIL'} ${name}`);}
@@ -69,6 +69,7 @@ app.whenReady().then(async()=>{
  handle('commandRun',(_e,input)=>{commandCalls.push(input);if(input.command.includes('python3'))setTimeout(()=>win.webContents.send(IPC.onCommand,{id:input.id,sessionId:input.sessionId,type:'output',text:'5050\n'}),20);if(!input.command.includes('python3'))setTimeout(()=>{win.webContents.send(IPC.onCommand,{id:input.id,sessionId:input.sessionId,type:'output',text:'fixture output <img src=x onerror=alert(1)>\n'});win.webContents.send(IPC.onCommand,{id:input.id,sessionId:input.sessionId,type:'exit',code:0,stopped:false});},20);return true;});
  handle('commandStop',(_e,input)=>{commandStops.push(input);setTimeout(()=>win.webContents.send(IPC.onCommand,{id:input.id,sessionId:input.sessionId,type:'exit',code:null,stopped:true}),0);return true;});
  handle('configRead',()=>config);handle('configWrite',async(_e,p)=>{if(configWriteFails)throw Error('config write failed');if(p.profile&&configGate)await configGate;return Object.assign(config,p);});handle('runtimeStart',()=>undefined);
+ handle('diagnosticsExport',()=>'/fixture/diagnostics.zip');
  handle('diagnosticsNetwork',()=> 'PASS configuration\nPASS HTTP: Model catalog received.');handle('questionRespond',(_e,input)=>{questionReplies.push(input);});const questionReplies=[];
  handle('updateReleases',()=>[{tag:'v3.11.4',publishedAt:'2026-11-14T00:00:00Z',body:'## Changes\n\n- Example fix',url:'https://github.com/chowyu12/aiclaw/releases/tag/v3.11.4'}]);
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
@@ -116,7 +117,7 @@ app.whenReady().then(async()=>{
  for(let attempt=0;attempt<60&&startupReads.size<4;attempt++)await new Promise(resolve=>setTimeout(resolve,50));
  check('independent startup reads are dispatched together before any completes',startupReads.size===4);
  holdStartupReads=false;releaseStartupReads();
- await js("localStorage.setItem('aiclaw:session-grouping','groups');localStorage.removeItem('aiclaw:pinned-workspaces');localStorage.removeItem('aiclaw:session-sidebar-width')");
+ await js("localStorage.removeItem('aiclaw.side-sessions');localStorage.setItem('aiclaw:session-grouping','groups');localStorage.removeItem('aiclaw:pinned-workspaces');localStorage.removeItem('aiclaw:session-sidebar-width')");
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
  await wait("document.querySelectorAll('.bucket').length===3");
  check('studio opens with navigation and the conversation sidebar visible by default',await wait("document.querySelector('.sidebar')?.contains(document.querySelector('.activity-rail')) && document.querySelector('.activity-rail').getBoundingClientRect().width===240 && document.querySelector('.sidebar').getBoundingClientRect().width===240 && document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').getAttribute('aria-expanded')==='true' && !!document.querySelector('.chat-header')"));
@@ -136,7 +137,13 @@ app.whenReady().then(async()=>{
  releaseSideMedia();
  check('side image loads from its owning workspace after entering the viewport',await wait("!!document.querySelector('.side-conversation .image-preview img')")&&mediaOwners.some(entry=>entry.sessionId==='other'&&entry.path==='generated/cat.png'));
 
+ await js("(()=>{const select=document.querySelector('.side-conversation header select');select.value='general';select.dispatchEvent(new Event('change',{bubbles:true}));})()");
+ check('side tabs add a second conversation',await wait("document.querySelectorAll('.side-tabs > div').length===2 && !document.querySelector('.side-conversation textarea').disabled"));
+ await js("[...document.querySelectorAll('.side-tabs > div button')].find(button=>button.textContent.trim()==='Other workspace').click()");
+ check('switching side tabs restores its independent draft',await wait("document.querySelector('.side-conversation textarea').value==='side-only draft'"));
  writeFileSync('/tmp/aiclaw-side-conversation.png',(await win.webContents.capturePage()).toPNG());
+ await win.loadFile(join(desktop,'dist/renderer/index.html'));
+ check('renderer restart restores side tab list and active conversation',await wait("document.querySelectorAll('.side-tabs > div').length===2 && document.querySelector('.side-conversation header select')?.value==='other' && !document.querySelector('.side-conversation textarea').disabled"));
  await js("document.querySelector('.side-conversation button[aria-label=\"关闭并排会话\"]').click()");
  check('closing side chat restores the main pane without stopping it',await wait("!document.querySelector('.side-conversation') && !!document.querySelector('.composer')"));
  for(const [view,label] of [['providers','模型服务'],['skills','技能'],['schedules','定时任务']]){
@@ -252,6 +259,8 @@ app.whenReady().then(async()=>{
  check('Markdown question submits original selected value',await wait("!document.querySelector('.question')")&&questionReplies[0]?.answer?.selected?.[0]==='**Safe** mode');
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
  await wait("[...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='网络专项诊断')");await click('网络专项诊断');
+ await click('导出诊断 ZIP');
+ check('diagnostics ZIP export is reachable and reports the chosen local path',await wait("document.body.textContent.includes('/fixture/diagnostics.zip')"));
  check('network diagnostics has a reachable settings entry and displays report',await wait("document.querySelector('.report')?.textContent.includes('PASS HTTP')"));
  await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");await wait("!!document.querySelector('.composer')");
 

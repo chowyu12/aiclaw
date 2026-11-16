@@ -295,3 +295,12 @@ test("live streaming content wins over an older snapshot without duplicating its
  restoreSessionHistory(record,[{id:'old',kind:'agentMessage',text:'older'},{id:'m',kind:'agentMessage',text:'stale delta'}],0);
  assert.deepEqual(record.timeline.map(i=>i.id),['old','m']);assert.equal((record.timeline[1] as {text:string}).text,'fresh delta');
 });
+
+test('late completion does not replace the identity or busy state of a newer turn', () => {
+ const live=fresh();
+ applyAgentEvent(live,event('turn/started','A',{turnId:'new'}),'A');
+ applyAgentEvent(live,event('turn/completed','A',{turnId:'old'}),'A');
+ assert.equal(live.A!.turnId,'new');assert.equal(live.A!.busy,true);
+ applyAgentEvent(live,event('turn/completed','A',{turnId:'new'}),'A');
+ assert.equal(live.A!.turnId,undefined);assert.equal(live.A!.busy,false);
+});

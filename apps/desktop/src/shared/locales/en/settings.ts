@@ -435,4 +435,8 @@ export const settings: Record<string, string> = {
   "这段时间没有会话。": "No sessions in this period.",
   "代码模式": "Code mode",
   "内置": "Built-in",
+  "已导出：{path}": "Exported: {path}",
+  "导出中…": "Exporting…",
+  "导出诊断 ZIP": "Export diagnostics ZIP",
+  "图片过大": "Image is too large",
 };

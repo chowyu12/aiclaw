@@ -56,7 +56,7 @@ const api = {
     resume: (sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}, activate = true) => ipcRenderer.invoke(IPC.sessionResume, sessionId, recoveryModel, activate),
     history: (sessionId: string) => ipcRenderer.invoke(IPC.sessionHistory, sessionId),
     send: (input: unknown) => ipcRenderer.invoke(IPC.sessionSend, input),
-    interrupt: (sessionId: string) => ipcRenderer.invoke(IPC.sessionInterrupt, sessionId),
+    interrupt: (sessionId: string, turnId?: string) => ipcRenderer.invoke(IPC.sessionInterrupt, sessionId, turnId),
     list: () => ipcRenderer.invoke(IPC.sessionList),
     search: (keyword: string) => ipcRenderer.invoke(IPC.sessionSearch, keyword),
     setWorkspace: (input: unknown) => ipcRenderer.invoke(IPC.sessionWorkspace, input),
@@ -155,6 +155,7 @@ const api = {
     list: () => ipcRenderer.invoke(IPC.profileList),
   },
   diagnostics: {
+    export: (): Promise<string | null> => ipcRenderer.invoke(IPC.diagnosticsExport),
     network: () => ipcRenderer.invoke(IPC.diagnosticsNetwork),
     read: () => ipcRenderer.invoke(IPC.diagnosticsRead),
   },

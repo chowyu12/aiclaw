@@ -70,6 +70,12 @@ onUnmounted(() => { end(); observer.disconnect(); });
       <button :title="t('聚焦输入框')" @click="input?.focus()">⌨</button>
       <button :aria-label="t('关闭并排会话')" @click="actions.closeSideSession()">×</button>
     </header>
+    <nav class="side-tabs" :aria-label="t('并排会话')">
+      <div v-for="tab in store.sideSessionIds" :key="tab" :class="{ active: tab === id }">
+        <button :aria-pressed="tab === id" @click="actions.openSideSession(tab)">{{ store.sessions.find(session => session.id === tab)?.title || t('未命名会话') }}<span v-if="store.live[tab]?.unread"> ●</span></button>
+        <button :aria-label="t('关闭')" @click="actions.closeSideTab(tab)">×</button>
+      </div>
+    </nav>
     <div v-if="store.sideLoading" class="side-notice" role="status">{{ t('载入中…') }}</div>
     <div v-if="store.sideError" class="side-notice" role="alert">{{ store.sideError }} <button @click="actions.openSideSession(id)">{{ t('重试') }}</button></div>
     <div ref="history" class="side-history">
@@ -91,6 +97,10 @@ onUnmounted(() => { end(); observer.disconnect(); });
 .side-resize { position:absolute; left:-4px; top:0; bottom:0; width:8px; cursor:col-resize; z-index:3; touch-action:none; }
 .side-resize:hover,.side-resize:focus-visible { background:var(--hover); outline:none; }
 header { display:flex; align-items:center; gap:4px; padding:10px 12px; border-bottom:1px solid var(--rule); }
+.side-tabs { display:flex; gap:4px; overflow-x:auto; padding:6px 10px; border-bottom:1px solid var(--rule); }
+.side-tabs > div { display:flex; flex:none; min-width:0; border-radius:6px; }
+.side-tabs .active { background:var(--hover); }
+.side-tabs button { background:transparent; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 header select { min-width:0; flex:1; color:var(--ink); background:transparent; border:0; font:inherit; }
 button { border:0; border-radius:6px; background:var(--surface-2); color:var(--ink); padding:5px 8px; cursor:pointer; } button:disabled { opacity:.45; cursor:default; }
 .side-history { flex:1; min-height:0; overflow:auto; padding:16px; overflow-wrap:anywhere; }

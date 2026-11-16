@@ -97,6 +97,7 @@ export function profileSpecs(): ProfileSpec[] {
 
 /** 一个会话起来之后宿主需要知道的东西。 */
 export interface SessionInfo {
+  turnId?: string;
   reasoningEffort?: string;
   sessionId: string;
   tools: string[];
@@ -500,6 +501,7 @@ export class SessionManager extends EventEmitter {
     }
     return {
       sessionId,
+      turnId: result.turnId,
       tools: result.tools,
       mcpStatus: result.mcpStatus ?? {},
       workspace: result.workspace ?? "",
@@ -582,8 +584,8 @@ export class SessionManager extends EventEmitter {
     return status;
   }
 
-  async interrupt(sessionId: string): Promise<void> {
-    await this.requireClient().turnInterrupt(sessionId);
+  async interrupt(sessionId: string, turnId?: string): Promise<void> {
+    await this.requireClient().turnInterrupt(sessionId, turnId);
   }
 
   listSessions(): Promise<SessionSummary[]> {

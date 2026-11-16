@@ -1,3 +1,4 @@
+import { imageDataURL } from "./attachments";
 import type { ComputerControlState, ComputerControlAction } from "../shared/computer-control";
 import type { ConfigurationCard, ConfigurationReply, ConfigurationOutcome } from "../shared/app-config";
 import { reactive, readonly } from "vue";
@@ -59,6 +60,7 @@ export interface FilePreviewState {
 let previewRequest = 0;
 let sessionRestoreRequest = 0;
 let sideRestoreRequest = 0;
+const sideReady = new Set<string>();
 let computerRevision = 0;
 const queueRevisions = new Map<string, number>();
 
@@ -69,6 +71,7 @@ const state = reactive({
   computer: { mode: "ready", active: null, watching: 0 } as ComputerControlState,
   sessionId: "",
   sideSessionId: "",
+  sideSessionIds: [] as string[],
   sideLoading: false,
   sideSessionReady: false,
   sideError: "",
@@ -223,6 +226,10 @@ function acceptUpdateStatus(status: UpdateStatusView): void {
   if (status.hasUpdate && status.canInstall) void actions.prepareUpdate();
 }
 
+function persistSideSessions(): void {
+  try { localStorage.setItem("aiclaw.side-sessions", JSON.stringify({ ids: state.sideSessionIds, active: state.sideSessionId })); } catch { /* Optional layout preference. */ }
+}
+
 export const actions = {
   /**
    * 拉起界面需要的全部状态。
@@ -373,7 +380,9 @@ export const actions = {
         cancelledHostRequests.clear();
         completedHostTurns.clear();
         sessionRestoreRequest++;
-        actions.closeSideSession();
+        sideReady.clear();
+        ++sideRestoreRequest;
+        state.sideSessionId = ""; state.sideLoading = false; state.sideSessionReady = false; state.sideError = "";
         state.loadingSession = "";
         state.sessionInfo = null;
         state.configurations = [];
@@ -462,7 +471,8 @@ export const actions = {
       // start() 返回就是起来了。状态推送通常先到，但别赌顺序——App.vue 接下来
       // 就要按这个状态决定开不开会话。
       state.runtime = { state: "ready" };
-      await Promise.all([actions.refreshSessions(), actions.loadProviders()]);
+      const [listed] = await Promise.all([actions.refreshSessions(), actions.loadProviders()]);
+      if (listed) await actions.restoreSideSessions();
     } catch (error) {
       state.error = t("启动本地运行时失败：{error}", { error: describeError(error) });
     }
@@ -534,6 +544,7 @@ export const actions = {
       // Merge events received during the RPC, even if their turn has already finished.
       // An idle session with no new events can use the authoritative snapshot directly.
       restoreSessionHistory(record, info.history ?? [], revision);
+      if ((record.revision ?? 0) === revision) { record.turnId = info.turnId; record.busy = !!info.turnId; }
     } catch (error) {
       const reason = describeError(error);
       try {
@@ -550,21 +561,51 @@ export const actions = {
     }
   },
 
+  // Closing the pane retains its tabs for the next open/restart.
   closeSideSession(): void {
     ++sideRestoreRequest;
     state.sideSessionId = ""; state.sideLoading = false; state.sideSessionReady = false; state.sideError = "";
+    persistSideSessions();
+  },
+
+  closeSideTab(sessionId: string): void {
+    state.sideSessionIds = state.sideSessionIds.filter(id => id !== sessionId);
+    if (state.sideSessionId === sessionId) {
+      actions.closeSideSession();
+      const next = state.sideSessionIds.at(-1);
+      if (next) void actions.openSideSession(next);
+    }
+    persistSideSessions();
+  },
+
+  async restoreSideSessions(): Promise<void> {
+    try {
+      const saved = JSON.parse(localStorage.getItem("aiclaw.side-sessions") ?? "null");
+      if (!saved || !Array.isArray(saved.ids)) return;
+      const available = new Set(state.sessions.filter(session => !session.archivedAt).map(session => session.id));
+      state.sideSessionIds = [...new Set<string>(saved.ids.filter((id: unknown): id is string => typeof id === "string" && available.has(id)))];
+      if (state.sideSessionIds.includes(saved.active)) await actions.openSideSession(saved.active);
+      else persistSideSessions();
+    } catch { /* Ignore invalid or unavailable storage. */ }
   },
 
   async openSideSession(sessionId: string): Promise<void> {
+    if (!sessionId) return;
     const request = ++sideRestoreRequest;
+    if (!state.sideSessionIds.includes(sessionId)) state.sideSessionIds.push(sessionId);
     state.fileBrowser = false; state.filePreview = null;
-    state.sideSessionId = sessionId; state.sideLoading = true; state.sideSessionReady = false; state.sideError = "";
+    state.sideSessionId = sessionId; state.sideError = "";
+    persistSideSessions();
     const record = ensureLive(state.live, sessionId); record.unread = false;
+    if (sideReady.has(sessionId)) { state.sideLoading = false; state.sideSessionReady = true; return; }
+    state.sideLoading = true; state.sideSessionReady = false;
     const revision = record.revision ?? 0;
     try {
       const info = await window.aiclaw.session.resume(sessionId, undefined, false) as SessionStartView;
       if (request !== sideRestoreRequest) return;
       restoreSessionHistory(record, info.history ?? [], revision);
+      if ((record.revision ?? 0) === revision) { record.turnId = info.turnId; record.busy = !!info.turnId; }
+      sideReady.add(sessionId);
       state.sideSessionReady = true;
       void actions.refreshQueue(sessionId);
     } catch (error) {
@@ -577,12 +618,14 @@ export const actions = {
     } finally { if (request === sideRestoreRequest) state.sideLoading = false; }
   },
 
-  async refreshSessions(): Promise<void> {
+  async refreshSessions(): Promise<boolean> {
     try {
       state.sessions = (await window.aiclaw.session.list()) as SessionSummaryView[];
       state.groups = await window.aiclaw.groups.read() as SessionGroupsView;
+      return true;
     } catch {
       // 列表拉不到不该打断正在进行的对话，静默即可——侧边栏空着就空着。
+      return false;
     }
   },
 
@@ -629,8 +672,10 @@ export const actions = {
 
   async archiveSession(sessionId: string): Promise<void> {
     const changed = ((await window.aiclaw.session.archive(sessionId, true)) as string[] | undefined) ?? [sessionId];
-    for (const id of changed) delete state.live[id];
+    state.sideSessionIds = state.sideSessionIds.filter(id => !changed.includes(id));
+    for (const id of changed) { delete state.live[id]; sideReady.delete(id); }
     if (changed.includes(state.sideSessionId)) actions.closeSideSession();
+    persistSideSessions();
     if (changed.includes(state.sessionId)) {
       state.sessionId = "";
       state.sessionInfo = null;
@@ -655,8 +700,10 @@ export const actions = {
   /** 删会话。内核会连同它开出的子 agent 一起删，回来的是删掉的全部 id。 */
   async deleteSession(sessionId: string): Promise<void> {
     const removed = ((await window.aiclaw.session.remove(sessionId)) as string[] | undefined) ?? [sessionId];
-    for (const id of removed) delete state.live[id];
+    state.sideSessionIds = state.sideSessionIds.filter(id => !removed.includes(id));
+    for (const id of removed) { delete state.live[id]; sideReady.delete(id); }
     if (removed.includes(state.sideSessionId)) actions.closeSideSession();
+    persistSideSessions();
     if (removed.includes(state.sessionId)) {
       state.sessionId = "";
       state.sessionInfo = null;
@@ -1416,7 +1463,7 @@ export const actions = {
       id: optimisticId,
       requestId: optimisticId,
       text,
-      images: images.map((data) => `data:image/jpeg;base64,${data}`),
+      images: images.map((data) => imageDataURL(data)),
       // 内核随后会为这条输入发来 userMessage 事件；标记之后由它认领，
       // 不标记的话通道会话与本机发送没法区分，二选一必错一头。
       pending: true,
@@ -1455,7 +1502,9 @@ export const actions = {
   },
 
   async interrupt(sessionId = state.sessionId): Promise<void> {
-    if (sessionId) await window.aiclaw.session.interrupt(sessionId);
+    const turnId = state.live[sessionId]?.turnId;
+    // Wait for turn/started rather than sending an unscoped delayed UI stop.
+    if (sessionId && turnId) await window.aiclaw.session.interrupt(sessionId, turnId);
   },
 
   async refreshQueue(sessionId = state.sessionId): Promise<void> {

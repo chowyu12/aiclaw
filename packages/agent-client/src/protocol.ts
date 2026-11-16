@@ -423,6 +423,7 @@ export interface MCPToolInfo {
 }
 
 export interface SessionStartResult {
+  turnId?: string;
   reasoningEffort?: string;
   /** 会话用的模型服务 id；0 或缺省表示走环境变量的 Key。 */
   providerId?: number;

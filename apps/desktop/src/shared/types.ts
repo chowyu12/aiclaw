@@ -41,6 +41,7 @@ export interface AgentEventPayload {
 }
 
 export interface SessionStartView {
+  turnId?: string;
   reasoningEffort?: string;
   sessionId: string;
   tools: string[];

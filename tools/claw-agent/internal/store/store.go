@@ -21,6 +21,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"golang.org/x/text/cases"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,17 +289,7 @@ func (s *Store) SetArchived(ctx context.Context, ids []string, at time.Time) err
 	return nil
 }
 
-/**
- * Search 按关键词找会话：标题与消息正文都找，返回命中的片段。
- *
- * 只按标题找是不够的——标题是第一句话自动截的，而人回来找的往往是中间提过的
- * 某个表名、某个报错。消息正文是一整块 JSON，用 LIKE 扫它足够了：这是本机
- * 单用户的库，会话是几百条量级，一次全表扫描比引入 FTS5 划算得多
- * （FTS5 要建虚表、维护触发器，还要考虑中文分词——而 LIKE 对中文天然可用）。
- *
- * 命中片段在 Go 这边从 JSON 里取，不在 SQL 里做：SQL 只知道整块文本的偏移，
- * 取出来的片段大概率跨在 JSON 转义中间，显示出来是乱的。
- */
+// Search matches decoded titles and non-system message text with Unicode case folding.
 func (s *Store) Search(ctx context.Context, keyword string, limit int) ([]Summary, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
@@ -307,13 +298,12 @@ func (s *Store) Search(ctx context.Context, keyword string, limit int) ([]Summar
 	if limit <= 0 {
 		limit = 50
 	}
-	pattern := "%" + escapeLike(keyword) + "%"
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, title, created_at, updated_at, workdir, model, turn_count, messages,
   COALESCE(json_extract(config, '$.parentId'), '')
 FROM sessions
-WHERE archived_at = 0 AND (title LIKE ? ESCAPE '\' OR messages LIKE ? ESCAPE '\')
-ORDER BY updated_at DESC LIMIT ?`, pattern, pattern, limit)
+WHERE archived_at = 0
+ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("%s%w", i18n.D("搜索会话失败："), err)
 	}
@@ -331,15 +321,15 @@ ORDER BY updated_at DESC LIMIT ?`, pattern, pattern, limit)
 		summary.CreatedAt = time.UnixMilli(created)
 		summary.UpdatedAt = time.UnixMilli(updated)
 		summary.Snippet = snippet(messages, keyword)
+		if foldedIndex(summary.Title, keyword) < 0 && summary.Snippet == "" {
+			continue
+		}
 		summaries = append(summaries, summary)
+		if len(summaries) == limit {
+			break
+		}
 	}
 	return summaries, rows.Err()
-}
-
-// escapeLike 转义 LIKE 的通配符。用户搜「100%」时不该变成「100 + 任意」。
-func escapeLike(raw string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
-	return replacer.Replace(raw)
 }
 
 // snippet 从消息正文里取一段含关键词的上下文，给搜索结果显示。
@@ -354,19 +344,18 @@ func snippet(messages, keyword string) string {
 	if json.Unmarshal([]byte(messages), &parsed) != nil {
 		return ""
 	}
-	lower := strings.ToLower(keyword)
 	for _, message := range parsed {
 		// 系统提示词里有工作目录、工具名这些，命中了对用户没有意义。
 		if strings.EqualFold(message.Role, "system") {
 			continue
 		}
-		at := strings.Index(strings.ToLower(message.Content), lower)
+		at := foldedIndex(message.Content, keyword)
 		if at < 0 {
 			continue
 		}
 		runes := []rune(message.Content)
 		// 按 rune 切，别把一个汉字劈成两半。
-		start := len([]rune(message.Content[:at]))
+		start := at
 		from := max(0, start-30)
 		to := min(len(runes), start+len([]rune(keyword))+40)
 		text := strings.TrimSpace(string(runes[from:to]))
@@ -393,4 +382,22 @@ func (s *Store) IsArchived(ctx context.Context, id string) (bool, error) {
 	var at int64
 	err := s.db.QueryRowContext(ctx, `SELECT archived_at FROM sessions WHERE id = ?`, id).Scan(&at)
 	return at != 0, err
+}
+
+// Map every folded byte back to its source rune, including expanding folds
+// such as ß -> ss. Never apply transformed byte offsets to original UTF-8.
+func foldedIndex(text, keyword string) int {
+	fold := cases.Fold()
+	at := strings.Index(fold.String(text), fold.String(keyword))
+	if at < 0 {
+		return -1
+	}
+	offset := 0
+	for index, r := range []rune(text) {
+		offset += len(fold.String(string(r)))
+		if offset > at {
+			return index
+		}
+	}
+	return -1
 }

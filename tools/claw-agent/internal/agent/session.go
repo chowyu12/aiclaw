@@ -127,7 +127,8 @@ type Session struct {
 	cancelSample context.CancelFunc
 	cancelTools  context.CancelFunc
 	// currentTurn 是进行中那一轮的 id，用于把排队的输入归到它名下。
-	currentTurn string
+	currentTurn     string
+	interruptedTurn string
 	// emitter 是当轮的事件出口。computer use 的工具要靠它回调宿主，
 	// 而工具是建会话时注册的、emitter 是每轮传进来的，所以存在这儿。
 	emitter Emitter
@@ -1280,18 +1281,35 @@ func (s *Session) Close() {
 
 // Interrupt also invalidates reserved automatic wakes; mail stays queued until
 // an explicit turn or follow-up reopens admission.
-func (s *Session) Interrupt() {
+func (s *Session) Interrupt() { s.InterruptTurn("") }
+
+// InterruptTurn validates ownership and cancels under the same admission lock.
+// This covers desktop submissions, channel turns and automatic agent wakes.
+func (s *Session) InterruptTurn(expected string) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if expected != "" && (s.currentTurn != expected || s.cancelTurn == nil || s.interruptedTurn == expected) {
+		return false
+	}
 	s.wakeGeneration++
 	s.wakeStopped = true
-	cancel := s.cancelTurn
-	s.mu.Unlock()
-	if cancel != nil {
-		cancel()
+	if s.cancelTurn != nil {
+		s.cancelTurn()
+		s.interruptedTurn = s.currentTurn
 	}
 	if s.codeCells != nil {
 		s.codeCells.CancelAll()
 	}
+	return true
+}
+
+func (s *Session) ActiveTurn() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cancelTurn == nil {
+		return ""
+	}
+	return s.currentTurn
 }
 
 func (s *Session) ReserveWake() (uint64, bool) {

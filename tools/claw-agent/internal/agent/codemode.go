@@ -9,6 +9,8 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/mcpclient"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
+	"io"
+	"os"
 	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
@@ -232,16 +234,31 @@ func (s *Session) codeWaitTool() tools.Tool {
 
 func (s *Session) codeObservation(ctx context.Context, env *tools.Env, o codemode.Observation) (string, error) {
 	text := o.Text
+	mediaBytes := 0
 	for _, item := range o.Media {
 		if env == nil {
 			return text, errors.New("media output requires a tool environment")
 		}
-		tools.EmitContent(ctx, protocol.ToolContent{Type: item.Type, URL: item.URL, Hint: item.Hint})
+		if err := ctx.Err(); err != nil {
+			return text, err
+		}
+		if item.Path != "" {
+			data, err := readCodeAudio(ctx, env, item.Path)
+			if err != nil {
+				return text, err
+			}
+			item.URL = "data:" + item.MIME + ";base64," + base64.StdEncoding.EncodeToString(data)
+		}
 		prefix, encoded, _ := strings.Cut(item.URL, ",")
 		data, err := base64.StdEncoding.DecodeString(encoded)
 		if err != nil {
 			return text, err
 		}
+		mediaBytes += len(item.URL)
+		if mediaBytes > 16*1024*1024 {
+			return text, errors.New("media output exceeds 16 MiB")
+		}
+		tools.EmitContent(ctx, protocol.ToolContent{Type: item.Type, URL: item.URL, Hint: item.Hint})
 		if item.Type != "audio" {
 			env.Attach(data)
 		}
@@ -259,6 +276,12 @@ func (s *Session) codeObservation(ctx context.Context, env *tools.Env, o codemod
 					ext = "m4a"
 				case strings.Contains(prefix, "webm"):
 					ext = "webm"
+				case strings.Contains(prefix, "flac"):
+					ext = "flac"
+				case strings.Contains(prefix, "aac"):
+					ext = "aac"
+				case strings.Contains(prefix, "opus"):
+					ext = "opus"
 				}
 			}
 			effect := tools.EffectWrite
@@ -311,4 +334,40 @@ func (s *Session) KeepCodeModeState(previous *Session) {
 	if previous != nil && previous.ID == s.ID && previous.codeRuntime != nil && s.codeRuntime != nil {
 		s.codeRuntime.CopyStateFrom(previous.codeRuntime)
 	}
+}
+
+// Resolve inside the host, never inside the isolated JavaScript worker. Saved
+// artifacts and content events contain materialized bytes, not transient paths.
+func readCodeAudio(ctx context.Context, env *tools.Env, raw string) ([]byte, error) {
+	path, err := env.ResolveRead(raw)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > 8*1024*1024 {
+		return nil, errors.New("audio file must be regular, nonempty and at most 8 MiB")
+	}
+	if err := env.RequestApproval(ctx, tools.EffectRead, protocol.ApprovalTool, "Read code-mode audio", path, "Materialize explicitly emitted audio"); err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err = file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, errors.New("audio source is no longer a regular file")
+	}
+	data, err := io.ReadAll(io.LimitReader(file, 8*1024*1024+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 || len(data) > 8*1024*1024 {
+		return nil, errors.New("invalid audio file size")
+	}
+	return data, ctx.Err()
 }

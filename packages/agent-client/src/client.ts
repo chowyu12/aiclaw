@@ -535,9 +535,9 @@ export class ClawAgentClient extends EventEmitter {
     });
   }
 
-  turnInterrupt(sessionId: string): Promise<unknown> {
+  turnInterrupt(sessionId: string, turnId?: string): Promise<unknown> {
     this.assertReady();
-    return this.transport.request("turn/interrupt", { sessionId });
+    return this.transport.request("turn/interrupt", { sessionId, turnId });
   }
 
   /** 回应一次审批。 */

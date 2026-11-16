@@ -194,3 +194,20 @@ func TestProcessCancellationReachesHostTools(t *testing.T) {
 		t.Fatal("worker cancellation hung")
 	}
 }
+
+func TestTypedLocalAudioPassesThroughWorkerWithoutReadingFiles(t *testing.T) {
+	r := New(nil, DefaultLimits())
+	r.WorkerCommand = workerCommand()
+	cells := NewCells(r)
+	defer cells.Close()
+	o, err := cells.Start(context.Background(), context.Background(), `audio({path:'音频.wav',mimeType:'audio/wav',output_hint:'fixture'});`, 1000, 1000)
+	if err != nil || o.Error != nil || len(o.Media) != 1 || o.Media[0].Path != "音频.wav" || o.Media[0].MIME != "audio/wav" || o.Media[0].URL != "" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	for _, source := range []string{`audio({file_id:'provider-file'});`, `audio({path:'x',mimeType:'image/png'});`, `audio({path:'',mimeType:'audio/wav'});`, `image({path:'x',mimeType:'audio/wav'});`} {
+		_, err := r.Run(WithHooks(context.Background(), Hooks{Output: func(OutputItem) error { return nil }}), source)
+		if err == nil {
+			t.Fatalf("accepted %s", source)
+		}
+	}
+}

@@ -118,3 +118,36 @@ func (s *Server) queuedRequestIDs(id string) []string {
 	}
 	return ids
 }
+
+// Keep validation and cancellation in the same admission lock: a completed
+// turn cannot advance the queue between checking its ID and stopping it.
+func (s *Server) interruptTurn(params protocol.TurnInterruptParams) bool {
+	s.submissionMu.Lock()
+	defer s.submissionMu.Unlock()
+	session := s.session(params.SessionID)
+	if session == nil {
+		return false
+	}
+	reserved := s.activeTurns[params.SessionID]
+	if params.TurnID != "" {
+		if reserved != "" {
+			if reserved != params.TurnID || s.turnCancels[params.SessionID] == nil {
+				return false
+			}
+			// The reserved goroutine may not yet have entered RunTurn. Cancel its
+			// parent even then, without touching a different automatic turn.
+			session.InterruptTurn(params.TurnID)
+		} else if !session.InterruptTurn(params.TurnID) {
+			return false
+		}
+	} else {
+		session.Interrupt()
+	}
+	delete(s.queuedTurns, params.SessionID)
+	if cancel := s.turnCancels[params.SessionID]; cancel != nil {
+		cancel()
+	}
+	delete(s.turnCancels, params.SessionID)
+	s.collab.InterruptTree(params.SessionID)
+	return true
+}

@@ -431,22 +431,12 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 	case protocol.MethodTurnStart:
 		s.handleTurnStart(ctx, f)
 	case protocol.MethodTurnInterrupt:
-		var params protocol.SessionIDParams
+		var params protocol.TurnInterruptParams
 		if err := json.Unmarshal(f.Params, &params); err != nil {
 			s.writeError(f.ID, codeInvalidParams, "invalid params")
 			return
 		}
-		if session := s.session(params.SessionID); session != nil {
-			s.submissionMu.Lock()
-			delete(s.queuedTurns, params.SessionID)
-			if cancel := s.turnCancels[params.SessionID]; cancel != nil {
-				cancel()
-			}
-			s.submissionMu.Unlock()
-			session.Interrupt()
-		}
-		s.collab.InterruptTree(params.SessionID)
-		s.writeResult(f.ID, map[string]any{})
+		s.writeResult(f.ID, map[string]any{"interrupted": s.interruptTurn(params)})
 	case protocol.MethodShutdown:
 		s.writeResult(f.ID, map[string]any{})
 		close(s.shutdown)
@@ -612,10 +602,14 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 			return
 		}
 		if !fresh || existing.Busy() || running {
+			activeTurn := s.activeTurns[params.SessionID]
+			if activeTurn == "" {
+				activeTurn = existing.ActiveTurn()
+			}
 			s.submissionMu.Unlock()
 			s.lifecycleMu.Unlock()
 			s.writeResult(f.ID, protocol.SessionStartResult{
-				SessionID: existing.ID, Tools: existing.Tools(),
+				SessionID: existing.ID, TurnID: activeTurn, Tools: existing.Tools(),
 				MCPStatus: existing.MCPStatus(), Model: existing.Model().Model,
 				ProviderID: existing.Model().ProviderID, ReasoningEffort: existing.Model().ReasoningEffort,
 				Skills: existing.Skills(), FoldedTools: existing.FoldedTools(), Workspace: existing.Workspace(),

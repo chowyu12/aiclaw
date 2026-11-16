@@ -3,8 +3,10 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // 会话搜索。
@@ -120,4 +122,38 @@ func contains(haystack, needle string) bool {
 		}
 		return false
 	})()
+}
+
+func TestUnicodeSearchAndSnippetsShareCaseFolding(t *testing.T) {
+	for _, tc := range []struct{ body, query string }{
+		{"中文 😀 Straße", "STRASSE"}, {"emoji 😀 ΟΣ", "ος"},
+		{"长前缀 " + string(rune(0x212A)) + " 中文目标 😀", "目标"},
+		{"İ 开头 中文 KEY", "key"}, {"😀😀中文", "😀中文"},
+		{`literal 100% _ \\ and quote "`, `100% _`},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			s := newStore(t)
+			save(t, s, "match", "unrelated", [2]string{"user", tc.body})
+			save(t, s, "system-only", "other", [2]string{"system", tc.body})
+			got, err := s.Search(context.Background(), tc.query, 1)
+			if err != nil || len(got) != 1 || got[0].ID != "match" || got[0].Snippet != tc.body {
+				t.Fatalf("got %+v, %v", got, err)
+			}
+		})
+	}
+	s := newStore(t)
+	save(t, s, "title", "Straße")
+	got, err := s.Search(context.Background(), "STRASSE", 5)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("title fold: %+v %v", got, err)
+	}
+}
+
+func TestFoldedSnippetUsesOriginalRunePositions(t *testing.T) {
+	body := "K" + strings.Repeat("前", 60) + "Straße😀" + strings.Repeat("后", 60)
+	raw, _ := json.Marshal([]map[string]string{{"Role": "user", "Content": body}})
+	got := snippet(string(raw), "STRASSE")
+	if !utf8.ValidString(got) || !strings.Contains(got, "Straße😀") || !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "…") {
+		t.Fatal(got)
+	}
 }

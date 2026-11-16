@@ -23,6 +23,7 @@ test('side restore, send and stop target only the selected session and ignore st
   draftFor('main').text='main draft';draftFor('side').text='side draft';
   assert.equal(await actions.send('side message',[],[],[],'side'),true);
   assert.equal(sent[0].sessionId,'side');assert.equal(store.live.side?.busy,true);assert.equal(store.live.main?.busy,false);
+  (toRaw(store.live) as Record<string,LiveSession>).side!.turnId='side-turn';
   await actions.interrupt('side');assert.deepEqual(stopped,['side']);
   assert.equal(draftFor('main').text,'main draft');
   actions.closeSideSession();assert.equal(store.sideSessionId,'');assert.equal(store.live.side?.busy,true);
@@ -59,4 +60,40 @@ test('side RPC completion cannot overwrite a turn that finished during history r
   assert.deepEqual(store.live['finish-during-restore']?.timeline.map(item=>item.id),['old-answer','new-answer']);
   assert.equal(store.live['finish-during-restore']?.busy,false);
  } finally {actions.closeSideSession();(globalThis as any).window=old;}
+});
+
+test('side tabs reuse live history and restore only still-existing persisted tabs',async()=>{
+ const old=(globalThis as any).window,oldStorage=(globalThis as any).localStorage;
+ const values=new Map<string,string>();let resumes=0;
+ (globalThis as any).localStorage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>values.set(key,value)};
+ (globalThis as any).window={aiclaw:{session:{resume:async(id:string)=>{resumes++;return {sessionId:id,history:[]}},work:async()=>({pending:[]})}}};
+ try {
+  await actions.openSideSession('tab-one');await actions.openSideSession('tab-two');await actions.openSideSession('tab-one');
+  assert.equal(resumes,2);assert.equal(store.sideSessionId,'tab-one');
+  assert.ok(store.sideSessionIds.includes('tab-one'));assert.ok(store.sideSessionIds.includes('tab-two'));
+  const persisted=JSON.parse(values.get('aiclaw.side-sessions')!);assert.equal(persisted.active,'tab-one');
+  (toRaw(store) as any).sessions=[{id:'tab-one',title:'one'}];
+  values.set('aiclaw.side-sessions',JSON.stringify({ids:['tab-one','deleted',null,'tab-one'],active:'tab-one'}));
+  actions.closeSideSession();values.set('aiclaw.side-sessions',JSON.stringify({ids:['tab-one','deleted',null,'tab-one'],active:'tab-one'}));
+  await actions.restoreSideSessions();assert.deepEqual([...store.sideSessionIds],['tab-one']);assert.equal(store.sideSessionId,'tab-one');assert.equal(resumes,2);
+  actions.closeSideTab('tab-one');assert.equal(store.sideSessionId,'');assert.equal(store.sideSessionIds.length,0);
+  values.set('aiclaw.side-sessions','{broken');await actions.restoreSideSessions();assert.equal(store.sideSessionId,'');
+ } finally {actions.closeSideSession();(globalThis as any).window=old;(globalThis as any).localStorage=oldStorage;}
+});
+
+test('UI stop carries the observed turn id and never falls back to a session-wide stop',async()=>{
+ const old=(globalThis as any).window;const stopped:unknown[]=[];
+ (globalThis as any).window={aiclaw:{session:{interrupt:async(...args:unknown[])=>stopped.push(args)}}};
+ try {
+  (toRaw(store.live) as Record<string,LiveSession>)['stop-fixture']={timeline:[],busy:true};await actions.interrupt('stop-fixture');assert.deepEqual(stopped,[]);
+  (toRaw(store.live) as Record<string,LiveSession>)['stop-fixture']!.turnId='observed';await actions.interrupt('stop-fixture');assert.deepEqual(stopped,[['stop-fixture','observed']]);
+ } finally {(globalThis as any).window=old;}
+});
+
+test('a failed startup session list does not erase the saved side layout',async()=>{
+ const old=(globalThis as any).window,oldStorage=(globalThis as any).localStorage;
+ const saved=JSON.stringify({ids:['saved-tab'],active:'saved-tab'});let value=saved;
+ (globalThis as any).localStorage={getItem:()=>value,setItem:(_key:string,next:string)=>{value=next}};
+ (globalThis as any).window={aiclaw:{runtime:{start:async()=>{}},session:{list:async()=>{throw Error('temporarily unavailable')}},providers:{list:async()=>[]}}};
+ try {await actions.startRuntime();assert.equal(value,saved);}finally{(globalThis as any).window=old;(globalThis as any).localStorage=oldStorage;}
 });

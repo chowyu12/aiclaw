@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { projectWorkspace } from "./workspace-defaults.js";
 import { normalizeProject, type ProjectInput } from "../shared/projects.js";
 import { join, dirname, isAbsolute } from "node:path";
+import { writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { PendingApproval, PendingUserInput } from "@aiclaw/agent-client";
@@ -21,7 +22,7 @@ import { formatWhen, type ScheduledTaskInput } from "../shared/schedule.js";
 import { normalizeLocale, setCurrentLocale, tr } from "../shared/i18n.js";
 import { Updater } from "./updater.js";
 import { fetchReleaseNotes } from "./release-notes.js";
-import { DiagnosticsLog, buildReport } from "./diagnostics.js";
+import { DiagnosticsLog, buildReport, buildDiagnosticsArchive } from "./diagnostics.js";
 import { LogFile } from "./logfile.js";
 import { workspaceFiles } from "./workspace-files.js";
 import { readTextPreview } from "./file-preview.js";
@@ -381,7 +382,7 @@ function registerIpc(): void {
   ipcMain.handle(IPC.sessionResume, (_event, sessionId: string, recoveryModel?: {providerId: number; model: string; contextWindow: number; reasoningEffort?: string}, activate = true) => sessions.resumeSession(sessionId, recoveryModel, activate));
   ipcMain.handle(IPC.sessionHistory, (_event, sessionId: string) => sessions.sessionHistory(sessionId));
   ipcMain.handle(IPC.sessionSend, (_event, input) => sessions.sendTurn(input));
-  ipcMain.handle(IPC.sessionInterrupt, (_event, sessionId: string) => sessions.interrupt(sessionId));
+  ipcMain.handle(IPC.sessionInterrupt, (_event, sessionId: string, turnId?: string) => sessions.interrupt(sessionId, turnId));
   ipcMain.handle(IPC.sessionList, async () => {
     const list = await sessions.listSessions();
     // 顺手清掉指向已删会话的分组归属，别让分组里留下看不见的幽灵成员。
@@ -557,7 +558,7 @@ function registerIpc(): void {
   );
 
   ipcMain.handle(IPC.diagnosticsNetwork, () => sessions.networkDiagnostics());
-  ipcMain.handle(IPC.diagnosticsRead, () => {
+  const readDiagnostics = (): string => {
     const config = store.readConfig();
     return buildReport(
       {
@@ -585,6 +586,16 @@ function registerIpc(): void {
       },
       diagnostics.all(),
     );
+  };
+  ipcMain.handle(IPC.diagnosticsRead, readDiagnostics);
+  ipcMain.handle(IPC.diagnosticsExport, async () => {
+    const result = await dialog.showSaveDialog({
+      defaultPath: join(app.getPath("downloads"), `AIClaw-diagnostics-${app.getVersion()}.zip`),
+      filters: [{ name: "ZIP", extensions: ["zip"] }],
+    });
+    if (result.canceled || !result.filePath) return null;
+    await writeFile(result.filePath, buildDiagnosticsArchive(readDiagnostics(), diagnostics.all()), { mode: 0o600 });
+    return result.filePath;
   });
 
   ipcMain.handle(IPC.skillList, () => skills.list());

@@ -93,3 +93,16 @@ Verification covers catalog refresh, state copies/quotas, discovery declarations
 wait, no replay, termination, nested evidence restoration, media/text separation, MCP errors,
 real worker exhaustion/recovery and cancellation propagation. Tests use fixture tools and model
 servers; they do not establish real-provider behavior or end-to-end desktop task quality.
+
+### File-backed audio
+
+`audio({path: "generated/clip.wav", mimeType: "audio/wav", output_hint: "..."})`
+keeps file bytes out of the JavaScript worker protocol. The Go host resolves the path
+through the normal protected-path checks and read policy, reads a regular file up to
+8 MiB, and applies the 16 MiB encoded-media budget per observation. It materializes
+the output into a persistent artifact and typed history content, so playback survives
+removal of the source file and session restore. Base64/MCP audio blocks still work.
+
+Provider-owned `file_id` values are not portable file paths. They are explicitly
+rejected: download with the owning provider's tool before emitting local audio.
+This does not add provider uploads or audio model input capabilities.

@@ -70,3 +70,14 @@ test("日志环有上限，且按行切、丢空行", () => {
   assert.deepEqual(lines.map((line) => line.text), ["b", "c", "d"]);
   assert.ok(lines.every((line) => line.at > 0));
 });
+
+test('diagnostic ZIP contains only redacted allowlisted text entries', async () => {
+ const {unzipSync,strFromU8}=await import('fflate');
+ const {buildDiagnosticsArchive}=await import('../apps/desktop/src/main/diagnostics.ts');
+ const archive=buildDiagnosticsArchive('version 3.x\nAuthorization: Bearer abc-secret\nhttps://user:password@example.com\nCookie: session=private-cookie', [{at:0,source:'app',text:'MCP_TOKEN=secret-log'}]);
+ const files=unzipSync(archive);
+ assert.deepEqual(Object.keys(files).sort(),['recent.log','report.txt']);
+ const text=Object.values(files).map(data=>strFromU8(data)).join('\n');
+ for (const secret of ['abc-secret','user:password','private-cookie','secret-log']) assert.ok(!text.includes(secret),text);
+ assert.match(text,/version 3.x/);assert.match(text,/example.com/);
+});

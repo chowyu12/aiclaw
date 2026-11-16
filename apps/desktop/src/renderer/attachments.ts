@@ -163,19 +163,18 @@ export function fitSize(width: number, height: number): { width: number; height:
 
 // ---------- 下面这半要 DOM，只在渲染层跑 ----------
 
-/**
- * 把一个图片文件解码、缩放、编码成 JPEG。
- *
- * 为什么一定要缩：贴一张 4K 截图原样发过去是几 MB，而它每一轮都会**重发一遍**
- * （图片在消息历史里），还要原样写进会话库。长边 1568 是识别精度与体积的
- * 折中——再大对模型看清楚没有帮助。
- *
- * 用 JPEG 而不是 PNG：截图里大片纯色 PNG 更小，但照片和带渐变的界面 PNG 会
- * 大几倍，而这里收的两种都有。0.82 的质量下肉眼看不出差别。
- */
+/** Preserve supported small images; normalize oversized/other inputs once. */
 export async function readImage(file: File): Promise<ImageAttachment> {
-  const bitmap = await createImageBitmap(file);
+  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
   const { width, height } = fitSize(bitmap.width, bitmap.height);
+  if (width === bitmap.width && height === bitmap.height && (file.type === "image/png" || file.type === "image/jpeg") && file.size <= 4 * 1024 * 1024) {
+    bitmap.close();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    const data = btoa(binary);
+    return { kind: "image", name: file.name || tr("截图.jpg"), data, preview: `data:${file.type};base64,${data}` };
+  }
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -184,7 +183,9 @@ export async function readImage(file: File): Promise<ImageAttachment> {
   context.drawImage(bitmap, 0, 0, width, height);
   bitmap.close();
 
-  const preview = canvas.toDataURL("image/jpeg", 0.82);
+  const mime = file.type === "image/png" ? "image/png" : "image/jpeg";
+  const preview = canvas.toDataURL(mime, 0.82);
+  if (preview.slice(preview.indexOf(",") + 1).length > Math.ceil(4 * 1024 * 1024 / 3) * 4) throw new Error(tr("图片过大"));
   return {
     kind: "image",
     name: file.name || tr("截图.jpg"),
@@ -208,4 +209,9 @@ export async function readAudio(file: File): Promise<AudioAttachment> {
 export async function readTextFile(file: File): Promise<TextAttachment> {
   const { text, truncated } = clampText(await file.text());
   return { kind: "text", name: file.name, text, truncated };
+}
+
+/** Incoming history carries bytes without MIME; keep PNG previews correctly typed. */
+export function imageDataURL(data: string): string {
+  return `data:${data.startsWith("iVBOR") ? "image/png" : "image/jpeg"};base64,${data}`;
 }

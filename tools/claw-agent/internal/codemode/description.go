@@ -101,7 +101,7 @@ Helpers:
 - setTimeout(callback, delayMs) / clearTimeout(id): bounded timers; await a Promise to keep the script alive. Unawaited timers do not keep it alive.
 - notify(value): print output and request an immediate yield to the model.
 - yield_control(): yield accumulated output while the script continues.
-- image(dataUrlOrContent), audio(dataUrlOrContent), generatedImage({image_url, output_hint?}): explicitly emit base64 data URLs or individual MCP media blocks. No HTTP URLs. Media is separate from text truncation. Audio is delivered as a playable file; models without audio input use transcribe_audio if needed.
+- image(dataUrlOrContent), audio(dataUrlOrContent), generatedImage({image_url, output_hint?}): explicitly emit base64 data URLs or individual MCP media blocks. No HTTP URLs. Media is separate from text truncation. Audio also accepts {path: "relative/or/absolute.wav", mimeType: "audio/wav", output_hint?: "..."}. Local paths are resolved and protected by the host, capped at 8 MiB each and 16 MiB total per observation, and copied into persistent playable artifacts. Provider file_id values and HTTP URLs are unsupported; use the owning provider tool to download/materialize them first. Audio is delivered as a playable file; models without audio input use transcribe_audio if needed.
 - exec accepts yield_time_ms and max_output_tokens. When it returns a running cell_id, call the top-level wait({cell_id}) for new output or wait({cell_id,terminate:true}) to cancel. Never restart the original script to poll. Cells stop when their originating turn ends or is canceled.
 
 Example:

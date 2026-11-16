@@ -9,6 +9,7 @@
  * 子进程随便写的，上游返回的错误里也可能回显 Authorization。所以每一行都过
  * 一遍 redact——这一步是纯函数，被 scripts/test-diagnostics.ts 钉着。
  */
+import { zipSync, strToU8 } from "fflate";
 import { tr } from "../shared/i18n.js";
 
 /** 一行日志。 */
@@ -36,6 +37,8 @@ export interface ReportFacts {
 }
 
 const REDACTIONS: [RegExp, string][] = [
+  [/(https?:\/\/)[^\s/@:]+:[^\s/@]+@/gi, "$1***@"],
+  [/\b((?:set-)?cookie\s*:\s*)[^\r\n]+/gi, "$1***"],
   // OpenAI 风格的 Key。别的形状由下面几条兜住。
   [/\bsk-[A-Za-z0-9_-]{6,}/g, "sk-***"],
   [/\b(bearer\s+)\S+/gi, "$1***"],
@@ -88,7 +91,7 @@ export function buildReport(facts: ReportFacts, lines: LogLine[]): string {
   for (const line of lines) {
     rows.push(`${new Date(line.at).toISOString()} [${line.source}] ${redact(line.text)}`);
   }
-  return rows.join("\n");
+  return redact(rows.join("\n"));
 }
 
 /**
@@ -120,4 +123,12 @@ export class DiagnosticsLog {
   all(): LogLine[] {
     return this.lines;
   }
+}
+
+/** Fixed allowlist: never read raw log files, configuration databases or chats. */
+export function buildDiagnosticsArchive(report: string, lines: LogLine[]): Uint8Array {
+  return zipSync({
+    "report.txt": strToU8(redact(report)),
+    "recent.log": strToU8(redact(lines.map(line => `${new Date(line.at).toISOString()} [${line.source}] ${line.text}`).join("\n"))),
+  });
 }
