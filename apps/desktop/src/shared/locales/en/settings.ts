@@ -1,5 +1,7 @@
 /** 英文词典：settings 这一组界面（中文原文 → 英文）。 */
 export const settings: Record<string, string> = {
+ "雾蓝浅紫": "Misty blue & lavender",
+ "薄荷青绿": "Mint green",
   "关于": "About",
   "版本信息与更新日志": "Version information and release notes",
   "当前版本": "Current version",

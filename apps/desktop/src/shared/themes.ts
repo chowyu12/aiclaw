@@ -5,6 +5,8 @@ export const THEMES = [
   { id: "blue", label: "冷静雾蓝", accent: "#5269c5", surface: "#ffffff", sidebar: "#f2f5fc" },
   { id: "sand", label: "暖砂阅读", accent: "#a87536", surface: "#fffefb", sidebar: "#f7f4ed" },
   { id: "violet", label: "柔和墨紫", accent: "#7b62af", surface: "#ffffff", sidebar: "#f5f2fa" },
+  { id: "mist", label: "雾蓝浅紫", accent: "#6655a6", surface: "#fcfdff", sidebar: "#f0f4fa" },
+  { id: "mint", label: "薄荷青绿", accent: "#168266", surface: "#fafcfc", sidebar: "#eaf5f0" },
   { id: "dark", label: "深色", accent: "#9baded", surface: "#1c1f26", sidebar: "#1a1d23" },
   { id: "modern", label: "现代极简", accent: "#c1b1ff", surface: "#18191c", sidebar: "#131416" },
 ] as const;

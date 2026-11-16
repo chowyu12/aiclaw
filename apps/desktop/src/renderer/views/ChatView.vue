@@ -37,6 +37,7 @@ import {
 } from "../mentions";
 import type { SessionSummaryView, SkillView } from "../../shared/types";
 import StepsBlock from "./StepsBlock.vue";
+import MessageIdentity from "./MessageIdentity.vue";
 import FileReferences from "./FileReferences.vue";
 import SearchSources from "./SearchSources.vue";
 import ConfigurationCard from "./ConfigurationCard.vue";
@@ -656,7 +657,7 @@ watch(
 );
 
 function stepsOpen(key: string): boolean {
-  return stepsOverride.value.get(key) ?? false;
+  return stepsOverride.value.get(key) ?? (store.config?.theme === 'mint');
 }
 function toggleSteps(key: string): void {
   const next = new Map(stepsOverride.value);
@@ -668,7 +669,7 @@ function thinkingOnly(turn: Turn): boolean {
   return turn.key === runningKey.value && turn.entries.every(entry => entry.kind === "step" && entry.step === "llm" && entry.state !== "failed");
 }
 function processOpen(turn: Turn): boolean {
-  return stepsOverride.value.get(turn.key) ?? (turn.key === runningKey.value && !thinkingOnly(turn));
+  return stepsOverride.value.get(turn.key) ?? ((store.config?.theme === 'mint' && turn.steps.some(step => step.step === 'tool')) || (turn.key === runningKey.value && !thinkingOnly(turn)));
 }
 function toggleProcess(turn: Turn): void {
   const next = new Map(stepsOverride.value);
@@ -749,6 +750,7 @@ const forking = ref(false);
             <!-- 提问与它下面那一行包在一起：鼠标在这块上面时才显示时间与复制
                  （与 Codex / Claude 一样），平时整屏只有正文。 -->
             <div v-if="turn.user" class="say">
+            <MessageIdentity v-if="store.config?.theme === 'mint'" user :at="turn.user.at" />
             <div class="msg user">
               <div class="bubble">
                 <div v-if="(turn.user.images ?? []).length > 0" class="shots">
@@ -810,6 +812,7 @@ const forking = ref(false);
               <div v-if="processOpen(turn)" class="process-body">
                 <template v-for="block in turnBlocks(turn, turn.key === runningKey)" :key="block.key">
                   <div v-if="block.kind === 'message'" class="msg agent progress-message">
+                    <MessageIdentity v-if="store.config?.theme === 'mint'" :at="block.message.at" />
                     <FileReferences class="prose" :html="renderMarkdown(block.message.text)" :session-id="store.sessionId" :run-scope="block.message.streaming ? undefined : block.message.id" />
                     <span v-if="block.message.streaming" class="caret">▌</span>
                   </div>
@@ -828,6 +831,7 @@ const forking = ref(false);
 
             <!-- 最终回答独立于过程；复制、反馈和交付文件均只属于这条回答。 -->
             <div v-if="answerDone(turn)" class="say final-answer">
+            <MessageIdentity v-if="store.config?.theme === 'mint'" :at="finalMessage(turn)?.at" :steps="turn.steps" />
             <div v-if="answerDone(turn)" class="msg agent">
               <FileReferences class="prose" :html="renderMarkdown(finalMessage(turn)!.text)" :session-id="store.sessionId" :run-scope="finalMessage(turn)!.id" @loaded="turn.key === turns.at(-1)?.key && scrollToEnd()" />
             </div>

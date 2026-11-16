@@ -121,6 +121,35 @@
   --rule: #ebe6f1; --rule-strong: #dbd1e9; --hover: #f2edf8; --active: #ebe3f5;
   --action: #7b62af;
 }
+/* 浅雾蓝背景与淡紫选中态；正文和细字仍保留足够对比度。 */
+:root[data-theme="mist"] {
+  color-scheme: light;
+  --ground: #fcfdff; --surface: #fcfdff; --surface-2: #f4f6fc;
+  --sidebar: #f0f4fa; --rail: #edf1f9;
+  --ink: #30394b; --ink-2: #515d73; --muted: #68768c;
+  --accent: #6655a6; --accent-hover: #56458f; --accent-soft: #eeebfb;
+  --action: #dcdff5; --on-action: #484379;
+  --rule: #e1e7f3; --rule-strong: #cbd3e9; --chrome-rule: #e8edf7;
+  --hover: #eaf0f9; --active: #ebe9fa;
+  --chat-selected: #ebe9fa; --chat-selected-ink: #59458f;
+  --ok: #317755; --ok-soft: #e4f4ec;
+  --code-keyword: #735a9d; --code-number: #8d651c; --code-title: #356b98;
+  --shadow-1: 0 1px 3px rgb(66 82 125 / 4%);
+  --shadow-2: 0 4px 14px rgb(66 82 125 / 6%);
+}
+html[data-theme="mist"] .sidebar.is-chat .item.active { box-shadow: inset 2px 0 #9382c5; }
+html[data-theme="mist"] .sidebar .new { background: var(--accent-soft); color: var(--accent); border-radius: var(--r-md); }
+html[data-theme="mist"] .sidebar .new:hover:not(:disabled) { background: #e3dff6; }
+html[data-theme="mist"] .composer { background: var(--surface); border-color: #cfc9ec; }
+html[data-theme="mist"] .file-preview { background: #f7f9fd; }
+html[data-theme="mist"] .code-panel { --code-keyword: #735a9d; --code-number: #8d651c; --code-title: #356b98; }
+html[data-theme="mist"] .file-preview .hljs-keyword,
+html[data-theme="mist"] .file-preview .hljs-selector-tag { color: #735a9d; }
+html[data-theme="mist"] .file-preview .hljs-number,
+html[data-theme="mist"] .file-preview .hljs-literal { color: #8d651c; }
+html[data-theme="mist"] .file-preview .hljs-title,
+html[data-theme="mist"] .file-preview .hljs-built_in { color: #356b98; }
+
 html[data-theme="sand"] .prose :is(h3, h4),
 html[data-theme="violet"] .prose :is(h3, h4) { color: var(--accent); }
 
