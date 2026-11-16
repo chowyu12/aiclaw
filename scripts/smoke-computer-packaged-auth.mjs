@@ -13,7 +13,7 @@ import {createConnection} from 'node:net';
 import {setTimeout as pause} from 'node:timers/promises';
 import {packager} from '@electron/packager';
 import {buildComputerRuntime} from './build-computer-runtime.mjs';
-import {stageComputerHostDependencies} from './stage-computer-runtime.mjs';
+import {stageHostDependencies} from './stage-host-dependencies.mjs';
 import {signMacApplication,signMacBundle,verifyMacBundle,loadMacSigning} from './mac-signing.mjs';
 if(process.platform!=='darwin'){console.log('Production packaged authentication requires macOS');process.exit(0)}
 const repo=resolve('.'),root=mkdtempSync('/tmp/acp-'),stage=join(root,'stage'),home=join(root,'home'),directory=join(home,'.aiclaw/computer-use');
@@ -28,7 +28,7 @@ try{
  const client=join(stage,'node_modules/@aiclaw/agent-client');mkdirSync(client,{recursive:true});
  cpSync(join(repo,'packages/agent-client/dist'),join(client,'dist'),{recursive:true});
  cpSync(join(repo,'packages/agent-client/package.json'),join(client,'package.json'));
- await stageComputerHostDependencies({repo,destination:stage});
+ await stageHostDependencies({repo,destination:stage});
  const helper=buildComputerRuntime({universal:true,output:join(repo,'build/listener-auth-production')});
  mkdirSync(join(stage,'computer-use'));cpSync(helper,join(stage,'computer-use/AIClaw Computer Use.app'),{recursive:true});
  const metadata=JSON.parse(readFileSync(join(helper,'Contents/Resources/Build.json'),'utf8'));assert.equal(metadata.authenticationProfile,'production');

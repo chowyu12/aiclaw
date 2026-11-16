@@ -12,10 +12,9 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import {
-  stageComputerRuntime,
-  stageComputerHostDependencies,
-} from "./stage-computer-runtime.mjs";
+import { stageComputerRuntime } from "./stage-computer-runtime.mjs";
+import { stageHostDependencies } from "./stage-host-dependencies.mjs";
+import { execFileSync } from "node:child_process";
 const manifest = JSON.parse(
   await readFile(
     new URL("../tools/cua-driver/runtime.json", import.meta.url),
@@ -130,7 +129,7 @@ test("a corrupted cached Driver or SDK is rejected before packaging", async () =
 test("packaging includes SDK JS and its exact resolver dependencies", async () => {
   const destination = await mkdtemp(join(tmpdir(), "aiclaw-cua-modules-"));
   try {
-    await stageComputerHostDependencies({
+    await stageHostDependencies({
       repo: fileURLToPath(new URL("../", import.meta.url)),
       destination,
     });
@@ -150,6 +149,29 @@ test("packaging includes SDK JS and its exact resolver dependencies", async () =
       ),
       /EmbeddedCuaDriverHost/,
     );
+  } finally {
+    await rm(destination, { recursive: true, force: true });
+  }
+});
+
+
+test("packaged diagnostics ZIP dependency loads outside the repository", async () => {
+  const destination = await mkdtemp(join(tmpdir(), "aiclaw-host-dependency-test-"));
+  try {
+    await stageHostDependencies({
+      repo: fileURLToPath(new URL("../", import.meta.url)),
+      destination,
+    });
+    await writeFile(join(destination, "probe.mjs"), `
+      import { zipSync, unzipSync, strToU8, strFromU8 } from 'fflate';
+      const result = unzipSync(zipSync({'report.txt': strToU8('isolated diagnostics')}));
+      if (strFromU8(result['report.txt']) !== 'isolated diagnostics') throw Error('ZIP round trip failed');
+    `);
+    execFileSync(process.execPath, [join(destination, "probe.mjs")], {
+      cwd: destination,
+      env: { ...process.env, NODE_PATH: "" },
+      stdio: "pipe",
+    });
   } finally {
     await rm(destination, { recursive: true, force: true });
   }

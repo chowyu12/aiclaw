@@ -58,6 +58,9 @@ try {
       readiness=await evaluate(`(async()=>{
         if(!process.resourcesPath) return false;
         const require=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app/package.json');
+        // Resolve the production ZIP module from the package, before waiting for a renderer.
+        // ESM startup failures may otherwise leave a modal error and only time out.
+        require.resolve('fflate');
         let electron;
         try {electron=require('electron');} catch {return false;}
         const {app,BrowserWindow}=electron;

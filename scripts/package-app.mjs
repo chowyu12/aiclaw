@@ -22,7 +22,8 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { packager } from "@electron/packager";
-import { stageComputerRuntime, stageComputerHostDependencies } from "./stage-computer-runtime.mjs";
+import { stageComputerRuntime } from "./stage-computer-runtime.mjs";
+import { stageHostDependencies } from "./stage-host-dependencies.mjs";
 import { signMacApplication } from "./mac-signing.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -116,7 +117,7 @@ async function stage() {
   );
 
   await stageComputerRuntime({ repo: REPO, destination: STAGING, platform, arch });
-  await stageComputerHostDependencies({ repo: REPO, destination: STAGING });
+  await stageHostDependencies({ repo: REPO, destination: STAGING });
 
   writeFileSync(
     join(STAGING, "package.json"),

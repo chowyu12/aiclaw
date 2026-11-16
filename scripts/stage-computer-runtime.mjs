@@ -13,16 +13,6 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-export async function stageComputerHostDependencies({ repo, destination }) {
-  // Same-process SDK owns daemon lifetime and parent-liveness, not tool dispatch.
-  for (const name of ["@trycua/cua-driver", "@ubjs/core", "@ubjs/node"]) {
-    await cp(
-      join(repo, "node_modules", name),
-      join(destination, "node_modules", name),
-      { recursive: true },
-    );
-  }
-}
 export async function stageComputerRuntime({
   repo,
   destination,
