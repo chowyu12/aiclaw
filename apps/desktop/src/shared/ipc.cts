@@ -118,6 +118,7 @@ export const IPC = {
   workspaceReveal: "workspace:reveal",
   fileOpen: "file:open",
   filePreview: "file:preview",
+  attachmentRead: "attachment:read",
   filePreviewLayout: "file:previewLayout",
   memoryRead: "memory:read",
   memorySave: "memory:save",

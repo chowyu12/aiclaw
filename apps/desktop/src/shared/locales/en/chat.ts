@@ -1,5 +1,8 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "文档或压缩包不能为空，且不能超过 25MiB": "Documents and archives must be nonempty and no larger than 25 MiB",
+  "正在读取附件…": "Reading attachments…",
+  "添加图片、音频、文档或压缩包，也可粘贴或拖入": "Add images, audio, documents or archives, or paste or drag them here",
   "你": "You",
   "回答已生成": "Response generated",
   "{n} 次模型调用": "{n} model calls",

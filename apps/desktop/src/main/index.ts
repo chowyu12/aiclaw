@@ -2,6 +2,7 @@ import { app, BrowserWindow, clipboard, ClipboardItem, dialog, ipcMain, Menu, na
 import { homedir } from "node:os";
 import { toolPath } from "./shell-path.js";
 import { CommandRunner } from "./command-runner.js";
+import { readDocumentAttachment } from "./document-reader.js";
 import { randomUUID } from "node:crypto";
 import { projectWorkspace } from "./workspace-defaults.js";
 import { normalizeProject, type ProjectInput } from "../shared/projects.js";
@@ -537,6 +538,7 @@ function registerIpc(): void {
       previewWindowBounds = null;
     }
   });
+  ipcMain.handle(IPC.attachmentRead, (_event, input: unknown) => readDocumentAttachment(input));
   ipcMain.handle(IPC.filePreview, async (_event, input: { path: string; sessionId: string }) => {
     const session = (await sessions.listSessions()).find(session => session.id === input.sessionId && !session.archivedAt);
     if (!session) throw new Error(tr("找不到预览文件所属的会话。"));

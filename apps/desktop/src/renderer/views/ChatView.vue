@@ -368,25 +368,34 @@ function onMentionKey(event: KeyboardEvent): boolean {
 
 const attachments = computed({ get: () => draftFor(store.sessionId).attachments, set: value => { draftFor(store.sessionId).attachments = value; } });
 const attachError = ref("");
+const parsingAttachments = ref(false);
 const picker = ref<HTMLInputElement | null>(null);
 
 async function accept(files: FileList | File[] | null | undefined): Promise<void> {
+  if (parsingAttachments.value) return;
+  parsingAttachments.value = true;
   attachError.value = "";
   const target = draftFor(store.sessionId);
-  for (const file of Array.from(files ?? [])) {
-    const images = target.attachments.filter((item) => item.kind === "image").length;
-    const audio = target.attachments.filter((item) => item.kind === "audio").length;
-    const verdict = classifyFile(file, images, audio);
-    try {
-      if (verdict.accept === "image") target.attachments.push(await readImage(file));
-      else if (verdict.accept === "audio") target.attachments.push(await readAudio(file));
-      else if (verdict.accept === "text") target.attachments.push(await readTextFile(file));
-      // 拒绝的要说出来。默默忽略的话，用户以为模型看过了那份文件。
-      else attachError.value = verdict.reason;
-    } catch (error) {
-      attachError.value = t("{name} 读不了：{error}", { name: file.name, error: describeError(error) });
+  try {
+    for (const file of Array.from(files ?? [])) {
+      const images = target.attachments.filter((item) => item.kind === "image").length;
+      const audio = target.attachments.filter((item) => item.kind === "audio").length;
+      const verdict = classifyFile(file, images, audio);
+      try {
+        if (verdict.accept === "image") target.attachments.push(await readImage(file));
+        else if (verdict.accept === "audio") target.attachments.push(await readAudio(file));
+        else if (verdict.accept === "text") target.attachments.push(await readTextFile(file));
+        else if (verdict.accept === "document") {
+          const parsed = await window.aiclaw.files.readAttachment(file.name, new Uint8Array(await file.arrayBuffer()));
+          target.attachments.push({ kind: "text", name: file.name, ...parsed });
+        }
+        // 拒绝的要说出来。默默忽略的话，用户以为模型看过了那份文件。
+        else attachError.value = verdict.reason;
+      } catch (error) {
+        attachError.value = t("{name} 读不了：{error}", { name: file.name, error: describeError(error) });
+      }
     }
-  }
+  } finally { parsingAttachments.value = false; }
 }
 
 function onPaste(event: ClipboardEvent): void {
@@ -446,7 +455,7 @@ function attachmentLabel(item: Attachment): string {
 // 运行中发送默认排队；已排队消息可显式选择“立即引导”。
 const submitting = ref(false);
 async function submit(): Promise<void> {
-  if (submitting.value) return;
+  if (submitting.value || parsingAttachments.value) return;
   const target = draftFor(store.sessionId);
   const originalDraft = draft.value;
   const originalBindings = bindings.value;
@@ -976,6 +985,7 @@ const forking = ref(false);
               </div>
             </div>
             <p v-if="attachError" class="attach-error">{{ attachError }}</p>
+            <p v-if="parsingAttachments" class="attach-error" role="status">{{ t("正在读取附件…") }}</p>
             <p v-if="voiceError" class="attach-error">
               {{ voiceError }}
               <button v-if="!sttReady" class="link" @click="actions.setView('settings')">{{ t("去配置") }}</button>
@@ -1037,7 +1047,7 @@ const forking = ref(false);
 
             <div class="bar">
               <div class="bar-left">
-                <button class="chip" :title="t(`贴图片或文本文件（也可以直接粘贴/拖进来）`)" @click="picker?.click()">
+                <button class="chip" :disabled="parsingAttachments" :title="t(`添加图片、音频、文档或压缩包，也可粘贴或拖入`)" @click="picker?.click()">
                   <span class="chip-icon">+</span>
                   {{ t("附件") }}
                 </button>
@@ -1165,7 +1175,7 @@ const forking = ref(false);
                 </button>
                 <button
                   class="send"
-                  :disabled="submitting || !!store.sessionLoadError || !!store.loadingSession || (!draft.trim() && !attachments.length)"
+                  :disabled="submitting || parsingAttachments || !!store.sessionLoadError || !!store.loadingSession || (!draft.trim() && !attachments.length)"
                   :title="store.busy ? t('排队发送') : t('发送')"
                   :aria-label="store.busy ? t('排队发送') : t('发送')"
                   @click="submit()"

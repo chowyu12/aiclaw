@@ -7,6 +7,7 @@
  * 塞进提示词，都是判断错了。
  */
 import { tr } from "../shared/i18n.js";
+import { DOCUMENT_EXTENSIONS, ARCHIVE_EXTENSIONS, TEXT_EXTENSIONS, MAX_DOCUMENT_BYTES } from "../shared/attachment-files.js";
 
 /** 一张要随消息发出去的图片。data 是 base64，不带 `data:` 前缀。 */
 export interface ImageAttachment {
@@ -73,18 +74,11 @@ const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "mp4", "wav", "ogg", "opus", "we
 /** 缩放后图片的最长边。再大对模型的识别没有帮助，只是更贵。 */
 export const MAX_IMAGE_EDGE = 1568;
 
-const TEXT_EXTENSIONS = new Set([
-  "txt", "md", "markdown", "json", "jsonl", "yaml", "yml", "toml", "ini", "conf", "env",
-  "csv", "tsv", "log", "sql", "sh", "bash", "zsh", "py", "go", "rs", "java", "kt", "c", "h",
-  "cc", "cpp", "hpp", "cs", "rb", "php", "swift", "ts", "tsx", "js", "jsx", "mjs", "cjs",
-  "vue", "css", "scss", "less", "html", "htm", "xml", "svg", "gradle", "properties", "diff",
-  "patch", "gitignore", "dockerfile", "makefile",
-]);
-
 export type Verdict =
   | { accept: "image" }
   | { accept: "text" }
   | { accept: "audio" }
+  | { accept: "document" }
   | { accept: "no"; reason: string };
 
 /**
@@ -100,6 +94,11 @@ export function classifyFile(
 ): Verdict {
   const type = file.type.toLowerCase();
   const extension = (file.name.split(".").pop() ?? "").toLowerCase();
+
+  if (DOCUMENT_EXTENSIONS.has(extension) || ARCHIVE_EXTENSIONS.has(extension)) {
+    if (!file.size || file.size > MAX_DOCUMENT_BYTES) return { accept: "no", reason: tr("文档或压缩包不能为空，且不能超过 25MiB") };
+    return { accept: "document" };
+  }
 
   // 音频排在图片前面判：webm 既可能是视频也可能是音频，而 type 常常是空的
   //（拖进来的文件在某些系统上没有 MIME），所以以扩展名为准。

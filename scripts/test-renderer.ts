@@ -436,7 +436,7 @@ test("认得出没有 MIME 类型的源码与配置文件", () => {
 });
 
 test("不支持的文件明确拒绝，并告诉用户怎么办", () => {
-  const verdict = classifyFile({ name: "报告.pdf", type: "application/pdf", size: 100 }, 0);
+  const verdict = classifyFile({ name: "程序.exe", type: "application/octet-stream", size: 100 }, 0);
   assert.equal(verdict.accept, "no");
   assert.match(verdict.accept === "no" ? verdict.reason : "", /工作目录/);
 });

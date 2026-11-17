@@ -161,6 +161,7 @@ const api = {
     read: () => ipcRenderer.invoke(IPC.diagnosticsRead),
   },
   files: {
+    readAttachment: (name: string, data: Uint8Array): Promise<{text: string; truncated: boolean}> => ipcRenderer.invoke(IPC.attachmentRead, { name, data }),
     browse: (sessionId: string, path = "", query = "") => ipcRenderer.invoke(IPC.workspaceFiles, { sessionId, path, query }),
     /** 打开模型在对话里提到的一个路径。主进程会校验，渲染层不碰文件系统。 */
     revealWorkspace: (path: string) => ipcRenderer.invoke(IPC.workspaceReveal, path),
