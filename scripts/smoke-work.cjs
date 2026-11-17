@@ -228,10 +228,28 @@ app.whenReady().then(async()=>{
   await wait("!!document.querySelector('.theme-settings [data-theme-option]')");
  };
  await openThemes();
- check('settings offers theme previews with white selected by default',await wait("document.querySelectorAll('[data-theme-option]').length===9 && document.querySelector('[data-theme-option=white]').getAttribute('aria-pressed')==='true'"));
- for(const [theme,background] of [['green','rgb(243, 247, 245)'],['blue','rgb(242, 245, 252)'],['violet','rgb(245, 242, 250)'],['dark','rgb(26, 29, 35)'],['modern','rgb(19, 20, 22)'],['mint','rgb(234, 245, 240)'],['mist','rgb(240, 244, 250)'],['sand','rgb(247, 244, 237)']]){
+ check('settings offers theme previews with white selected by default',await wait("document.querySelectorAll('[data-theme-option]').length===12 && document.querySelector('[data-theme-option=white]').getAttribute('aria-pressed')==='true'"));
+ for(const [theme,background] of [['green','rgb(243, 247, 245)'],['blue','rgb(242, 245, 252)'],['violet','rgb(245, 242, 250)'],['dark','rgb(26, 29, 35)'],['modern','rgb(19, 20, 22)'],['mint','rgb(234, 245, 240)'],['mist','rgb(240, 244, 250)'],['studio','rgb(241, 245, 250)'],['reading','rgb(245, 240, 232)'],['developer','rgb(241, 243, 249)'],['sand','rgb(247, 244, 237)']]){
   await js(`document.querySelector('[data-theme-option="${theme}"]').click()`);
   check('theme '+theme+' updates the app immediately after saving',await wait(`document.documentElement.dataset.theme==='${theme}' && document.querySelector('[data-theme-option="${theme}"]').getAttribute('aria-pressed')==='true' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='${background}'`)&&config.theme===theme);
+  if(['studio','reading','developer'].includes(theme)){
+   await win.loadFile(join(desktop,'dist/renderer/index.html'));
+   check(theme+' restores avatars and file change cards after reload',await wait(`document.documentElement.dataset.theme==='${theme}' && document.querySelectorAll('.message-avatar').length>=2 && document.querySelector('.change-list').open && document.querySelector('.change-path strong')?.textContent==='example.sql'`));
+   check(theme+' shows conflict separately and keeps undo disabled for conflicting files',await js("document.querySelector('.change-status.conflict').textContent.includes('禁止覆盖') && document.querySelector('.change-status.conflict').closest('article').querySelectorAll('button').length===1"));
+   check(theme+' shows completed steps and allows collapsing their details',await wait("!!document.querySelector('.step[data-state=done] .dot svg') && getComputedStyle(document.querySelector('.step[data-state=done] .dot svg')).display==='block'"));
+   await js("document.querySelector('.process-head').click()");
+   check(theme+' execution log remains collapsible',await wait("!document.querySelector('.process-body')"));
+   await js("document.querySelector('.process-head').click()");
+   await js("document.querySelector('.change-path').click()");
+   check(theme+' file card opens actual added and removed lines',await wait("!!document.querySelector('.file-preview .add') && !!document.querySelector('.file-preview .remove')"));
+   await wait("![...document.querySelectorAll('.artifact-note')].some(e=>e.textContent.includes('正在读取'))");
+   await js("document.querySelector('.stream').scrollTop=0; new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+   writeFileSync(`/tmp/aiclaw-${theme}-chat.png`,(await win.webContents.capturePage()).toPNG());
+   await js("document.querySelector('.file-preview .preview-close').click()");
+   await wait("!document.querySelector('.file-preview')");
+   previewReads.length=0;
+   await openThemes();
+  }
   if(theme==='mint'){
    await win.loadFile(join(desktop,'dist/renderer/index.html'));
    check('mint restores message avatars and real response badges',await wait("document.documentElement.dataset.theme==='mint' && document.querySelectorAll('.message-avatar').length>=2 && !!document.querySelector('.message-badge.generated') && getComputedStyle(document.querySelector('.sidebar .new')).backgroundColor==='rgb(22, 130, 102)'"));

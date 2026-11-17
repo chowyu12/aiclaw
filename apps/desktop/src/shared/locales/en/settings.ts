@@ -2,6 +2,9 @@
 export const settings: Record<string, string> = {
  "雾蓝浅紫": "Misty blue & lavender",
  "薄荷青绿": "Mint green",
+ "轻盈工作室": "Light studio",
+ "暖白阅读": "Warm reading",
+ "清爽开发台": "Clear developer",
   "关于": "About",
   "版本信息与更新日志": "Version information and release notes",
   "当前版本": "Current version",

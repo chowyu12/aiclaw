@@ -1,5 +1,8 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "已修改": "Modified",
+  "撤销中": "Undoing",
+  "待保存": "Pending save",
   "文档或压缩包不能为空，且不能超过 25MiB": "Documents and archives must be nonempty and no larger than 25 MiB",
   "正在读取附件…": "Reading attachments…",
   "每条消息最多附加 32 个文件": "Attach up to 32 files per message",
