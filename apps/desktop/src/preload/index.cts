@@ -49,6 +49,7 @@ const api = {
     setGoal: (id: string, goal: unknown) => ipcRenderer.invoke(IPC.goalSet, id, goal),
     updateGoal: (id: string, update: unknown) => ipcRenderer.invoke(IPC.goalUpdate, id, update),
     fork: (id: string, itemId?: string) => ipcRenderer.invoke(IPC.sessionFork, id, itemId),
+    editQueued: (id: string, requestId: string, text: string, expectedText: string) => ipcRenderer.invoke(IPC.sessionQueueEdit, id, requestId, text, expectedText),
     recover: (id: string, requestId: string, action: "resume" | "dismiss" | "steer") => ipcRenderer.invoke(IPC.sessionRecover, id, requestId, action),
     changes: (id: string) => ipcRenderer.invoke(IPC.changesList, id),
     undo: (id: string, changeId: string) => ipcRenderer.invoke(IPC.changesUndo, id, changeId),

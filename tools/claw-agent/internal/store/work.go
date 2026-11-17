@@ -138,3 +138,20 @@ func (s *Store) HasRunningSubmission(ctx context.Context, id string) (bool, erro
 	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM submissions WHERE session_id=? AND state='running'`, id).Scan(&n)
 	return n > 0, err
 }
+
+// Editing changes the payload, not the original submission fingerprint: a lost
+// acceptance receipt can still be retried without replaying or overwriting it.
+func (s *Store) EditQueuedSubmission(ctx context.Context, id, request string, previous, payload json.RawMessage) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE submissions SET payload=? WHERE session_id=? AND request_id=? AND state='queued' AND payload=?`, string(payload), id, request, string(previous))
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return i18n.E("消息已离开队列或已被修改，无法保存")
+	}
+	return nil
+}

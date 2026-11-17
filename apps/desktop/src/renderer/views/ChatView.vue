@@ -619,6 +619,40 @@ const turns = computed<Turn[]>(() => groupTurns(store.timeline.filter(entry => e
 const queuedInputs = computed(() => store.queuedInputs[store.sessionId] ?? []);
 const queuedAutomatic = computed(() => store.queuedAutomatic[store.sessionId] ?? []);
 const queueAction = ref("");
+const queueMenu = ref<HTMLElement>();
+const queueMenuId = ref("");
+const queueMenuPosition = ref({ left: "0px", top: "0px" });
+const queueTextarea = ref<HTMLTextAreaElement>();
+const queueEdit = ref<{ sessionId: string; requestId: string; text: string; original: string } | null>(null);
+const queueEditError = ref("");
+const queueEditGone = computed(() => !!queueEdit.value && !queuedInputs.value.some(item => item.requestId === queueEdit.value!.requestId));
+function openQueueMenu(requestId: string, event: MouseEvent): void {
+  const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  queueMenuId.value = requestId;
+  queueMenuPosition.value = { left: `${Math.max(8, Math.min(bounds.right - 160, window.innerWidth - 168))}px`, top: `${Math.max(8, bounds.top - 48)}px` };
+  queueMenu.value?.showPopover();
+}
+async function editQueueMessage(): Promise<void> {
+  const item = queuedInputs.value.find(item => item.requestId === queueMenuId.value);
+  queueMenu.value?.hidePopover();
+  if (!item) return;
+  queueEdit.value = { sessionId: store.sessionId, requestId: item.requestId, text: item.payload.text ?? "", original: item.payload.text ?? "" };
+  queueEditError.value = "";
+  await nextTick(); queueTextarea.value?.focus();
+}
+function cancelQueueEdit(): void { queueEdit.value = null; queueEditError.value = ""; }
+async function saveQueueEdit(): Promise<void> {
+  const editing = queueEdit.value;
+  if (!editing || queueAction.value || queueEditGone.value) return;
+  queueAction.value = editing.requestId; queueEditError.value = "";
+  try {
+    await actions.editQueuedInput(editing.sessionId, editing.requestId, editing.text, editing.original);
+    if (queueEdit.value === editing) cancelQueueEdit();
+  } catch (error) { if (queueEdit.value === editing) queueEditError.value = describeError(error); }
+  finally { queueAction.value = ""; }
+}
+watch(() => store.sessionId, () => { cancelQueueEdit(); queueMenu.value?.hidePopover(); });
+
 async function handleQueued(requestId: string, action: "steer" | "dismiss"): Promise<void> {
   if (queueAction.value) return;
   queueAction.value = requestId;
@@ -900,14 +934,25 @@ const forking = ref(false);
             @answer="(answer) => actions.answerQuestion(question.id, answer)"
           />
 
-          <section v-if="queuedInputs.length" class="input-queue" :aria-label="t('待发送消息')">
-            <div class="queue-head">{{ t('待发送消息') }} · {{ queuedInputs.length }}<span>{{ queuedAutomatic.length ? t('当前轮结束后依次发送') : t('已暂停，请选择发送或取消') }}</span></div>
+          <section v-if="queuedInputs.length || queueEdit" class="input-queue" :aria-label="t('待发送消息')">
+            <div v-if="queuedInputs.length" class="queue-head">{{ t('待发送消息') }} · {{ queuedInputs.length }}<span>{{ queuedAutomatic.length ? t('当前轮结束后依次发送') : t('已暂停，请选择发送或取消') }}</span></div>
             <article v-for="item in queuedInputs" :key="item.requestId" class="queue-item">
               <p>{{ item.payload.text || t('附件消息') }}</p>
               <span v-if="!queuedAutomatic.includes(item.requestId)" class="queue-paused">{{ t('已暂停') }}</span>
-              <button :disabled="!!queueAction" :title="t('立即影响当前轮次，而不是等待下一轮')" @click="handleQueued(item.requestId, 'steer')">{{ store.busy ? t('立即引导') : t('立即发送') }}</button>
-              <button :disabled="!!queueAction" :aria-label="t('取消排队')" :title="t('取消排队')" @click="handleQueued(item.requestId, 'dismiss')">×</button>
+              <button :disabled="!!queueAction || !!queueEdit" :title="t('立即影响当前轮次，而不是等待下一轮')" @click="handleQueued(item.requestId, 'steer')">{{ store.busy ? t('立即引导') : t('立即发送') }}</button>
+              <button :disabled="!!queueAction || !!queueEdit" :aria-label="t('取消排队')" :title="t('取消排队')" @click="handleQueued(item.requestId, 'dismiss')">×</button>
+              <button :disabled="!!queueAction || !!queueEdit" aria-haspopup="menu" :aria-label="t('排队消息更多操作')" :title="t('排队消息更多操作')" @click="openQueueMenu(item.requestId, $event)">⋯</button>
             </article>
+            <div ref="queueMenu" popover class="queue-menu" role="menu" :style="queueMenuPosition">
+              <button role="menuitem" @click="editQueueMessage()">✎ {{ t('编辑消息') }}</button>
+            </div>
+            <form v-if="queueEdit" class="queue-editor" @submit.prevent="saveQueueEdit()">
+              <label for="queue-message-editor">{{ t('编辑消息') }}</label>
+              <textarea id="queue-message-editor" ref="queueTextarea" v-model="queueEdit.text" :disabled="!!queueAction" @keydown.ctrl.enter.prevent="saveQueueEdit()" @keydown.meta.enter.prevent="saveQueueEdit()" @keydown.esc.prevent="!queueAction && cancelQueueEdit()"></textarea>
+              <p v-if="queueEditGone" role="alert">{{ t('消息已离开队列，无法编辑；你可以复制编辑内容。') }}</p>
+              <p v-if="queueEditError" role="alert">{{ queueEditError }}</p>
+              <div><button type="button" :disabled="!!queueAction" @click="cancelQueueEdit()">{{ t('取消') }}</button><button type="submit" :disabled="!!queueAction || queueEditGone">{{ queueAction ? t('保存中…') : t('保存修改') }}</button></div>
+            </form>
           </section>
           <div
             class="composer"
@@ -1139,12 +1184,22 @@ const forking = ref(false);
 .configuration-notice button { padding:0 4px; }
 
 .input-queue { max-width: var(--content-width); margin: 0 auto 8px; padding: 10px 12px; max-height: 180px; overflow: auto; border: 1px solid var(--rule); border-radius: 12px; background: var(--surface); font-size: 12px; }
+.input-queue:has(.queue-editor) { max-height:300px; }
 .queue-head { display: flex; flex-wrap: wrap; gap: 6px; color: var(--ink-2); }
 .queue-head span { margin-left: auto; color: var(--muted); }
 .queue-item { display: flex; align-items: center; gap: 8px; padding-top: 8px; }
 .queue-item p { flex: 1; min-width: 0; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .queue-item button { flex-shrink: 0; border: 0; border-radius: 6px; padding: 4px 6px; background: var(--hover); color: var(--ink-2); font: inherit; cursor: pointer; }
 .queue-item button:disabled { opacity: .5; cursor: default; }
+.queue-menu { position:fixed; inset:auto; margin:0; padding:4px; width:160px; border:1px solid var(--rule); border-radius:10px; background:var(--surface); color:var(--ink); box-shadow:0 6px 24px #0002; }
+.queue-menu button { width:100%; padding:8px 10px; border:0; border-radius:6px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; }
+.queue-menu button:hover { background:var(--hover); }
+.queue-editor { display:grid; gap:8px; padding-top:10px; }
+.queue-editor textarea { box-sizing:border-box; width:100%; min-height:72px; resize:vertical; border:1px solid var(--rule); border-radius:8px; padding:8px; background:var(--surface); color:var(--ink); font:inherit; }
+.queue-editor p { margin:0; color:var(--danger); }
+.queue-editor > div { display:flex; justify-content:flex-end; gap:8px; }
+.queue-editor button { padding:5px 10px; border:1px solid var(--rule); border-radius:6px; background:var(--hover); color:var(--ink); font:inherit; cursor:pointer; }
+.queue-editor button:disabled { opacity:.5; cursor:default; }
 .queue-paused { color: var(--muted); white-space: nowrap; }
 .chat {
   display: flex;

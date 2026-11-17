@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/chowyu12/aiclaw/internal/i18n"
+	"strings"
 	"time"
 
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
@@ -14,14 +15,16 @@ import (
 
 func (s *Server) handleWork(ctx context.Context, f frame) {
 	var p struct {
-		SessionID string                `json:"sessionId"`
-		ItemID    string                `json:"itemId"`
-		RequestID string                `json:"requestId"`
-		Action    string                `json:"action"`
-		ChangeID  string                `json:"changeId"`
-		Model     *protocol.ModelConfig `json:"model"`
-		Goal      agent.Goal            `json:"goal"`
-		Update    agent.GoalUpdate      `json:"update"`
+		SessionID    string                `json:"sessionId"`
+		ItemID       string                `json:"itemId"`
+		RequestID    string                `json:"requestId"`
+		Text         *string               `json:"text"`
+		ExpectedText *string               `json:"expectedText"`
+		Action       string                `json:"action"`
+		ChangeID     string                `json:"changeId"`
+		Model        *protocol.ModelConfig `json:"model"`
+		Goal         agent.Goal            `json:"goal"`
+		Update       agent.GoalUpdate      `json:"update"`
 	}
 	if err := json.Unmarshal(f.Params, &p); err != nil || p.SessionID == "" {
 		s.writeError(f.ID, codeInvalidParams, "invalid params")
@@ -90,6 +93,46 @@ func (s *Server) handleWork(ctx context.Context, f frame) {
 				child.Close()
 			}
 		}
+	case "session/queueEdit":
+		s.submissionMu.Lock()
+		defer s.submissionMu.Unlock()
+		if p.RequestID == "" || p.Text == nil || p.ExpectedText == nil {
+			err = i18n.E("缺少排队消息的编辑内容")
+			break
+		}
+		record, e := s.db.Submission(ctx, p.SessionID, p.RequestID)
+		var input protocol.TurnStartParams
+		if e != nil || record.State != "queued" || json.Unmarshal(record.Payload, &input) != nil || input.Mode != "queue" {
+			err = i18n.E("消息已离开队列，无法编辑")
+			break
+		}
+		if input.Text != *p.ExpectedText {
+			err = i18n.E("排队消息已被修改，请重新打开编辑")
+			break
+		}
+		if strings.TrimSpace(*p.Text) == "" && len(input.Images) == 0 && len(input.AudioPaths) == 0 && len(input.References) == 0 {
+			err = i18n.E("消息内容不能为空")
+			break
+		}
+		input.Text = *p.Text
+		payload, e := json.Marshal(input)
+		if e != nil {
+			err = e
+			break
+		}
+		err = s.db.EditQueuedSubmission(ctx, p.SessionID, p.RequestID, record.Payload, payload)
+		if err != nil {
+			break
+		}
+		// Update the actual scheduled payload without moving it or resuming a paused queue.
+		for index, entry := range s.queuedTurns[p.SessionID] {
+			if entry.input.RequestID == p.RequestID {
+				s.queuedTurns[p.SessionID][index].input = input
+				break
+			}
+		}
+		s.notifyQueue(p.SessionID)
+		result = map[string]any{"edited": true}
 	case "session/recover":
 		s.submissionMu.Lock()
 		defer s.submissionMu.Unlock()

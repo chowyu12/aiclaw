@@ -199,7 +199,10 @@ function updateQueue(id: string, pending: PendingSubmission[], automatic: string
   state.queuedInputs[id] = pending.filter(item => item.state === "queued" && item.payload.mode === "queue");
   const ids = new Set(state.queuedInputs[id].map(item => item.requestId));
   for (const entry of state.live[id]?.timeline ?? []) {
-    if (entry.kind === "user" && entry.pending && ids.has(entry.requestId ?? "")) entry.queued = true;
+    if (entry.kind === "user" && entry.pending && ids.has(entry.requestId ?? "")) {
+      entry.queued = true;
+      entry.text = state.queuedInputs[id].find(item => item.requestId === entry.requestId)!.payload.text;
+    }
   }
 }
 
@@ -1515,6 +1518,11 @@ export const actions = {
       const work = await window.aiclaw.session.work(sessionId) as SessionWork;
       if (queueRevisions.get(sessionId) === revision) updateQueue(sessionId, work.pending, work.queuedRequestIds);
     } catch { /* The existing work panel reports recovery lookup failures. */ }
+  },
+
+  async editQueuedInput(sessionId: string, requestId: string, text: string, expectedText: string): Promise<void> {
+    await window.aiclaw.session.editQueued(sessionId, requestId, text, expectedText);
+    await actions.refreshQueue(sessionId);
   },
 
   async queuedInput(requestId: string, action: "steer" | "dismiss"): Promise<void> {

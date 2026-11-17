@@ -33,6 +33,7 @@ export const IPC = {
   goalSet: "goal:set",
   goalUpdate: "goal:update",
   sessionFork: "session:fork",
+  sessionQueueEdit: "session:queueEdit",
   sessionRecover: "session:recover",
   changesList: "changes:list",
   changesUndo: "changes:undo",

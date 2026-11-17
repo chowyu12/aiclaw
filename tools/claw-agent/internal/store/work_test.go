@@ -394,3 +394,29 @@ func TestRestartPreservesWorkReceiptsTranscriptAndUndoSnapshot(t *testing.T) {
 		t.Fatalf("restart undo=%q err=%v", body, err)
 	}
 }
+
+func TestEditQueuedSubmissionRejectsStalePayloadAndRunningWork(t *testing.T) {
+	db := workDB(t)
+	ctx := context.Background()
+	original := json.RawMessage(`{"text":"original","mode":"queue"}`)
+	edited := json.RawMessage(`{"text":"edited","mode":"queue"}`)
+	if err := db.AcceptSubmission(ctx, "s", Submission{RequestID: "edit", TurnID: "turn", Payload: original, Fingerprint: "accepted-identity"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.EditQueuedSubmission(ctx, "s", "edit", original, edited); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.EditQueuedSubmission(ctx, "s", "edit", original, json.RawMessage(`{"text":"stale"}`)); err == nil {
+		t.Fatal("stale edit overwrote saved text")
+	}
+	if err := db.SetSubmission(ctx, "s", "edit", "turn", "running"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.EditQueuedSubmission(ctx, "s", "edit", edited, original); err == nil {
+		t.Fatal("running message edited")
+	}
+	got, err := db.Submission(ctx, "s", "edit")
+	if err != nil || !bytes.Equal(got.Payload, edited) || got.Fingerprint != "accepted-identity" || got.State != "running" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}

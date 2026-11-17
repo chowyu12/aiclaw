@@ -376,6 +376,7 @@ function registerIpc(): void {
     if (projectId && current.groups.some(group => group.id === projectId)) store.writeGroups({assignments: {...current.assignments, [result.sessionId]: projectId}});
     return result;
   });
+  ipcMain.handle(IPC.sessionQueueEdit, (_event, id: string, requestId: string, text: string, expectedText: string) => sessions.editQueuedSession(id, requestId, text, expectedText));
   ipcMain.handle(IPC.sessionRecover, (_event, id: string, requestId: string, action: "resume" | "dismiss" | "steer") => sessions.recoverSession(id, requestId, action));
   ipcMain.handle(IPC.changesList, (_event, id: string) => sessions.changesList(id));
   ipcMain.handle(IPC.changesUndo, (_event, id: string, changeId: string) => sessions.changesUndo(id, changeId));

@@ -486,6 +486,9 @@ export class ClawAgentClient extends EventEmitter {
   goalSet(sessionId: string, goal: GoalInput): Promise<Goal> { return this.transport.request("goal/set", { sessionId, goal }); }
   goalUpdate(sessionId: string, update: GoalUpdate): Promise<Goal> { return this.transport.request("goal/update", { sessionId, update }); }
   sessionFork(sessionId: string, itemId?: string, model?: ModelConfig): Promise<{sessionId: string}> { return this.transport.request("session/fork", { sessionId, itemId, model }); }
+  sessionQueueEdit(sessionId: string, requestId: string, text: string, expectedText: string): Promise<unknown> {
+    return this.transport.request("session/queueEdit", { sessionId, requestId, text, expectedText });
+  }
   sessionRecover(sessionId: string, requestId: string, action: "resume" | "dismiss" | "steer"): Promise<unknown> { return this.transport.request("session/recover", { sessionId, requestId, action }); }
   changesList(sessionId: string): Promise<FileChange[]> { return this.transport.request("changes/list", { sessionId }); }
   changesUndo(sessionId: string, changeId: string): Promise<unknown> { return this.transport.request("changes/undo", { sessionId, changeId }); }

@@ -97,3 +97,18 @@ test('a failed startup session list does not erase the saved side layout',async(
  (globalThis as any).window={aiclaw:{runtime:{start:async()=>{}},session:{list:async()=>{throw Error('temporarily unavailable')}},providers:{list:async()=>[]}}};
  try {await actions.startRuntime();assert.equal(value,saved);}finally{(globalThis as any).window=old;(globalThis as any).localStorage=oldStorage;}
 });
+
+test('queued message edits stay bound to their original session during navigation',async()=>{
+ const old=(globalThis as any).window;const edits:unknown[]=[];let release!:()=>void;
+ (globalThis as any).window={aiclaw:{session:{
+  editQueued:async(...args:unknown[])=>{edits.push(args);await new Promise<void>(resolve=>{release=resolve})},
+  resume:async(id:string)=>({sessionId:id,model:'fixture',providerId:1,history:[]}),
+  work:async(id:string)=>({pending:[{requestId:'queued',state:'queued',turnId:'t',createdAt:1,payload:{mode:'queue',text:id==='editing-session'?'edited':'other'}}],queuedRequestIds:['queued']}),
+ }}};
+ try {
+  const saving=actions.editQueuedInput('editing-session','queued','edited','original');
+  await actions.openSession('another-session');release();await saving;
+  assert.deepEqual(edits,[['editing-session','queued','edited','original']]);
+  assert.equal(store.sessionId,'another-session');assert.equal(store.queuedInputs['editing-session']?.[0]?.payload.text,'edited');
+ } finally {(globalThis as any).window=old;}
+});

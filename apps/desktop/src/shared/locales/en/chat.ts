@@ -371,4 +371,8 @@ export const chat: Record<string, string> = {
   "合并预览": "Merge preview",
   "记忆合并预览": "Memory merge preview",
   "确认导入": "Confirm import",
+  "排队消息更多操作": "Queued message actions",
+  "编辑消息": "Edit message",
+  "保存修改": "Save changes",
+  "消息已离开队列，无法编辑；你可以复制编辑内容。": "This message has left the queue and cannot be edited. You can copy your edits.",
 };

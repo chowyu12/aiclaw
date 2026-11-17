@@ -478,6 +478,7 @@ export class SessionManager extends EventEmitter {
   goalSet(id: string, goal: import("@aiclaw/agent-client").GoalInput) { return this.requireClient().goalSet(id, goal); }
   goalUpdate(id: string, update: import("@aiclaw/agent-client").GoalUpdate) { return this.requireClient().goalUpdate(id, update); }
   forkSession(id: string, itemId?: string) { return this.requireClient().sessionFork(id, itemId); }
+  editQueuedSession(id: string, requestId: string, text: string, expectedText: string) { return this.requireClient().sessionQueueEdit(id, requestId, text, expectedText); }
   recoverSession(id: string, requestId: string, action: "resume" | "dismiss" | "steer") { return this.requireClient().sessionRecover(id, requestId, action); }
   changesList(id: string) { return this.requireClient().changesList(id); }
   changesUndo(id: string, changeId: string) { return this.requireClient().changesUndo(id, changeId); }
