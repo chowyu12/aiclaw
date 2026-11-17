@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import type { ReleaseNote } from "../../main/release-notes";
 import { actions, store } from "../store";
 import { renderMarkdown } from "../markdown";
@@ -11,6 +11,14 @@ const releases = ref<ReleaseNote[]>([]);
 const loading = ref(true);
 const failed = ref(false);
 const checking = ref(false);
+const updateBusy = computed(() => store.updating || store.updateDownloading);
+const updateStage = computed(() => {
+  if (store.updatePhase === "checking") return t("检查中…");
+  if (store.updatePhase === "verifying") return t("校验中…");
+  if (store.updatePhase === "installing") return t("安装中…");
+  if (store.updateProgress >= 0) return t("下载 {percent}%", { percent: store.updateProgress });
+  return store.updateReceived > 0 ? t("下载 {size} MB", { size: (store.updateReceived / 1048576).toFixed(1) }) : t("连接中…");
+});
 async function loadReleases(): Promise<void> {
   loading.value = true;
   failed.value = false;
@@ -35,11 +43,18 @@ onMounted(() => {
       <header><h2>{{ t("关于") }}</h2></header>
       <div class="version-row">
         <div><span class="label">{{ t("当前版本") }}</span><strong>{{ version || (versionError ? t("版本信息获取失败") : "…") }}</strong></div>
-        <button :disabled="checking" @click="checkUpdate">{{ checking ? t("正在检查…") : t("检查更新") }}</button>
+        <div class="update-actions">
+          <button v-if="store.update?.hasUpdate" class="install-update" :disabled="updateBusy" @click="actions.installUpdate()">{{ updateBusy ? updateStage : store.updateReady ? t("重启更新") : (store.update.installLabel || t("更新到 {version}", { version: store.update.latest })) }}</button>
+          <button class="check-update" :disabled="checking || updateBusy" @click="checkUpdate">{{ checking ? t("正在检查…") : t("检查更新") }}</button>
+        </div>
       </div>
       <p v-if="store.update?.error" class="muted">{{ t("暂时无法检查更新") }}：{{ store.update.error }}</p>
       <p v-else-if="store.update?.hasUpdate" class="muted">{{ t("发现新版本 {version}", { version: store.update.latest }) }}</p>
       <p v-else-if="store.update" class="muted">{{ t("当前已是最新版本") }}</p>
+      <div v-if="store.update?.hasUpdate && updateBusy" class="update-progress" role="status">
+        <span>{{ updateStage }}</span>
+        <progress v-if="store.updatePhase === 'downloading'" :value="store.updateProgress >= 0 ? store.updateProgress : undefined" max="100" :aria-label="updateStage"></progress>
+      </div>
     </section>
     <section>
       <header><h2>{{ t("更新日志") }}</h2></header>
@@ -61,7 +76,11 @@ section { display: flex; flex-direction: column; gap: 16px; max-width: 620px; ma
 h2 { margin: 0; font-size: 15px; }
 .version-row, .release-header, .release-error { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .version-row { justify-content: space-between; }
-.version-row > div { display: flex; flex-direction: column; gap: 5px; }
+.version-row > div:not(.update-actions) { display: flex; flex-direction: column; gap: 5px; }
+.update-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.install-update { color: var(--accent); }
+.update-progress { display: flex; flex-direction: column; gap: 8px; color: var(--muted); font-size: 12px; }
+.update-progress progress { width: 100%; height: 5px; accent-color: var(--accent); }
 .label, .muted, time { color: var(--muted); font-size: 12px; }
 .muted { margin: 0; }
 button { min-height: 34px; padding: 7px 12px; border: 1px solid var(--rule); border-radius: 8px; background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; font-size: 13px; }

@@ -1250,6 +1250,33 @@ app.whenReady().then(async()=>{
  await wait("!!document.querySelector('.settings')");
  await js("[...document.querySelectorAll('.sidebar .item')].find(e=>e.querySelector('.title')?.textContent.trim()==='关于').click()");
  check('about settings display app version and published release notes',await wait("document.querySelector('.about-view')?.textContent.includes('work-smoke') && document.querySelector('.about-view')?.textContent.includes('v3.11.4') && document.querySelector('.about-view')?.textContent.includes('Example fix')"));
+ const aboutInstallCount=updateInstalls;
+ prepareHold=true;
+ ipcMain.handle(IPC.updateCheck,()=>({current:'work-smoke',latest:'100.0.0',hasUpdate:true,canInstall:true,installLabel:'升级并重启',error:''}));
+ await js("document.querySelector('.about-view .check-update').click()");
+ check('about manual update check starts a download and disables duplicate actions',await wait("document.querySelector('.about-view .install-update')?.disabled && document.querySelector('.about-view .check-update')?.disabled")&&updateInstalls===aboutInstallCount);
+ win.webContents.send(IPC.onUpdateProgress,{received:42,total:100,phase:'downloading'});
+ check('about shows the shared download percentage and progress bar',await wait("document.querySelector('.about-view progress')?.value===42 && document.querySelector('.about-view .update-progress')?.textContent.includes('42%')"));
+ await js("[...document.querySelectorAll('.sidebar .item')].find(e=>e.querySelector('.title')?.textContent.trim()==='主题').click()");
+ await wait("!document.querySelector('.about-view')");
+ await js("[...document.querySelectorAll('.sidebar .item')].find(e=>e.querySelector('.title')?.textContent.trim()==='关于').click()");
+ check('about restores in-progress downloads after switching settings pages',await wait("document.querySelector('.about-view progress')?.value===42 && document.querySelector('.about-view .install-update')?.disabled"));
+ win.webContents.send(IPC.onUpdateProgress,{received:2097152,total:0,phase:'downloading'});
+ check('about unknown-length downloads show bytes without a false percentage',await wait("document.querySelector('.about-view .update-progress')?.textContent.includes('2.0 MB') && !document.querySelector('.about-view progress')?.hasAttribute('value')"));
+ win.webContents.send(IPC.onUpdateProgress,{received:100,total:100,phase:'verifying'});
+ check('about shows verification separately from download progress',await wait("document.querySelector('.about-view .update-progress')?.textContent.includes('校验中') && !document.querySelector('.about-view progress')"));
+ finishPrepare({ready:true,version:'100.0.0',detail:''});prepareHold=false;
+ check('about offers restart only after download and verification complete',await wait("document.querySelector('.about-view .install-update')?.textContent==='重启更新' && !document.querySelector('.about-view .install-update').disabled && !document.querySelector('.about-view .update-progress')")&&updateInstalls===aboutInstallCount);
+ await js("document.querySelector('.about-view .install-update').click()");
+ check('about restart action invokes the existing installer once',await wait("document.querySelector('.about-view .install-update')?.disabled")&&updateInstalls===aboutInstallCount+1);
+ win.webContents.send(IPC.onUpdateProgress,{received:100,total:100,phase:'installing'});
+ check('about displays installation phase while waiting to restart',await wait("document.querySelector('.about-view .update-progress')?.textContent.includes('安装中')"));
+ finishUpdate({started:false,detail:''});
+ await wait("!document.querySelector('.about-view .install-update')?.disabled");
+ win.webContents.send(IPC.onUpdateCheck,{current:'work-smoke',latest:'work-smoke',hasUpdate:false,canInstall:true,error:''});
+ check('about hides stale update progress after status returns to current',await wait("!document.querySelector('.about-view .install-update') && !document.querySelector('.about-view .update-progress')"));
+ ipcMain.removeHandler(IPC.updateCheck);
+
 
  computerState={mode:'ready',active:{sessionId:'s',turnId:'desktop-t',action:'get_app_state',app:'com.example.fixture'},watching:0};
  win.webContents.send(IPC.onComputerStatus,computerState);
