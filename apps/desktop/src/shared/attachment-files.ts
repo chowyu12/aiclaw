@@ -1,5 +1,6 @@
 /** File attachment parsing limits apply before IPC and again in the parser. */
 export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_DOCUMENT_ATTACHMENTS = 32;
 export const MAX_EXTRACTED_BYTES = 64 * 1024 * 1024;
 export const MAX_ARCHIVE_ENTRIES = 512;
 export const MAX_ATTACHMENT_TEXT_BYTES = 128 * 1024;
@@ -15,7 +16,34 @@ export const TEXT_EXTENSIONS = new Set([
 export function attachmentExtension(name: string): string {
   return (name.split(/[\\/]/).pop()?.split(".").pop() ?? "").toLowerCase();
 }
-export interface ParsedAttachment { text: string; truncated: boolean }
+export interface AttachmentRef {
+  id: string;
+  name: string;
+  size: number;
+  sha256: string;
+  /** Only the renderer uses this token to bind an upload to its first session. */
+  claimToken: string;
+}
+export interface AttachmentReadQuery {
+  mode?: "index" | "read";
+  /** One-based document part/page/sheet/slide number. */
+  section?: number;
+  /** Exact archive member name from the index. */
+  member?: string;
+  /** Index position in index mode; UTF-8 byte offset in read mode. */
+  offset?: number;
+  limit?: number;
+}
+export interface AttachmentSection { number: number; kind: string; label: string }
+export interface AttachmentMember { name: string; size: number; supported: boolean }
+export interface ParsedAttachment {
+  text: string;
+  truncated: boolean;
+  sections?: AttachmentSection[];
+  members?: AttachmentMember[];
+  total?: number;
+  nextOffset?: number;
+}
 export function limitAttachmentText(text: string): ParsedAttachment {
   const bytes = new TextEncoder().encode(text);
   if (bytes.length <= MAX_ATTACHMENT_TEXT_BYTES) return { text, truncated: false };

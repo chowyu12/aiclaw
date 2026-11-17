@@ -8,6 +8,7 @@
  */
 import { tr } from "../shared/i18n.js";
 import { DOCUMENT_EXTENSIONS, ARCHIVE_EXTENSIONS, TEXT_EXTENSIONS, MAX_DOCUMENT_BYTES } from "../shared/attachment-files.js";
+import type { AttachmentRef } from "../shared/attachment-files.js";
 
 /** 一张要随消息发出去的图片。data 是 base64，不带 `data:` 前缀。 */
 export interface ImageAttachment {
@@ -44,7 +45,16 @@ export interface AudioAttachment {
   size: number;
 }
 
-export type Attachment = ImageAttachment | TextAttachment | AudioAttachment;
+export interface DocumentAttachment { kind: "document"; file: AttachmentRef; name: string }
+export type Attachment = ImageAttachment | TextAttachment | AudioAttachment | DocumentAttachment;
+export function inlineDocument(item: DocumentAttachment): string {
+  return `\n\n${tr("附件 {name}（{size} bytes，原文件已保留）", { name: JSON.stringify(item.name), size: item.file.size })}\n[attachment:${item.file.id}]`;
+}
+
+/** Keep host reference IDs in history/model input, outside the visible bubble. */
+export function attachmentDisplayText(text: string): string {
+  return text.replace(/\n\[attachment:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\](?=\n|$)/g, "");
+}
 
 /**
  * 模型一次最多看几张图。与内核里的上限一致（`limitImages`），
@@ -94,6 +104,7 @@ export function classifyFile(
 ): Verdict {
   const type = file.type.toLowerCase();
   const extension = (file.name.split(".").pop() ?? "").toLowerCase();
+  if ((type.startsWith("text/") || type === "image/svg+xml" || TEXT_EXTENSIONS.has(extension)) && file.size > MAX_DOCUMENT_BYTES) return { accept: "no", reason: tr("文档或压缩包不能为空，且不能超过 25MiB") };
 
   if (DOCUMENT_EXTENSIONS.has(extension) || ARCHIVE_EXTENSIONS.has(extension)) {
     if (!file.size || file.size > MAX_DOCUMENT_BYTES) return { accept: "no", reason: tr("文档或压缩包不能为空，且不能超过 25MiB") };

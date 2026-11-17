@@ -103,6 +103,7 @@ export interface SessionStartParams {
   /** 挂上定时任务工具。只给用户自己的会话。 */
   enableSchedule?: boolean;
   enableAppConfig?: boolean;
+  enableAttachments?: boolean;
   /** 会话一开始的标题；空的话由第一条消息生成。 */
   title?: string;
   /** 界面语言（en / zh-CN），决定模型默认用什么语言回复。 */
@@ -143,6 +144,7 @@ export interface SessionRefresh {
   enableEmail?: boolean;
   enableSchedule?: boolean;
   enableAppConfig?: boolean;
+  enableAttachments?: boolean;
   locale?: string;
   disableSandbox: boolean;
   codeMode: boolean;
@@ -794,3 +796,6 @@ export interface AppConfigRequest {
   values?: Record<string, unknown>;
 }
 export interface AppConfigResult { text: string; }
+
+export interface AttachmentRequest { sessionId: string; attachmentId?: string; mode?: "index" | "read"; member?: string; section?: number; offset?: number; limit?: number }
+export interface AttachmentResult { text: string }

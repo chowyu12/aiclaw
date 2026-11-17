@@ -1443,6 +1443,7 @@ export const actions = {
     audio: { name: string; data: string }[] = [],
     references: { id: string; title: string }[] = [],
     targetSessionId = "",
+    attachmentClaims: { id: string; claimToken: string }[] = [],
   ): Promise<boolean> {
     if (targetSessionId ? targetSessionId !== state.sideSessionId || !state.sideSessionReady || state.sideLoading : state.policyChanging || state.sessionLoadError || state.loadingSession) return false;
     if (!text.trim() && images.length === 0 && audio.length === 0) return false;
@@ -1481,7 +1482,7 @@ export const actions = {
       for (const item of audio) {
         audioPaths.push((await window.aiclaw.audio.stage(plain(item))) as string);
       }
-      await window.aiclaw.session.send({ sessionId, requestId: optimisticId, text, images, audioPaths, references: plain(references), mode: "queue" });
+      await window.aiclaw.session.send({ sessionId, requestId: optimisticId, text, images, audioPaths, references: plain(references), attachmentClaims: plain(attachmentClaims), mode: "queue" });
       void actions.refreshQueue(sessionId);
       return true;
     } catch (error) {

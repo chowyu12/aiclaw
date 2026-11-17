@@ -53,6 +53,8 @@ import { ComputerController } from "./computer.js";
 import type { ComputerControlAction, ComputerControlActivity, ComputerControlState } from "../shared/computer-control.js";
 import { TurnBrowsers } from "./browser.js";
 import { ExtensionBridge } from "./browser-bridge.js";
+import { AttachmentStore } from "./attachment-store.js";
+import { readDocumentAttachment } from "./document-reader.js";
 import { browserName } from "./browser-cdp.js";
 import type { BrowserBridgeView } from "../shared/types.js";
 import type { SkillManager } from "./skills.js";
@@ -146,6 +148,7 @@ export declare interface SessionManager {
  * 一个应用进程只拉起一个 claw-agent；会话是它内部的概念。
  */
 export class SessionManager extends EventEmitter {
+  readonly attachments: AttachmentStore;
   private client: ClawAgentClient | null = null;
   private readonly desktopSessions = new Set<string>();
   private readonly store: ConfigStore;
@@ -166,6 +169,7 @@ export class SessionManager extends EventEmitter {
   constructor(store: ConfigStore, skills: SkillManager, private readonly runtimes?: ManagedRuntimes) {
     super();
     this.store = store;
+    this.attachments = new AttachmentStore(join(store.dataDir, "attachments", "documents"), (name, data, query) => readDocumentAttachment({ name, data, query }));
     this.skills = skills;
     this.bridge = new ExtensionBridge(() => this.store.readConfig().browserPairToken);
     this.bridge.on("status", () => this.emit("browserBridge", this.browserBridge()));
@@ -236,6 +240,31 @@ export class SessionManager extends EventEmitter {
     client.on("appConfig", (action) => this.emit("appConfig", action));
     // 模型要建、列、删定时任务：调度器在主进程，交给它。
     client.on("schedule", (action) => this.emit("schedule", action));
+    client.on("attachment", async ({ request, respond, fail }) => {
+      try {
+        // Child agents inherit access only through their real stored ancestry.
+        const known = await this.listSessions();
+        let owner = request.sessionId;
+        const owners = new Set<string>();
+        while (owner && !owners.has(owner)) {
+          owners.add(owner); owner = known.find(item => item.id === owner)?.parentId ?? "";
+        }
+        const files = new Map<string, { owner: string; file: Awaited<ReturnType<AttachmentStore["list"]>>[number] }>();
+        for (const id of owners) for (const file of await this.attachments.list(id)) if (!files.has(file.id)) files.set(file.id, { owner: id, file });
+        let result;
+        if (request.attachmentId) {
+          const access = files.get(request.attachmentId);
+          if (!access) throw Error("Attachment does not belong to this session");
+          result = await this.attachments.read(access.owner, request.attachmentId, { mode: request.mode ?? "index", ...(request.member ? { member: request.member } : {}), ...(request.section !== undefined ? { section: request.section } : {}), ...(request.offset !== undefined ? { offset: request.offset } : {}), ...(request.limit !== undefined ? { limit: request.limit } : {}) });
+        } else {
+          const offset = request.offset ?? 0, limit = request.limit ?? 50;
+          if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw Error("Invalid attachment index range");
+          const all = [...files.values()].map(item => item.file).sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+          result = { attachments: all.slice(offset, offset + limit), total: all.length, ...(offset + limit < all.length ? { nextOffset: offset + limit } : {}) };
+        }
+        respond({ text: JSON.stringify(result) });
+      } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
+    });
     // 宿主控制审批与会话；内嵌 Cua Driver 继承主 App 权限并在后台执行操作。
     // 浏览器窗口是宿主的：加载、点、填、截图都在这边做，内核只发请求。
     client.on("browser", async ({ request, respond, fail }) => {
@@ -477,7 +506,13 @@ export class SessionManager extends EventEmitter {
   sessionContext(id: string) { return this.requireClient().sessionContext(id); }
   goalSet(id: string, goal: import("@aiclaw/agent-client").GoalInput) { return this.requireClient().goalSet(id, goal); }
   goalUpdate(id: string, update: import("@aiclaw/agent-client").GoalUpdate) { return this.requireClient().goalUpdate(id, update); }
-  forkSession(id: string, itemId?: string) { return this.requireClient().sessionFork(id, itemId); }
+  async forkSession(id: string, itemId?: string) {
+    const client = this.requireClient();
+    const result = await client.sessionFork(id, itemId);
+    try { await this.attachments.fork(id, result.sessionId); }
+    catch (error) { await client.sessionDelete(result.sessionId); throw error; }
+    return result;
+  }
   editQueuedSession(id: string, requestId: string, text: string, expectedText: string) { return this.requireClient().sessionQueueEdit(id, requestId, text, expectedText); }
   recoverSession(id: string, requestId: string, action: "resume" | "dismiss" | "steer") { return this.requireClient().sessionRecover(id, requestId, action); }
   changesList(id: string) { return this.requireClient().changesList(id); }
@@ -565,8 +600,10 @@ export class SessionManager extends EventEmitter {
     audioPaths?: string[];
     /** 这条消息里 @ 引用的会话。 */
     references?: { id: string; title: string }[];
+    attachmentClaims?: { id: string; claimToken: string }[];
     mode?: "queue" | "steer";
   }): Promise<string> {
+    if (input.attachmentClaims?.length) await this.attachments.bind(input.sessionId, input.attachmentClaims);
     const result = await this.requireClient().turnStart(
       input.sessionId, input.text, input.images, input.audioPaths, input.references, input.requestId, undefined, input.mode ?? "queue",
     );
@@ -647,6 +684,7 @@ export class SessionManager extends EventEmitter {
     const ids = await this.requireClient().sessionDelete(sessionId);
     ids.forEach(id => this.desktopSessions.delete(id));
     await Promise.all(ids.map(id => this.computer.releaseSession(id)));
+    await Promise.all(ids.map(id => this.attachments.removeSession(id)));
     return ids;
   }
 
@@ -687,6 +725,7 @@ export class SessionManager extends EventEmitter {
       enableEmail: contributions.email === true,
       enableSchedule: true,
       enableAppConfig: true,
+      enableAttachments: true,
       enableBrowser: config.browser === true,
       roles: toRoles(config),
       modelSeesImages: await this.modelSeesImages(config),
@@ -786,6 +825,7 @@ export class SessionManager extends EventEmitter {
       enableEmail: contributions.email === true,
       enableSchedule: true,
       enableAppConfig: true,
+      enableAttachments: true,
       enableBrowser: config.browser === true,
       disableSandbox: config.sandboxCommands === false,
       codeMode: config.codeMode === true,

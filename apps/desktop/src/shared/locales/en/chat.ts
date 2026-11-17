@@ -2,6 +2,8 @@
 export const chat: Record<string, string> = {
   "文档或压缩包不能为空，且不能超过 25MiB": "Documents and archives must be nonempty and no larger than 25 MiB",
   "正在读取附件…": "Reading attachments…",
+  "每条消息最多附加 32 个文件": "Attach up to 32 files per message",
+  "附件 {name}（{size} bytes，原文件已保留）": "Attachment {name} ({size} bytes, original retained)",
   "添加图片、音频、文档或压缩包，也可粘贴或拖入": "Add images, audio, documents or archives, or paste or drag them here",
   "你": "You",
   "回答已生成": "Response generated",

@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { AgentTransport, type TransportOptions } from "./transport.js";
 import type {
-  AppConfigRequest, AppConfigResult,
+  AppConfigRequest, AppConfigResult, AttachmentRequest, AttachmentResult,
   ContextStatus, Goal, GoalInput, GoalUpdate, SessionWork, FileChange,
   AgentNotification,
   RoleModels,
@@ -90,6 +90,7 @@ export interface PendingAppConfigAction {
 
 export interface ClientEvents {
   proxyResolve: (action: { url: string; respond: (result: string) => void; fail: (message: string) => void }) => void;
+  attachment: (action: { request: AttachmentRequest; respond: (result: AttachmentResult) => void; fail: (message: string) => void }) => void;
   appConfig: (action: PendingAppConfigAction) => void;
   notification: (notification: AgentNotification) => void;
   approval: (request: PendingApproval) => void;
@@ -147,6 +148,10 @@ export class ClawAgentClient extends EventEmitter {
           fail: (message: string) =>
             this.transport.respondError(id, { code: -32000, message }),
         });
+        return;
+      }
+      if (method === "attachment/request") {
+        this.emit("attachment", { request: params as AttachmentRequest, respond: (result: AttachmentResult) => this.transport.respond(id, result), fail: (message: string) => this.transport.respondError(id, { code: -32000, message }) });
         return;
       }
       if (method === "appConfig/request") {

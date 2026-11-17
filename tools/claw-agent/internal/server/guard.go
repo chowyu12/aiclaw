@@ -57,6 +57,7 @@ func pinChannelPolicy(sessionID string, refresh *protocol.SessionRefresh, policy
 	refresh.EnableEmail = false
 	refresh.EnableSchedule = false
 	refresh.EnableAppConfig = false
+	refresh.EnableAttachments = false
 	refresh.EnableBrowser = false
 	refresh.EnableComputerUse = false
 	refresh.SkillDirs = nil

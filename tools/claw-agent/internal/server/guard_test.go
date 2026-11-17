@@ -35,9 +35,9 @@ func TestChannelSessionsKeepTheUnattendedPolicyOnResume(t *testing.T) {
 }
 
 func TestExplicitChannelBypassSurvivesRefresh(t *testing.T) {
-	refresh := &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalAlways, EnableAppConfig: true, EnableEmail: true, EnableSchedule: true}
+	refresh := &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalAlways, EnableAppConfig: true, EnableAttachments: true, EnableEmail: true, EnableSchedule: true}
 	pinChannelPolicy("c_explicit", refresh, protocol.ApprovalBypass)
-	if refresh.ApprovalPolicy != protocol.ApprovalBypass || refresh.EnableAppConfig || refresh.EnableEmail || refresh.EnableSchedule {
+	if refresh.ApprovalPolicy != protocol.ApprovalBypass || refresh.EnableAppConfig || refresh.EnableAttachments || refresh.EnableEmail || refresh.EnableSchedule {
 		t.Fatalf("incorrect pinned mode: %+v", refresh)
 	}
 }

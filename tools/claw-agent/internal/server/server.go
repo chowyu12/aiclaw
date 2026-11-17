@@ -1448,3 +1448,15 @@ func (e *emitter) RequestAppConfig(ctx context.Context, params protocol.AppConfi
 	err = json.Unmarshal(raw, &result)
 	return result, err
 }
+
+func (e *emitter) RequestAttachment(ctx context.Context, params protocol.AttachmentRequest) (protocol.AttachmentResult, error) {
+	actionCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	raw, err := e.server.requestHost(actionCtx, "attachment/request", params)
+	if err != nil {
+		return protocol.AttachmentResult{}, err
+	}
+	var result protocol.AttachmentResult
+	err = json.Unmarshal(raw, &result)
+	return result, err
+}

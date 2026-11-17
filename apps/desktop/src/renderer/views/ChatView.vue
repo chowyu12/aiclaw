@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { MAX_DOCUMENT_ATTACHMENTS } from "../../shared/attachment-files";
 import WorkPanel from "./WorkPanel.vue";
 import WorkspaceWelcome from "./WorkspaceWelcome.vue";
 import PromptPresets from "./PromptPresets.vue";
@@ -12,8 +13,9 @@ import {
   classifyFile,
   readAudio,
   inlineText,
+  inlineDocument,
+  attachmentDisplayText,
   readImage,
-  readTextFile,
   type Attachment,
   type AudioAttachment,
   type ImageAttachment,
@@ -364,18 +366,19 @@ function onMentionKey(event: KeyboardEvent): boolean {
 // ---------- 附件 ----------
 //
 // 贴一张报错截图问「这是什么」是最常见的用法之一。图片走视觉通道发给模型，
-// 文本文件并进正文（模型没有别的办法读到它——那个文件可能在任何地方）。
+// 上传状态归会话草稿所有，切页或切换会话不丢失。
 
 const attachments = computed({ get: () => draftFor(store.sessionId).attachments, set: value => { draftFor(store.sessionId).attachments = value; } });
-const attachError = ref("");
-const parsingAttachments = ref(false);
+const attachError = computed({ get: () => draftFor(store.sessionId).attachmentError, set: value => { draftFor(store.sessionId).attachmentError = value; } });
+const parsingAttachments = computed(() => draftFor(store.sessionId).pendingAttachments > 0);
 const picker = ref<HTMLInputElement | null>(null);
 
 async function accept(files: FileList | File[] | null | undefined): Promise<void> {
-  if (parsingAttachments.value) return;
-  parsingAttachments.value = true;
-  attachError.value = "";
+  const sessionId = store.sessionId;
   const target = draftFor(store.sessionId);
+  if (target.pendingAttachments) return;
+  target.pendingAttachments++;
+  target.attachmentError = "";
   try {
     for (const file of Array.from(files ?? [])) {
       const images = target.attachments.filter((item) => item.kind === "image").length;
@@ -384,18 +387,18 @@ async function accept(files: FileList | File[] | null | undefined): Promise<void
       try {
         if (verdict.accept === "image") target.attachments.push(await readImage(file));
         else if (verdict.accept === "audio") target.attachments.push(await readAudio(file));
-        else if (verdict.accept === "text") target.attachments.push(await readTextFile(file));
-        else if (verdict.accept === "document") {
-          const parsed = await window.aiclaw.files.readAttachment(file.name, new Uint8Array(await file.arrayBuffer()));
-          target.attachments.push({ kind: "text", name: file.name, ...parsed });
+        else if (verdict.accept === "document" || verdict.accept === "text") {
+          if (target.attachments.filter(item => item.kind === "document").length >= MAX_DOCUMENT_ATTACHMENTS) throw Error(t("每条消息最多附加 32 个文件"));
+          const staged = await window.aiclaw.files.stageAttachment(file.name, new Uint8Array(await file.arrayBuffer()), sessionId);
+          target.attachments.push({ kind: "document", name: staged.name, file: staged });
         }
         // 拒绝的要说出来。默默忽略的话，用户以为模型看过了那份文件。
-        else attachError.value = verdict.reason;
+        else target.attachmentError = verdict.reason;
       } catch (error) {
-        attachError.value = t("{name} 读不了：{error}", { name: file.name, error: describeError(error) });
+        target.attachmentError = t("{name} 读不了：{error}", { name: file.name, error: describeError(error) });
       }
     }
-  } finally { parsingAttachments.value = false; }
+  } finally { target.pendingAttachments--; }
 }
 
 function onPaste(event: ClipboardEvent): void {
@@ -447,6 +450,7 @@ function removeAttachment(index: number): void {
 
 /** 附件上那行字。音频标出大小——转写按时长收费，用户该知道自己发了多大一段。 */
 function attachmentLabel(item: Attachment): string {
+  if (item.kind === "document") return item.name;
   if (item.kind === "image") return item.name;
   if (item.kind === "audio") return t("{name}（{size} MB）", { name: item.name, size: (item.size / 1024 / 1024).toFixed(1) });
   return item.truncated ? t("{name}（已截断）", { name: item.name }) : item.name;
@@ -466,7 +470,7 @@ async function submit(): Promise<void> {
     pending
       .filter((item): item is TextAttachment => item.kind === "text")
       .map(inlineText)
-      .join("");
+      .join("") + pending.filter((item) => item.kind === "document").map(inlineDocument).join("");
   const images = pending
     .filter((item): item is ImageAttachment => item.kind === "image")
     .map((item) => item.data);
@@ -483,7 +487,7 @@ async function submit(): Promise<void> {
   closeSuggestions();
   submitting.value = true;
   try {
-    if (!await actions.send(text, images, audio, references)) {
+    if (!await actions.send(text, images, audio, references, "", pending.filter(item => item.kind === "document").map(item => ({ id: item.file.id, claimToken: item.file.claimToken })))) {
       // Keep anything typed while sending and restore all original attachments.
       target.text = originalDraft + (target.text ? "\n" + target.text : "");
       target.attachments = [...pending, ...target.attachments];
@@ -804,7 +808,7 @@ const forking = ref(false);
                     :alt="t(`附带的图片`)"
                   />
                 </div>
-                {{ turn.user.text }}
+                {{ attachmentDisplayText(turn.user.text) }}
               </div>
             </div>
             <!-- 这条消息引用的会话：点一下打开它。 -->

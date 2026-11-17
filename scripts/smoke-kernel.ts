@@ -279,9 +279,12 @@ async function main(): Promise<number> {
         const usage = `data: {"choices":[],"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}\n\n`;
         if (!toolResult) {
           const configuring = String(messages[0]?.content).includes("use app_config_list then app_configure");
+          const readingAttachment = String(messages[0]?.content).includes("User file references [attachment:ID]");
           const call = {
             choices: [{ delta: { tool_calls: [{ index: 0, id: "c1", type: "function",
-              function: configuring
+              function: readingAttachment
+                ? {name:"read_attachment",arguments:JSON.stringify({sessionId:"forged",attachmentId:"fixture-file",mode:"read",section:2,offset:16,limit:32,member:"report.pdf"})}
+                : configuring
                 ? {name:"app_configure",arguments:JSON.stringify({category:"schedule",operation:"save",values:{name:"Public project digest",prompt:"Check public releases",time:"08:00"}})}
                 : { name: "ask_user", arguments: JSON.stringify({ question: "删哪些？", options: [{ label: "日志" }, { label: "缓存" }] }) } }] } }],
           };
@@ -341,6 +344,24 @@ async function main(): Promise<number> {
       await Promise.race([configFinished,new Promise((_,fail)=>setTimeout(()=>fail(Error("configuration response timed out")),15_000))]);
       record("应用配置：宿主确认结果回到模型并完成轮次",configAnswer.includes("Scheduled task saved."));
       client.off("appConfig",configListener);
+      const fileSession = await client.sessionStart({model:{providerId:asker.id,baseUrl:"",model:"fake"},approvalPolicy:"on-write",enableAttachments:true});
+      let fileAnswer="", fileRequest:import("../packages/agent-client/dist/index.js").AttachmentRequest|undefined;
+      const fileListener = (action: {request:import("../packages/agent-client/dist/index.js").AttachmentRequest;respond:(result:{text:string})=>void}) => {
+        fileRequest=action.request;
+        action.respond({text:JSON.stringify({text:"Original page two",nextOffset:48})});
+      };
+      client.on("attachment",fileListener);
+      const fileFinished = new Promise<void>(done => client.on("notification",note=>{
+        const p=note.params as {sessionId?:string;item?:{kind?:string;text?:string}};
+        if(p.sessionId!==fileSession.sessionId)return;
+        if(note.method==="item/completed"&&p.item?.kind==="agentMessage")fileAnswer=p.item.text??"";
+        if(note.method==="turn/completed")done();
+      }));
+      await client.turnStart(fileSession.sessionId,"Read [attachment:fixture-file]");
+      await Promise.race([fileFinished,new Promise((_,fail)=>setTimeout(()=>fail(Error("attachment host response timed out")),15_000))]);
+      record("附件：可信会话与按需读取范围穿过内核和宿主协议",fileRequest?.sessionId===fileSession.sessionId&&fileRequest.section===2&&fileRequest.offset===16&&fileRequest.limit===32&&fileRequest.member==="report.pdf");
+      record("附件：宿主只读结果返回模型并完成轮次",fileAnswer.includes("Original page two")&&fileAnswer.includes("nextOffset"));
+      client.off("attachment",fileListener);
       // 用量记录是后台写的（每秒一批）：等它落盘。
       await new Promise((done) => setTimeout(done, 1500));
       const usage = await client.usageSummary(1);

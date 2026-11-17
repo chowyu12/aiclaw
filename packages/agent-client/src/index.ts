@@ -4,7 +4,7 @@ export { ClawAgentClient } from "./client.js";
 export { MODEL_ROLES } from "./protocol.js";
 export type { PendingAppConfigAction, PendingApproval, PendingUserInput, PendingScheduleAction, ClientEvents } from "./client.js";
 export type {
-  AppConfigRequest, AppConfigResult,
+  AppConfigRequest, AppConfigResult, AttachmentRequest, AttachmentResult,
   ComputerRequestParams, ComputerResult,
   EmailTestResult,
   ThreadRef,

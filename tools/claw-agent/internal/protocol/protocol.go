@@ -771,8 +771,9 @@ type SessionStartParams struct {
 	 */
 	EnableEmail bool `json:"enableEmail,omitempty"`
 	/** 是否挂上定时任务工具（建、列、删）。只给用户自己的会话。 */
-	EnableSchedule  bool `json:"enableSchedule,omitempty"`
-	EnableAppConfig bool `json:"enableAppConfig,omitempty"`
+	EnableSchedule    bool `json:"enableSchedule,omitempty"`
+	EnableAppConfig   bool `json:"enableAppConfig,omitempty"`
+	EnableAttachments bool `json:"enableAttachments,omitempty"`
 	/** 会话一开始的标题。空的话由第一条消息生成；定时任务用它写上任务名。 */
 	Title string `json:"title,omitempty"`
 	/** 界面语言（en / zh-CN）。决定模型默认用什么语言回复；用户用别的语言提问时跟着用户。 */
@@ -829,6 +830,7 @@ type SessionRefresh struct {
 	EnableEmail       bool                       `json:"enableEmail,omitempty"`
 	EnableSchedule    bool                       `json:"enableSchedule,omitempty"`
 	EnableAppConfig   bool                       `json:"enableAppConfig,omitempty"`
+	EnableAttachments bool                       `json:"enableAttachments,omitempty"`
 	Locale            string                     `json:"locale,omitempty"`
 	DisableSandbox    bool                       `json:"disableSandbox"`
 	CodeMode          bool                       `json:"codeMode"`
@@ -933,6 +935,19 @@ type TurnStartParams struct {
 type ThreadRef struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
+}
+
+type AttachmentRequest struct {
+	SessionID    string `json:"sessionId"`
+	AttachmentID string `json:"attachmentId,omitempty"`
+	Mode         string `json:"mode,omitempty"`
+	Member       string `json:"member,omitempty"`
+	Section      int    `json:"section,omitempty"`
+	Offset       int    `json:"offset,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+}
+type AttachmentResult struct {
+	Text string `json:"text"`
 }
 
 type TurnStartResult struct {

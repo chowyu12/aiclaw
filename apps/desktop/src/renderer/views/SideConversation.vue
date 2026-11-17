@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store } from "../store";
 import { draftFor } from "../drafts";
 import { renderMarkdown } from "../markdown";
+import { attachmentDisplayText } from "../attachments";
 import { t } from "../i18n";
 import FileReferences from "./FileReferences.vue";
 
@@ -80,7 +81,7 @@ onUnmounted(() => { end(); observer.disconnect(); });
     <div v-if="store.sideError" class="side-notice" role="alert">{{ store.sideError }} <button @click="actions.openSideSession(id)">{{ t('重试') }}</button></div>
     <div ref="history" class="side-history">
       <template v-for="entry in record?.timeline" :key="entry.id">
-        <div v-if="entry.kind === 'user'" class="side-user">{{ entry.text }}<span v-if="entry.queued"> · {{ t('已排队') }}</span><img v-for="image in entry.images" :key="image" :src="image" :alt="t('附件')" /></div>
+        <div v-if="entry.kind === 'user'" class="side-user">{{ attachmentDisplayText(entry.text) }}<span v-if="entry.queued"> · {{ t('已排队') }}</span><img v-for="image in entry.images" :key="image" :src="image" :alt="t('附件')" /></div>
         <FileReferences v-else-if="entry.kind === 'agent'" class="prose" :html="renderMarkdown(entry.text)" :session-id="id" system-only @loaded="scrollBottom" />
         <details v-else class="side-step" :class="entry.state"><summary>{{ entry.title }}</summary><pre>{{ entry.detail }}</pre></details>
       </template>
