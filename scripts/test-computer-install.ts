@@ -7,6 +7,9 @@ import {
   rm,
   writeFile,
   readdir,
+  copyFile,
+  chmod,
+  stat,
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -15,12 +18,53 @@ import { fileURLToPath } from "node:url";
 import { stageComputerRuntime } from "./stage-computer-runtime.mjs";
 import { stageHostDependencies } from "./stage-host-dependencies.mjs";
 import { execFileSync } from "node:child_process";
+import { thinMacComputerRuntime } from "./mac-signing.mjs";
 const manifest = JSON.parse(
   await readFile(
     new URL("../tools/cua-driver/runtime.json", import.meta.url),
     "utf8",
   ),
 );
+test("Mac packages keep only the target Cua architecture, permissions and repeatability", {skip:process.platform!=="darwin"}, async () => {
+  const app=await mkdtemp(join(tmpdir(),"aiclaw-thin-"));
+  try {
+    const objects: Record<string,string>={};
+    for (const arch of ["arm64","x86_64"]) {
+      const path=join(app,`${arch}.o`);
+      execFileSync("xcrun",["clang","-target",`${arch}-apple-macos14`,"-x","c","-c","-o",path,"-"],{input:"int fixture(void) { return 0; }"});
+      objects[arch]=path;
+    }
+    const fat=join(app,"universal.o");
+    execFileSync("/usr/bin/lipo",["-create",...Object.values(objects),"-output",fat]);
+    const main=join(app,"Contents/MacOS/AIClaw");
+    await mkdir(join(app,"Contents/MacOS"),{recursive:true});
+    for (const [arch,moduleArch] of [["arm64","arm64"],["x86_64","x64"]]) {
+      await copyFile(objects[arch!]!,main);
+      const root=join(app,"Contents/Resources/app");
+      const sdk=join(root,`node_modules/@trycua/cua-driver-darwin-${moduleArch}`);
+      await mkdir(sdk,{recursive:true});
+      await mkdir(join(root,"cua-driver"),{recursive:true});
+      const files=[join(root,"cua-driver/cua-driver"),join(sdk,"libcua_driver_sdk.dylib"),join(sdk,"cua_driver_node_runtime.node")];
+      for (const path of files) {await copyFile(fat,path);await chmod(path,0o755);}
+      // Wrong architecture must fail before any other runtime file is changed.
+      await copyFile(objects[arch==="arm64"?"x86_64":"arm64"]!,files[2]!);
+      const before=await readFile(files[0]!);
+      assert.throws(()=>thinMacComputerRuntime(app),/missing/);
+      assert.deepEqual(await readFile(files[0]!),before);
+      await copyFile(fat,files[2]!);
+      await chmod(files[2]!,0o755);
+      thinMacComputerRuntime(app);
+      for (const path of files) {
+        assert.equal(execFileSync("/usr/bin/lipo",["-archs",path],{encoding:"utf8"}).trim(),arch);
+        assert.equal((await stat(path)).mode & 0o777,0o755);
+        assert.ok((await stat(path)).size < (await stat(fat)).size);
+      }
+      const thinned=await readFile(files[0]!);
+      thinMacComputerRuntime(app);
+      assert.deepEqual(await readFile(files[0]!),thinned);
+    }
+  } finally {await rm(app,{recursive:true,force:true});}
+});
 async function fixture(platform: string, arch: string) {
   const repo = await mkdtemp(join(tmpdir(), "aiclaw-cua-stage-")),
     destination = join(repo, "app");

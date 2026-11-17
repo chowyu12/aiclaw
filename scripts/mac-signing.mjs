@@ -1,7 +1,7 @@
 /** Persistent local signing identity. Private material never lives in the repo. */
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -106,7 +106,30 @@ export function signMacBundle(bundle, identifier, signing=loadMacSigning()) {
 export function verifyMacBundle(bundle, identifier, signing=loadMacSigning()) {
   execFileSync("/usr/bin/codesign",["--verify","--strict",...(signing.identity==="-"?[]:["-R",`=identifier "${identifier}" and certificate leaf = H"${signing.identity}"`]),bundle],{stdio:"pipe"});
 }
+// Cross-packaging runs on Linux; thin the verified runtime copies on the Mac
+// signing runner, before signing nested code. Never alter the upstream cache.
+export function thinMacComputerRuntime(app) {
+  const architectures = path => execFileSync("/usr/bin/lipo", ["-archs", path], {encoding:"utf8"}).trim().split(/\s+/);
+  const [arch, ...extra] = architectures(join(app,"Contents/MacOS/AIClaw"));
+  if (extra.length || !["arm64","x86_64"].includes(arch)) throw Error("Expected a single supported Electron architecture");
+  const root=join(app,"Contents/Resources/app");
+  const sdk=join(root,"node_modules/@trycua",`cua-driver-darwin-${arch==="x86_64"?"x64":arch}`);
+  const files=[join(root,"cua-driver/cua-driver"),join(sdk,"libcua_driver_sdk.dylib"),join(sdk,"cua_driver_node_runtime.node")];
+  // Validate every component before changing any of them.
+  const slices=files.map(path=>architectures(path));
+  for (let i=0;i<files.length;i++) if (!slices[i].includes(arch)) throw Error(`Cua runtime is missing ${arch}: ${files[i]}`);
+  for (let i=0;i<files.length;i++) {
+    if (slices[i].length===1) continue;
+    const path=files[i], temporary=`${path}.thin-${randomBytes(8).toString("hex")}`;
+    try {
+      execFileSync("/usr/bin/lipo",[path,"-thin",arch,"-output",temporary]);
+      chmodSync(temporary,lstatSync(path).mode & 0o777);
+      renameSync(temporary,path);
+    } finally {rmSync(temporary,{force:true});}
+  }
+}
 export async function signMacApplication(app, signing=loadMacSigning()) {
+  thinMacComputerRuntime(app);
   const {sign}=await import("@electron/osx-sign");
   await sign({app,identity:signing.identity,keychain:signing.keychain,identityValidation:false,
     timestamp:signing.selfSigned?"none":undefined,preAutoEntitlements:false,preEmbedProvisioningProfile:false,

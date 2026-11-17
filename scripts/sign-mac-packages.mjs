@@ -21,7 +21,7 @@ for (const name of zips) {
     }
     // zip -y keeps relative framework symlinks intact.
     rmSync(join(directory,name));
-    execFileSync("/usr/bin/zip",["-qry",join(directory,name),folder],{cwd:temporary});
+    execFileSync("/usr/bin/zip",["-9qry",join(directory,name),folder],{cwd:temporary});
     console.log(`Signed ${name}`);
   } finally {rmSync(temporary,{recursive:true,force:true});}
 }

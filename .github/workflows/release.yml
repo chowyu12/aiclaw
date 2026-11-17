@@ -74,6 +74,7 @@ jobs:
       - run: npm ci --registry=https://registry.npmjs.org --no-audit --no-fund
       - run: npm run setup:electron
       - run: node scripts/stage-computer-runtime.mjs
+      - run: node --test --experimental-strip-types --import ./scripts/ts-resolve.mjs scripts/test-computer-install.ts
       - run: npm run test:computer-native
       - run: npm run build -w @aiclaw/agent-client && npm run build:main -w @aiclaw/desktop
       - run: npx --no-install electron scripts/smoke-computer.cjs
@@ -134,10 +135,10 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           [[ "$TAG" =~ ^v ]] || TAG="v0.0.${GITHUB_RUN_NUMBER}"
           mkdir -p dist-release
-          (cd release && zip -qry "../dist-release/AIClaw-${TAG}-mac-arm64.zip" "AIClaw-darwin-arm64")
-          (cd release && zip -qry "../dist-release/AIClaw-${TAG}-mac-x64.zip"   "AIClaw-darwin-x64")
-          (cd release && zip -qry "../dist-release/AIClaw-${TAG}-win-x64.zip"   "AIClaw-win32-x64")
-          (cd release && zip -qry "../dist-release/AIClaw-${TAG}-linux-x64.zip" "AIClaw-linux-x64")
+          (cd release && zip -9qry "../dist-release/AIClaw-${TAG}-mac-arm64.zip" "AIClaw-darwin-arm64")
+          (cd release && zip -9qry "../dist-release/AIClaw-${TAG}-mac-x64.zip"   "AIClaw-darwin-x64")
+          (cd release && zip -9qry "../dist-release/AIClaw-${TAG}-win-x64.zip"   "AIClaw-win32-x64")
+          (cd release && zip -9qry "../dist-release/AIClaw-${TAG}-linux-x64.zip" "AIClaw-linux-x64")
           ls -la dist-release/
       - uses: actions/upload-artifact@v4
         with:
