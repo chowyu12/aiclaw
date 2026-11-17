@@ -105,7 +105,7 @@ function llmSubline(step: Turn["steps"][number]): string {
       <details v-for="step in turn.steps" :key="step.id" class="step" :data-state="step.state" :data-nested="!!step.parentId">
         <summary @click="loadArtifacts(step)">
           <div class="row">
-            <span class="dot" />
+            <span class="dot" :data-state="step.state" aria-hidden="true"><svg v-if="step.state === 'done'" viewBox="0 0 12 12"><path d="m2.5 6 2.3 2.3 4.7-5"/></svg><span v-else-if="step.state === 'failed'">×</span></span>
             <span class="kind" :data-kind="step.step">{{ stepLabel(step.step) }}</span>
             <span v-if="step.seq" class="seq">{{ step.seq }}</span>
             <span class="name">{{ step.title }}</span>
@@ -249,6 +249,7 @@ function llmSubline(step: Turn["steps"][number]): string {
   border-radius: 50%;
   background: var(--muted);
 }
+.dot > svg, .dot > span { display: none; }
 
 .step[data-state="running"] .dot {
   background: var(--accent);

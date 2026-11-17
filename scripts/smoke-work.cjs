@@ -200,10 +200,27 @@ app.whenReady().then(async()=>{
   await wait("!!document.querySelector('.theme-settings [data-theme-option]')");
  };
  await openThemes();
- check('settings offers theme previews with white selected by default',await wait("document.querySelectorAll('[data-theme-option]').length===7 && document.querySelector('[data-theme-option=white]').getAttribute('aria-pressed')==='true'"));
- for(const [theme,background] of [['green','rgb(243, 247, 245)'],['blue','rgb(242, 245, 252)'],['violet','rgb(245, 242, 250)'],['dark','rgb(26, 29, 35)'],['modern','rgb(19, 20, 22)'],['sand','rgb(247, 244, 237)']]){
+ check('settings offers theme previews with white selected by default',await wait("document.querySelectorAll('[data-theme-option]').length===9 && document.querySelector('[data-theme-option=white]').getAttribute('aria-pressed')==='true'"));
+ for(const [theme,background] of [['green','rgb(243, 247, 245)'],['blue','rgb(242, 245, 252)'],['violet','rgb(245, 242, 250)'],['dark','rgb(26, 29, 35)'],['modern','rgb(19, 20, 22)'],['mint','rgb(234, 245, 240)'],['mist','rgb(240, 244, 250)'],['sand','rgb(247, 244, 237)']]){
   await js(`document.querySelector('[data-theme-option="${theme}"]').click()`);
   check('theme '+theme+' updates the app immediately after saving',await wait(`document.documentElement.dataset.theme==='${theme}' && document.querySelector('[data-theme-option="${theme}"]').getAttribute('aria-pressed')==='true' && getComputedStyle(document.querySelector('.sidebar')).backgroundColor==='${background}'`)&&config.theme===theme);
+  if(theme==='mint'){
+   await win.loadFile(join(desktop,'dist/renderer/index.html'));
+   check('mint restores message avatars and real response badges',await wait("document.documentElement.dataset.theme==='mint' && document.querySelectorAll('.message-avatar').length>=2 && !!document.querySelector('.message-badge.generated') && getComputedStyle(document.querySelector('.sidebar .new')).backgroundColor==='rgb(22, 130, 102)'"));
+   check('mint shows real completed steps as checkmarks',await wait("!!document.querySelector('.step[data-state=done] .dot svg') && getComputedStyle(document.querySelector('.step[data-state=done] .dot svg')).display==='block'"));
+   await wait("![...document.querySelectorAll('.artifact-note')].some(e=>e.textContent.includes('正在读取'))");
+   await js("document.querySelector('.stream').scrollTop=0");
+   await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+   writeFileSync('/tmp/aiclaw-mint-chat.png',(await win.webContents.capturePage()).toPNG());
+   await openThemes();
+  }
+  if(theme==='mist'){
+   await win.loadFile(join(desktop,'dist/renderer/index.html'));
+   check('mist theme restores its light canvas and lavender composer on reload',await wait("document.documentElement.dataset.theme==='mist' && !!document.querySelector('.composer') && getComputedStyle(document.body).backgroundColor==='rgb(252, 253, 255)' && getComputedStyle(document.documentElement).colorScheme==='light' && getComputedStyle(document.querySelector('.composer')).borderColor==='rgb(207, 201, 236)'"));
+   await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+   writeFileSync('/tmp/aiclaw-mist-chat.png',(await win.webContents.capturePage()).toPNG());
+   await openThemes();
+  }
   if(theme==='modern'){
    check('modern settings use dark controls and layered cards',await js("getComputedStyle(document.documentElement).colorScheme==='dark' && getComputedStyle(document.querySelector('.theme-settings section')).backgroundImage.includes('linear-gradient') && getComputedStyle(document.querySelector('.theme-settings section')).borderRadius==='18px'"));
    await js("Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})))");

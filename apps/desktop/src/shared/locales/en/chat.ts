@@ -1,5 +1,9 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "你": "You",
+  "回答已生成": "Response generated",
+  "{n} 次模型调用": "{n} model calls",
+  "有失败步骤": "Some steps failed",
   "当前为只读历史。恢复原服务后重试，或在下方选择其他模型继续：{error}": "This chat is read-only. Restore the original provider and retry, or select another model below to continue: {error}",
   "复制代码": "Copy code",
   "命令输出": "Command output",

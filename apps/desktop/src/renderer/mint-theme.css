@@ -1,0 +1,58 @@
+/* 薄荷原型：浅底、青绿交互、蓝紫工具徽标。所有细节只作用于此主题。 */
+:root[data-theme="mint"] {
+  color-scheme: light;
+  --ground: #fafcfc; --surface: #ffffff; --surface-2: #f0f7f5;
+  --sidebar: #eaf5f0; --rail: #e3f1eb;
+  --ink: #253831; --ink-2: #4a635a; --muted: #60796f;
+  --accent: #168266; --accent-hover: #106b54; --accent-soft: #e2f5ec;
+  --action: #168266; --on-action: #ffffff;
+  --rule: #dcebe5; --rule-strong: #bddbcf; --chrome-rule: #e0eee7;
+  --hover: #dff0e9; --active: #168266;
+  --chat-selected: #168266; --chat-selected-ink: #ffffff;
+  --ok: #16805a; --ok-soft: #e0f6ea;
+  --shadow-1: 0 1px 3px rgb(22 130 102 / 5%);
+  --shadow-2: 0 3px 12px rgb(22 130 102 / 8%);
+}
+html[data-theme="mint"] .sidebar .new { background: var(--accent); color: #fff; border-radius: 10px; }
+html[data-theme="mint"] .sidebar .new:hover:not(:disabled) { background: var(--accent-hover); }
+html[data-theme="mint"] .sidebar.is-chat .item.active { box-shadow: inset 3px 0 #5fc9a3; border-radius: 9px; }
+html[data-theme="mint"] .sidebar .item.active :is(.title, .count, .source-label, button) { color: #fff; }
+html[data-theme="mint"] .sidebar .item.active .agents-toggle { background: #e2f5ec; color: #176c49; }
+html[data-theme="mint"] .composer { background: #fff; border-color: #9ddcc5; box-shadow: 0 2px 10px rgb(22 130 102 / 4%); }
+html[data-theme="mint"] .composer:focus-within { border-color: var(--accent); }
+html[data-theme="mint"] .msg.user { justify-content: flex-start; }
+html[data-theme="mint"] .bubble { background: transparent; padding: 0; max-width: 100%; border-radius: 0; }
+html[data-theme="mint"] .message-identity { max-width: var(--content-width); margin: 0 auto 10px; display: flex; align-items: center; gap: 10px; color: var(--ink); }
+html[data-theme="mint"] .message-identity strong { font-size: 14px; }
+html[data-theme="mint"] .message-identity time { font-size: 11px; color: var(--muted); }
+html[data-theme="mint"] .message-avatar { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; flex: 0 0 32px; background: #dcf4e9; border-radius: 50%; }
+html[data-theme="mint"] .message-avatar > svg { width: 19px; height: 19px; fill: var(--accent); }
+html[data-theme="mint"] .message-avatar .mark { width: 23px; height: 23px; }
+html[data-theme="mint"] .message-badges { max-width: var(--content-width); display: flex; flex-wrap: wrap; gap: 7px; margin: 0 auto 12px; }
+html[data-theme="mint"] .message-badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 7px; font-size: 11px; line-height: 1.6; }
+html[data-theme="mint"] .message-badge.generated { background: #def6e9; color: #176c49; }
+html[data-theme="mint"] .message-badge.tools { background: #e8efff; color: #385aa4; }
+html[data-theme="mint"] .message-badge.models { background: #f0eaff; color: #7351a4; }
+html[data-theme="mint"] .message-badge.failed { background: var(--danger-soft); color: var(--danger); }
+html[data-theme="mint"] .turn-process { border: 1px solid var(--rule); border-radius: 12px; overflow: hidden; background: #f7fbf9; }
+html[data-theme="mint"] .process-head { display: flex; width: 100%; padding: 10px 12px; background: #e8f5ef; color: var(--ink-2); text-align: left; }
+html[data-theme="mint"] .process-chevron { margin-left: auto; }
+html[data-theme="mint"] .process-body { padding: 10px; }
+html[data-theme="mint"] .steps-head { color: var(--accent); }
+html[data-theme="mint"] .steps-body { background: #fcfefd; border-color: var(--rule); }
+html[data-theme="mint"] .step .dot { width: 16px; height: 16px; flex-basis: 16px; display: inline-flex; align-items: center; justify-content: center; }
+html[data-theme="mint"] .step .dot[data-state="done"] { background: var(--ok); }
+html[data-theme="mint"] .step .dot[data-state="done"] > svg { display: block; width: 12px; height: 12px; fill: none; stroke: #fff; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+html[data-theme="mint"] .step .dot[data-state="failed"] > span { display: block; color: #fff; font-weight: 700; }
+html[data-theme="mint"] .step .pill { background: var(--ok-soft); color: var(--ink-2); }
+html[data-theme="mint"] .code-panel { --code-keyword: #345eb1; --code-number: #90621b; --code-title: #7655a5; background: #f4f9f7; border-radius: 12px; }
+html[data-theme="mint"] .code-toolbar { background: #edf4f1; border-bottom: 1px solid var(--rule); }
+html[data-theme="mint"] .file-preview { background: #fcfefd; }
+html[data-theme="mint"] .preview-file-tab.active { border-bottom-color: var(--accent); }
+html[data-theme="mint"] .file-preview :is(.hljs-keyword, .hljs-selector-tag) { color: #345eb1; }
+html[data-theme="mint"] .file-preview :is(.hljs-title, .hljs-built_in) { color: #7655a5; }
+html[data-theme="mint"] .file-preview :is(.hljs-number, .hljs-literal) { color: #90621b; }
+@media (max-width: 640px) {
+  html[data-theme="mint"] .process-body { padding: 6px; }
+  html[data-theme="mint"] .message-badges { gap: 5px; }
+}
