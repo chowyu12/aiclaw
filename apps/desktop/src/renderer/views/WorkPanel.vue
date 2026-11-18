@@ -4,10 +4,23 @@ import type { SessionWork, FileChange, GoalUpdate, PlanStep, Goal } from "@aicla
 import { store, actions } from "../store";
 import { t } from "../i18n";
 import { describeError } from "../errors";
+import { usesWorkspaceStyle } from "../../shared/themes";
+import { filename, fileType } from "../file-card";
 
 const sessionApi = window.aiclaw.session;
 const work = ref<SessionWork | null>(null);
 const changes = ref<FileChange[]>([]);
+const workspaceStyle = computed(() => usesWorkspaceStyle(store.config?.theme));
+function changeLabel(change: FileChange): string {
+ if(change.conflict) return t("文件已变化，禁止覆盖撤销");
+ if(change.state==='undone') return t("已撤销");
+ if(change.state==='undoing') return t("撤销中");
+ if(change.state==='pending') return t("待保存");
+ return t("已修改");
+}
+function changeDirectory(path: string): string {
+ const name=filename(path);return path.slice(0,path.length-name.length);
+}
 const saving = ref(false), error = ref("");
 const evidence = ref("");
 const tokenBudget = ref(0), minutes = ref(0);
@@ -84,14 +97,18 @@ function editBudget(){tokenBudget.value=work.value?.goal?.tokenBudget??0;minutes
    <button :disabled="saving||store.busy" @click="perform(id=>sessionApi.recover(id,pending.requestId,'dismiss'))">{{t("已检查，移除恢复提示")}}</button>
   </article>
  </details>
- <details v-if="changes.length">
+ <details v-if="changes.length" class="change-list" :open="workspaceStyle || undefined">
   <summary>{{t("文件改动")}} ({{changes.length}})</summary>
   <p>{{t("记录 write_file 和 edit_file 的文本改动；命令及外部工具改动不在此列表。")}}</p>
-  <article v-for="change in changes" :key="change.id">
-   <button @click="actions.previewChange(change)">{{change.path}}</button>
-   <span v-if="change.state==='undone'">{{t("已撤销")}}</span>
-   <span v-else-if="change.conflict">{{t("文件已变化，禁止覆盖撤销")}}</span>
-   <button v-else :disabled="saving||store.busy" @click="perform(id=>sessionApi.undo(id,change.id))">{{t("撤销此改动")}}</button>
+  <article v-for="change in changes" :key="change.id" :class="{'change-row':workspaceStyle}">
+   <button v-if="workspaceStyle" class="change-path" :title="change.path" @click="actions.previewChange(change)">
+    <span class="change-extension" aria-hidden="true">{{fileType(change.path)}}</span>
+    <span class="file-name"><strong>{{filename(change.path)}}</strong><span class="change-directory">{{changeDirectory(change.path)}}</span></span>
+   </button>
+   <button v-else @click="actions.previewChange(change)">{{change.path}}</button>
+   <span v-if="workspaceStyle" class="change-status" :data-state="change.state" :class="{conflict:change.conflict}">{{changeLabel(change)}}</span>
+   <template v-else><span v-if="change.state==='undone'">{{t("已撤销")}}</span><span v-else-if="change.conflict">{{t("文件已变化，禁止覆盖撤销")}}</span></template>
+   <button v-if="change.state!=='undone' && !change.conflict" :disabled="saving||store.busy||change.state==='undoing'" @click="perform(id=>sessionApi.undo(id,change.id))">{{t("撤销此改动")}}</button>
 
   </article>
  </details>
