@@ -107,6 +107,7 @@ const state = reactive({
   archived: [] as SessionSummaryView[],
   /** 定时任务。主进程改了会推过来（建、改、删、跑完）。 */
   schedules: [] as ScheduledTaskView[],
+  scheduleEditId: "",
   schedulesError: "",
   /** 模型提的、还没回答的问题（ask_user）。按会话显示在对话里。 */
   questions: [] as QuestionPayload[],
@@ -1578,6 +1579,17 @@ export const actions = {
     await window.aiclaw.approval.respond(id, approved, scope);
     const index = state.approvals.findIndex((a) => a.id === id);
     if (index >= 0) state.approvals.splice(index, 1);
+  },
+
+  editScheduleFromDetails(id: string): void {
+    state.scheduleEditId = id;
+    actions.setView("schedules");
+  },
+
+  consumeScheduleEdit(): string {
+    const id = state.scheduleEditId;
+    state.scheduleEditId = "";
+    return id;
   },
 
   setView(view: "chat" | "providers" | "search" | "plugins" | "mcp" | "skills" | "memory" | "settings" | "theme" | "usage" | "schedules" | "archived" | "about"): void {

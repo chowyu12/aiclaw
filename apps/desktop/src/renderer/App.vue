@@ -11,6 +11,7 @@ import { locale, t } from "./i18n";
 
 /** 「配完了」= 选好了默认模型（它所属的模型服务在库里带着端点与 Key）。 */
 const SideConversation = defineAsyncComponent(() => import("./views/SideConversation.vue"));
+const SessionDetails = defineAsyncComponent(() => import("./views/SessionDetails.vue"));
 const WorkspaceFiles = defineAsyncComponent(() => import("./views/WorkspaceFiles.vue"));
 const FilePreview = defineAsyncComponent(() => import("./views/FilePreview.vue"));
 const SettingsShell = defineAsyncComponent(() => import("./views/SettingsShell.vue"));
@@ -33,6 +34,32 @@ function openSide(): void {
   if (target) void actions.openSideSession(target.id);
 }
 const configured = computed(() => Boolean(store.config?.providerId && store.config.model));
+const detailsWidth = window.matchMedia("(min-width: 1280px)");
+const wideEnough = ref(detailsWidth.matches);
+const detailsOpen = ref(true);
+const detailsToggle = ref<HTMLButtonElement | null>(null);
+const detailsAvailable = computed(() => wideEnough.value && store.view === "chat" && !!store.sessionId);
+const detailsVisible = computed(() => detailsAvailable.value && detailsOpen.value && !store.fileBrowser && !store.filePreview && !store.sideSessionId);
+function toggleDetails(): void {
+  if (detailsVisible.value) { detailsOpen.value = false; return; }
+  if (!detailsAvailable.value) return;
+  actions.closeSideSession();
+  actions.closeFileBrowser();
+  actions.closeFilePreview();
+  detailsOpen.value = true;
+}
+function closeDetails(): void {
+  detailsOpen.value = false;
+  void nextTick(() => detailsToggle.value?.focus());
+}
+function updateDetailsWidth(): void {
+  wideEnough.value = detailsWidth.matches;
+}
+onMounted(() => {
+  detailsWidth.addEventListener("change", updateDetailsWidth);
+  updateDetailsWidth();
+});
+onUnmounted(() => detailsWidth.removeEventListener("change", updateDetailsWidth));
 const sessionsOpen = ref(true);
 const isMac = navigator.userAgent.includes("Macintosh");
 function toggleSessions(): void {
@@ -91,6 +118,9 @@ onMounted(() => {
         <span class="workspace-mode">{{ store.view === 'chat' ? t('工作台') : t('设置') }}</span>
         <button v-if="!sessionsOpen && store.view === 'chat'" class="toolbar-settings" :aria-label="t('设置')" :title="t('设置')" @click="actions.setView('settings')"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18 M8 3v6M16 9v6M10 15v6"/></svg></button>
         <button v-if="store.view === 'chat' && store.sessions.some(session => session.id !== store.sessionId && !session.archivedAt)" class="side-toggle" :aria-label="t('并排会话')" :title="t('并排会话')" :aria-pressed="!!store.sideSessionId" @click="openSide"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 4v16"/></svg></button>
+        <button v-if="detailsAvailable" ref="detailsToggle" class="details-toggle" :aria-label="t('会话详情')" :title="t('会话详情')" :aria-expanded="detailsVisible" :aria-controls="detailsVisible ? 'session-details' : undefined" @click="toggleDetails">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M15 4v16m3-11v1m0 4v1"/></svg>
+        </button>
       </header>
       <div v-if="store.error" class="error-bar">
         <span>{{ store.error }}</span>
@@ -102,6 +132,7 @@ onMounted(() => {
         <template v-if="store.view === 'chat'">
           <ChatView :configured="configured" />
           <SideConversation v-if="store.sideSessionId" />
+          <SessionDetails v-if="detailsAvailable && detailsOpen" v-show="detailsVisible" :key="store.sessionId" :session-id="store.sessionId" @close="closeDetails" />
           <WorkspaceFiles v-if="store.fileBrowser" />
           <FilePreview v-else-if="store.filePreview && store.filePreview.sessionId === store.sessionId" :preview="store.filePreview" />
         </template>
@@ -135,10 +166,11 @@ onMounted(() => {
 .workspace-toolbar { display:flex; align-items:center; gap:10px; height:38px; flex:none; padding:0 12px; color:var(--muted); -webkit-app-region:drag; }
 .workspace-toolbar button { position:relative; display:grid; place-items:center; width:28px; height:28px; padding:5px; border:0; border-radius:6px; background:none; color:var(--muted); cursor:pointer; -webkit-app-region:no-drag; }
 .workspace-toolbar button:hover { background:var(--hover); color:var(--ink); }
+.workspace-toolbar .details-toggle[aria-expanded="true"] { background:var(--accent-soft); color:var(--accent); }
 .workspace-toolbar svg { width:16px; height:16px; fill:none; stroke:currentColor; stroke-width:1.4; stroke-linecap:round; }
 .workspace-mode { margin:auto; padding:2px 9px; border-radius:var(--r-full); background:var(--surface-2); color:var(--ink-2); font-size:10px; }
 .workspace-toolbar::after { content:""; width:28px; }
-.workspace-toolbar:has(.side-toggle)::after { display:none; }
+.workspace-toolbar:has(.side-toggle, .details-toggle)::after { display:none; }
 .workspace-toolbar:has(.toolbar-settings)::after { display:none; }
 .rail-unread { position:absolute; right:1px; top:1px; width:6px; height:6px; border-radius:50%; background:#0878e8; }
 

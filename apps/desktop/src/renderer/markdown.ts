@@ -215,6 +215,7 @@ md.core.ruler.after("inline", "local-file-cards", state => {
       try { path = decodeURIComponent(href); } catch { /* Keep literal paths with percent signs. */ }
       const card = new state.Token("html_inline", "", 0);
       card.content = fileCard(path);
+      card.meta = { localFilePath: path };
       children.splice(i, end - i + 1, card);
     }
   }
@@ -341,6 +342,22 @@ function sanitizer(): ReturnType<typeof createDOMPurify> {
  */
 export function renderMarkdown(source: string): string {
   return sanitizer().sanitize(md.render(source), PURIFY_CONFIG) as unknown as string;
+}
+
+/** File paths explicitly presented by a reply, independent of its HTML rendering. */
+export function reportedFilePaths(source: string): string[] {
+  const paths: string[] = [];
+  const add = (path: string) => {
+    if (!path.includes("\0") && looksLikePath(path) && /\.[a-z][a-z0-9]{0,7}$/i.test(path)) paths.push(path);
+  };
+  for (const token of md.parse(source, {})) {
+    if (token.type === "fence" && /^(?:text|txt|plain|plaintext)?$/i.test(token.info.trim())) add(token.content.trim());
+    for (const child of token.children ?? []) {
+      if (child.meta?.standaloneFile) add(child.content.trim());
+      if (typeof child.meta?.localFilePath === "string") add(child.meta.localFilePath);
+    }
+  }
+  return paths;
 }
 
 /** Local document previews never fetch embedded images or CSS resources automatically. */

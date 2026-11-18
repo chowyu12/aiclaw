@@ -28,6 +28,9 @@ test("original uploads are private, immutable, retained beyond preview limits an
   await store.bind("s", [file]);
   await store.bind("s", [file]); // Retry is idempotent.
   assert.equal((await store.list("s")).length, 1);
+  assert.deepEqual(await store.original("s", file.id), { name: "report.txt", bytes: data });
+  assert.deepEqual(await store.list("other"), []);
+  await assert.rejects(store.original("other", file.id), /belong/);
   assert.ok(!JSON.stringify(await store.list("s")).includes(file.claimToken));
   const prompt = inlineDocument({ kind: "document", name: file.name, file });
   assert.ok(prompt.includes(`[attachment:${file.id}]`));
@@ -80,6 +83,7 @@ test("cache queries are isolated and original tampering is detected even on a ca
   assert.equal((await store.read("s", file.id, { mode: "index" })).sections?.length, 1);
   await writeFile(join(root, file.id, "original"), "tampered!!");
   await assert.rejects(store.read("s", file.id, query), /changed or is damaged/);
+  await assert.rejects(store.original("s", file.id), /changed or is damaged/);
 }));
 test("linked originals and linked attachment directories are refused", { skip: process.platform === "win32" }, async () => setup(async (store, root) => {
   const file = await store.stage({ name: "a.txt", data: Buffer.from("file"), sessionId: "s" });

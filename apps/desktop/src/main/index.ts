@@ -27,7 +27,7 @@ import { LogFile } from "./logfile.js";
 import { workspaceFiles } from "./workspace-files.js";
 import { readTextPreview } from "./file-preview.js";
 import { readMemoryDocument, saveMemoryDocument } from "./memory-files.js";
-import { openFromChat, revealWorkspace } from "./open-file.js";
+import { existingWorkspaceFiles, openFromChat, revealWorkspace } from "./open-file.js";
 import { readMedia, stageAudio } from "./media-files.js";
 import { IPC } from "../shared/ipc.cjs";
 import type { ApprovalPayload, QuestionAnswer, QuestionPayload } from "../shared/types.js";
@@ -538,6 +538,14 @@ function registerIpc(): void {
       previewWindowBounds = null;
     }
   });
+  ipcMain.handle(IPC.attachmentList, (_event, sessionId: string) => sessions.attachments.list(sessionId));
+  ipcMain.handle(IPC.attachmentSaveOriginal, async (event, sessionId: string, id: string) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return;
+    const { name, bytes } = await sessions.attachments.original(sessionId, id);
+    const result = await dialog.showSaveDialog(window, { defaultPath: name.split(/[\\/]/).pop() });
+    if (!result.canceled && result.filePath) await writeFile(result.filePath, bytes);
+  });
   ipcMain.handle(IPC.attachmentStage, (_event, input: unknown) => sessions.attachments.stage(input));
   ipcMain.handle(IPC.filePreview, async (_event, input: { path: string; sessionId: string }) => {
     const session = (await sessions.listSessions()).find(session => session.id === input.sessionId && !session.archivedAt);
@@ -550,6 +558,9 @@ function registerIpc(): void {
     if (!session) throw new Error(tr("找不到预览文件所属的会话。"));
     return session.workdir;
   }
+  ipcMain.handle(IPC.fileExistingOutputs, async (_event, sessionId: string, paths: string[]) =>
+    sessionId ? existingWorkspaceFiles(paths, { base: await fileWorkspace(sessionId), protectedPaths: [store.dataDir] }) : [],
+  );
   ipcMain.handle(IPC.fileOpen, async (_event, path: string, sessionId?: string) =>
     openFromChat(path, { base: await fileWorkspace(sessionId), protectedPaths: [store.dataDir] }),
   );

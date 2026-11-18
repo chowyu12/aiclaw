@@ -62,7 +62,13 @@ const formError = ref("");
 const saving = ref(false);
 const busy = reactive<Record<string, string>>({});
 
-onMounted(() => { void actions.loadSchedules(); void actions.refreshSessions(); });
+onMounted(() => {
+  const id = actions.consumeScheduleEdit();
+  const task = store.schedules.find(item => item.id === id);
+  if (task) edit(task);
+  void actions.loadSchedules();
+  void actions.refreshSessions();
+});
 
 const tasks = computed(() => store.schedules);
 

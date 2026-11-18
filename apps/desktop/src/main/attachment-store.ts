@@ -95,11 +95,20 @@ export class AttachmentStore {
     }
     return result.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
   }
-  async read(sessionId: string, id: string, query: AttachmentReadQuery = { mode: "index" }) {
+  private async ownedOriginal(sessionId: string, id: string) {
     const record = await this.record(id);
     if (!sessionId || !record.owners.includes(sessionId)) throw Error("Attachment does not belong to this session");
     const bytes = await this.readFile(join(this.root, id, "original"));
     if (bytes.length !== record.size || digest(bytes) !== record.sha256) throw Error("Original attachment changed or is damaged; upload it again");
+    return { record, bytes };
+  }
+  async original(sessionId: string, id: string) {
+    const { record, bytes } = await this.ownedOriginal(sessionId, id);
+    if (!(await this.record(id)).owners.includes(sessionId)) throw Error("Attachment is no longer associated with this session");
+    return { name: record.name, bytes };
+  }
+  async read(sessionId: string, id: string, query: AttachmentReadQuery = { mode: "index" }) {
+    const { record, bytes } = await this.ownedOriginal(sessionId, id);
     const cache = join(this.root, id, `parsed-v2-${digest(JSON.stringify(query))}.json`);
     let parsed: ParsedAttachment;
     try { parsed = JSON.parse((await this.readFile(cache)).toString()) as ParsedAttachment; }

@@ -162,11 +162,14 @@ const api = {
     read: () => ipcRenderer.invoke(IPC.diagnosticsRead),
   },
   files: {
+    listAttachments: (sessionId: string): Promise<{ id: string; name: string; size: number }[]> => ipcRenderer.invoke(IPC.attachmentList, sessionId),
+    saveAttachment: (sessionId: string, id: string): Promise<void> => ipcRenderer.invoke(IPC.attachmentSaveOriginal, sessionId, id),
     stageAttachment: (name: string, data: Uint8Array, sessionId: string): Promise<{ id: string; name: string; size: number; sha256: string; claimToken: string }> => ipcRenderer.invoke(IPC.attachmentStage, { name, data, sessionId }),
     browse: (sessionId: string, path = "", query = "") => ipcRenderer.invoke(IPC.workspaceFiles, { sessionId, path, query }),
     /** 打开模型在对话里提到的一个路径。主进程会校验，渲染层不碰文件系统。 */
     revealWorkspace: (path: string) => ipcRenderer.invoke(IPC.workspaceReveal, path),
     previewLayout: (open: boolean) => ipcRenderer.invoke(IPC.filePreviewLayout, open),
+    existingOutputs: (sessionId: string, paths: string[]): Promise<string[]> => ipcRenderer.invoke(IPC.fileExistingOutputs, sessionId, paths),
     preview: (path: string, sessionId: string) => ipcRenderer.invoke(IPC.filePreview, { path, sessionId }),
     open: (path: string, sessionId?: string) => ipcRenderer.invoke(IPC.fileOpen, path, sessionId),
     /** 读一个图片/音频文件用于内联显示。校验同样在主进程。 */

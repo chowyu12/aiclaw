@@ -107,7 +107,7 @@ export function nextRun(rule: ScheduleRule, after: Date, anchor?: Date): Date | 
 }
 
 /** 规则写成人话：「每个工作日 09:00」「每 30 分钟」。 */
-export function describeRule(rule: ScheduleRule, locale: Locale = currentLocale()): string {
+export function describeRule(rule: Omit<ScheduleRule, "days"> & { days?: readonly number[] }, locale: Locale = currentLocale()): string {
   const t = translator(locale);
   const time = rule.time ?? "";
   switch (rule.kind) {

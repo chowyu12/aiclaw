@@ -1,6 +1,7 @@
 import { existsSync, statSync } from "node:fs";
+import { realpath, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { shell } from "electron";
 
 import { tr } from "../shared/i18n.js";
@@ -81,4 +82,29 @@ export function revealWorkspace(path: string): void {
   const info = statSync(path);
   if (!info.isDirectory() && !info.isFile()) throw new Error(tr("这不是一个文件"));
   shell.showItemInFolder(resolve(path));
+}
+
+/** Verify reply references using metadata only, with both paths constrained to the workspace. */
+export async function existingWorkspaceFiles(paths: string[], options: { base: string; protectedPaths: string[] }): Promise<string[]> {
+  if (!options.base.trim() || !Array.isArray(paths)) return [];
+  const base = resolve(options.base);
+  const realBase = await realpath(base).catch(() => "");
+  if (!realBase) return [];
+  const home = homedir();
+  const policy = { home, protectedPaths: options.protectedPaths, executable: false };
+  const inside = (root: string, path: string) => {
+    const rel = relative(root, path);
+    return rel && !isAbsolute(rel) && rel !== ".." && !rel.startsWith(".." + sep);
+  };
+  const files = await Promise.all(paths.slice(0, 128).map(async raw => {
+    if (typeof raw !== "string" || !raw.trim() || raw.length > 400 || raw.includes("\0")) return "";
+    const path = resolve(base, raw.startsWith("~/") ? join(home, raw.slice(2)) : raw);
+    if (!inside(base, path) || classifyOpen(path, policy).action === "refuse") return "";
+    try {
+      const real = await realpath(path);
+      if (inside(realBase, real) && classifyOpen(real, policy).action !== "refuse" && (await stat(real)).isFile()) return raw;
+    } catch { /* A missing or inaccessible file cannot be listed. */ }
+    return "";
+  }));
+  return files.filter(Boolean);
 }

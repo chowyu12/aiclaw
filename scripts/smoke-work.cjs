@@ -1,7 +1,7 @@
 /** Exercises the real Vue/preload workflow without touching user data or paid models. */
 const {app,BrowserWindow,ipcMain,nativeTheme}=require('electron');
 const {join}=require('node:path');
-const {writeFileSync,readFileSync}=require('node:fs');
+const {writeFileSync,readFileSync,mkdirSync,symlinkSync}=require('node:fs');
 const desktop=join(__dirname,'../apps/desktop');
 const {IPC}=require(join(desktop,'dist/shared/ipc.cjs'));
 app.setPath('userData',join(app.getPath('temp'),`aiclaw-work-smoke-${process.pid}`));
@@ -21,6 +21,16 @@ app.whenReady().then(async()=>{
  const {AttachmentStore}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/attachment-store.js')).href);
  const attachments=new AttachmentStore(join(app.getPath('userData'),'attachments'),(name,data,query)=>readDocumentAttachment({name,data,query}));
  let releaseAttachment;const attachmentGate=new Promise(resolve=>{releaseAttachment=resolve;});
+ const {existingWorkspaceFiles}=await import(require('node:url').pathToFileURL(join(desktop,'dist/main/open-file.js')).href);
+ const outputWorkspace=join(app.getPath('userData'),'output-workspace');
+ mkdirSync(outputWorkspace,{recursive:true});
+ const pptx='1937-1938王明回国与领导核心的确立_美化版.pptx';
+ const outputFile=join(outputWorkspace,pptx), outsideOutput=join(outputWorkspace,'../outside.pptx');
+ writeFileSync(outputFile,'fixture');writeFileSync(outsideOutput,'fixture');
+ const candidates=[outputFile,'./'+pptx,'missing.pptx',outputWorkspace,outsideOutput];
+ if(process.platform!=='win32'){symlinkSync(outsideOutput,join(outputWorkspace,'alias.pptx'));candidates.push('alias.pptx');}
+ check('reported output validation only accepts existing ordinary files inside the owning workspace',
+  JSON.stringify(await existingWorkspaceFiles(candidates,{base:outputWorkspace,protectedPaths:[]}))===JSON.stringify([outputFile,'./'+pptx]));
  let uploadFails=false;
  ipcMain.handle(IPC.attachmentStage,async(_event,input)=>{await attachmentGate;if(uploadFails)throw Error('fixture storage unavailable');return attachments.stage(input);});
  check('desktop offers exactly default strict and allow-all policies',profiles.map(p=>p.id).join('|')==='auto|always|bypass'&&profiles[0].label==='默认');
@@ -55,6 +65,13 @@ app.whenReady().then(async()=>{
  });
  let computerState={mode:'ready',active:null,watching:0};const computerActions=[];let computerChecks=0,computerSetups=0;
  const computerDiagnostic=()=>({platform:'darwin',available:true,accessibility:true,screenCapture:false,toolCount:18,message:'请开启屏幕录制权限。'});
+ let detailsReference=false;
+ const reportedPath='/tmp/smoke/'+pptx;
+ const reportedReads=[];
+ handle('fileExistingOutputs',(_e,id,paths)=>{reportedReads.push({id,paths});return id==='s'?paths.filter(path=>path===reportedPath):[];});
+ const attachmentExports=[];
+ handle('attachmentList',(_e,id)=>id==='s'?[{id:'source-upload',name:'source.pdf',size:123}]:[]);
+ handle('attachmentSaveOriginal',(_e,sessionId,attachmentId)=>{attachmentExports.push({sessionId,attachmentId});});
  handle('computerStatus',()=>computerState);
  handle('computerControl',(_e,action)=>{computerActions.push(action);computerState={mode:action==='resume'?'ready':action==='pause'?'paused':'stopped',active:null,watching:0};win?.webContents.send(IPC.onComputerStatus,computerState);return computerState;});
  handle('computerDiagnostics',()=>{computerChecks++;return computerDiagnostic();});
@@ -112,7 +129,7 @@ app.whenReady().then(async()=>{
  let commandHistory=false;const resumeFailures=new Set(),resumeModels=new Map(),resumeCalls=[];
  handle('sessionConfigure',async(_e,input)=>{configureCalls.push(input);try{if(configureGate)await configureGate;if(configureFails)throw Error('fixture model switch failed');contextFixture={...contextFixture,model:input.model,window:input.contextWindow||0,lastInputTokens:0};return {tools:[],mcpStatus:{}};}finally{configureSettled++;}});
  handle('scheduleSave',(_e,input)=>{scheduleInputs.push(input);const task={...input,id:'scheduled',enabled:true,lastResult:'waiting for checks',createdAt:new Date().toISOString(),anchorAt:new Date().toISOString()};tasks=[task];return task;});
- handle('sessionResume',async(_e,id)=>{if(welcomeMode)return {sessionId:id,workspace:sessionWorkspace,tools:[],mcpStatus:{},model:'test',providerId:1,history:[]};resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now()},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json']},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\n`/tmp/smoke/generated/2026 AI 行业趋势.md`\n\nWord：\n\n[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论\n\n![猫](generated/cat.png)\n\n[狗](generated/dog.webp)\n\n[缺失图片](generated/missing.png)',at:Date.now()},...(id==='s'&&commandHistory?[{id:'command-user',kind:'userMessage',text:'Test commands'},{id:'command-answer',kind:'agentMessage',text:'运行 `python3 sum.py`。\n\n```bash\nprintf foo\n```\n\n```python\nprint(1)\n```\n\n```console\n$ ls\nexample.txt\n```\n\n```sh\npython3 sum.py\n```'}]:[])]});});
+ handle('sessionResume',async(_e,id)=>{if(welcomeMode)return {sessionId:id,workspace:sessionWorkspace,tools:[],mcpStatus:{},model:'test',providerId:1,history:[]};resumeCalls.push(id);if(resumeFailures.has(id))throw Error('fixture resume failed');if(resumeGate?.id===id){resumeGate.started();await resumeGate.promise;}return ({sessionId:id,reasoningEffort:effort,skills:['alpha','beta'],workspace:sessionWorkspace,tools:[],mcpStatus:{},model:resumeModels.get(id)?.model??'test',providerId:resumeModels.get(id)?.providerId??1,history:[{id:'u1',kind:'userMessage',text:'original prompt',at:Date.now(),...(detailsReference&&id==='s'?{references:[{id:'other',title:'Referenced workspace'}]}:{})},{id:'tool1',kind:'toolCall',toolName:'generate_image',toolResult:'saved',artifacts:['generated/cat.png','generated/cat.png','generated/dog.webp','generated/missing.png','generated/speech.wav','generated/2026 AI 行业趋势.md','generated/2026 AI 行业趋势.docx','generated/2026 AI 行业趋势.pptx','generated/2026 AI 行业趋势.md','.archify/history-run/candidate.json','.archify/history-run/request.finalize.json',...(detailsReference&&id==='s'?['./example.sql','nested/../other.txt','/tmp/smoke/example.sql','/tmp/smoke/generated/cat.png','generated/example.sql']:[])]},{id:'search1',kind:'toolCall',toolName:'search__web_search',toolResult:'results',sources:id==='s'?[{title:'AIClaw 文档',url:'https://example.com/docs#one',snippet:'联网搜索返回的功能说明。'},{title:'重复文档',url:'https://example.com/docs#two',snippet:'Duplicate'},{title:'版本更新 <b>说明</b>',url:'https://news.example.com/releases',snippet:'本轮找到的最新发布信息。'},{title:'Unsafe',url:'javascript:alert(1)',snippet:'unsafe'}]:[]},{id:'a1',kind:'agentMessage',text:'original answer\n\n文件路径：`/tmp/smoke/generated/2026 AI 行业趋势.md`（约 7.2 KB）\n\n`/tmp/smoke/generated/2026 AI 行业趋势.md`\n\nWord：\n\n[打开文档](generated/2026%20AI%20行业趋势.docx)\n\n文档结构：\n- 行业排名\n- 四个关键结论\n\n![猫](generated/cat.png)\n\n[狗](generated/dog.webp)\n\n[缺失图片](generated/missing.png)',at:Date.now()},...(detailsReference&&id==='s'?[{id:'reported-file',kind:'agentMessage',text:'文件在工作区：\n\n```\n'+reportedPath+'\n```\n\n`missing.pptx`\n\n```bash\npython build_ppt.py\n```'}]:[]),...(id==='s'&&commandHistory?[{id:'command-user',kind:'userMessage',text:'Test commands'},{id:'command-answer',kind:'agentMessage',text:'运行 `python3 sum.py`。\n\n```bash\nprintf foo\n```\n\n```python\nprint(1)\n```\n\n```console\n$ ls\nexample.txt\n```\n\n```sh\npython3 sum.py\n```'}]:[])]});});
  handle('sessionWork',(_e,id)=>(welcomeMode ? {goal:null,pending:[],queuedRequestIds:[]} : {goal:id==='s'?goal:null,pending:id==='s'?[...pending,...queuedInputs]:[],queuedRequestIds:queueAuto&&id==='s'?queuedInputs.map(p=>p.requestId):[],forkSourceId:id==='fork'?'s':'',forkItemId:id==='fork'?'u1':''}));
  handle('changesList',(_e,id)=>{changeReads.push(id);return id==='s'?changes:[];});
  handle('goalSet',(_e,id,input)=>{goal={...input,status:'active',tokensUsed:0,elapsedMs:0,evidence:'',revision:1};return goal;});
@@ -1364,6 +1381,82 @@ app.whenReady().then(async()=>{
  await win.reload();await wait("!!document.querySelector('.composer')");await openSessions();
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-workspace-chat.png',(await win.webContents.capturePage()).toPNG());
+ const existingTasks=tasks;
+ tasks=[
+  {id:'details-task',name:'Daily detail task',prompt:'check',mode:'followup',sessionId:'s',rule:{kind:'daily',time:'08:00'},enabled:true,nextRunAt:new Date(Date.now()+86400000).toISOString()},
+  {id:'other-task',name:'Other detail task',prompt:'check',mode:'cron',lastSessionId:'other',rule:{kind:'daily',time:'09:00'},enabled:false},
+ ];
+ changes[0].state='applied';
+ changes.push(
+  {...changes[0],id:'second-edit',before:changes[0].after,after:changes[0].after+'SELECT email FROM users;\n',createdAt:4},
+  {...changes[0],id:'created-file',path:'/tmp/smoke/created.txt',before:'',after:'new line\n',createdAt:5},
+  {...changes[0],id:'deleted-file',path:'/tmp/smoke/deleted.txt',before:'old line\n',after:'',createdAt:6},
+ );
+ detailsReference=true;
+ sessionWorkspace='/tmp/smoke';
+ win.setContentSize(1279,900);
+ await win.reload();
+ win.webContents.send(IPC.onOpenSession,'s');
+ await wait("!!document.querySelector('.composer') && !!document.querySelector('.prose .file-card')");
+ check('windowed chats below the width threshold hide the details control and panel',await wait("innerWidth===1279 && !document.querySelector('.details-toggle, .session-details')"));
+ const clickDetails=async()=>{if(!await wait("!!document.querySelector('.details-toggle')"))throw Error('details toggle unavailable');await js("document.querySelector('.details-toggle').click()");};
+ win.setContentSize(1280,900);
+ const detailsExpanded="document.querySelector('.details-toggle')?.getAttribute('aria-expanded')==='true' && document.querySelector('.session-details')?.getClientRects().length>0";
+ const detailsClosed="document.querySelector('.details-toggle')?.getAttribute('aria-expanded')==='false' && !document.querySelector('.session-details')";
+ check('details open automatically when a regular window reaches the width threshold',!win.isFullScreen()&&await wait(`innerWidth===1280 && ${detailsExpanded}`));
+ await clickDetails();
+ check('the toolbar can close details in a wide window',await wait(detailsClosed));
+ win.setContentSize(1440,900);
+ check('resizing within the wide layout respects manual close',await wait(`innerWidth===1440 && ${detailsClosed}`));
+ await clickDetails();
+ check('details show only the current task, recorded changes and deduplicated sources',await wait("document.querySelector('.scheduled-detail')?.textContent.includes('Daily detail task') && !document.querySelector('.session-details').textContent.includes('Other detail task') && document.querySelector('.changed-file') && document.querySelectorAll('.source-link').length===1 && document.querySelector('.source-item')?.title==='source.pdf'"));
+ await js("document.querySelector('.source-item').closest('section').querySelector('.show-all').click()");
+ check('sources expand to include referenced chats and only unique safe search links',await js("!!document.querySelector('.source-item[title=\"Referenced workspace\"]') && document.querySelectorAll('.source-link').length===2"));
+ await js("document.querySelector('.scheduled-tasks summary').click()");
+ check('the schedule title folds tasks while leaving the workspace and sources visible',await wait("!document.querySelector('.scheduled-tasks').open && document.querySelector('.detail-sources').open && document.querySelector('.workspace-label').checkVisibility() && !document.querySelector('.workspace-label').closest('section').querySelector('summary')"));
+ await js("document.querySelector('.detail-sources summary').click()");
+ check('the sources title folds sources independently',await wait("!document.querySelector('.scheduled-tasks').open && !document.querySelector('.detail-sources').open && !document.querySelector('.file-changes').open && document.querySelector('.file-outputs').open"));
+ await js("document.querySelector('.scheduled-tasks summary').click(); document.querySelector('.detail-sources summary').click()");
+ check('reopening sources preserves the previously expanded list',await wait("document.querySelector('.scheduled-tasks').open && document.querySelector('.detail-sources').open && document.querySelectorAll('.source-link').length===2"));
+ check('recorded changes start collapsed with unique file count and net line totals',await js("!document.querySelector('.file-changes').open && document.querySelector('.file-changes summary small').textContent.trim()==='· 4' && document.querySelector('.change-summary .added').textContent==='+4' && document.querySelector('.change-summary .removed').textContent==='−3'"));
+ await js("document.querySelector('.file-changes summary').click()");
+ check('the file changes title opens the recorded list on demand',await wait("document.querySelector('.file-changes').open && document.querySelectorAll('.changed-file').length===4 && [...document.querySelectorAll('.changed-file')].every(row=>row.checkVisibility())"));
+ await js("document.querySelector('.file-changes summary').click()");
+ check('clicking the file changes title closes only that section',await wait("!document.querySelector('.file-changes').open && document.querySelector('.file-outputs').open"));
+ await js("document.querySelector('.file-outputs summary').click()");
+ check('clicking the outputs title also closes its section',await wait("!document.querySelector('.file-outputs').open"));
+ await js("document.querySelector('.file-changes summary').click(); document.querySelector('.file-outputs summary').click()");
+ check('both titles reopen their own lists',await wait("document.querySelector('.file-changes').open && document.querySelector('.file-outputs').open"));
+ check('the output list starts collapsed',await js("document.querySelectorAll('.output-file').length===3"));
+ await js("document.querySelector('.output-file').closest('section').querySelector('.show-all').click()");
+ check('an existing PPTX reported only in a reply appears in outputs, ahead of older tool artifacts',await wait(`document.querySelector('.output-file')?.title===${JSON.stringify(reportedPath)}`)&&reportedReads.some(({id,paths})=>id==='s'&&paths.includes(reportedPath)&&paths.includes('missing.pptx')&&!paths.includes('python build_ppt.py')));
+ check('outputs exclude files already listed as changes even when their paths differ in spelling',await js("(()=>{const paths=[...document.querySelectorAll('.output-file')].map(file=>file.title); return paths.length===9 && paths.includes('generated/example.sql') && !paths.includes('missing.pptx') && !paths.includes('./example.sql') && !paths.includes('nested/../other.txt') && !paths.includes('/tmp/smoke/example.sql') && !paths.includes('/tmp/smoke/generated/cat.png') && !paths.some(path=>path.includes('.archify'));})()"));
+ await js("document.querySelector('.source-item').click()");
+ check('details export an upload with the owning session id',attachmentExports.at(-1)?.sessionId==='s'&&attachmentExports.at(-1)?.attachmentId==='source-upload');
+ await js(`document.querySelector('.changed-file[title$="/example.sql"]').click()`);
+ check('recorded changes use the existing diff preview',await wait("document.querySelector('.file-preview .split-diff')?.textContent.includes('active = 0') && document.querySelector('.file-preview .split-diff')?.textContent.includes('SELECT email FROM users;') && document.querySelector('.session-details').getClientRects().length===0"));
+ await js("document.querySelector('.preview-close').click()");
+ check('closing the preview restores the expanded details panel',await wait("document.querySelector('.session-details').getClientRects().length>0 && document.querySelectorAll('.output-file').length===9"));
+ await js("[...document.querySelectorAll('.output-file')].find(b=>b.title.endsWith('.md')).click()");
+ check('output previews receive the current session',await wait("!!document.querySelector('.file-preview .markdown-preview') && document.querySelector('.session-details').getClientRects().length===0")&&previewReads.at(-1)?.sessionId==='s');
+ await js("document.querySelector('.preview-close').click()");
+ check('closing an output preview restores the right panel',await wait("document.querySelector('.session-details').getClientRects().length>0"));
+ writeFileSync('/tmp/aiclaw-session-details.png',(await win.webContents.capturePage()).toPNG());
+ await js(`document.querySelector('.source-item[title="Referenced workspace"]').click()`);
+ check('opening a referenced chat replaces tasks, changes and sources without retaining previous rows',await wait("document.querySelector('.scheduled-detail')?.textContent.includes('Other detail task') && !document.querySelector('.changed-file, .source-link, .source-item') && document.querySelectorAll('.output-file').length===3"));
+ win.setContentSize(1279,900);
+ check('narrowing the window unmounts the open right panel',await wait("innerWidth===1279 && !document.querySelector('.session-details, .details-toggle')"));
+ win.setContentSize(1280,900);
+ check('widening the window again restores previously open details automatically',await wait(detailsExpanded));
+ await wait("!!document.querySelector('.scheduled-detail')");
+ await js("document.querySelector('.scheduled-detail').click()");
+ check('linked tasks open directly in the schedule editor',await wait("[...document.querySelectorAll('.card.editor input')].some(input=>input.value==='Other detail task') && !document.querySelector('.session-details, .details-toggle')"));
+ await win.reload();
+ await wait("!!document.querySelector('.composer')");
+ check('a renderer reload starts with the wide details panel open',await wait(detailsExpanded));
+ tasks=existingTasks;
+ detailsReference=false;
+
  welcomeMode=true;
  win.setSize(1440,900);
  await win.reload();
