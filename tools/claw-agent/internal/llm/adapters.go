@@ -72,6 +72,9 @@ func (c *Client) CatalogRequest(ctx context.Context) (*http.Request, error) {
 	req, err := c.request(ctx, http.MethodGet, c.adapter.catalogPath, nil)
 	if err == nil {
 		req.Header.Set("Accept", "application/json")
+		if c.protocol == model.APIAnthropic && req.URL.Hostname() == "api.anthropic.com" {
+			req.Header.Set("anthropic-version", "2026-10-21")
+		}
 	}
 	return req, err
 }
@@ -119,14 +122,19 @@ func (c *Client) ListModelsAndMetadata(ctx context.Context) ([]string, map[strin
 	if err != nil {
 		return nil, nil, err
 	}
+	if c.protocol == model.APIGemini {
+		caps, err := geminiCatalogCapabilities(raw)
+		return names, caps, err
+	}
 	var catalog struct {
 		Data []struct {
-			ID               string                  `json:"id"`
-			Capabilities     model.ModelCapabilities `json:"capabilities"`
-			ContextLength    int                     `json:"context_length"`
-			ReasoningEfforts []string                `json:"reasoning_efforts"`
-			APIProtocol      model.APIProtocol       `json:"api_protocol"`
-			Parameters       *[]string               `json:"supported_parameters"`
+			ID               string            `json:"id"`
+			Capabilities     json.RawMessage   `json:"capabilities"`
+			MaxInputTokens   int               `json:"max_input_tokens"`
+			ContextLength    int               `json:"context_length"`
+			ReasoningEfforts []string          `json:"reasoning_efforts"`
+			APIProtocol      model.APIProtocol `json:"api_protocol"`
+			Parameters       *[]string         `json:"supported_parameters"`
 			Architecture     struct {
 				Inputs *[]string `json:"input_modalities"`
 			} `json:"architecture"`
@@ -137,7 +145,12 @@ func (c *Client) ListModelsAndMetadata(ctx context.Context) ([]string, map[strin
 	}
 	caps := map[string]model.ModelCapabilities{}
 	for _, entry := range catalog.Data {
-		cap := entry.Capabilities
+		var cap model.ModelCapabilities
+		if c.protocol == model.APIAnthropic {
+			cap = anthropicCatalogCapabilities(entry.Capabilities, entry.MaxInputTokens)
+		} else {
+			_ = json.Unmarshal(entry.Capabilities, &cap)
+		}
 		if entry.ContextLength > 0 && entry.ContextLength <= 100_000_000 {
 			cap.ContextWindow = entry.ContextLength
 		}

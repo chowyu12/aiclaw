@@ -436,14 +436,6 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 		// 用户会觉得「我都说了别改那个文件了它还在改」。
 		s.drainPending(ctx, turnID, emitter)
 
-		// 主动压缩：等上游报超窗再压要白花一次请求，而那一次请求恰恰是
-		// 历史最长、最贵的一次。
-		if s.needsCompaction() {
-			if err := s.compact(ctx, turnID, emitter); err != nil {
-				return total, err
-			}
-		}
-
 		// Register cancellation under the same lock as enqueueing so input arriving
 		// between draining the queue and starting the HTTP request cannot be missed.
 		sampleCtx, cancelSample := context.WithCancel(ctx)
@@ -607,7 +599,20 @@ func (s *Session) sample(
 	compacted := false
 	for attempt := 1; ; attempt++ {
 		s.refreshMCP(ctx, turnID, emitter)
-		response, err := s.callModel(ctx, turnID, emitter, steps, round)
+		model, client, err := s.samplingClient()
+		if err != nil {
+			return llm.Response{}, err
+		}
+		if attempt == 1 && s.needsCompaction() {
+			if err := s.compact(ctx, turnID, emitter); err != nil {
+				return llm.Response{}, err
+			}
+			model, client, err = s.samplingClient()
+			if err != nil {
+				return llm.Response{}, err
+			}
+		}
+		response, err := s.callModel(ctx, turnID, emitter, steps, round, model, client)
 		if err != nil && response.Sampling != nil {
 			s.recordPhase(*response.Sampling)
 			if response.Content != "" && response.LocalItemID != "" {
@@ -716,11 +721,9 @@ func (s *Session) callModel(
 	emitter Emitter,
 	steps *stepCounter,
 	round int,
+	model protocol.ModelConfig,
+	client *llm.Client,
 ) (llm.Response, error) {
-	model, client, err := s.samplingClient()
-	if err != nil {
-		return llm.Response{}, err
-	}
 	itemID := newID("msg")
 	started := false
 	var streamed strings.Builder

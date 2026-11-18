@@ -112,8 +112,15 @@ interface Bucket {
   sessions: SessionSummaryView[];
 }
 
+const removeProjectDropID = "remove-project";
 const SESSION_DRAG_TYPE = "application/x-aiclaw-session";
 const draggingSession = ref(""), dropBucket = ref(""), movingSession = ref("");
+const removeProjectDrop = computed<Bucket | undefined>(() => {
+  const session = store.sessions.find(item => item.id === draggingSession.value);
+  const projectId = session && store.groups.assignments[session.id];
+  if (!session || !store.groups.groups.some(project => project.id === projectId && Array.isArray(project.directories))) return;
+  return { id: removeProjectDropID, name: t("移出项目"), path: session.workdir?.trim(), sessions: [] };
+});
 function endSessionDrag(): void { draggingSession.value = ""; dropBucket.value = ""; }
 function startSessionDrag(event: DragEvent, session: SessionSummaryView): void {
   if (movingSession.value || (event.target as HTMLElement).closest(".item-actions, button, input, textarea, [contenteditable]")) {
@@ -127,7 +134,11 @@ function startSessionDrag(event: DragEvent, session: SessionSummaryView): void {
 function acceptsSessionDrop(bucket: Bucket): boolean {
   if (!draggingSession.value || movingSession.value || bucket.sessions.some(session => session.id === draggingSession.value)) return false;
   const session = store.sessions.find(session => session.id === draggingSession.value);
-  return !!session && (!!bucket.projectId || (bucket.path ? bucket.path === session.workdir : bucket.id === UNGROUPED && !session.workdir));
+  const workdir = session?.workdir?.trim();
+  return !!session && (
+    bucket.id === removeProjectDrop.value?.id || !!bucket.projectId ||
+    (bucket.path ? bucket.path === workdir : bucket.id === UNGROUPED && !workdir)
+  );
 }
 function overSessionDrop(event: DragEvent, bucket: Bucket): void {
   if (!acceptsSessionDrop(bucket)) return;
@@ -149,7 +160,10 @@ async function moveSessionDrop(event: DragEvent, bucket: Bucket): Promise<void> 
   movingSession.value = id;
   try {
     await actions.assignSession(id, bucket.projectId ?? null);
-    await actions.collapseGroup(bucket.id, false);
+    const destination = bucket.id === removeProjectDropID
+      ? (bucket.path ? `workspace:${bucket.path}` : UNGROUPED)
+      : bucket.id;
+    await actions.collapseGroup(destination, false);
   } catch (error) { actions.showError(describeError(error)); }
   finally { movingSession.value = ""; }
 }
@@ -415,6 +429,15 @@ function when(iso: string): string {
         }}
       </p>
 
+      <div
+        v-if="removeProjectDrop"
+        class="bucket project-removal-target"
+        :class="{ 'session-drop-target': dropBucket === removeProjectDrop.id }"
+        @dragover="overSessionDrop($event, removeProjectDrop)"
+        @dragleave="leaveSessionDrop($event, removeProjectDrop)"
+        @drop.stop="moveSessionDrop($event, removeProjectDrop)"
+      >{{ removeProjectDrop.name }}</div>
+
       <section
         v-for="bucket in buckets"
 
@@ -571,6 +594,7 @@ function when(iso: string): string {
 <style scoped>
 .project-directory{display:block;padding:6px 10px 10px;font-size:11px;color:var(--muted)}
 .project-directory select{display:block;width:100%;margin-top:5px;font-size:11px;min-width:0;padding:5px}
+.project-removal-target { padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; }
 .bucket.session-drop-target { outline: 1px solid var(--accent); outline-offset: -1px; border-radius: 8px; background: var(--hover); }
 
 .sidebar {

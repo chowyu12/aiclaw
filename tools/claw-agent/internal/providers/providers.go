@@ -223,8 +223,17 @@ func resolveProvider(item *model.Provider, m *protocol.ModelConfig) (string, err
 	m.APIProtocol = route.APIProtocol
 	m.ProtocolSource = route.Source
 	m.ServiceProfile = serviceProfile(item)
+	if m.ConfiguredContextWindow == nil {
+		configured := m.ContextWindow
+		// Older snapshots stored an automatically resolved value as the host limit.
+		if configured == m.Capabilities.ContextWindow {
+			configured = 0
+		}
+		m.ConfiguredContextWindow = &configured
+	}
 	m.Capabilities = route.Capabilities
-	if m.ContextWindow == 0 {
+	m.ContextWindow = *m.ConfiguredContextWindow
+	if m.ContextWindow == 0 || route.Evidence["contextWindow"].Source == "user" {
 		m.ContextWindow = route.Capabilities.ContextWindow
 	}
 	if strings.TrimSpace(item.APIKey) == "" {

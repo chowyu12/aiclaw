@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"github.com/chowyu12/aiclaw/internal/model"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"testing"
 	"time"
 )
@@ -45,5 +46,32 @@ func TestCapabilityOverrideValidationAndNormalization(t *testing.T) {
 	cap := model.ModelCapabilities{Tools: "yes", Vision: "unsupported", ReasoningEfforts: " ultra,invalid,ultra,high ", ContextWindow: -1}.Normalized()
 	if cap.Tools != "" || cap.Vision != "unsupported" || cap.ContextWindow != 0 || cap.ReasoningEfforts != "ultra,high" {
 		t.Fatal(cap)
+	}
+}
+
+func TestContextWindowOverrideUpdatesExistingSnapshotAndRestoresHostLimit(t *testing.T) {
+	p := &model.Provider{Type: model.ProviderOpenAI, Enabled: true, APIKey: "fixture"}
+	cfg := protocol.ModelConfig{Model: "gpt-6.2-sol", ContextWindow: 131072}
+	for _, tc := range []struct {
+		override string
+		want     int
+	}{
+		{`{"gpt-6.2-sol":{"contextWindow":8192}}`, 8192},
+		{`{"gpt-6.2-sol":{"contextWindow":4096}}`, 4096},
+		{`{}`, 131072},
+	} {
+		p.CapabilityOverrides = model.JSON(tc.override)
+		if _, err := resolveProvider(p, &cfg); err != nil || cfg.ContextWindow != tc.want {
+			t.Fatalf("override %s: window=%d, err=%v", tc.override, cfg.ContextWindow, err)
+		}
+		// Resume from the persisted model snapshot on the next iteration.
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg = protocol.ModelConfig{}
+		if err := json.Unmarshal(raw, &cfg); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

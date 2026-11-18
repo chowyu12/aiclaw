@@ -55,13 +55,12 @@ const interruptMarker = `The user interrupted the previous turn on purpose. Any 
 //
 // 窗口未配置时返回 false：这时只能等上游报错再被动压缩，见 sample。
 func (s *Session) needsCompaction() bool {
-	window := s.config.Model.ContextWindow
+	s.mu.Lock()
+	window, used := s.config.Model.ContextWindow, s.lastInputTokens
+	s.mu.Unlock()
 	if window <= 0 {
 		return false
 	}
-	s.mu.Lock()
-	used := s.lastInputTokens
-	s.mu.Unlock()
 	// Reported usage describes the previous request, not the current history:
 	// tool results and new user input may have been appended since then.
 	if estimated, _ := contextEstimate(s.snapshotMessages(), s.llmTools()); estimated > used {

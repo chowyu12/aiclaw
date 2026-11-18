@@ -154,6 +154,7 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 		for _, choice := range choices {
 			if choice.ProviderID == request.Model.ProviderID && choice.Model == request.Model.Model {
 				config.Model = choice
+				config.ModelSeesImages = choice.Capabilities.Vision == "supported"
 				found = true
 				break
 			}
@@ -552,7 +553,7 @@ func (s *Server) childModelChoices(ctx context.Context) ([]protocol.ModelConfig,
 				continue
 			}
 			// Marked speech/image-only models are not chat workers.
-			onlyNonChat := len(parsed.Roles) > 0
+			onlyNonChat := len(parsed.Roles) > 0 && route.Capabilities.Tools != "supported"
 			for _, role := range parsed.Roles {
 				if role == protocol.RoleVision {
 					onlyNonChat = false
@@ -561,11 +562,7 @@ func (s *Server) childModelChoices(ctx context.Context) ([]protocol.ModelConfig,
 			if onlyNonChat {
 				continue
 			}
-			window := parsed.Context
-			if window == 0 {
-				window = route.Capabilities.ContextWindow
-			}
-			result = append(result, protocol.ModelConfig{ProviderID: provider.ID, Model: parsed.Name, ContextWindow: window, APIProtocol: route.APIProtocol, Capabilities: route.Capabilities})
+			result = append(result, protocol.ModelConfig{ProviderID: provider.ID, Model: parsed.Name, ContextWindow: parsed.Context, APIProtocol: route.APIProtocol, Capabilities: route.Capabilities})
 		}
 	}
 	return result, nil

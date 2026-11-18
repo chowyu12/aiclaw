@@ -283,6 +283,8 @@ type ModelConfig struct {
 	 * 所以这个值由宿主的模型配置给出。
 	 */
 	ContextWindow int `json:"contextWindow,omitempty"`
+	// ConfiguredContextWindow retains the host setting while a provider supplies the effective limit.
+	ConfiguredContextWindow *int `json:"configuredContextWindow,omitempty"`
 }
 
 // ---------- 模型服务 ----------

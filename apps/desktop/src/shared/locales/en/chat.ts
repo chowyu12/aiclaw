@@ -1,5 +1,6 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
+  "移出项目": "Remove from project",
   "已修改": "Modified",
   "撤销中": "Undoing",
   "待保存": "Pending save",

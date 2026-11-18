@@ -131,3 +131,26 @@ func contains(list []string, want string) bool {
 	}
 	return false
 }
+
+func TestTextChildCanSampleForkedHistoryWithImages(t *testing.T) {
+	parent := newTestSession(t, &fakeModel{}, protocol.ApprovalBypass)
+	parent.appendMessage(llm.Message{Role: llm.RoleUser, Content: "previous screenshot", Images: [][]byte{{1, 2, 3}}})
+	model := &fakeModel{script: []string{sseText("child completed")}}
+	child := newTestSession(t, model, protocol.ApprovalBypass)
+	child.config.Model.Capabilities.Vision = "unsupported"
+	child.ForkFrom(parent, -1)
+	forked := child.snapshotMessages()
+	last := forked[len(forked)-1]
+	if len(last.Images) != 0 || last.Shown == nil || len(last.Shown.Images) != 1 {
+		t.Fatal("fork should keep the image visible in history without sending it to the text model")
+	}
+	emitter := &recordingEmitter{}
+	child.RunTurn(context.Background(), "child-turn", "summarize the text task", nil, nil, emitter)
+	if model.calls != 1 || !emitter.find(protocol.NotifyItemCompleted, "child completed") {
+		t.Fatalf("child did not complete: %v", emitter.events)
+	}
+	original := parent.snapshotMessages()
+	if len(original[len(original)-1].Images) != 1 {
+		t.Fatal("fork changed the parent history")
+	}
+}

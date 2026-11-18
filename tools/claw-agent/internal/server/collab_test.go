@@ -538,13 +538,17 @@ func TestChildModelOverrideRevalidatesCatalogAndKeepsParentScope(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(model.handler))
 	defer upstream.Close()
 	ctx := context.Background()
-	provider, err := server.providers.Create(ctx, protocol.ProviderCreateParams{Name: "child service", Type: "openai-compatible", BaseURL: upstream.URL, APIKey: "fixture", Models: []string{"worker"}})
+	provider, err := server.providers.Create(ctx, protocol.ProviderCreateParams{Name: "child service", Type: "openai-compatible", BaseURL: upstream.URL, APIKey: "fixture", Models: []string{"worker#stt", "transcribe#stt"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	provider, err = server.providers.Update(ctx, protocol.ProviderUpdateParams{ID: provider.ID, CapabilityOverrides: map[string]modelpkg.ModelCapabilities{"worker": {Tools: "supported", Reasoning: "supported", ReasoningEfforts: "low,high,ultra"}}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	choices, err := server.childModelChoices(ctx)
+	if err != nil || len(choices) != 1 || choices[0].Model != "worker" {
+		t.Fatalf("tool-capable audio model should be offered while transcription-only model is excluded: %+v %v", choices, err)
 	}
 	requested := &protocol.RoleModel{ProviderID: provider.ID, Model: "worker"}
 	effort := "ultra"

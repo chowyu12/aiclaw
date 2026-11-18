@@ -242,14 +242,24 @@ func (c *Client) reasoningEffort(effort string, preference bool) (string, error)
 		return "", &Error{Status: 400, Code: "invalid_request", Message: "Unsupported reasoning effort: " + effort}
 	}
 	supported := c.capabilities.Reasoning == "supported" && (c.capabilities.ReasoningEfforts == "" || strings.Contains(","+c.capabilities.ReasoningEfforts+",", ","+effort+","))
-	if preference && !supported {
+	// Gemini exposes whether thinking exists, but that alone cannot distinguish
+	// models that take a thinking budget from models that take a thinking level.
+	if preference && (!supported || c.protocol == model.APIGemini && c.capabilities.ReasoningEfforts == "") {
 		return "", nil
 	}
 	if effort != "" && (c.capabilities.Reasoning == "unsupported" || c.capabilities.ReasoningEfforts != "" && !strings.Contains(","+c.capabilities.ReasoningEfforts+",", ","+effort+",")) {
 		return "", &Error{Status: 400, Code: "invalid_request", Message: "Unsupported reasoning effort for this model: " + effort}
 	}
-	if extendedReasoningEffort(effort) && (c.capabilities.ReasoningEfforts == "" || (c.protocol != model.APIResponses && c.protocol != model.APIChatCompletions)) {
-		return "", &Error{Status: 400, Code: "invalid_request", Message: "Reasoning effort requires explicit support on this model route"}
+	if extendedReasoningEffort(effort) {
+		wireSupports := c.protocol == model.APIResponses || c.protocol == model.APIChatCompletions ||
+			c.protocol == model.APIAnthropic && (effort == "max" || effort == "xhigh") ||
+			c.protocol == model.APIGemini && effort == "minimal"
+		if !wireSupports || c.capabilities.ReasoningEfforts == "" {
+			if preference {
+				return "", nil
+			}
+			return "", &Error{Status: 400, Code: "invalid_request", Message: "Reasoning effort requires explicit support on this model route"}
+		}
 	}
 	return effort, nil
 }

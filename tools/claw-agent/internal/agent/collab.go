@@ -452,6 +452,19 @@ func (s *Session) ForkFrom(parent *Session, turns int) {
 		}
 	}
 	s.mu.Lock()
+	if s.config.Model.Capabilities.Vision == "unsupported" {
+		for i := range body {
+			message := &body[i]
+			if len(message.Images) == 0 {
+				continue
+			}
+			if message.Shown == nil && message.Role == llm.RoleUser {
+				message.Shown = &llm.Shown{Text: message.Content, Images: message.Images}
+			}
+			message.Content += fmt.Sprintf("\n\n[%d inherited image(s) omitted because the selected model does not support images.]", len(message.Images))
+			message.Images = nil
+		}
+	}
 	s.messages = append(s.messages, body...)
 	s.mu.Unlock()
 }

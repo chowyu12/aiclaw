@@ -1237,6 +1237,7 @@ app.whenReady().then(async()=>{
  projectDirectoryMode=true;await click('添加目录');await wait("document.querySelectorAll('.project-editor .directory-row').length===1");await click('添加目录');await wait("document.querySelectorAll('.project-editor .directory-row').length===2");projectDirectoryMode=false;
  await js("document.querySelector('.project-editor').requestSubmit()");
  check('project with multiple directories is persisted and visible without chats',await wait("!document.querySelector('.project-editor') && !!document.querySelector('[data-bucket-id=\"p_fixture\"]')")&&groups.groups.find(p=>p.id==='p_fixture')?.directories.length===2);
+ extraSessions.push({id:'drag-only-workspace',title:'Only chat in workspace',workdir:'/tmp/only-drag-workspace',model:'test',turnCount:1,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z'});
  await win.reload();await wait("!!document.querySelector('[data-bucket-id=\"p_fixture\"]')");await openSessions();
  await js("document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"工作区更多操作\"]').click()");await wait("!!document.querySelector('.workspace-menu .project-directory')");
  check('project directories survive renderer reload',await wait("document.querySelectorAll('.workspace-menu .project-directory select option').length===2"));
@@ -1247,7 +1248,7 @@ app.whenReady().then(async()=>{
  const assignmentsBeforeDrag=assignmentCalls.length;
  await js("(()=>{const dt=new DataTransfer();dt.setData('application/x-aiclaw-session','s');const target=document.querySelector('[data-bucket-id=\"p_fixture\"]');target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt}));})()");
  check('external drag payloads cannot move conversations',assignmentCalls.length===assignmentsBeforeDrag);
- const draggedSession=await js("document.querySelector('.bucket .item[data-session-id]').dataset.sessionId");
+ const draggedSession="drag-only-workspace";
  const originalWorkspace=list().find(session=>session.id===draggedSession)?.workdir;
  const activeTitle=await js("document.querySelector('.chat-session-title').textContent");
  const beginSessionDrag=async()=>js(`(()=>{const source=document.querySelector('[data-session-id="${draggedSession}"]');window.sessionDragFixture=new DataTransfer();source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:window.sessionDragFixture}));document.querySelector('[data-bucket-id="p_fixture"]').dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.sessionDragFixture}));})()`);
@@ -1267,6 +1268,12 @@ app.whenReady().then(async()=>{
  check('dropping into the same project is a no-op',assignmentCalls.length===assignmentsAfterDrag);
  await win.reload();await openSessions();
  check('dragged project membership survives renderer reload',await wait(`!!document.querySelector('[data-bucket-id="p_fixture"] [data-session-id="${draggedSession}"]')`));
+ await beginSessionDrag();
+ check('the last chat in a workspace can be removed from a project after its original bucket disappears',await wait(`!document.querySelector('[data-bucket-id="workspace:${originalWorkspace}"]') && document.querySelector('.project-removal-target')?.textContent.includes('移出项目')`));
+ await js("document.querySelector('.project-removal-target').dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:window.sessionDragFixture}))");
+ check('dropping outside the project restores group placement without changing the workspace',await wait(`!document.querySelector('[data-bucket-id="p_fixture"] [data-session-id="${draggedSession}"]') && !!document.querySelector('[data-session-id="${draggedSession}"]') && !document.querySelector('.project-removal-target')`) && !groups.assignments[draggedSession] && list().find(session=>session.id===draggedSession)?.workdir===originalWorkspace);
+ await beginSessionDrag();await dropSessionDrag();
+ await wait(`!!document.querySelector('[data-bucket-id="p_fixture"] [data-session-id="${draggedSession}"]')`);
  await js("document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"工作区更多操作\"]').click()");await wait("!!document.querySelector('.workspace-menu .project-directory')");
  await js("(()=>{const select=document.querySelector('.workspace-menu .project-directory select');select.value='/tmp/second';select.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('.workspace-menu-backdrop').click();document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"在此工作区新建会话\"]').click()})()");
  check('project new chat uses the selected second directory and keeps project membership',await wait("document.querySelectorAll('[data-bucket-id=\"p_fixture\"] .item').length===2")&&startedWorkspaces.at(-1)==='/tmp/second');

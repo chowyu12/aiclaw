@@ -146,3 +146,21 @@ func TestCompactionRetriesTransientFailureWithFreshSummary(t *testing.T) {
 		t.Fatal(status, err)
 	}
 }
+
+func TestNextSampleUsesUpdatedContextWindowBeforeSending(t *testing.T) {
+	model := &fakeModel{script: []string{sseText("condensed history"), sseText("finished")}}
+	s := newTestSession(t, model, protocol.ApprovalBypass)
+	persistTestSession(t, s)
+	s.config.Model.ContextWindow = 1000000
+	s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: strings.Repeat("Previous work. ", 1000)})
+	s.keyFor = func(config *protocol.ModelConfig) (string, error) {
+		config.ContextWindow = 1000
+		return "fixture", nil
+	}
+	e := &recordingEmitter{}
+	s.RunTurn(context.Background(), "turn", "continue", nil, nil, e)
+	if model.calls != 2 || !strings.Contains(strings.Join(userTexts(t, model.requests[0]), "\n"), summarizationPrompt) ||
+		!e.find(protocol.NotifyItemCompleted, "finished") {
+		t.Fatalf("expected compaction before regular sampling, got %d calls and %v", model.calls, e.events)
+	}
+}
