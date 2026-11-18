@@ -182,7 +182,10 @@ function openSource(source: typeof sources.value[number]): void {
             <span v-else class="line-count"><span class="added">+{{ changeTotals.added }}</span> <span class="removed">−{{ changeTotals.removed }}</span></span>
           </summary>
           <button v-for="row in changeRows" :key="row.change.id" type="button" class="detail-row changed-file" :title="row.change.path" @click="actions.previewChange(row.change)">
-            <span class="detail-name">{{ filename(row.change.path) }}</span>
+            <span class="changed-file-label">
+              <span class="detail-name">{{ filename(row.change.path) }}</span>
+              <small class="change-kind" :class="{ 'change-kind-new': row.change.existed === false }">{{ t(row.change.existed === false ? "Agent 新建" : "修改已有文件") }}</small>
+            </span>
             <span v-if="row.truncated" class="detail-meta">{{ t("改动较多") }}</span>
             <span v-else class="line-count"><span class="added">+{{ row.added }}</span> <span class="removed">−{{ row.removed }}</span></span>
           </button>
@@ -247,6 +250,9 @@ button:focus-visible, a:focus-visible, summary:focus-visible { outline:2px solid
 .detail-row { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; min-height:31px; padding:6px; border-radius:6px; text-align:left; text-decoration:none; }
 .detail-row:hover, .close-details:hover { background:var(--hover); }
 .detail-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.changed-file-label { display:flex; align-items:center; gap:6px; min-width:0; }
+.change-kind { flex:none; padding:2px 5px; border-radius:4px; background:var(--surface-2); white-space:nowrap; }
+.change-kind-new { color:var(--ok); background:color-mix(in srgb, var(--ok) 10%, var(--surface)); }
 .detail-meta { text-align:right; flex:none; }
 .detail-meta small { display:block; margin-top:3px; }
 .line-count { flex:none; font:11px var(--mono); }

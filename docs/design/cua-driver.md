@@ -1,6 +1,6 @@
 # 内嵌 Cua Driver
 
-AIClaw 使用官方 Cua Driver **0.49.0**，通过同版本 `@trycua/cua-driver` 的 `EmbeddedCuaDriverHost` 从 Electron 主进程直接启动后台子进程。产品不安装独立 CuaDriver.app，也不加载旧的自建执行层。macOS 的辅助功能和屏幕录制权限归属于 AIClaw；开发模式归属于 Electron。已有权限是否有效仍取决于系统对主程序签名身份的判断。
+AIClaw 使用官方 Cua Driver **0.53.1**，通过同版本 `@trycua/cua-driver` 的 `EmbeddedCuaDriverHost` 从 Electron 主进程直接启动后台子进程。产品不安装独立 CuaDriver.app，也不加载旧的自建执行层。macOS 的辅助功能和屏幕录制权限归属于 AIClaw；开发模式归属于 Electron。已有权限是否有效仍取决于系统对主程序签名身份的判断。
 
 SDK 管理私有端点、父进程存活管道和退出；每个聊天轮次有独立的 MCP 连接、快照和 `AIClaw-…` 光标会话。最后一个连接关闭时停止子进程。主程序退出会等待会话清理。权限只读检查不弹窗，主动授权入口使用 SDK 的主程序权限 API；运行时核对 `check_permissions.source` 必须是 `host` 和 `embedded:true`。
 
@@ -53,6 +53,6 @@ AICLAW_CUA_BACKGROUND_TEST=1 node scripts/smoke-packaged-computer.mjs /absolute/
 
 验收覆盖后台中文填写、点击、效果校验、截图、AIClaw 光标启用，以及操作各阶段的前台应用和鼠标位置。用户主动切应用或移动鼠标会使位置断言失败，需要结合执行阶段判断；它不代表所有应用、显示器或桌面空间均经过验证。Windows/Linux 的包布局有回归测试，真实桌面验收需在相应系统另行执行。
 
-上游：[Release](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.49.0)、[内嵌宿主说明](https://github.com/trycua/cua/blob/cua-driver-rs-v0.49.0/libs/cua-driver/rust/Skills/cua-driver/EMBEDDING.md)。旧 Swift/Windows/Linux 实现和对应实验脚本仅作历史对照；当前 `createComputerRuntime` 不会回退到这些执行层。
+上游：[Release](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.53.1)、[内嵌宿主说明](https://github.com/trycua/cua/blob/cua-driver-rs-v0.53.1/libs/cua-driver/rust/Skills/cua-driver/EMBEDDING.md)。旧 Swift/Windows/Linux 实现和对应实验脚本仅作历史对照；当前 `createComputerRuntime` 不会回退到这些执行层。
 
-TextEdit 实测中，后台新建与文本输入可用，macOS 将后台“保存”和“保存为”菜单置灰。宿主会在确认拒绝后尝试前台菜单；命令已发送不等于保存成功，必须验证保存结果。其他应用的后台菜单能力需要分别验证。
+macOS 可能禁用后台窗口的“保存”和“保存为”菜单。新版 Driver 在符合条件时可通过 Apple Events 保存已有路径的文档，是否可用取决于应用支持和系统自动化权限。宿主在明确的后台拒绝后才尝试前台操作；仍须验证文件实际保存成功。

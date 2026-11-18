@@ -181,7 +181,7 @@ async function document(data: Uint8Array, ext: string, budget: Budget, query?: A
   // file:// CMap URLs and can misclassify selectable CJK text as a scan.
   pdfEngine ??= definePDFJSModule(() => import("pdfjs-dist/legacy/build/pdf.mjs"));
   await pdfEngine;
-  const root = dirname(createRequire(typeof __filename === "string" ? __filename : import.meta.url).resolve("pdfjs-dist/package.json"));
+  const root = dirname(createRequire(import.meta.filename).resolve("pdfjs-dist/package.json"));
   const pdfOptions = { useSystemFonts: false, disableFontFace: true, stopAtErrors: true, isEvalSupported: false, useWasm: false, cMapUrl: join(root, "cmaps") + "/", cMapPacked: true, standardFontDataUrl: join(root, "standard_fonts") + "/", verbosity: 0 };
   const pdf = await getDocumentProxy(new Uint8Array(data), pdfOptions);
   try {

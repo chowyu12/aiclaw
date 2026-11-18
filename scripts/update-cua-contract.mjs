@@ -95,12 +95,17 @@ const specs = names.map((action) => {
       (name) => name !== "move_cursor",
     );
   }
+  const summary = description.trim().split("\n\n")[0];
+  const descriptionLimit = 1600;
+  const shortSummary = summary.length <= descriptionLimit
+    ? summary
+    : summary.slice(0, summary.lastIndexOf(". ", descriptionLimit - 1) + 1) || summary.slice(0, descriptionLimit);
   return {
     name: `computer_${action}`,
     action,
     readOnly: reads.has(action),
     description:
-      description.trim().split("\n\n")[0].slice(0, 1600) +
+      shortSummary +
       " Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
     schema,
     platforms: ["darwin", "windows", "linux"],

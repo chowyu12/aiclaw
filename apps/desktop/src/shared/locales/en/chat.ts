@@ -4,6 +4,8 @@ export const chat: Record<string, string> = {
   "关闭会话详情": "Close chat details",
   "无法保存附件原件": "Unable to save the original attachment",
   "改动较多": "Large change",
+  "Agent 新建": "Created by agent",
+  "修改已有文件": "Modified existing file",
   "查看全部": "View all",
   "已开启": "Enabled",
   "输出内容": "Outputs",

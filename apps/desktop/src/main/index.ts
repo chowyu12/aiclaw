@@ -30,6 +30,7 @@ import { readMemoryDocument, saveMemoryDocument } from "./memory-files.js";
 import { existingWorkspaceFiles, openFromChat, revealWorkspace } from "./open-file.js";
 import { readMedia, stageAudio } from "./media-files.js";
 import { IPC } from "../shared/ipc.cjs";
+import { loadWindowSize, saveWindowSize, WINDOW_MIN_SIZE } from "./window-size.js";
 import type { ApprovalPayload, QuestionAnswer, QuestionPayload } from "../shared/types.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -166,11 +167,11 @@ function installAppMenu(): void {
 
 function createWindow(): void {
   previewWindowBounds = null;
+  const sizeFile = join(app.getPath("userData"), "window-size.json");
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 800,
-    minWidth: 860,
-    minHeight: 600,
+    ...loadWindowSize(sizeFile, screen.getPrimaryDisplay().workAreaSize),
+    minWidth: WINDOW_MIN_SIZE.width,
+    minHeight: WINDOW_MIN_SIZE.height,
     title: "AIClaw",
     ...(process.platform === "darwin" ? { titleBarStyle: "hidden" as const, trafficLightPosition: { x: 12, y: 10 } } : {}),
     backgroundColor: "#f3f8f4",
@@ -199,6 +200,10 @@ function createWindow(): void {
   });
 
   const window = mainWindow;
+  window.on("close", () => {
+    const { width, height } = window.getNormalBounds();
+    saveWindowSize(sizeFile, { width: previewWindowBounds?.width ?? width, height });
+  });
   const load = (): void => {
     const devServer = process.env.VITE_DEV_SERVER_URL;
     if (devServer) {

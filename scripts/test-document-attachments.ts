@@ -158,7 +158,8 @@ test("bundled parser runs outside the checkout using staged production modules o
     const repo = fileURLToPath(new URL("../", import.meta.url));
     await stageHostDependencies({ repo, destination: directory });
     const entry = join(directory, "worker.cjs");
-    await build({ entryPoints: [join(repo, "apps/desktop/src/main/document-worker.ts")], outfile: entry, bundle: true, platform: "node", target: "node22", format: "cjs", external: ["unpdf", "7z-wasm", "pdfjs-dist"] });
+    const { warnings } = await build({ entryPoints: [join(repo, "apps/desktop/src/main/document-worker.ts")], outfile: entry, bundle: true, platform: "node", target: "node22", format: "cjs", define: { "import.meta.filename": "__filename" }, external: ["unpdf", "7z-wasm", "pdfjs-dist"] });
+    assert.deepEqual(warnings, []);
     const child = fork(entry, [], { cwd: directory, env: { ...process.env, NODE_PATH: "" }, execArgv: [], serialization: "advanced", stdio: ["ignore", "ignore", "pipe", "ipc"] });
     try {
       for (const [name, data] of [["file.doc", await fixture("sample.doc")], ["file.pdf", pdf()], ["中文.pdf", pdf("Chinese", true)], ["file.zip", zipSync({ "a.docx": word })]] as const) {
