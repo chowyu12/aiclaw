@@ -110,7 +110,7 @@ test("new project chats choose only configured directories with a Home fallback"
 test("主题缺省和损坏值恢复白色，所有已支持的颜色可以保存", async () => {
   const { THEMES, normalizeTheme } = await import("../apps/desktop/src/shared/themes.ts");
   assert.equal(DEFAULT_CONFIG.theme, "white");
-  for (const value of [undefined, null, "", "unknown", "system", {}, 1]) {
+  for (const value of [undefined, null, "", "unknown", "system", "studio", "reading", "developer", {}, 1]) {
     assert.equal(normalizeTheme(value), "white");
     assert.equal(normalizeConfig({ ...DEFAULT_CONFIG, theme: value } as never).theme, "white");
   }
