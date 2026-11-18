@@ -365,6 +365,7 @@ func (s *Session) turnEnv(turnID string, emitter Emitter) *tools.Env {
 	defer s.mu.Unlock()
 	env := &tools.Env{
 		Workspace:      s.config.Workdir,
+		ScratchDir:     s.scratchDir,
 		Home:           userHome(),
 		ProtectedPaths: append([]string(nil), s.config.ProtectedPaths...),
 		Sandbox:        !s.config.DisableSandbox,
@@ -401,6 +402,10 @@ func (s *Session) loop(ctx context.Context, turnID string, emitter Emitter) (pro
 	// 步骤序号按轮次重置：用户看的是「这一轮做了几步」，不是自会话开始以来的累计。
 	steps := &stepCounter{}
 	s.mu.Lock()
+	if err := s.prepareScratchLocked(); err != nil {
+		s.mu.Unlock()
+		return total, fmt.Errorf("prepare session temporary directory: %w", err)
+	}
 	s.refreshSystemPromptLocked()
 	s.mu.Unlock()
 	env := s.turnEnv(turnID, emitter)
@@ -963,7 +968,11 @@ func (s *Session) executeRecorded(ctx context.Context, call llm.ToolCall, env *t
 	artifacts := &tools.ArtifactSink{}
 	sources := &tools.SourceSink{}
 	output, err := invoke(tools.WithSources(tools.WithArtifacts(ctx, artifacts), sources))
-	item.Artifacts = artifacts.Paths()
+	for _, path := range artifacts.Paths() {
+		if !env.IsTemporaryPath(path) {
+			item.Artifacts = append(item.Artifacts, path)
+		}
+	}
 	item.Content = artifacts.Content()
 	item.Sources = sources.Sources()
 	item.ToolResult = output

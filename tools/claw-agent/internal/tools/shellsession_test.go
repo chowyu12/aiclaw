@@ -87,6 +87,26 @@ func TestOneShotCommandsStayIndependent(t *testing.T) {
 	}
 }
 
+func TestCommandTempDirectoryInOneShotAndPersistentShells(t *testing.T) {
+	env, registry := shellEnv(t)
+	env.ScratchDir = t.TempDir()
+	env.Policy = protocol.ApprovalBypass
+	for _, session := range []string{"", "new"} {
+		out, err := call(t, registry, "run_command",
+			`{"command":"printf '%s\\n' \"$AICLAW_TMPDIR\" \"$TMPDIR\" \"$TMP\" \"$TEMP\"; printf scratch > \"$TMPDIR/intermediate.txt\"","session":"`+session+`"}`, env)
+		if err != nil || strings.Count(out, env.ScratchDir) != 4 {
+			t.Fatalf("session=%q: output=%q error=%v", session, out, err)
+		}
+		data, err := os.ReadFile(filepath.Join(env.ScratchDir, "intermediate.txt"))
+		if err != nil || string(data) != "scratch" {
+			t.Fatalf("session=%q: scratch file=%q error=%v", session, data, err)
+		}
+		if err := os.Remove(filepath.Join(env.ScratchDir, "intermediate.txt")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestShellSessionReportsExitCodeAndKeepsGoing(t *testing.T) {
 	// 失败的命令也要打印哨兵，否则这次读取会一直等到超时——
 	// 所以命令与哨兵之间是 `;` 而不是 `&&`。

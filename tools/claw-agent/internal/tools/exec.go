@@ -266,6 +266,7 @@ func runCommand(ctx context.Context, raw json.RawMessage, env *Env) (result stri
 		cmd = sandboxedShellCommand(execCtx, command, env)
 	}
 	cmd.Dir = cwd
+	env.setCommandTemp(cmd)
 	stdout, stderr := OutputBuffer{Complete: true}, OutputBuffer{Complete: true}
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -356,6 +357,12 @@ func prepare(cmd *exec.Cmd) *exec.Cmd {
 		"CI=1",
 	)
 	return cmd
+}
+
+func (e *Env) setCommandTemp(cmd *exec.Cmd) {
+	if e.ScratchDir != "" {
+		cmd.Env = append(cmd.Environ(), "AICLAW_TMPDIR="+e.ScratchDir, "TMPDIR="+e.ScratchDir, "TMP="+e.ScratchDir, "TEMP="+e.ScratchDir)
+	}
 }
 
 // prepareContext 是 prepare 加上「ctx 取消时按进程组杀」。

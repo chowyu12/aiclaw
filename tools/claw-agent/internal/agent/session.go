@@ -83,6 +83,8 @@ type Session struct {
 	deleted             bool
 	persistedMessages   map[string]bool
 	persistenceErr      error
+	scratchDir          string
+	scratchClosed       bool
 	goalMu              sync.Mutex
 	goalTick            time.Time
 	goalCancel          context.CancelFunc
@@ -1138,6 +1140,29 @@ func (s *Session) refreshSystemPromptLocked() {
 		return
 	}
 	s.messages[0].Content = buildSystemPrompt(s.config, s.registry, s.skills, s.memoryText())
+	if s.scratchDir != "" {
+		s.messages[0].Content += fmt.Sprintf("\nTemporary directory for this session: %q. Use it for helper scripts, intermediate files, and test outputs needed only during execution. Shell commands receive this directory as AICLAW_TMPDIR, TMPDIR, TMP and TEMP. Pass the absolute path to file tools. Keep requested deliverables and project changes in the workspace or the user's requested location. For a question that does not ask for a file, answer in chat; if you need a script to compute or verify the answer, write it in the temporary directory. Temporary files may disappear when the session closes; do not link them as deliverables.\n", s.scratchDir)
+	}
+}
+
+func (s *Session) prepareScratchLocked() error {
+	if s.scratchClosed {
+		return context.Canceled
+	}
+	if s.scratchDir != "" {
+		return nil
+	}
+	dir, err := os.MkdirTemp("", "aiclaw-session-")
+	if err != nil {
+		return err
+	}
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return err
+	}
+	s.scratchDir = resolved
+	return nil
 }
 
 // Workspace 返回会话当前的工作区，空串表示没设置。
@@ -1286,11 +1311,27 @@ func (s *Session) Busy() bool {
 // Close 关闭所有 MCP 子进程。
 func (s *Session) Close() {
 	s.Interrupt()
+	s.mu.Lock()
+	s.scratchClosed = true
+	scratch := s.scratchDir
+	s.mu.Unlock()
 	if s.codeCells != nil {
 		s.codeCells.Close()
 	}
 	if s.shells != nil {
 		s.shells.Close()
+	}
+	if scratch != "" {
+		if s.runMu.TryLock() {
+			_ = os.RemoveAll(scratch)
+			s.runMu.Unlock()
+		} else {
+			go func() {
+				s.runMu.Lock()
+				defer s.runMu.Unlock()
+				_ = os.RemoveAll(scratch)
+			}()
+		}
 	}
 	// 归还而不是直接关：同一条连接可能还有别的会话在用，
 	// 最后一个归还的才真正关掉它。

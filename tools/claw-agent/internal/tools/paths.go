@@ -213,6 +213,9 @@ func (e *Env) ResolveWrite(raw string) (path string, inside bool, err error) {
 	if e.Protected(path) {
 		return "", false, fmt.Errorf("%w: %s", ErrProtected, raw)
 	}
+	if e.isScratchPath(path) {
+		return path, true, nil
+	}
 	// 用户在本次会话里批准过的目录，与工作区同等对待——他已经明确说过
 	// 「往这儿写没问题」，再问一次就是没记住他的话。
 	if e.Grants != nil {
@@ -228,6 +231,18 @@ func (e *Env) ResolveWrite(raw string) (path string, inside bool, err error) {
 		return path, false, nil
 	}
 	return path, within(realpath(filepath.Clean(workspace)), path), nil
+}
+
+func (e *Env) isScratchPath(resolved string) bool {
+	return e.ScratchDir != "" && within(e.ScratchDir, resolved)
+}
+
+func (e *Env) IsTemporaryPath(raw string) bool {
+	if e.ScratchDir == "" {
+		return false
+	}
+	resolved, err := e.resolve(raw)
+	return err == nil && e.isScratchPath(resolved)
 }
 
 // resolveLoose 解析一个**可能还不存在**的路径上的软链。

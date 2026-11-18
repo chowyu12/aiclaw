@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -384,6 +385,21 @@ func isBinary(content []byte) bool {
 }
 
 func (e *Env) writeFile(ctx context.Context, path string, data, expected []byte) error {
+	if e.isScratchPath(path) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if expected != nil {
+			current, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if !bytes.Equal(current, expected) {
+				return i18n.E("文件在读取后已变化，请重新读取后再编辑")
+			}
+		}
+		return os.WriteFile(path, data, 0o600)
+	}
 	if e.WriteFile != nil {
 		return e.WriteFile(ctx, path, data, expected)
 	}

@@ -65,7 +65,8 @@ type Env struct {
 	//
 	// 它是**相对路径的基准**和「写这里不用问」的范围，不是围墙——
 	// 读可以在外面，写在外面要确认。见 paths.go 顶上的说明。
-	Workspace string
+	Workspace  string
+	ScratchDir string
 	// Home 是用户主目录。没有工作区时相对路径按它解析，敏感名单也按它拼。
 	Home string
 	// ProtectedPaths 是宿主追加的敏感路径（比如应用自己存凭据的那个目录）。

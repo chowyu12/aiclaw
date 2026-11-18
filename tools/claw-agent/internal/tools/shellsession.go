@@ -178,6 +178,7 @@ func startShellSession(env *Env) (*shellSession, error) {
 	// 非交互环境（挂住的命令多半在等输入，而这里没有人可以回答）。
 	prepare(cmd)
 	cmd.Dir = env.Base()
+	env.setCommandTemp(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
