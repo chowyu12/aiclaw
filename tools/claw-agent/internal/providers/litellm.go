@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
+	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -31,6 +32,8 @@ var liteLLMURLs = []string{
 // liteLLMEntry 是那份表里一个模型的、我们用得上的字段。
 type liteLLMEntry struct {
 	Mode                string `json:"mode"`
+	SupportsReasoning   bool   `json:"supports_reasoning"`
+	SupportsTools       bool   `json:"supports_function_calling"`
 	SupportsVision      bool   `json:"supports_vision"`
 	SupportsAudioInput  bool   `json:"supports_audio_input"`
 	SupportsAudioOutput bool   `json:"supports_audio_output"`
@@ -55,7 +58,7 @@ func ParseLiteLLM(body []byte) (*Catalog, error) {
 			continue // 个别条目形状不对不该拖垮整份表
 		}
 		entry := liteLLMRoles(item)
-		if len(entry.Roles) == 0 && entry.Context == 0 && !entry.NonChat {
+		if len(entry.Roles) == 0 && entry.Context == 0 && !entry.NonChat && entry.Capabilities == (model.ModelCapabilities{}) {
 			continue
 		}
 		catalog.add(key, entry)
@@ -69,6 +72,12 @@ func ParseLiteLLM(body []byte) (*Catalog, error) {
 // 视频、实时语音这些没有对应的角色，只带上下文窗口（如果有）。
 func liteLLMRoles(item liteLLMEntry) Entry {
 	entry := Entry{Context: item.MaxInputTokens}
+	if item.SupportsReasoning {
+		entry.Capabilities.Reasoning = "supported"
+	}
+	if item.SupportsTools {
+		entry.Capabilities.Tools = "supported"
+	}
 	switch strings.ToLower(item.Mode) {
 	case "image_generation", "image_edit":
 		entry.Roles = []protocol.ModelRole{protocol.RoleImage}

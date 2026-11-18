@@ -42,7 +42,7 @@ const loading = computed(() => !!query.value.trim() && (store.sessionSearch.keyw
 const rows = computed<Command[]>(() => {
   const needle = query.value.trim().toLocaleLowerCase();
   const matching = commands.value.filter(command => !needle || `${command.label} ${command.detail}`.toLocaleLowerCase().includes(needle));
-  if (!needle || loading.value) return matching;
+  if (!needle || store.sessionSearch.keyword !== query.value) return matching;
   return [...matching, ...store.sessionSearch.results.map(session => ({
     id: `session-${session.id}`, group: t("会话"), label: session.title || t("未命名会话"), detail: workspaceLabel(session), icon: "chat",
     run: () => actions.openSession(session.id),

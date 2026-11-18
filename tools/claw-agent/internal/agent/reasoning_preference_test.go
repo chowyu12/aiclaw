@@ -41,7 +41,13 @@ func TestDefaultPreferenceWorksButExplicitOverrideIsRetained(t *testing.T) {
 	if calls != 1 || !emitter.find(protocol.NotifyItemCompleted, "completed") || s.Model().ReasoningEffort != "medium" || s.Model().ReasoningExplicit {
 		t.Fatal("preference was changed or failed", s.Model(), calls)
 	}
-	if err = s.ConfigureReasoning(ctx, "high"); err != nil {
+	if err = s.ConfigureReasoning(ctx, "high"); err == nil || s.Model().ReasoningExplicit || s.Model().ReasoningEffort != "medium" {
+		t.Fatal("unsupported explicit effort changed configuration", err, s.Model())
+	}
+	// A choice persisted by an older version must still fail without billing.
+	s.config.Model.ReasoningEffort = "high"
+	s.config.Model.ReasoningExplicit = true
+	if err = s.Save(ctx, db); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := Load(ctx, db, s.ID, resolver, nil)
@@ -51,7 +57,7 @@ func TestDefaultPreferenceWorksButExplicitOverrideIsRetained(t *testing.T) {
 	defer restored.Close()
 	emitter = &recordingEmitter{}
 	restored.RunTurn(ctx, "t2", "continue", nil, nil, emitter)
-	if calls != 1 || !restored.Model().ReasoningExplicit || restored.Model().ReasoningEffort != "high" || !emitter.find(protocol.NotifyTurnCompleted, "reasoning settings") {
+	if calls != 1 || !restored.Model().ReasoningExplicit || restored.Model().ReasoningEffort != "high" || !emitter.find(protocol.NotifyTurnCompleted, "Unsupported reasoning effort") {
 		t.Fatal("explicit setting was lost or silently retried", restored.Model(), calls, emitter.events)
 	}
 }

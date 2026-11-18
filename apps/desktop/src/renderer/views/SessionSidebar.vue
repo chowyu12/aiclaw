@@ -112,6 +112,49 @@ interface Bucket {
   sessions: SessionSummaryView[];
 }
 
+const SESSION_DRAG_TYPE = "application/x-aiclaw-session";
+const draggingSession = ref(""), dropBucket = ref(""), movingSession = ref("");
+function endSessionDrag(): void { draggingSession.value = ""; dropBucket.value = ""; }
+function startSessionDrag(event: DragEvent, session: SessionSummaryView): void {
+  if (movingSession.value || (event.target as HTMLElement).closest(".item-actions, button, input, textarea, [contenteditable]")) {
+    event.preventDefault(); return;
+  }
+  if (!event.dataTransfer) return;
+  draggingSession.value = session.id;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData(SESSION_DRAG_TYPE, session.id);
+}
+function acceptsSessionDrop(bucket: Bucket): boolean {
+  if (!draggingSession.value || movingSession.value || bucket.sessions.some(session => session.id === draggingSession.value)) return false;
+  const session = store.sessions.find(session => session.id === draggingSession.value);
+  return !!session && (!!bucket.projectId || (bucket.path ? bucket.path === session.workdir : bucket.id === UNGROUPED && !session.workdir));
+}
+function overSessionDrop(event: DragEvent, bucket: Bucket): void {
+  if (!acceptsSessionDrop(bucket)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+  dropBucket.value = bucket.id;
+}
+function leaveSessionDrop(event: DragEvent, bucket: Bucket): void {
+  if (!(event.relatedTarget instanceof Node) || !(event.currentTarget as HTMLElement).contains(event.relatedTarget)) {
+    if (dropBucket.value === bucket.id) dropBucket.value = "";
+  }
+}
+async function moveSessionDrop(event: DragEvent, bucket: Bucket): Promise<void> {
+  event.preventDefault();
+  const id = draggingSession.value;
+  const accepted = acceptsSessionDrop(bucket) && event.dataTransfer?.getData(SESSION_DRAG_TYPE) === id;
+  endSessionDrag();
+  if (!accepted) return;
+  movingSession.value = id;
+  try {
+    await actions.assignSession(id, bucket.projectId ?? null);
+    await actions.collapseGroup(bucket.id, false);
+  } catch (error) { actions.showError(describeError(error)); }
+  finally { movingSession.value = ""; }
+}
+watch(() => store.view, endSessionDrag);
+
 const editingProject = ref<{id:string; name:string; directories?: string[]} | undefined>();
 const projectEditorOpen = ref(false);
 const projectWorkspaces = ref<Record<string,string>>({});
@@ -377,6 +420,10 @@ function when(iso: string): string {
 
         :key="bucket.id"
         class="bucket" :data-bucket-id="bucket.id"
+        :class="{ 'session-drop-target': dropBucket === bucket.id }"
+        @dragover="overSessionDrop($event, bucket)"
+        @dragleave="leaveSessionDrop($event, bucket)"
+        @drop.stop="moveSessionDrop($event, bucket)"
       >
         <header class="bucket-head" :class="{ collapsed: isCollapsed(bucket), current: isCollapsed(bucket) && holdsCurrent(bucket) }">
           <button
@@ -414,6 +461,10 @@ function when(iso: string): string {
         <template v-for="session in visibleSessions(bucket)" :key="session.id">
         <div
           class="item"
+          :data-session-id="session.id"
+          :draggable="!movingSession && renamingSession !== session.id"
+          @dragstart.stop="startSessionDrag($event, session)"
+          @dragend="endSessionDrag"
           :class="{ active: session.id === store.sessionId }"
           :title="[session.title || t('未命名会话'), when(session.updatedAt), session.turnCount ? t('{n} 轮', { n: session.turnCount }) : '', session.model].filter(Boolean).join(' · ')"
           @click="actions.openSession(session.id)"
@@ -442,10 +493,6 @@ function when(iso: string): string {
           </div>
           <span v-if="store.live[session.id]?.unread && !store.live[session.id]?.busy" class="session-unread" role="status" :aria-label="t('未读')" :title="t('未读')"></span>
           <div class="item-actions" @click.stop>
-            <select v-if="store.groups.groups.some(project => Array.isArray(project.directories))" class="project-move" :aria-label="t('移动到项目')" :value="store.groups.assignments[session.id] || ''" @change="actions.assignSession(session.id, ($event.target as HTMLSelectElement).value || null)">
-              <option value="">{{ t('未分配项目') }}</option>
-              <option v-for="project in store.groups.groups.filter(project => Array.isArray(project.directories))" :key="project.id" :value="project.id">{{ project.name }}</option>
-            </select>
             <button class="icon tiny" :title="t(`重命名会话`)" :aria-label="t(`重命名会话`)" :disabled="!!renamingSession" @click="renamingSession = session.id">
               <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="m10 2 4 4-7.5 7.5-4.5.5.5-4.5Z M8.5 3.5l4 4" /></svg>
             </button>
@@ -524,7 +571,7 @@ function when(iso: string): string {
 <style scoped>
 .project-directory{display:block;padding:6px 10px 10px;font-size:11px;color:var(--muted)}
 .project-directory select{display:block;width:100%;margin-top:5px;font-size:11px;min-width:0;padding:5px}
-.project-move{max-width:80px;font-size:10px;padding:2px}
+.bucket.session-drop-target { outline: 1px solid var(--accent); outline-offset: -1px; border-radius: 8px; background: var(--hover); }
 
 .sidebar {
   position: relative;

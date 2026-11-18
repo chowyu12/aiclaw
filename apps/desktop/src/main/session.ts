@@ -657,8 +657,10 @@ export class SessionManager extends EventEmitter {
     return this.mounts;
   }
 
-  searchSessions(keyword: string): Promise<SessionSummary[]> {
-    return this.requireClient().sessionSearch(keyword);
+  cancelSearch(requestId: string): Promise<void> { return this.requireClient().sessionSearchCancel(requestId); }
+
+ searchSessions(keyword: string, requestId?: string): Promise<SessionSummary[]> {
+    return this.requireClient().sessionSearch(keyword, requestId);
   }
 
   /** 归档（或恢复）会话，连同它开出的子 agent。返回涉及的全部 id。 */

@@ -7,13 +7,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	modelpkg "github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/appdb"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/providers"
 )
 
 // 子 agent 端到端：真的内核会话、真的工具循环，模型换成本机的假服务。
@@ -519,5 +523,61 @@ func TestSpawnPreparationReservationAndCancellation(t *testing.T) {
 	infos, _ := server.collab.List(parent, "")
 	if len(infos) != 1 {
 		t.Fatalf("failed reservations leaked: %v", infos)
+	}
+}
+
+func TestChildModelOverrideRevalidatesCatalogAndKeepsParentScope(t *testing.T) {
+	model := &scriptedModel{root: func(int, wireRequest) string { return sseText("root") }, child: func(wireRequest) string { return sseText("child") }}
+	server, parent := collabServer(t, model)
+	applicationDB, err := appdb.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.appDB = applicationDB
+	server.providers = providers.New(applicationDB)
+	upstream := httptest.NewServer(http.HandlerFunc(model.handler))
+	defer upstream.Close()
+	ctx := context.Background()
+	provider, err := server.providers.Create(ctx, protocol.ProviderCreateParams{Name: "child service", Type: "openai-compatible", BaseURL: upstream.URL, APIKey: "fixture", Models: []string{"worker"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err = server.providers.Update(ctx, protocol.ProviderUpdateParams{ID: provider.ID, CapabilityOverrides: map[string]modelpkg.ModelCapabilities{"worker": {Tools: "supported", Reasoning: "supported", ReasoningEfforts: "low,high,ultra"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requested := &protocol.RoleModel{ProviderID: provider.ID, Model: "worker"}
+	effort := "ultra"
+	_, err = server.collab.Spawn(ctx, parent, agent.SpawnRequest{TaskName: "chosen", Message: "report only", Model: requested, ReasoningEffort: &effort})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child := server.session(findNode(server.collab, "/root/chosen").sessionID)
+	got, original := child.Config(), parent.Config()
+	if got.Model.ProviderID != provider.ID || got.Model.Model != "worker" || got.Model.ReasoningEffort != "ultra" || !got.Model.ReasoningExplicit || got.Workdir != original.Workdir || got.ApprovalPolicy != original.ApprovalPolicy || got.Instructions != original.Instructions {
+		t.Fatal("override changed scope or lost settings", got, original)
+	}
+	eventually(t, "child completed", func() bool { return !child.Busy() })
+	if _, err = server.collab.Spawn(ctx, parent, agent.SpawnRequest{TaskName: "unknown", Model: &protocol.RoleModel{ProviderID: provider.ID, Model: "unlisted"}}); err == nil {
+		t.Fatal("unlisted model admitted")
+	}
+	effort = "none"
+	if _, err = server.collab.Spawn(ctx, parent, agent.SpawnRequest{TaskName: "bad-effort", Model: requested, ReasoningEffort: &effort}); err == nil {
+		t.Fatal("unsupported effort admitted")
+	}
+	disabled := false
+	if _, err = server.providers.Update(ctx, protocol.ProviderUpdateParams{ID: provider.ID, Enabled: &disabled}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = server.collab.Spawn(ctx, parent, agent.SpawnRequest{TaskName: "disabled", Model: requested}); err == nil {
+		t.Fatal("stale advertised model admitted")
+	}
+	// The default path continues to inherit even if the optional catalog changed.
+	if _, err = server.collab.Spawn(ctx, parent, agent.SpawnRequest{TaskName: "inherited", Message: "report only"}); err != nil {
+		t.Fatal(err)
+	}
+	inherited := server.session(findNode(server.collab, "/root/inherited").sessionID)
+	if inherited.Model().Model != original.Model.Model || inherited.Model().ProviderID != original.Model.ProviderID {
+		t.Fatal("default inheritance changed")
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/agent"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/llm"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 )
 
@@ -141,6 +142,43 @@ func (h *collabHub) Spawn(ctx context.Context, parent *agent.Session, request ag
 	}()
 
 	config := parent.Config()
+	if request.Model != nil {
+		if strings.HasPrefix(parent.ID, "c_") {
+			return agent.SpawnResult{}, fmt.Errorf("channel agents cannot override the configured model service")
+		}
+		choices, err := h.server.childModelChoices(prepareCtx)
+		if err != nil {
+			return agent.SpawnResult{}, err
+		}
+		found := false
+		for _, choice := range choices {
+			if choice.ProviderID == request.Model.ProviderID && choice.Model == request.Model.Model {
+				config.Model = choice
+				found = true
+				break
+			}
+		}
+		if !found {
+			return agent.SpawnResult{}, fmt.Errorf("child model must be an enabled, configured, tool-capable model")
+		}
+	}
+	if request.ReasoningEffort != nil {
+		resolved := config.Model
+		key, err := h.server.keyFor(&resolved)
+		if err != nil {
+			return agent.SpawnResult{}, err
+		}
+		client, err := llm.NewConfigured(llm.Config{BaseURL: resolved.BaseURL, APIKey: key, Protocol: resolved.APIProtocol, Capabilities: resolved.Capabilities})
+		if err != nil {
+			return agent.SpawnResult{}, err
+		}
+		if err = client.ValidateReasoningEffort(*request.ReasoningEffort); err != nil {
+			return agent.SpawnResult{}, err
+		}
+		config.Model = resolved
+		config.Model.ReasoningEffort = *request.ReasoningEffort
+		config.Model.ReasoningExplicit = true
+	}
 	config.Title = "↳ " + request.TaskName
 	config.ParentID = parent.ID
 	config.AgentPath = path
@@ -488,4 +526,47 @@ func (s *Server) invalidateRestore(id string) {
 		s.lifecycleEpoch = map[string]uint64{}
 	}
 	s.lifecycleEpoch[id]++
+}
+
+// Catalog contains no keys or endpoint credentials. Rechecked before every spawn.
+func (s *Server) childModelChoices(ctx context.Context) ([]protocol.ModelConfig, error) {
+	if s.providers == nil {
+		return nil, nil
+	}
+	providers, err := s.providers.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := []protocol.ModelConfig{}
+	for _, provider := range providers {
+		if !provider.Enabled || !provider.APIKeySet {
+			continue
+		}
+		for _, entry := range provider.Models {
+			parsed := protocol.ParseModelMark(entry)
+			if strings.TrimSpace(parsed.Name) == "" {
+				continue
+			}
+			route := provider.ModelRoutes[parsed.Name]
+			if route.Capabilities.Tools == "unsupported" {
+				continue
+			}
+			// Marked speech/image-only models are not chat workers.
+			onlyNonChat := len(parsed.Roles) > 0
+			for _, role := range parsed.Roles {
+				if role == protocol.RoleVision {
+					onlyNonChat = false
+				}
+			}
+			if onlyNonChat {
+				continue
+			}
+			window := parsed.Context
+			if window == 0 {
+				window = route.Capabilities.ContextWindow
+			}
+			result = append(result, protocol.ModelConfig{ProviderID: provider.ID, Model: parsed.Name, ContextWindow: window, APIProtocol: route.APIProtocol, Capabilities: route.Capabilities})
+		}
+	}
+	return result, nil
 }

@@ -41,7 +41,8 @@ const maxCatalogBytes = 64 << 20
 
 // Entry 是那份表里关于一个模型的、我们用得上的部分。
 type Entry struct {
-	Roles []protocol.ModelRole
+	Capabilities model.ModelCapabilities
+	Roles        []protocol.ModelRole
 	// Context 是上下文窗口（token）。0 表示那份表没给。
 	Context int
 	// NonChat 表示有一份表明确说这不是聊天模型（生图、转写、朗读、向量……）。
@@ -168,6 +169,8 @@ func (c *Catalog) merge(other *Catalog) {
 type catalogProvider struct {
 	Models map[string]struct {
 		ID         string `json:"id"`
+		Reasoning  *bool  `json:"reasoning"`
+		Tools      *bool  `json:"tool_call"`
 		Modalities struct {
 			Input  []string `json:"input"`
 			Output []string `json:"output"`
@@ -187,18 +190,28 @@ func ParseCatalog(body []byte) (*Catalog, error) {
 	}
 	catalog := &Catalog{byName: map[string]Entry{}}
 	for _, provider := range raw {
-		for key, model := range provider.Models {
+		for key, item := range provider.Models {
 			entry := Entry{
-				Roles:   rolesOf(model.Modalities.Input, model.Modalities.Output),
-				Context: model.Limit.Context,
+				Roles:   rolesOf(item.Modalities.Input, item.Modalities.Output),
+				Context: item.Limit.Context,
 			}
-			if len(entry.Roles) == 0 && entry.Context == 0 {
+			entry.Capabilities.ContextWindow = entry.Context
+			if item.Reasoning != nil && *item.Reasoning {
+				entry.Capabilities.Reasoning = "supported"
+			}
+			if item.Tools != nil && *item.Tools {
+				entry.Capabilities.Tools = "supported"
+			}
+			if hasRole(entry.Roles, protocol.RoleVision) {
+				entry.Capabilities.Vision = "supported"
+			}
+			if len(entry.Roles) == 0 && entry.Context == 0 && entry.Capabilities == (model.ModelCapabilities{}) {
 				continue
 			}
 			// 同一个模型在表里可能以好几种写法出现（带网关前缀、不带）。
 			// 两种都索引：用户配置里填的是发给端点的那个名字，而那取决于他用的网关。
 			catalog.add(key, entry)
-			catalog.add(model.ID, entry)
+			catalog.add(item.ID, entry)
 		}
 	}
 	return catalog, nil
@@ -264,6 +277,11 @@ func (c *Catalog) addOne(name string, entry Entry) {
 	existing.NonChat = existing.NonChat || entry.NonChat
 	if existing.NonChat {
 		existing.Roles = withoutRole(existing.Roles, protocol.RoleVision)
+	}
+	mergeCapabilities(&existing.Capabilities, map[string]protocol.CapabilitySource{}, entry.Capabilities, protocol.CapabilitySource{})
+	existing.Capabilities.ContextWindow = existing.Context
+	if existing.NonChat {
+		existing.Capabilities.Vision = ""
 	}
 	c.byName[key] = existing
 }
@@ -389,10 +407,41 @@ func (s *Store) AutoMark(ctx context.Context, id int64) (protocol.ProviderAutoMa
 		updated = append(updated, protocol.FormatModelMark(parsed))
 	}
 
-	if err := s.db.UpdateProvider(ctx, id, model.UpdateProviderReq{Models: encodeModels(updated)}); err != nil {
+	metadata := catalogMetadata{}
+	_ = json.Unmarshal(item.ModelMetadata, &metadata)
+	if metadata.Profile != serviceProfile(item) || metadata.BaseURL != item.BaseURL || (metadata.Identity != "" && metadata.Identity != catalogIdentity(item)) {
+		metadata = catalogMetadata{}
+	}
+	metadata.Identity = catalogIdentity(item)
+	metadata.Profile, metadata.BaseURL = serviceProfile(item), item.BaseURL
+	metadata.Supplemental = map[string]model.ModelCapabilities{}
+	metadata.SupplementalAt = time.Now().UnixMilli()
+	for _, entry := range updated {
+		parsed := protocol.ParseModelMark(entry)
+		if value, ok := catalog.Lookup(parsed.Name); ok {
+			cap := value.Capabilities
+			cap.ContextWindow = value.Context
+			if hasRole(value.Roles, protocol.RoleVision) {
+				cap.Vision = "supported"
+			}
+			metadata.Supplemental[parsed.Name] = cap
+		}
+	}
+	raw, err := json.Marshal(metadata)
+	if err != nil {
 		return protocol.ProviderAutoMarkResult{}, err
 	}
-	item.Models = encodeModels(updated)
+	cached, err := s.db.UpdateProviderCatalog(ctx, id, item.Revision, item.ModelMetadata, model.JSON(raw), encodeModels(updated))
+	if err != nil {
+		return protocol.ProviderAutoMarkResult{}, err
+	}
+	if !cached {
+		return protocol.ProviderAutoMarkResult{}, fmt.Errorf("model service configuration changed while fetching capabilities")
+	}
+	item, err = s.db.GetProvider(ctx, id)
+	if err != nil {
+		return protocol.ProviderAutoMarkResult{}, err
+	}
 	return protocol.ProviderAutoMarkResult{
 		Provider: view(item), Matched: matched, Unmatched: unmatched, Guessed: guessed, Note: catalog.Note,
 	}, nil

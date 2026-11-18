@@ -86,3 +86,11 @@ Claude 与 Gemini 使用完整本地历史重放。
 - [OpenRouter 统一接口约定](https://openrouter.ai/docs/api_reference/overview)
 - [OpenRouter 模型能力字段](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)
 - [Azure 推理模型与接口限制](https://learn.microsoft.com/azure/foundry/openai/how-to/reasoning)
+
+## 能力来源与逐字段合并（2026-11-18）
+
+有效能力按字段依次采用：用户模型覆盖、当前端点的明确元数据、直连服务的精确官方规则、models.dev/LiteLLM 公共目录；缺失保留未知，明确不支持不会被低优先级的支持覆盖。公共目录只补能力，不决定网关协议。端点缓存绑定服务类型、地址与凭据指纹，变更后不沿用；指纹不包含可回读的密钥。能力同步与派生模型标记原子写入，配置或目录快照变化时拒绝旧结果覆盖。
+
+`modelRoutes.evidence` 保存每个已知字段的来源、来源链接和可用的核验/获取时间；高级设置可查看并覆盖能力，清空后恢复自动解析。旧手工角色标记只在视觉能力仍未知时补充。OpenAI 直连的 GPT-6.2 Sol/Astra 使用 Responses，输入窗口 922,000；推理档位依模型元数据展示和校验，未知路由不能凭名称发送扩展档位。会话显式选择在保存前校验，已保存的旧设置仍在采样前校验；默认偏好不支持时采用模型默认。
+
+来源：[GPT-6.2 Sol](https://developers.openai.com/api/docs/models/gpt-6.2-sol)、[GPT-6.2 Astra](https://developers.openai.com/api/docs/models/gpt-6.2-astra)、[models.dev](https://models.dev/api.json)、[LiteLLM](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json)。

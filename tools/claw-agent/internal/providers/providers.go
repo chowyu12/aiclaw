@@ -126,6 +126,13 @@ func (s *Store) Create(ctx context.Context, params protocol.ProviderCreateParams
 // Update 改一个模型服务。nil 的字段不动；apiKey 传空串表示清掉。
 func (s *Store) Update(ctx context.Context, params protocol.ProviderUpdateParams) (protocol.ProviderView, error) {
 	req := model.UpdateProviderReq{Enabled: params.Enabled}
+	if params.CapabilityOverrides != nil {
+		raw, err := validateCapabilityOverrides(params.CapabilityOverrides)
+		if err != nil {
+			return protocol.ProviderView{}, err
+		}
+		req.CapabilityOverrides = raw
+	}
 	if params.ModelOverrides != nil {
 		raw, err := validateOverrides(params.ModelOverrides)
 		if err != nil {
@@ -217,6 +224,9 @@ func resolveProvider(item *model.Provider, m *protocol.ModelConfig) (string, err
 	m.ProtocolSource = route.Source
 	m.ServiceProfile = serviceProfile(item)
 	m.Capabilities = route.Capabilities
+	if m.ContextWindow == 0 {
+		m.ContextWindow = route.Capabilities.ContextWindow
+	}
 	if strings.TrimSpace(item.APIKey) == "" {
 		return "", i18n.E("模型服务「{name}」没有配置 Key", "name", item.Name)
 	}
@@ -242,14 +252,18 @@ func (s *Store) FetchModels(ctx context.Context, id int64) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if serviceProfile(item) != "openrouter" {
-		return client.ListModels(ctx)
-	}
 	names, caps, err := client.ListModelsAndMetadata(ctx)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := json.Marshal(catalogMetadata{Profile: "openrouter", BaseURL: item.BaseURL, Models: caps})
+	metadata := catalogMetadata{}
+	_ = json.Unmarshal(item.ModelMetadata, &metadata)
+	if metadata.Profile != serviceProfile(item) || metadata.BaseURL != item.BaseURL || (metadata.Identity != "" && metadata.Identity != catalogIdentity(item)) {
+		metadata = catalogMetadata{}
+	}
+	metadata.Identity = catalogIdentity(item)
+	metadata.Profile, metadata.BaseURL, metadata.Models, metadata.FetchedAt = serviceProfile(item), item.BaseURL, caps, time.Now().UnixMilli()
+	raw, err := json.Marshal(metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +279,7 @@ func (s *Store) FetchModels(ctx context.Context, id int64) ([]string, error) {
 
 func view(item *model.Provider) protocol.ProviderView {
 	return protocol.ProviderView{
-		DefaultBaseURL: defaultAPIBaseURL(serviceProfile(item), resolveRoute(item, "").APIProtocol), RoutingMode: pRoutingMode(item), ServiceProfile: serviceProfile(item), ModelOverrides: modelOverrides(item), ModelRoutes: modelRoutes(item),
+		DefaultBaseURL: defaultAPIBaseURL(serviceProfile(item), resolveRoute(item, "").APIProtocol), RoutingMode: pRoutingMode(item), ServiceProfile: serviceProfile(item), ModelOverrides: modelOverrides(item), CapabilityOverrides: capabilityOverrides(item), ModelRoutes: modelRoutes(item),
 		ID:          item.ID,
 		Name:        item.Name,
 		Type:        string(item.Type),

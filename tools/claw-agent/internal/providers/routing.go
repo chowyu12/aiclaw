@@ -1,10 +1,12 @@
 package providers
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
@@ -67,20 +69,25 @@ func validateOverrides(items map[string]model.APIProtocol) (model.JSON, error) {
 }
 
 type routeResolver struct {
-	provider  *model.Provider
-	profile   string
-	metadata  map[string]model.ModelCapabilities
-	overrides map[string]model.APIProtocol
-	visions   map[string]bool
-	audios    map[string]bool
-	names     []string
+	provider       *model.Provider
+	profile        string
+	metadata       map[string]model.ModelCapabilities
+	supplemental   map[string]model.ModelCapabilities
+	fetchedAt      int64
+	supplementalAt int64
+	overrides      map[string]model.APIProtocol
+	visions        map[string]bool
+	audios         map[string]bool
+	names          []string
 }
 
 func compileRoutes(p *model.Provider) *routeResolver {
 	r := &routeResolver{provider: p, profile: serviceProfile(p), overrides: modelOverrides(p), visions: map[string]bool{}, audios: map[string]bool{}}
 	var metadata catalogMetadata
-	if json.Unmarshal(p.ModelMetadata, &metadata) == nil && metadata.Profile == r.profile && metadata.BaseURL == p.BaseURL {
+	if json.Unmarshal(p.ModelMetadata, &metadata) == nil && metadata.Profile == r.profile && metadata.BaseURL == p.BaseURL && (metadata.Identity == "" || metadata.Identity == catalogIdentity(p)) {
 		r.metadata = metadata.Models
+		r.supplemental = metadata.Supplemental
+		r.fetchedAt, r.supplementalAt = metadata.FetchedAt, metadata.SupplementalAt
 	}
 	for _, entry := range decodeModels(p.Models) {
 		parsed := protocol.ParseModelMark(entry)
@@ -103,14 +110,14 @@ func resolveRoute(p *model.Provider, name string) protocol.ModelRouteView {
 
 func (r *routeResolver) resolve(name string) protocol.ModelRouteView {
 	p, profile := r.provider, r.profile
-	route := protocol.ModelRouteView{APIProtocol: model.APIChatCompletions, Source: "service:" + profile}
+	route := protocol.ModelRouteView{Evidence: map[string]protocol.CapabilitySource{}, APIProtocol: model.APIChatCompletions, Source: "service:" + profile}
 	switch profile {
 	case "claude":
 		route.APIProtocol = model.APIAnthropic
 	case "gemini":
 		route.APIProtocol = model.APIGemini
 	case "openai", "azure":
-		if responsesModels[name] {
+		if responsesModels[name] || profile == "openai" && (name == "gpt-6.2-sol" || name == "gpt-6.2-astra") {
 			route.APIProtocol = model.APIResponses
 			route.Source = "builtin:2026-11-02:" + profile
 			route.SourceURL = "https://developers.openai.com/api/docs/guides/latest-model"
@@ -130,12 +137,30 @@ func (r *routeResolver) resolve(name string) protocol.ModelRouteView {
 	if profile == "gemini" && r.audios[name] {
 		route.Capabilities.AudioInput = "supported"
 	}
-	// A gateway's own metadata takes precedence over built-in capability descriptions.
-	if caps, ok := r.metadata[name]; ok {
-		route.Capabilities = caps
+	if name == "gpt-6.2-sol" || name == "gpt-6.2-astra" {
+		if profile == "openai" {
+			route.Source, route.SourceURL = "builtin:2026-11-18:openai", "https://developers.openai.com/api/docs/models/"+name
+			route.Capabilities = model.ModelCapabilities{Tools: "supported", Vision: "supported", AudioInput: "unsupported", Reasoning: "supported", ReasoningEfforts: "low,medium,high,xhigh,max,ultra", ContextWindow: 922000}
+		}
 	}
+	official := route.Capabilities
+	route.Capabilities = model.ModelCapabilities{}
+	mergeCapabilities(&route.Capabilities, route.Evidence, r.supplemental[name], protocol.CapabilitySource{Source: "public-catalog", URL: "https://models.dev/api.json;https://github.com/BerriAI/litellm", UpdatedAt: r.supplementalAt})
+	mergeCapabilities(&route.Capabilities, route.Evidence, official, protocol.CapabilitySource{Source: route.Source, URL: route.SourceURL, UpdatedAt: officialTime(route.Source)})
+	mergeCapabilities(&route.Capabilities, route.Evidence, r.metadata[name].Normalized(), protocol.CapabilitySource{Source: "endpoint", URL: p.BaseURL, UpdatedAt: r.fetchedAt})
 	if r.visions[name] && route.Capabilities.Vision == "" {
 		route.Capabilities.Vision = "supported"
+		route.Evidence["vision"] = protocol.CapabilitySource{Source: "model-mark"}
+	}
+	mergeCapabilities(&route.Capabilities, route.Evidence, capabilityOverrides(p)[name], protocol.CapabilitySource{Source: "user", UpdatedAt: p.UpdatedAt.UnixMilli()})
+	if route.Capabilities.Reasoning == "unsupported" {
+		route.Capabilities.ReasoningEfforts = ""
+		delete(route.Evidence, "reasoningEfforts")
+	}
+	if route.Capabilities.APIProtocol != "" {
+		route.APIProtocol = route.Capabilities.APIProtocol
+		route.Source = route.Evidence["apiProtocol"].Source
+		route.SourceURL = route.Evidence["apiProtocol"].URL
 	}
 	if p.RoutingMode == "manual" {
 		route.APIProtocol = p.APIProtocol.Normalized()
@@ -147,13 +172,40 @@ func (r *routeResolver) resolve(name string) protocol.ModelRouteView {
 		route.Source = "model-override"
 		route.SourceURL = ""
 	}
+	if route.Capabilities.APIProtocol != "" {
+		route.Capabilities.APIProtocol = route.APIProtocol
+	}
+	if prior, ok := route.Evidence["apiProtocol"]; !ok || prior.Source != route.Source {
+		updatedAt := officialTime(route.Source)
+		if route.Source == "model-override" || route.Source == "service-override" {
+			updatedAt = p.UpdatedAt.UnixMilli()
+		}
+		route.Evidence["apiProtocol"] = protocol.CapabilitySource{Source: route.Source, URL: route.SourceURL, UpdatedAt: updatedAt}
+	}
 	return route
 }
 
+func officialTime(source string) int64 {
+	if strings.HasPrefix(source, "builtin:2026-11-18:") {
+		return time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC).UnixMilli()
+	}
+	if strings.HasPrefix(source, "builtin:") {
+		return time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC).UnixMilli()
+	}
+	return 0
+}
+func catalogIdentity(p *model.Provider) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(string(p.Type)+"\x00"+p.BaseURL+"\x00"+p.APIKey)))
+}
+
 type catalogMetadata struct {
-	Profile string                             `json:"profile"`
-	BaseURL string                             `json:"baseUrl"`
-	Models  map[string]model.ModelCapabilities `json:"models"`
+	Identity       string                             `json:"identity,omitempty"`
+	FetchedAt      int64                              `json:"fetchedAt,omitempty"`
+	SupplementalAt int64                              `json:"supplementalAt,omitempty"`
+	Supplemental   map[string]model.ModelCapabilities `json:"supplemental,omitempty"`
+	Profile        string                             `json:"profile"`
+	BaseURL        string                             `json:"baseUrl"`
+	Models         map[string]model.ModelCapabilities `json:"models"`
 }
 
 func modelRoutes(p *model.Provider) map[string]protocol.ModelRouteView {

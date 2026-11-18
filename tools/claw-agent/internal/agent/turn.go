@@ -643,23 +643,29 @@ func (s *Session) sample(
 				return response, err
 			}
 			continue
-		case isAPIErr && !apiErr.Retryable():
-			return response, err
-		case attempt > maxModelRetries:
-			return response, err
 		}
-
-		delay := s.backoff(attempt)
-		// 上游说了多久之后再试（Retry-After）就听它的：按自己的退避提前重试，
-		// 只会再撞一次限流、白白用掉一次重试机会。封顶两分钟，免得一轮卡死。
-		if isAPIErr && apiErr.RetryAfter > delay {
-			delay = min(apiErr.RetryAfter, maxRetryAfter)
-		}
-		s.notify(emitter, turnID, retryNotice(delay, attempt, err))
-		if werr := sleepCtx(ctx, delay); werr != nil {
-			return response, werr
+		if err = s.retryModel(ctx, turnID, emitter, attempt, err); err != nil {
+			return response, err
 		}
 	}
+}
+
+// retryModel waits only for transient failures; it never replays tools or installs partial summaries.
+func (s *Session) retryModel(ctx context.Context, turnID string, emitter Emitter, attempt int, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	var apiErr *llm.Error
+	isAPI := errors.As(err, &apiErr)
+	if attempt > maxModelRetries || isAPI && (!apiErr.Retryable() || apiErr.ContextWindowExceeded()) {
+		return err
+	}
+	delay := s.backoff(attempt)
+	if isAPI && apiErr.RetryAfter > delay {
+		delay = min(apiErr.RetryAfter, maxRetryAfter)
+	}
+	s.notify(emitter, turnID, retryNotice(delay, attempt, err))
+	return sleepCtx(ctx, delay)
 }
 
 // maxRetryAfter 是听从上游 Retry-After 的上限。

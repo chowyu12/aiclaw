@@ -450,13 +450,17 @@ export class ClawAgentClient extends EventEmitter {
   }
 
   /** 按关键词找会话：标题与正文都找。关键词为空等于列全部。 */
-  async sessionSearch(keyword: string): Promise<SessionSummary[]> {
+  async sessionSearch(keyword: string, requestId?: string): Promise<SessionSummary[]> {
     this.assertReady();
     const result = await this.transport.request<{ sessions: SessionSummary[] }>(
       "session/search",
-      { keyword },
+      { keyword, requestId },
     );
     return result.sessions ?? [];
+  }
+
+  async sessionSearchCancel(requestId: string): Promise<void> {
+    this.assertReady(); await this.transport.request("session/search/cancel", { requestId });
   }
 
   /** 归档（或恢复）会话，连同它开出的子 agent。返回涉及的全部 id。 */

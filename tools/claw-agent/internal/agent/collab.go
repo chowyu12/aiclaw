@@ -37,8 +37,7 @@ import (
 // 与 Codex 一样，所有 agent 共用同一个工作区：一个改的文件别的立刻看得到，
 // 并行改代码时要让各自的写入范围不重叠。
 //
-// 不同于 Codex 的地方：模型与推理强度跟父会话走，不开放覆盖（AIClaw 的模型绑在
-// 模型服务上，按名字换模型说不清换到哪个服务）；agent_type（角色）暂不支持。
+// 模型默认继承父会话；显式覆盖使用 providerId/model 消除跨服务同名歧义。agent_type 暂不支持。
 
 // Collaboration 是协作的控制面，由 server 实现：开子会话、投递消息、跑轮次都要
 // 碰会话表与事件出口，那是 server 的东西。
@@ -52,8 +51,10 @@ type Collaboration interface {
 
 // SpawnRequest 是 spawn_agent 的参数。
 type SpawnRequest struct {
-	TaskName string
-	Message  string
+	Model           *protocol.RoleModel
+	ReasoningEffort *string
+	TaskName        string
+	Message         string
 	// ForkTurns：-1 = 全部历史，0 = 不带，N = 最近 N 轮。
 	ForkTurns int
 }
@@ -103,10 +104,30 @@ func (s *Session) registerCollabTools() error {
 		return nil
 	}
 	register := func(tool tools.Tool) error { return s.registry.Register(tool) }
+	choices := ""
+	if s.childModels != nil {
+		if models, err := s.childModels(context.Background()); err == nil {
+			if len(models) > 16 {
+				models = models[:16]
+			}
+			type choice struct {
+				ProviderID       int64  `json:"providerId"`
+				Model            string `json:"model"`
+				ReasoningEfforts string `json:"reasoningEfforts,omitempty"`
+			}
+			options := []choice{}
+			for _, m := range models {
+				options = append(options, choice{m.ProviderID, m.Model, m.Capabilities.ReasoningEfforts})
+			}
+			raw, _ := json.Marshal(options)
+			choices = " Available configured model choices: " + string(raw)
+		}
+	}
 
 	if err := register(tools.Tool{
 		Name: "spawn_agent",
 		Description: "Spawn a sub-agent to handle a well-scoped task. Returns immediately; the agent runs in the background. " +
+			"Optional model selects a configured providerId/model pair; reasoning_effort must be supported by that route. " + choices + " " +
 			"Its canonical name is your path plus task_name (if you are /root, a sub-agent with task_name research is /root/research); " +
 			"within your subtree you can refer to it simply as research. It has the same tools as you, can message you and other agents, and its final answer is delivered to your mailbox when it finishes. " +
 			"fork_turns defaults to all (carry the full context); none carries nothing, in which case the task message must spell out all the background.\n" +
@@ -115,16 +136,20 @@ func (s *Session) registerCollabTools() error {
 			"Tasks must be concrete, self-contained and non-overlapping; when changing code, give each sub-agent a non-overlapping write scope (everyone shares the same workspace), " +
 			"and have it list the files it changed in its final answer. After handing off, work on something that doesn't overlap — don't redo the task yourself, and don't wait on it repeatedly.",
 		Schema: schemaOf(map[string]any{
-			"task_name":  map[string]any{"type": "string", "description": "Task name for the sub-agent: lowercase letters, digits and underscores"},
-			"message":    map[string]any{"type": "string", "description": "The task description for it (plain text)"},
-			"fork_turns": map[string]any{"type": "string", "description": "How much context to carry: all (default), none, or a positive integer string (e.g. \"3\" carries only the last few turns)"},
+			"model":            map[string]any{"type": "object", "properties": map[string]any{"providerId": map[string]any{"type": "integer", "minimum": 1}, "model": map[string]any{"type": "string"}}, "required": []string{"providerId", "model"}},
+			"reasoning_effort": map[string]any{"type": "string"},
+			"task_name":        map[string]any{"type": "string", "description": "Task name for the sub-agent: lowercase letters, digits and underscores"},
+			"message":          map[string]any{"type": "string", "description": "The task description for it (plain text)"},
+			"fork_turns":       map[string]any{"type": "string", "description": "How much context to carry: all (default), none, or a positive integer string (e.g. \"3\" carries only the last few turns)"},
 		}, "task_name", "message"),
 		Effect: tools.EffectRead,
 		Handler: func(ctx context.Context, raw json.RawMessage, _ *tools.Env) (string, error) {
 			var args struct {
-				TaskName  string `json:"task_name"`
-				Message   string `json:"message"`
-				ForkTurns string `json:"fork_turns"`
+				Model           *protocol.RoleModel `json:"model"`
+				ReasoningEffort *string             `json:"reasoning_effort"`
+				TaskName        string              `json:"task_name"`
+				Message         string              `json:"message"`
+				ForkTurns       string              `json:"fork_turns"`
 			}
 			if err := decodeEmailArgs(raw, &args); err != nil {
 				return "", err
@@ -140,7 +165,7 @@ func (s *Session) registerCollabTools() error {
 			if err != nil {
 				return "", err
 			}
-			result, err := s.collab.Spawn(ctx, s, SpawnRequest{TaskName: name, Message: args.Message, ForkTurns: fork})
+			result, err := s.collab.Spawn(ctx, s, SpawnRequest{TaskName: name, Message: args.Message, ForkTurns: fork, Model: args.Model, ReasoningEffort: args.ReasoningEffort})
 			if err != nil {
 				return "", err
 			}

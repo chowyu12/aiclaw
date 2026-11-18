@@ -42,12 +42,11 @@ func (e *Error) Unwrap() error { return e.Err }
 func (e *Error) Retryable() bool {
 	for _, code := range strings.Fields(strings.ToLower(e.Code)) {
 		switch code {
-		case "model_not_found", "invalid_request_error", "invalid_argument", "authentication_error", "permission_error", "permission_denied", "unauthenticated", "not_found":
+		case "model_not_found", "invalid_request_error", "invalid_argument", "authentication_error", "permission_error", "permission_denied", "unauthenticated", "not_found",
+			"response_incomplete", "invalid_request", "content_policy_violation", "content_filter", "safety_violation",
+			"invalid_workspace", "workspace_not_found", "workspace_access_denied", "access_program_denied", "invalid_access_program", "inference_hook_denied":
 			return false
 		}
-	}
-	if e.Code == "response_incomplete" {
-		return false
 	}
 	// 额度用完、欠费：也常以 429 返回，但重试只会白等十几秒再收一遍同样的错。
 	if e.QuotaExhausted() {

@@ -74,6 +74,7 @@ type userInput struct {
 
 // Session 是一个会话：一份配置 + 一段对话历史 + 一套已挂载的工具。
 type Session struct {
+	childModels         func(context.Context) ([]protocol.ModelConfig, error)
 	skillLogger         log.Logger
 	mcpAuth             func(context.Context, string) (string, error)
 	db                  *store.Store
@@ -212,6 +213,10 @@ func refreshOf(config protocol.SessionStartParams) protocol.SessionRefresh {
 		Roles:             config.Roles,
 		ModelSeesImages:   config.ModelSeesImages,
 	}
+}
+
+func WithChildModels(catalog func(context.Context) ([]protocol.ModelConfig, error)) Option {
+	return func(s *Session) { s.childModels = catalog }
 }
 
 // KeyResolver 按模型配置给出 API Key。
@@ -698,6 +703,10 @@ func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.M
 		go func(index int, name string) {
 			defer wg.Done()
 			started := time.Now()
+			if deferred := mcpShared.deferred(name, servers[name], s.mcpAuth); deferred != nil {
+				results[index] = dialed{client: deferred}
+				return
+			}
 			client, key, err := mcpShared.acquire(ctx, name, servers[name], s.mcpAuth)
 			results[index] = dialed{client: client, key: key, err: err, took: time.Since(started)}
 		}(index, name)
@@ -784,7 +793,7 @@ func (s *Session) mountMCP(
 				); err != nil {
 					return "", err
 				}
-				output, err := mcp.CallTool(ctx, toolName, args)
+				output, err := mcp.CallToolExpected(ctx, def, args)
 				if err == nil && toolName == "web_search" {
 					tools.RecordSearchSources(ctx, output)
 				}
@@ -1173,10 +1182,15 @@ func (s *Session) Configure(model protocol.ModelConfig) error {
 // Only the next sampling snapshot sees this change; an in-flight request keeps
 // its original effort and client. Keep context usage and other model fields.
 func (s *Session) ConfigureReasoning(ctx context.Context, effort string) error {
-	switch effort {
-	case "", "low", "medium", "high":
-	default:
+	if !llm.ValidReasoningEffort(effort) {
 		return fmt.Errorf("unsupported reasoning effort: %s", effort)
+	}
+	_, client, err := s.samplingClient()
+	if err != nil {
+		return err
+	}
+	if err = client.ValidateReasoningEffort(effort); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	previous := s.config.Model.ReasoningEffort
@@ -1284,6 +1298,11 @@ func (s *Session) Close() {
 		mcpShared.release(key)
 	}
 	s.mcpKeys = nil
+	for _, binding := range s.mcpBindings {
+		if binding.client.Deferred() {
+			binding.client.Close()
+		}
+	}
 }
 
 // Interrupt also invalidates reserved automatic wakes; mail stays queued until

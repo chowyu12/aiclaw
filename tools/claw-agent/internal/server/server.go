@@ -93,7 +93,11 @@ type Server struct {
 	outboundPending map[int64]chan frame
 	outboundMu      sync.Mutex
 
-	shutdown chan struct{}
+	searchMu          sync.Mutex
+	searches          map[string]*sessionSearch
+	searchRetired     bool
+	cancelledSearches map[string]time.Time
+	shutdown          chan struct{}
 }
 
 // New 建服务端并打开会话库。
@@ -298,15 +302,34 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		protocol.MethodSearchDelete, protocol.MethodSearchTest:
 		s.handleSearch(ctx, f)
 	case protocol.MethodSessionSearch:
-		var params protocol.SessionSearchParams
-		// 参数解不出来就当空关键词：搜索框里打字很快，宁可回全部也不要报错。
-		_ = json.Unmarshal(f.Params, &params)
-		found, err := agent.Search(ctx, s.db, params.Keyword)
-		if err != nil {
-			s.writeError(f.ID, codeInternal, err.Error())
+		s.handleSessionSearch(ctx, f)
+	case "session/search/cancel":
+		var params struct {
+			RequestID string `json:"requestId"`
+		}
+		if json.Unmarshal(f.Params, &params) != nil || params.RequestID == "" || len(params.RequestID) > 128 {
+			s.writeError(f.ID, codeInvalidParams, "invalid search request id")
 			return
 		}
-		s.writeResult(f.ID, map[string]any{"sessions": found})
+		s.searchMu.Lock()
+		if search := s.searches["request:"+params.RequestID]; search != nil {
+			search.cancel()
+		} else {
+			if s.cancelledSearches == nil {
+				s.cancelledSearches = map[string]time.Time{}
+			}
+			now := time.Now()
+			for id, expiry := range s.cancelledSearches {
+				if now.After(expiry) {
+					delete(s.cancelledSearches, id)
+				}
+			}
+			if len(s.cancelledSearches) < 128 {
+				s.cancelledSearches[params.RequestID] = now.Add(30 * time.Second)
+			}
+		}
+		s.searchMu.Unlock()
+		s.writeResult(f.ID, map[string]bool{"cancelled": true})
 	case protocol.MethodSessionList:
 		summaries, err := agent.List(ctx, s.db)
 		if err != nil {
@@ -501,7 +524,7 @@ func (s *Server) sessionOptions(id string) []agent.Option {
 		return options
 	}
 	// 子 agent 同理只给用户自己的会话：外部的人不该能借助手在用户电脑上开一群 agent。
-	options = append(options, agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s}), agent.WithMCPAuth(s.oauth.AccessToken))
+	options = append(options, agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s}), agent.WithMCPAuth(s.oauth.AccessToken), agent.WithChildModels(s.childModelChoices))
 	if s.plugins != nil {
 		options = append(options, agent.WithMailbox(s.plugins.EmailAccount))
 	}
@@ -821,6 +844,12 @@ func (s *Server) session(id string) *agent.Session {
 }
 
 func (s *Server) closeAll() {
+	s.searchMu.Lock()
+	s.searchRetired = true
+	for _, search := range s.searches {
+		search.cancel()
+	}
+	s.searchMu.Unlock()
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
 	if s.closing {

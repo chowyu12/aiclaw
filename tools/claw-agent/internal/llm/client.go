@@ -83,14 +83,11 @@ func NewConfigured(config Config) (*Client, error) {
 // Stream never infers a protocol or changes user parameters in response to an error.
 // The caller owns retries; adapters only encode/decode one provider request.
 func (c *Client) Stream(ctx context.Context, req Request, onDelta func(Delta)) (Response, error) {
-	if req.ReasoningEffort != "" && req.ReasoningEffort != "low" && req.ReasoningEffort != "medium" && req.ReasoningEffort != "high" && req.ReasoningEffort != "none" {
-		return Response{}, &Error{Status: 400, Code: "invalid_request", Message: "Unsupported reasoning effort: " + req.ReasoningEffort}
+	effort, err := c.reasoningEffort(req.ReasoningEffort, req.ReasoningPreference)
+	if err != nil {
+		return Response{}, err
 	}
-	if req.ReasoningPreference {
-		if c.capabilities.Reasoning != "supported" || (c.capabilities.ReasoningEfforts != "" && !strings.Contains(","+c.capabilities.ReasoningEfforts+",", ","+req.ReasoningEffort+",")) {
-			req.ReasoningEffort = ""
-		}
-	}
+	req.ReasoningEffort = effort
 	messages := make([]Message, 0, len(req.Messages))
 	for _, message := range req.Messages {
 		if message.Role == RoleAssistant && message.Content == "" && len(message.ToolCalls) == 0 && message.Sampling != nil {
@@ -114,12 +111,6 @@ func (c *Client) Stream(ctx context.Context, req Request, onDelta func(Delta)) (
 		if len(m.Images) > 0 && c.capabilities.Vision == "unsupported" {
 			return Response{}, &Error{Status: 400, Message: "This model does not support image input"}
 		}
-	}
-	if req.ReasoningEffort != "" && c.capabilities.Reasoning == "unsupported" {
-		return Response{}, &Error{Status: 400, Message: "This model does not support reasoning settings; choose Model default"}
-	}
-	if req.ReasoningEffort != "" && c.capabilities.ReasoningEfforts != "" && !strings.Contains(","+c.capabilities.ReasoningEfforts+",", ","+req.ReasoningEffort+",") {
-		return Response{}, &Error{Status: 400, Message: "Unsupported reasoning effort for this model: " + req.ReasoningEffort}
 	}
 
 	path, wire, err := c.adapter.encode(c, req)
@@ -229,4 +220,36 @@ func parseRetryAfter(header string, now time.Time) time.Duration {
 		return at.Sub(now)
 	}
 	return 0
+}
+
+func ValidReasoningEffort(value string) bool {
+	switch value {
+	case "", "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+		return true
+	}
+	return false
+}
+func extendedReasoningEffort(value string) bool {
+	return value == "minimal" || value == "xhigh" || value == "max" || value == "ultra"
+}
+
+func (c *Client) ValidateReasoningEffort(effort string) error {
+	_, err := c.reasoningEffort(effort, false)
+	return err
+}
+func (c *Client) reasoningEffort(effort string, preference bool) (string, error) {
+	if !ValidReasoningEffort(effort) {
+		return "", &Error{Status: 400, Code: "invalid_request", Message: "Unsupported reasoning effort: " + effort}
+	}
+	supported := c.capabilities.Reasoning == "supported" && (c.capabilities.ReasoningEfforts == "" || strings.Contains(","+c.capabilities.ReasoningEfforts+",", ","+effort+","))
+	if preference && !supported {
+		return "", nil
+	}
+	if effort != "" && (c.capabilities.Reasoning == "unsupported" || c.capabilities.ReasoningEfforts != "" && !strings.Contains(","+c.capabilities.ReasoningEfforts+",", ","+effort+",")) {
+		return "", &Error{Status: 400, Code: "invalid_request", Message: "Unsupported reasoning effort for this model: " + effort}
+	}
+	if extendedReasoningEffort(effort) && (c.capabilities.ReasoningEfforts == "" || (c.protocol != model.APIResponses && c.protocol != model.APIChatCompletions)) {
+		return "", &Error{Status: 400, Code: "invalid_request", Message: "Reasoning effort requires explicit support on this model route"}
+	}
+	return effort, nil
 }

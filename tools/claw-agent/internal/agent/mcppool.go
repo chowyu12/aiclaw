@@ -6,6 +6,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -49,13 +52,14 @@ type pooledEntry struct {
 }
 
 type mcpPool struct {
-	mu      sync.Mutex
-	entries map[string]*pooledEntry
-	now     func() time.Time
+	mu       sync.Mutex
+	entries  map[string]*pooledEntry
+	catalogs map[string]cachedMCPCatalog
+	now      func() time.Time
 }
 
 func newMCPPool() *mcpPool {
-	return &mcpPool{entries: map[string]*pooledEntry{}, now: time.Now}
+	return &mcpPool{entries: map[string]*pooledEntry{}, catalogs: map[string]cachedMCPCatalog{}, now: time.Now}
 }
 
 // mcpShared 是进程级的池。一个内核进程一个，与会话的生命周期无关。
@@ -67,10 +71,24 @@ var mcpShared = newMCPPool()
 // server——共用一条连着旧配置的连接，表现会是「改了配置没生效」，而那正是
 // 上一版刚修过的那类 bug。
 func fingerprint(name string, config protocol.MCPServerConfig) string {
+	config.EnabledTools = nil
+	config.Trusted = false
+	identity := config.Command
+	if path, err := exec.LookPath(config.Command); err == nil {
+		identity = path
+	}
+	for _, path := range append([]string{identity}, config.Args...) {
+		if filepath.IsAbs(path) {
+			if stat, err := os.Stat(path); err == nil {
+				identity += fmt.Sprintf("|%s:%d:%d", path, stat.Size(), stat.ModTime().UnixNano())
+			}
+		}
+	}
 	encoded, err := json.Marshal(struct {
-		Name   string
-		Config protocol.MCPServerConfig
-	}{name, config})
+		Name     string
+		Identity string
+		Config   protocol.MCPServerConfig
+	}{name, identity, config})
 	if err != nil {
 		// 编不出来就退回一个必然唯一的值：宁可不复用，也不要错误地复用。
 		return name + ":" + time.Now().String()
@@ -137,6 +155,17 @@ func (p *mcpPool) acquire(
 			Headers:     config.Headers,
 		})
 		entry.client, entry.err = client, err
+		if err == nil && config.URL == "" {
+			p.mu.Lock()
+			if len(p.catalogs) >= 64 {
+				for key := range p.catalogs {
+					delete(p.catalogs, key)
+					break
+				}
+			}
+			p.catalogs[key] = cachedMCPCatalog{defs: client.Tools(), at: p.now()}
+			p.mu.Unlock()
+		}
 		close(entry.ready)
 
 		if err != nil {
@@ -194,4 +223,29 @@ func (e *pooledEntry) close() {
 	if e.client != nil {
 		e.client.Close()
 	}
+}
+
+type cachedMCPCatalog struct {
+	defs []mcpclient.ToolDef
+	at   time.Time
+}
+
+func (p *mcpPool) deferred(name string, config protocol.MCPServerConfig, auth func(context.Context, string) (string, error)) *mcpclient.Client {
+	if config.URL != "" || config.Command == "" {
+		return nil
+	}
+	key := fingerprint(name, config)
+	p.mu.Lock()
+	catalog, ok := p.catalogs[key]
+	p.mu.Unlock()
+	if !ok || p.now().Sub(catalog.at) > reuseTTL {
+		return nil
+	}
+	return mcpclient.NewDeferred(catalog.defs, func(ctx context.Context) (*mcpclient.Client, func(), error) {
+		client, key, err := p.acquire(ctx, name, config, auth)
+		if err != nil {
+			return nil, nil, err
+		}
+		return client, func() { p.release(key) }, nil
+	})
 }

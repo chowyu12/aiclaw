@@ -2,6 +2,7 @@ package gormstore
 
 import (
 	"context"
+	"time"
 
 	"github.com/chowyu12/aiclaw/internal/model"
 	"gorm.io/gorm"
@@ -56,6 +57,9 @@ func (s *GormStore) UpdateProvider(ctx context.Context, id int64, req model.Upda
 	if req.ModelOverrides != nil {
 		updates["model_overrides"] = req.ModelOverrides
 	}
+	if req.CapabilityOverrides != nil {
+		updates["capability_overrides"] = req.CapabilityOverrides
+	}
 	if req.ModelMetadata != nil {
 		updates["model_metadata"] = req.ModelMetadata
 	}
@@ -97,6 +101,15 @@ func (s *GormStore) CacheProviderModelMetadata(ctx context.Context, id, revision
 	var count int64
 	err := s.db.WithContext(ctx).Model(&model.Provider{}).Where("id = ? AND revision = ? AND model_metadata = ?", id, revision, metadata).Count(&count).Error
 	return count == 1, err
+}
+
+// Publish capability metadata and its derived marks together. Never overwrite a
+// concurrently edited model list or a newer endpoint metadata snapshot.
+func (s *GormStore) UpdateProviderCatalog(ctx context.Context, id, revision int64, previous, metadata, models model.JSON) (bool, error) {
+	result := s.db.WithContext(ctx).Model(&model.Provider{}).
+		Where("id = ? AND revision = ? AND COALESCE(model_metadata,'') = ?", id, revision, string(previous)).
+		UpdateColumns(map[string]any{"model_metadata": metadata, "models": models, "revision": gorm.Expr("revision + 1"), "updated_at": time.Now()})
+	return result.RowsAffected == 1, result.Error
 }
 
 func (s *GormStore) DeleteProvider(ctx context.Context, id int64) error {

@@ -117,6 +117,7 @@ const state = reactive({
   sessions: [] as SessionSummaryView[],
   /** 会话搜索。关键词为空时界面用 sessions，不看这里。 */
   sessionSearch: {
+ requestId: "",
     error: "",
     keyword: "",
     results: [] as SessionSummaryView[],
@@ -301,6 +302,15 @@ export const actions = {
       if (event.method === "session/queueUpdated" && queued.sessionId) {
         queueRevisions.set(queued.sessionId, (queueRevisions.get(queued.sessionId) ?? 0) + 1);
         updateQueue(queued.sessionId, queued.pending ?? [], queued.queuedRequestIds);
+      }
+      if (event.method === "session/searchPartial") {
+        const partial=event.params as {requestId:string;keyword:string;sessions:SessionSummaryView[]};
+        if(state.sessionSearch.loading && partial.requestId===state.sessionSearch.requestId && partial.keyword===state.sessionSearch.keyword){
+          const found=new Map(state.sessionSearch.results.map(item=>[item.id,item]));
+          for(const item of partial.sessions)found.set(item.id,item);
+          state.sessionSearch.results=[...found.values()].slice(0,50);
+        }
+        return;
       }
       const applied = applyAgentEvent(state.live, payload as AgentEventPayload, state.sessionId, state.view === "chat" ? [state.sessionId, state.sideSessionId] : []);
       // 错误条是全局的：后台那个会话出错也要让人看见，不然它就静静地停了。
@@ -640,22 +650,22 @@ export const actions = {
    * 防抖在界面那边做。
    */
   async searchSessions(keyword: string): Promise<void> {
-    state.sessionSearch.keyword = keyword;
-    state.sessionSearch.error = "";
-    if (!keyword.trim()) {
-      state.sessionSearch.results = [];
-      state.sessionSearch.loading = false;
-      return;
-    }
-    state.sessionSearch.loading = true;
+    const previous=state.sessionSearch.requestId;
+    const requestId=crypto.randomUUID();
+    state.sessionSearch.requestId=requestId;
+    state.sessionSearch.keyword=keyword;
+    state.sessionSearch.error="";
+    state.sessionSearch.results=[];
+    if(previous)void window.aiclaw.session.cancelSearch(previous).catch(()=>{});
+    state.sessionSearch.loading=!!keyword.trim();
+    if(!keyword.trim()){state.sessionSearch.requestId="";return;}
     try {
-      const found = (await window.aiclaw.session.search(keyword)) as SessionSummaryView[];
-      // 打字很快，回来的可能是上一个关键词的结果。对不上就丢掉。
-      if (state.sessionSearch.keyword === keyword) state.sessionSearch.results = found;
-    } catch (error) {
-      if (state.sessionSearch.keyword === keyword) state.sessionSearch.error = describeError(error);
+      const found=await window.aiclaw.session.search(keyword,requestId) as SessionSummaryView[];
+      if(state.sessionSearch.requestId===requestId)state.sessionSearch.results=found;
+    } catch(error) {
+      if(state.sessionSearch.requestId===requestId)state.sessionSearch.error=describeError(error);
     } finally {
-      if (state.sessionSearch.keyword === keyword) state.sessionSearch.loading = false;
+      if(state.sessionSearch.requestId===requestId){state.sessionSearch.loading=false;state.sessionSearch.requestId="";}
     }
   },
 
@@ -1303,6 +1313,7 @@ export const actions = {
 
   /** 没给的字段不动；apiKey 给空串表示清掉。 */
   async updateProvider(params: {
+ capabilityOverrides?:ProviderView["capabilityOverrides"];
  routingMode?: "auto" | "manual";
  modelOverrides?: ProviderView["modelOverrides"];
     apiProtocol?: ProviderView["apiProtocol"];

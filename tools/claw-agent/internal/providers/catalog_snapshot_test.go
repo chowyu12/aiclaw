@@ -79,3 +79,42 @@ func TestCatalogCacheRejectsChangedConfigurationSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func TestCapabilityCatalogWritesDoNotOverwriteConcurrentChanges(t *testing.T) {
+	db, err := appdb.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	service := New(db)
+	ctx := context.Background()
+	p, err := service.Create(ctx, protocol.ProviderCreateParams{Name: "gateway", Models: []string{"original"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old, err := db.GetProvider(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := model.JSON(`{"endpoint":"fresh"}`)
+	if ok, err := db.CacheProviderModelMetadata(ctx, p.ID, old.Revision, endpoint); err != nil || !ok {
+		t.Fatal(err)
+	}
+	if ok, err := db.UpdateProviderCatalog(ctx, p.ID, old.Revision, old.ModelMetadata, model.JSON(`{"stale":true}`), model.JSON(`["stale"]`)); err != nil || ok {
+		t.Fatal("overwrote newer endpoint snapshot", ok, err)
+	}
+	current, err := db.GetProvider(ctx, p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := db.UpdateProviderCatalog(ctx, p.ID, current.Revision, current.ModelMetadata, model.JSON(`{"fresh":true}`), model.JSON(`["fresh"]`)); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	saved, err := db.GetProvider(ctx, p.ID)
+	if err != nil || string(saved.Models) != `["fresh"]` || saved.Revision != current.Revision+1 {
+		t.Fatal(saved, err)
+	}
+	if ok, err := db.CacheProviderModelMetadata(ctx, p.ID, old.Revision, endpoint); err != nil || ok {
+		t.Fatal("old fetch erased capability sync", ok, err)
+	}
+}

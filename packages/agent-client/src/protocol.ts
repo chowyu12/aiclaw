@@ -161,13 +161,15 @@ export interface SessionRefresh {
 export type APIProtocol = "chat-completions" | "responses" | "anthropic-messages" | "gemini";
 
 export interface ModelRouteView {
+ evidence?:Record<string,{source:string;url?:string;updatedAt?:number}>;
  apiProtocol: APIProtocol;
  source: string;
  sourceUrl?: string;
- capabilities: {tools?:string;vision?:string;reasoning?:string;reasoningEfforts?:string};
+ capabilities: {tools?:string;vision?:string;audioInput?:string;reasoning?:string;reasoningEfforts?:string;contextWindow?:number;apiProtocol?:APIProtocol};
 }
 
 export interface ProviderView {
+ capabilityOverrides?:Record<string,ModelRouteView["capabilities"]>;
  defaultBaseUrl?:string;
  routingMode?: "auto" | "manual";
  serviceProfile?: string;
@@ -199,6 +201,7 @@ export interface ProviderCreateParams {
 
 /** 没给的字段不动；apiKey 给空串表示清掉。 */
 export interface ProviderUpdateParams {
+ capabilityOverrides?:Record<string,ModelRouteView["capabilities"]>;
  routingMode?: "auto" | "manual";
  modelOverrides?: Record<string,APIProtocol>;
   apiProtocol?: APIProtocol;

@@ -259,6 +259,9 @@ FROM sessions WHERE `+where+` ORDER BY `+order)
 
 	summaries := []Summary{}
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var summary Summary
 		var created, updated, archived int64
 		if err := rows.Scan(&summary.ID, &summary.Title, &created, &updated,
@@ -291,12 +294,68 @@ func (s *Store) SetArchived(ctx context.Context, ids []string, at time.Time) err
 
 // Search matches decoded titles and non-system message text with Unicode case folding.
 func (s *Store) Search(ctx context.Context, keyword string, limit int) ([]Summary, error) {
+	return s.SearchStream(ctx, keyword, limit, nil)
+}
+
+// SearchStream emits verified provisional matches; only the final list defines ordering.
+func (s *Store) SearchStream(ctx context.Context, keyword string, limit int, partial func([]Summary)) ([]Summary, error) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
 		return s.List(ctx)
 	}
 	if limit <= 0 {
 		limit = 50
+	}
+	seen := map[string]bool{}
+	batch := []Summary{}
+	emit := func(item Summary) {
+		if partial == nil || seen[item.ID] {
+			return
+		}
+		seen[item.ID] = true
+		batch = append(batch, item)
+		if len(batch) == 10 {
+			partial(batch)
+			batch = nil
+		}
+	}
+	flush := func() {
+		if len(batch) > 0 {
+			partial(batch)
+			batch = nil
+		}
+	}
+	if partial != nil {
+		rows, err := s.db.QueryContext(ctx, `SELECT id,title,created_at,updated_at,workdir,model,turn_count,COALESCE(json_extract(config,'$.parentId'),'') FROM sessions WHERE archived_at=0 ORDER BY updated_at DESC`)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			if err := ctx.Err(); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			var item Summary
+			var created, updated int64
+			if err = rows.Scan(&item.ID, &item.Title, &created, &updated, &item.Workdir, &item.Model, &item.TurnCount, &item.ParentID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if foldedIndex(item.Title, keyword) >= 0 || foldedIndex(item.Workdir, keyword) >= 0 {
+				item.CreatedAt = time.UnixMilli(created)
+				item.UpdatedAt = time.UnixMilli(updated)
+				emit(item)
+			}
+			if len(seen) >= limit {
+				break
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+		flush()
 	}
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, title, created_at, updated_at, workdir, model, turn_count, messages,
@@ -311,6 +370,9 @@ ORDER BY updated_at DESC`)
 
 	summaries := []Summary{}
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var summary Summary
 		var created, updated int64
 		var messages string
@@ -321,14 +383,19 @@ ORDER BY updated_at DESC`)
 		summary.CreatedAt = time.UnixMilli(created)
 		summary.UpdatedAt = time.UnixMilli(updated)
 		summary.Snippet = snippet(messages, keyword)
-		if foldedIndex(summary.Title, keyword) < 0 && summary.Snippet == "" {
+		if foldedIndex(summary.Title, keyword) < 0 && foldedIndex(summary.Workdir, keyword) < 0 && summary.Snippet == "" {
 			continue
 		}
 		summaries = append(summaries, summary)
+		emit(summary)
 		if len(summaries) == limit {
 			break
 		}
 	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	flush()
 	return summaries, rows.Err()
 }
 

@@ -39,8 +39,6 @@ export const chat: Record<string, string> = {
  "新会话工作目录": "Working directory for new chats",
  "默认目录：~/aiclaw": "Default directory: ~/aiclaw",
  "移除项目（保留会话和文件）": "Remove project (keep chats and files)",
- "移动到项目": "Move to project",
- "未分配项目": "Unassigned project",
 
   "正在思考…": "Thinking…",
   "处理完成": "Completed",
@@ -374,7 +372,7 @@ export const chat: Record<string, string> = {
   "推理强度": "Reasoning effort",
   "会话推理强度": "Session reasoning effort",
   "模型默认": "Model default",
-  "从下一次模型请求生效；不支持时自动回退。": "Applies to the next model request; falls back if unsupported.",
+  "从下一次模型请求生效；按模型能力校验。": "Applies to the next model request; validated against model capabilities.",
   "请选择 UTF-8 文本或 Markdown 文件。": "Choose a UTF-8 text or Markdown file.",
   "导入记忆": "Import memory",
   "选择要合并的条目，确认前不会写入。仅按文本去重，不自动判断语义冲突。": "Select entries to merge. Nothing is written until confirmation. Deduplication compares text, not meaning.",

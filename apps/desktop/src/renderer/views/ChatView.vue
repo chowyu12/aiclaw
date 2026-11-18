@@ -369,6 +369,13 @@ function onMentionKey(event: KeyboardEvent): boolean {
 // 贴一张报错截图问「这是什么」是最常见的用法之一。图片走视觉通道发给模型，
 // 上传状态归会话草稿所有，切页或切换会话不丢失。
 
+const reasoningOptions = computed(() => {
+ const provider=store.providers.find(item=>item.id===store.providerId);
+ const caps=provider?.modelRoutes?.[store.model]?.capabilities;
+ if(caps?.reasoning==="unsupported")return [];
+ return caps?.reasoningEfforts ? caps.reasoningEfforts.split(",") : ["low","medium","high"];
+});
+
 const attachments = computed({ get: () => draftFor(store.sessionId).attachments, set: value => { draftFor(store.sessionId).attachments = value; } });
 const attachError = computed({ get: () => draftFor(store.sessionId).attachmentError, set: value => { draftFor(store.sessionId).attachmentError = value; } });
 const parsingAttachments = computed(() => draftFor(store.sessionId).pendingAttachments > 0);
@@ -1111,9 +1118,9 @@ const forking = ref(false);
                     <label v-if="store.sessionId && !store.sessionId.startsWith('c_')" class="reasoning-picker">
                       <span>{{ t('推理强度') }}</span>
                       <select :value="store.sessionInfo?.reasoningEffort ?? ''" :disabled="store.modelChanging" :aria-label="t('会话推理强度')" @change="actions.switchReasoning(($event.target as HTMLSelectElement).value)">
-                        <option value="">{{ t('模型默认') }}</option><option value="low">low</option><option value="medium">medium</option><option value="high">high</option>
+                        <option value="">{{ t('模型默认') }}</option><option v-for="effort in reasoningOptions" :key="effort" :value="effort">{{ effort }}</option>
                       </select>
-                      <small>{{ t('从下一次模型请求生效；不支持时自动回退。') }}</small>
+                      <small>{{ t('从下一次模型请求生效；按模型能力校验。') }}</small>
                     </label>
                     <div class="menu-head">
                       <span>{{ t("模型") }}<em v-if="modelSearch">{{ choices.length }} / {{ allChoices.length }}</em></span>

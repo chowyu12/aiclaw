@@ -290,21 +290,29 @@ type ModelConfig struct {
 // 一个模型服务保存显式 API 协议、端点、Key 与模型清单。会话按 id 选。
 // Key 只进库不出库：这里只有 APIKeySet 一位。
 
+type CapabilitySource struct {
+	Source    string `json:"source"`
+	URL       string `json:"url,omitempty"`
+	UpdatedAt int64  `json:"updatedAt,omitempty"`
+}
+
 type ModelRouteView struct {
-	APIProtocol  model.APIProtocol       `json:"apiProtocol"`
-	Source       string                  `json:"source"`
-	SourceURL    string                  `json:"sourceUrl,omitempty"`
-	Capabilities model.ModelCapabilities `json:"capabilities"`
+	Evidence     map[string]CapabilitySource `json:"evidence,omitempty"`
+	APIProtocol  model.APIProtocol           `json:"apiProtocol"`
+	Source       string                      `json:"source"`
+	SourceURL    string                      `json:"sourceUrl,omitempty"`
+	Capabilities model.ModelCapabilities     `json:"capabilities"`
 }
 
 type ProviderView struct {
-	DefaultBaseURL string                       `json:"defaultBaseUrl,omitempty"`
-	RoutingMode    string                       `json:"routingMode"`
-	ServiceProfile string                       `json:"serviceProfile"`
-	ModelOverrides map[string]model.APIProtocol `json:"modelOverrides"`
-	ModelRoutes    map[string]ModelRouteView    `json:"modelRoutes"`
-	ID             int64                        `json:"id"`
-	Name           string                       `json:"name"`
+	CapabilityOverrides map[string]model.ModelCapabilities `json:"capabilityOverrides,omitempty"`
+	DefaultBaseURL      string                             `json:"defaultBaseUrl,omitempty"`
+	RoutingMode         string                             `json:"routingMode"`
+	ServiceProfile      string                             `json:"serviceProfile"`
+	ModelOverrides      map[string]model.APIProtocol       `json:"modelOverrides"`
+	ModelRoutes         map[string]ModelRouteView          `json:"modelRoutes"`
+	ID                  int64                              `json:"id"`
+	Name                string                             `json:"name"`
 	/** openai / qwen / kimi / openrouter / openai-compatible / claude / gemini */
 	Type        string            `json:"type"`
 	APIProtocol model.APIProtocol `json:"apiProtocol"`
@@ -337,16 +345,17 @@ type ProviderCreateParams struct {
 
 // ProviderUpdateParams 里 nil 的字段不动。APIKey 指向空串表示清掉。
 type ProviderUpdateParams struct {
-	RoutingMode    *string                      `json:"routingMode,omitempty"`
-	ModelOverrides map[string]model.APIProtocol `json:"modelOverrides,omitempty"`
-	APIProtocol    *model.APIProtocol           `json:"apiProtocol,omitempty"`
-	ID             int64                        `json:"id"`
-	Name           *string                      `json:"name,omitempty"`
-	Type           *string                      `json:"type,omitempty"`
-	BaseURL        *string                      `json:"baseUrl,omitempty"`
-	APIKey         *string                      `json:"apiKey,omitempty"`
-	Models         []string                     `json:"models,omitempty"`
-	Enabled        *bool                        `json:"enabled,omitempty"`
+	CapabilityOverrides map[string]model.ModelCapabilities `json:"capabilityOverrides,omitempty"`
+	RoutingMode         *string                            `json:"routingMode,omitempty"`
+	ModelOverrides      map[string]model.APIProtocol       `json:"modelOverrides,omitempty"`
+	APIProtocol         *model.APIProtocol                 `json:"apiProtocol,omitempty"`
+	ID                  int64                              `json:"id"`
+	Name                *string                            `json:"name,omitempty"`
+	Type                *string                            `json:"type,omitempty"`
+	BaseURL             *string                            `json:"baseUrl,omitempty"`
+	APIKey              *string                            `json:"apiKey,omitempty"`
+	Models              []string                           `json:"models,omitempty"`
+	Enabled             *bool                              `json:"enabled,omitempty"`
 }
 
 type ProviderIDParams struct {
@@ -847,7 +856,8 @@ type SessionArchiveParams struct {
 
 // SessionSearchParams 按关键词找会话。关键词为空时等于列全部。
 type SessionSearchParams struct {
-	Keyword string `json:"keyword"`
+	RequestID string `json:"requestId,omitempty"`
+	Keyword   string `json:"keyword"`
 }
 
 // MCPProbeParams 试连一个 MCP server 并列出它的工具。

@@ -197,6 +197,9 @@ func (c *Client) Version() uint64  { c.toolsMu.RLock(); defer c.toolsMu.RUnlock(
 // Refresh only after a notification. Failures keep the last usable catalog and
 // back off; shared connections coalesce concurrent refresh requests.
 func (c *Client) RefreshTools(ctx context.Context) error {
+	if deferred, ok := c.transport.(*deferredTransport); ok {
+		return deferred.refresh(ctx)
+	}
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
 	if c.changed.Load() == c.applied || time.Now().Before(c.retryAfter) {

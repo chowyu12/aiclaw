@@ -184,7 +184,7 @@ async function add(): Promise<void> {
 
 async function patch(
   id: number,
-  change: { routingMode?: "auto" | "manual"; modelOverrides?: ProviderRow["modelOverrides"]; apiProtocol?: ProviderRow["apiProtocol"]; name?: string; type?: string; baseUrl?: string; models?: string[]; enabled?: boolean },
+  change: { capabilityOverrides?: ProviderRow["capabilityOverrides"]; routingMode?: "auto" | "manual"; modelOverrides?: ProviderRow["modelOverrides"]; apiProtocol?: ProviderRow["apiProtocol"]; name?: string; type?: string; baseUrl?: string; models?: string[]; enabled?: boolean },
 ): Promise<void> {
   await run(() => actions.updateProvider({ id, ...change }));
 }
@@ -211,6 +211,27 @@ async function changeModelProtocol(provider: ProviderRow, entry: string, event: 
  const overrides={...provider.modelOverrides};
  if(value) overrides[name]=value; else delete overrides[name];
  await patch(provider.id,{modelOverrides:overrides});
+}
+
+type ModelCaps = NonNullable<ProviderRow["capabilityOverrides"]>[string];
+const capabilityFields = ["tools", "vision", "audioInput", "reasoning"] as const;
+function capabilitySource(provider: ProviderRow, entry: string): string {
+ const route=provider.modelRoutes?.[parseModelMark(entry).name];
+ return Object.entries(route?.evidence ?? {}).map(([field,source]) => `${field}: ${source.source}${source.updatedAt ? " · " + new Date(source.updatedAt).toLocaleDateString() : ""}${source.url ? " · " + source.url : ""}`).join("\n");
+}
+async function changeCapability(provider: ProviderRow, entry: string, field: keyof ModelCaps, event: Event): Promise<void> {
+ const input=event.target as HTMLInputElement;
+ const name=parseModelMark(entry).name;
+ const prior=provider.capabilityOverrides?.[name] ?? {};
+ const value=input.value.trim();
+ input.value=String(prior[field] ?? "");
+ const caps={...prior};
+ if (!value) delete caps[field];
+ else if(field === "contextWindow") caps.contextWindow=Number(value);
+ else Object.assign(caps,{[field]:value});
+ const overrides={...provider.capabilityOverrides};
+ if(Object.keys(caps).length) overrides[name]=caps; else delete overrides[name];
+ await patch(provider.id,{capabilityOverrides:overrides});
 }
 
 async function saveKey(id: number): Promise<void> {
@@ -452,6 +473,17 @@ function summary(provider: ProviderRow): string {
                 {{ ROLE_LABELS[role] }}
               </label>
               <button class="icon" :title="t(`从清单里移除`)" @click="removeModel(provider, entry)">×</button>
+              <details v-if="advanced[provider.id]" class="model-capabilities">
+                <summary :title="capabilitySource(provider,entry)">{{ t("能力覆盖与来源") }}</summary>
+                <label v-for="field in capabilityFields" :key="field">{{ field }}
+                  <select :aria-label="field" :value="provider.capabilityOverrides?.[parseModelMark(entry).name]?.[field] ?? ''" :disabled="saving" @change="changeCapability(provider,entry,field,$event)">
+                    <option value="">{{ t("自动（推荐）") }}</option><option value="supported">{{ t("支持") }}</option><option value="unsupported">{{ t("不支持") }}</option>
+                  </select>
+                </label>
+                <label>{{ t("推理强度") }}<input :value="provider.capabilityOverrides?.[parseModelMark(entry).name]?.reasoningEfforts ?? ''" placeholder="low,medium,high" :disabled="saving" @change="changeCapability(provider,entry,'reasoningEfforts',$event)" /></label>
+                <label>{{ t("上下文窗口") }}<input type="number" min="1" max="100000000" :value="provider.capabilityOverrides?.[parseModelMark(entry).name]?.contextWindow ?? ''" :disabled="saving" @change="changeCapability(provider,entry,'contextWindow',$event)" /></label>
+                <pre>{{ capabilitySource(provider,entry) }}</pre>
+              </details>
               <!-- 勾反了当场说：选了这个角色一用就是一个莫名其妙的 400，那时已经离这里很远。 -->
               <span v-if="markConflict(entry)" class="hint bad conflict">{{ markConflict(entry) }}</span>
             </div>
@@ -821,4 +853,11 @@ button.small {
 .hint.bad {
   color: var(--danger);
 }
+</style>
+
+<style scoped>
+.model-capabilities { flex-basis: 100%; font-size: 11px; color: var(--muted); }
+.model-capabilities label { display: inline-flex; gap: 6px; align-items: center; margin: 8px 12px 0 0; }
+.model-capabilities input { width: 150px; }
+.model-capabilities pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 </style>

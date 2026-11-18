@@ -107,13 +107,15 @@ export interface HistoryItemView {
 export type APIProtocol = "chat-completions" | "responses" | "anthropic-messages" | "gemini";
 
 export interface ModelRouteView {
+ evidence?:Record<string,{source:string;url?:string;updatedAt?:number}>;
  apiProtocol: APIProtocol;
  source: string;
  sourceUrl?: string;
- capabilities: {tools?:string;vision?:string;audioInput?:string;reasoning?:string;reasoningEfforts?:string};
+ capabilities: {tools?:string;vision?:string;audioInput?:string;reasoning?:string;reasoningEfforts?:string;contextWindow?:number;apiProtocol?:APIProtocol};
 }
 
 export interface ProviderView {
+ capabilityOverrides?:Record<string,ModelRouteView["capabilities"]>;
  defaultBaseUrl?:string;
  routingMode?: "auto" | "manual";
  serviceProfile?: string;

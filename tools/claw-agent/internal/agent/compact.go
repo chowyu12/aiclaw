@@ -91,21 +91,28 @@ func (s *Session) compact(ctx context.Context, turnID string, emitter Emitter) e
 	if err != nil {
 		return err
 	}
-	started := time.Now()
-	response, err := client.Stream(ctx, llm.Request{
-		Model:     model.Model,
-		Messages:  request,
-		MaxTokens: model.MaxTokens,
-	}, nil)
-	// 压缩也花 token，而且往往是最贵的一次（整段历史都要读一遍）。
-	s.recordUsage(store.UsageEvent{
-		Kind: store.UsageModel, Model: model.Model, Detail: "compact",
-		Input: response.Usage.InputTokens, Output: response.Usage.OutputTokens, Total: response.Usage.TotalTokens,
-		Failed: err != nil, DurationMS: time.Since(started).Milliseconds(),
-	})
-	if err != nil {
-		return err
+	var response llm.Response
+	for attempt := 1; ; attempt++ {
+		started := time.Now()
+		response, err = client.Stream(ctx, llm.Request{
+			Model:     model.Model,
+			Messages:  request,
+			MaxTokens: model.MaxTokens,
+		}, nil)
+		// 压缩也花 token，而且往往是最贵的一次（整段历史都要读一遍）。
+		s.recordUsage(store.UsageEvent{
+			Kind: store.UsageModel, Model: model.Model, Detail: "compact",
+			Input: response.Usage.InputTokens, Output: response.Usage.OutputTokens, Total: response.Usage.TotalTokens,
+			Failed: err != nil, DurationMS: time.Since(started).Milliseconds(),
+		})
+		if err == nil {
+			break
+		}
+		if err = s.retryModel(ctx, turnID, emitter, attempt, err); err != nil {
+			return err
+		}
 	}
+
 	summary := strings.TrimSpace(response.Content)
 	if summary == "" {
 		return i18n.E("模型没有给出摘要")

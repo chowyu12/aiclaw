@@ -86,8 +86,15 @@ app.whenReady().then(async()=>{
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
  handle('projectSave',(_e,input)=>{const project={...input,id:input.id||'p_fixture',directories:input.directories.map(path=>path.trim()).filter(Boolean)};const index=groups.groups.findIndex(p=>p.id===project.id);if(index<0)groups.groups.push(project);else groups.groups[index]=project;return groups;});
  handle('groupDelete',(_e,id)=>{groups.groups=groups.groups.filter(p=>p.id!==id);for(const key of Object.keys(groups.assignments))if(groups.assignments[key]===id)delete groups.assignments[key];return groups;});
- handle('sessionAssign',(_e,input)=>{if(input.groupId)groups.assignments[input.sessionId]=input.groupId;else delete groups.assignments[input.sessionId];return groups;});
- handle('groupRead',()=>groups);handle('groupCollapse',(_e,input)=>{groups.collapsed[input.groupId]=input.collapsed;groups.seenAt[input.groupId]=Date.now();return groups;});handle('sessionSearch',()=>list().filter(s=>!s.parentId));handle('mcpRead',()=>mcpServers);handle('skillList',()=>{if(skillListFails)throw Error('skill list unavailable');return skillCatalog;});
+ const assignmentCalls=[];let assignmentFails=false;
+ handle('sessionAssign',(_e,input)=>{assignmentCalls.push(input);if(assignmentFails)throw Error('fixture project move failed');if(input.groupId)groups.assignments[input.sessionId]=input.groupId;else delete groups.assignments[input.sessionId];return groups;});
+ let streamSearch=false;
+ const searches=[],searchCancels=[];
+ handle('groupRead',()=>groups);handle('groupCollapse',(_e,input)=>{groups.collapsed[input.groupId]=input.collapsed;groups.seenAt[input.groupId]=Date.now();return groups;});handle('sessionSearchCancel',(_e,id)=>{searchCancels.push(id);return {cancelled:true};});handle('sessionSearch',(_e,keyword,requestId)=>{
+ if(!streamSearch)return list().filter(s=>!s.parentId);
+ const item={...list()[0],id:'partial-'+searches.length,title:keyword+' partial'};
+ return new Promise(resolve=>{searches.push({keyword,requestId,resolve,item});win.webContents.send(IPC.onAgentEvent,{method:'session/searchPartial',params:{requestId,keyword,sessions:[item]}});});
+ });handle('mcpRead',()=>mcpServers);handle('skillList',()=>{if(skillListFails)throw Error('skill list unavailable');return skillCatalog;});
  let providerFixture={id:1,name:'fixture',type:'openai-compatible',baseUrl:'https://fixture.invalid/v1',apiProtocol:'chat-completions',routingMode:'auto',serviceProfile:'openai-compatible',modelOverrides:{},modelRoutes:{test:{apiProtocol:'chat-completions',source:'service:openai-compatible',capabilities:{}}},enabled:true,apiKeySet:true,models:['test','test2']},providerSaveFails=false;const providerUpdates=[];
  handle('providerList',()=>[providerFixture]);
  handle('providerUpdate',(_event,input)=>{providerUpdates.push(input);if(providerSaveFails)throw Error('fixture protocol save failed');providerFixture={...providerFixture,...input};return providerFixture;});
@@ -205,6 +212,16 @@ app.whenReady().then(async()=>{
    await js("(()=>{const s=document.querySelector('.model-protocol');s.value='';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
    check('clearing an override returns the model to automatic routing',await wait("document.querySelector('.model-protocol')?.value===''")&&!Object.keys(providerFixture.modelOverrides).length);
 
+
+   await js("document.querySelector('.model-capabilities summary').click()");
+   await js("(()=>{const s=document.querySelector('.model-capabilities select[aria-label=tools]');s.value='unsupported';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   check('advanced capability override persists an explicit unsupported value through preload',await wait("document.querySelector('.model-capabilities select[aria-label=tools]')?.value==='unsupported'")&&providerFixture.capabilityOverrides?.test?.tools==='unsupported');
+   providerSaveFails=true;
+   await js("(()=>{const s=document.querySelector('.model-capabilities select[aria-label=vision]');s.value='supported';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   check('failed capability save preserves automatic resolution',await wait("document.querySelector('.model-capabilities select[aria-label=vision]')?.value==='' && document.body.innerText.includes('fixture protocol save failed')")&&!providerFixture.capabilityOverrides.test.vision);
+   providerSaveFails=false;
+   await js("(()=>{const s=document.querySelector('.model-capabilities select[aria-label=tools]');s.value='';s.dispatchEvent(new Event('change',{bubbles:true}));})()");
+   check('clearing the final capability override restores automatic selection',await wait("document.querySelector('.model-capabilities select[aria-label=tools]')?.value===''")&&!providerFixture.capabilityOverrides.test);
    await js("[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='知道了')?.click()");
   }
 
@@ -398,6 +415,26 @@ app.whenReady().then(async()=>{
  await wait("!!document.querySelector('.command-search input')");
  await js("document.querySelector('.command-search input').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
  check('Escape dismisses search before the conversation sidebar',await wait("!document.querySelector('.session-command-palette') && document.querySelector('.sidebar').getClientRects().length>0 && document.activeElement===document.querySelector('.sidebar .search-toggle')"));
+
+ streamSearch=true;
+ await js("document.querySelector('.sidebar .search-toggle').click()");
+ const typeSearch=async value=>js(`(()=>{const input=document.querySelector('.command-search input');input.value=${JSON.stringify(value)};input.dispatchEvent(new Event('input',{bubbles:true}))})()`);
+ await typeSearch('streamA');
+ check('search shows provisional session matches while the scan is still loading',await wait("document.querySelector('[data-command=\"session-partial-0\"]') && document.querySelector('.command-results [role=status]')"));
+ const firstSearch=searches[0];
+ await typeSearch('streamB');
+ await wait("!!document.querySelector('[data-command=\"session-partial-1\"]')");
+ await typeSearch('streamA');
+ await wait("!!document.querySelector('[data-command=\"session-partial-2\"]')");
+ win.webContents.send(IPC.onAgentEvent,{method:'session/searchPartial',params:{requestId:firstSearch.requestId,keyword:firstSearch.keyword,sessions:[{...firstSearch.item,id:'stale',title:'stale result'}]}});
+ firstSearch.resolve([{...firstSearch.item,id:'old-final',title:'old final'}]);
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ check('same-query stale partial and final search results cannot overwrite the newest generation',await js("!!document.querySelector('[data-command=\"session-partial-2\"]') && !document.querySelector('[data-command=\"session-stale\"]') && !document.querySelector('[data-command=\"session-old-final\"]')") && searchCancels.includes(firstSearch.requestId));
+ searches[2].resolve([{...searches[2].item,id:'current-final',title:'current final'}]);
+ check('final search results replace provisional results and finish loading',await wait("document.querySelector('[data-command=\"session-current-final\"]') && !document.querySelector('[data-command=\"session-partial-2\"]') && !document.querySelector('.command-results [role=status]')"));
+ searches[1].resolve([]);
+ streamSearch=false;
+ await js("document.querySelector('.command-close').click()");
  check('sidebar rows retain readable text and align with project names',await js("(()=>{const row=document.querySelector('.bucket .item .title'),name=document.querySelector('.bucket-name');return parseFloat(getComputedStyle(row).fontSize)>=12 && Math.abs(row.getBoundingClientRect().left-name.getBoundingClientRect().left)<3})()"));
  check('child-agent counts stay on one line and retain accessible labels',await js("(()=>{const toggle=document.querySelector('.agents-toggle');return toggle.getAttribute('aria-label').includes('个子 agent') && toggle.closest('.item').getBoundingClientRect().height<=36})()"));
  check('sidebar uses only workspaces and general chats even with an old grouping preference',await js("!document.querySelector('.grouping') && !document.querySelector('.head button[title=\"新建分组\"]') && !document.querySelector('.item-actions button[title=\"移动到分组\"]') && [...document.querySelectorAll('.bucket-name')].map(b=>b.textContent.trim()).join('|')==='smoke|smoke|普通会话' && document.querySelectorAll('.bucket-detail').length===2"));
@@ -1206,8 +1243,30 @@ app.whenReady().then(async()=>{
  check('multiple project directories use short labels while retaining exact paths',await js("(()=>{const select=document.querySelector('.workspace-menu .project-directory select');return select.options[0].textContent==='first'&&select.options[0].value==='/tmp/first'&&select.options[1].textContent==='second'&&select.title==='/tmp/first';})()"));
  check('project sidebar does not display directory selectors',await js("!document.querySelector('.bucket .project-directory')"));
  await js("document.querySelector('.workspace-menu-backdrop').click()");
- await js("(()=>{const select=document.querySelector('.project-move');select.value='p_fixture';select.dispatchEvent(new Event('change',{bubbles:true}))})()");
- check('moving chat changes project membership without moving files',await wait("document.querySelector('[data-bucket-id=\"p_fixture\"] .item')")&&sessionWorkspace==='/tmp/smoke');
+ check('chat rows have no project dropdown and support native dragging',await js("!document.querySelector('.project-move') && document.querySelector('.bucket .item[data-session-id]')?.draggable"));
+ const assignmentsBeforeDrag=assignmentCalls.length;
+ await js("(()=>{const dt=new DataTransfer();dt.setData('application/x-aiclaw-session','s');const target=document.querySelector('[data-bucket-id=\"p_fixture\"]');target.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:dt}));})()");
+ check('external drag payloads cannot move conversations',assignmentCalls.length===assignmentsBeforeDrag);
+ const draggedSession=await js("document.querySelector('.bucket .item[data-session-id]').dataset.sessionId");
+ const originalWorkspace=list().find(session=>session.id===draggedSession)?.workdir;
+ const activeTitle=await js("document.querySelector('.chat-session-title').textContent");
+ const beginSessionDrag=async()=>js(`(()=>{const source=document.querySelector('[data-session-id="${draggedSession}"]');window.sessionDragFixture=new DataTransfer();source.dispatchEvent(new DragEvent('dragstart',{bubbles:true,cancelable:true,dataTransfer:window.sessionDragFixture}));document.querySelector('[data-bucket-id="p_fixture"]').dispatchEvent(new DragEvent('dragover',{bubbles:true,cancelable:true,dataTransfer:window.sessionDragFixture}));})()`);
+ const dropSessionDrag=async()=>js("document.querySelector('[data-bucket-id=\"p_fixture\"]').dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:window.sessionDragFixture}))");
+ await beginSessionDrag();
+ check('valid project drag highlights the destination',await wait("document.querySelector('[data-bucket-id=\"p_fixture\"]').classList.contains('session-drop-target')"));
+ await js(`document.querySelector('[data-session-id="${draggedSession}"]').dispatchEvent(new DragEvent('dragend',{bubbles:true}))`);
+ check('canceling a drag clears the destination without changing membership',await wait("!document.querySelector('.session-drop-target')")&&assignmentCalls.length===assignmentsBeforeDrag);
+ assignmentFails=true;await beginSessionDrag();await dropSessionDrag();
+ check('failed project moves preserve the conversation in its original group and show the error',await wait("document.querySelector('.error-bar')?.textContent.includes('fixture project move failed')")&&!groups.assignments[draggedSession]?.startsWith('p_')&&await js(`!document.querySelector('[data-bucket-id="p_fixture"] [data-session-id="${draggedSession}"]')`));
+ assignmentFails=false;
+ await js("document.querySelector('[data-bucket-id=\"p_fixture\"] .fold').click()");
+ await beginSessionDrag();await dropSessionDrag();
+ check('dropping a chat moves project membership, expands the target and preserves workspace and selection',await wait(`!!document.querySelector('[data-bucket-id="p_fixture"] [data-session-id="${draggedSession}"]')`)&&groups.assignments[draggedSession]==='p_fixture'&&groups.collapsed.p_fixture===false&&list().find(session=>session.id===draggedSession)?.workdir===originalWorkspace&&await js(`document.querySelector('.chat-session-title').textContent===${JSON.stringify(activeTitle)}`));
+ const assignmentsAfterDrag=assignmentCalls.length;
+ await beginSessionDrag();await dropSessionDrag();
+ check('dropping into the same project is a no-op',assignmentCalls.length===assignmentsAfterDrag);
+ await win.reload();await openSessions();
+ check('dragged project membership survives renderer reload',await wait(`!!document.querySelector('[data-bucket-id="p_fixture"] [data-session-id="${draggedSession}"]')`));
  await js("document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"工作区更多操作\"]').click()");await wait("!!document.querySelector('.workspace-menu .project-directory')");
  await js("(()=>{const select=document.querySelector('.workspace-menu .project-directory select');select.value='/tmp/second';select.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('.workspace-menu-backdrop').click();document.querySelector('[data-bucket-id=\"p_fixture\"] button[aria-label=\"在此工作区新建会话\"]').click()})()");
  check('project new chat uses the selected second directory and keeps project membership',await wait("document.querySelectorAll('[data-bucket-id=\"p_fixture\"] .item').length===2")&&startedWorkspaces.at(-1)==='/tmp/second');

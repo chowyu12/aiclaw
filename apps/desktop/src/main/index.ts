@@ -399,7 +399,8 @@ function registerIpc(): void {
     sessions.archiveSession(String(input.sessionId), input.archived === true),
   );
   ipcMain.handle(IPC.sessionArchived, () => sessions.listArchived());
-  ipcMain.handle(IPC.sessionSearch, (_event, keyword: string) => sessions.searchSessions(keyword));
+  ipcMain.handle(IPC.sessionSearchCancel, (_event, requestId: string) => sessions.cancelSearch(requestId));
+  ipcMain.handle(IPC.sessionSearch, (_event, keyword: string, requestId?: string) => sessions.searchSessions(keyword, requestId));
   ipcMain.handle(
     IPC.sessionWorkspace,
     (_event, input: { sessionId: string; workspace: string }) => {

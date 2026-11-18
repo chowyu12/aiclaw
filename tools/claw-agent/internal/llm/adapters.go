@@ -121,9 +121,13 @@ func (c *Client) ListModelsAndMetadata(ctx context.Context) ([]string, map[strin
 	}
 	var catalog struct {
 		Data []struct {
-			ID           string    `json:"id"`
-			Parameters   *[]string `json:"supported_parameters"`
-			Architecture struct {
+			ID               string                  `json:"id"`
+			Capabilities     model.ModelCapabilities `json:"capabilities"`
+			ContextLength    int                     `json:"context_length"`
+			ReasoningEfforts []string                `json:"reasoning_efforts"`
+			APIProtocol      model.APIProtocol       `json:"api_protocol"`
+			Parameters       *[]string               `json:"supported_parameters"`
+			Architecture     struct {
 				Inputs *[]string `json:"input_modalities"`
 			} `json:"architecture"`
 		} `json:"data"`
@@ -133,7 +137,16 @@ func (c *Client) ListModelsAndMetadata(ctx context.Context) ([]string, map[strin
 	}
 	caps := map[string]model.ModelCapabilities{}
 	for _, entry := range catalog.Data {
-		cap := model.ModelCapabilities{}
+		cap := entry.Capabilities
+		if entry.ContextLength > 0 && entry.ContextLength <= 100_000_000 {
+			cap.ContextWindow = entry.ContextLength
+		}
+		if len(entry.ReasoningEfforts) > 0 {
+			cap.ReasoningEfforts = strings.Join(entry.ReasoningEfforts, ",")
+		}
+		if entry.APIProtocol != "" && entry.APIProtocol.Valid() {
+			cap.APIProtocol = entry.APIProtocol
+		}
 		if entry.Parameters != nil {
 			cap.Tools = "unsupported"
 			cap.Reasoning = "unsupported"
@@ -158,6 +171,7 @@ func (c *Client) ListModelsAndMetadata(ctx context.Context) ([]string, map[strin
 				}
 			}
 		}
+		cap = cap.Normalized()
 		if cap != (model.ModelCapabilities{}) {
 			caps[entry.ID] = cap
 		}

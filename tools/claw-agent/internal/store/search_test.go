@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -155,5 +156,23 @@ func TestFoldedSnippetUsesOriginalRunePositions(t *testing.T) {
 	got := snippet(string(raw), "STRASSE")
 	if !utf8.ValidString(got) || !strings.Contains(got, "Straße😀") || !strings.HasPrefix(got, "…") || !strings.HasSuffix(got, "…") {
 		t.Fatal(got)
+	}
+}
+
+func TestSearchStreamsMetadataBeforeBodyAndHonorsCancellation(t *testing.T) {
+	s := newStore(t)
+	save(t, s, "title", "needle title", [2]string{"user", "unrelated"})
+	time.Sleep(time.Millisecond)
+	save(t, s, "body", "other", [2]string{"user", "needle body"})
+	var batches [][]Summary
+	final, err := s.SearchStream(context.Background(), "needle", 50, func(items []Summary) { batches = append(batches, append([]Summary(nil), items...)) })
+	if err != nil || len(batches) != 2 || batches[0][0].ID != "title" || len(final) != 2 || final[0].ID != "body" {
+		t.Fatalf("partial/final: %+v %+v %v", batches, final, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	count := 0
+	_, err = s.SearchStream(ctx, "needle", 50, func([]Summary) { count++; cancel() })
+	if !errors.Is(err, context.Canceled) || count != 1 {
+		t.Fatal("cancel continued scan", err, count)
 	}
 }

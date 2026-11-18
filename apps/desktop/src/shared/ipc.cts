@@ -44,6 +44,7 @@ export const IPC = {
   sessionInterrupt: "session:interrupt",
   sessionList: "session:list",
   sessionSearch: "session:search",
+ sessionSearchCancel: "session:searchCancel",
   sessionWorkspace: "session:workspace",
   sessionRename: "session:rename",
   sessionDelete: "session:delete",

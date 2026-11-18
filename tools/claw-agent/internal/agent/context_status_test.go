@@ -13,6 +13,11 @@ import (
 func TestIncompleteCompactionPreservesHistory(t *testing.T) {
 	for _, ending := range []string{"", "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\ndata: [DONE]\n\n"} {
 		model := &fakeModel{script: []string{"data: {\"choices\":[{\"delta\":{\"content\":\"half summary\"}}]}\n\n" + ending}}
+		if ending == "" {
+			for len(model.script) < 5 {
+				model.script = append(model.script, model.script[0])
+			}
+		}
 		s := newTestSession(t, model, protocol.ApprovalBypass)
 		persistTestSession(t, s)
 		s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "original task"})
@@ -84,7 +89,7 @@ func TestCompactionMetadataOnlyRecordsSuccessfulCompaction(t *testing.T) {
 		{"provider failure", "!500 unavailable", 0, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := newTestSession(t, &fakeModel{script: []string{tc.response}}, protocol.ApprovalBypass)
+			s := newTestSession(t, &fakeModel{script: []string{tc.response, tc.response, tc.response, tc.response, tc.response}}, protocol.ApprovalBypass)
 			persistTestSession(t, s)
 			s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "Keep this task"})
 			s.appendMessage(llm.Message{Role: llm.RoleAssistant, Content: strings.Repeat("completed work ", 100)})
@@ -117,5 +122,27 @@ func TestCompactionRecordsPersistAndAreBounded(t *testing.T) {
 	}
 	if result.Records[0].Before <= result.Records[0].After || result.Records[0].At <= 0 {
 		t.Fatal("invalid recorded estimate")
+	}
+}
+
+func TestCompactionRetriesTransientFailureWithFreshSummary(t *testing.T) {
+	model := &fakeModel{script: []string{"data: {\"choices\":[{\"delta\":{\"content\":\"partial must be discarded\"}}]}\n\n", sseText("complete summary")}}
+	s := newTestSession(t, model, protocol.ApprovalBypass)
+	persistTestSession(t, s)
+	s.appendMessage(llm.Message{Role: llm.RoleUser, Content: "original"})
+	if err := s.compact(context.Background(), "turn", &recordingEmitter{}); err != nil {
+		t.Fatal(err)
+	}
+	if model.calls != 2 {
+		t.Fatal("missing retry", model.calls)
+	}
+	for _, m := range s.snapshotMessages() {
+		if strings.Contains(m.Content, "partial must be discarded") {
+			t.Fatal("partial summary mixed into retry")
+		}
+	}
+	status, err := s.ContextStatus()
+	if err != nil || status.Compactions != 1 {
+		t.Fatal(status, err)
 	}
 }

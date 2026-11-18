@@ -1,11 +1,14 @@
 package agent
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -370,5 +373,94 @@ func TestPendingPoolBorrowerCanCancelIndependently(t *testing.T) {
 	defer pool.mu.Unlock()
 	if entry.refs != 1 || pool.entries[key] != entry {
 		t.Fatal("cancelling a borrower changed the original preparation")
+	}
+}
+
+func TestMCPRuntimeIdentitySeparatesPolicyFromProcess(t *testing.T) {
+	config := protocol.MCPServerConfig{Command: "fixture", Args: []string{"server"}, Env: map[string]string{"TOKEN": "fixture"}}
+	key := fingerprint("service", config)
+	config.Trusted = true
+	config.EnabledTools = []string{"one"}
+	if key != fingerprint("service", config) {
+		t.Fatal("session policy restarted runtime")
+	}
+	config.Env = map[string]string{"TOKEN": "other-fixture"}
+	if key == fingerprint("service", config) {
+		t.Fatal("credential change reused runtime")
+	}
+}
+
+func TestMCPStdioFixture(t *testing.T) {
+	path := os.Getenv("AICLAW_MCP_STDIO_FIXTURE")
+	if path == "" {
+		return
+	}
+	log, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		os.Exit(2)
+	}
+	_, _ = log.WriteString("start\n")
+	_ = log.Close()
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		var request struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &request) != nil || len(request.ID) == 0 {
+			continue
+		}
+		result := json.RawMessage(`{}`)
+		switch request.Method {
+		case "initialize":
+			result = json.RawMessage(`{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"fixture","version":"1"}}`)
+		case "tools/list":
+			result = json.RawMessage(`{"tools":[{"name":"ping","inputSchema":{"type":"object"}}]}`)
+		case "tools/call":
+			result = json.RawMessage(`{"content":[{"type":"text","text":"pong"}]}`)
+		}
+		raw, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": request.ID, "result": result})
+		fmt.Println(string(raw))
+	}
+	os.Exit(0)
+}
+func TestPoolVerifiedStdioCatalogDefersUnusedSessions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "starts.log")
+	config := protocol.MCPServerConfig{Command: os.Args[0], Args: []string{"-test.run=^TestMCPStdioFixture$"}, Env: map[string]string{"AICLAW_MCP_STDIO_FIXTURE": path}}
+	pool := newMCPPool()
+	client, key, err := pool.acquire(context.Background(), "fixture", config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	def := client.Tools()[0]
+	pool.release(key)
+	lazy := pool.deferred("fixture", config, nil)
+	if lazy == nil {
+		t.Fatal("verified catalog not cached")
+	}
+	defer lazy.Close()
+	if err = lazy.RefreshTools(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	starts, err := os.ReadFile(path)
+	if err != nil || string(starts) != "start\n" {
+		t.Fatal("unused session started server", string(starts), err)
+	}
+	result, err := lazy.CallToolExpected(context.Background(), def, json.RawMessage(`{}`))
+	if err != nil || result != "pong" {
+		t.Fatal(result, err)
+	}
+	starts, _ = os.ReadFile(path)
+	if string(starts) != "start\nstart\n" {
+		t.Fatal("first call did not activate exactly once", string(starts))
+	}
+	changed := config
+	changed.Args = append(append([]string(nil), config.Args...), "-test.v")
+	if pool.deferred("fixture", changed, nil) != nil {
+		t.Fatal("changed command reused cached declarations")
+	}
+	config.URL = "http://example.invalid"
+	if pool.deferred("fixture", config, nil) != nil {
+		t.Fatal("HTTP service used stdio cache")
 	}
 }
