@@ -533,8 +533,9 @@ type PluginSetConfigParams struct {
 // 宿主开会话时把它并进 session/start 的参数。
 type PluginContributions struct {
 	/** 键是挂载名（也是工具名前缀）。 */
-	MCPServers map[string]MCPServerConfig `json:"mcpServers"`
-	Skills     []PluginSkill              `json:"skills"`
+	MCPServers   map[string]MCPServerConfig `json:"mcpServers"`
+	MCPConflicts []string                   `json:"mcpConflicts,omitempty"`
+	Skills       []PluginSkill              `json:"skills"`
 	/** 有启用中的插件贡献了 computer use。 */
 	ComputerUse bool `json:"computerUse"`
 	/** 启用了邮件插件（且填好了邮箱）。 */

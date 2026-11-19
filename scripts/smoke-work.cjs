@@ -489,6 +489,22 @@ app.whenReady().then(async()=>{
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
 
 
+ const mcpManager=Object.create(SessionManager.prototype);
+ let manualMcp=[],internalSearch=false;
+ mcpManager.agentBin='/fixture/claw-agent';
+ mcpManager.searchEnabled=async()=>internalSearch;
+ mcpManager.store={appDbPath:'/fixture/app.db',readMcpServers:()=>manualMcp};
+ const mcpContributions={skills:[],computerUse:false,mcpServers:{shared:{url:'https://plugin.example/mcp'}}};
+ manualMcp=[{id:'1',label:'shared',url:'https://manual.example/mcp',transport:'http',enabled:true}];
+ await assert.rejects(mcpManager.buildMcpServers(mcpContributions),/shared/);
+ manualMcp.push({...manualMcp[0],id:'2',label:'web_search'});
+ internalSearch=true;
+ await assert.rejects(mcpManager.buildMcpServers(mcpContributions),/shared, web_search/);
+ await assert.rejects(mcpManager.buildMcpServers({...mcpContributions,mcpConflicts:['plugins-only']}),/plugins-only/);
+ manualMcp=[{...manualMcp[0],label:'shared',enabled:false},{...manualMcp[1],label:'manual'}];
+ const mounts=await mcpManager.buildMcpServers(mcpContributions);
+ check('MCP conflicts are rejected before mounting and distinct names remain stable', mounts.shared.url==='https://plugin.example/mcp' && mounts.manual.url==='https://manual.example/mcp' && mounts.web_search.trusted);
+
  // Background resumes must not select another project's workspace or skills.
  const scopedManager=Object.create(SessionManager.prototype),scopeCalls=[];
  const scopedSkills={workspace:'/project-a',setWorkspace(value){this.workspace=value;}};

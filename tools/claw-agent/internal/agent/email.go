@@ -32,7 +32,7 @@ type Mailbox func(ctx context.Context) (mail.Account, error)
 // Option 是建会话时的可选项。
 type Option func(*Session)
 
-func WithMCPAuth(auth func(context.Context, string) (string, error)) Option {
+func WithMCPAuth(auth func(context.Context, string, string) (string, error)) Option {
 	return func(s *Session) { s.mcpAuth = auth }
 }
 

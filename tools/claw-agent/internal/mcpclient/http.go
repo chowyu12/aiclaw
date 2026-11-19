@@ -34,7 +34,7 @@ type httpTransport struct {
 	onToolsChanged func()
 	watchCancel    context.CancelFunc
 	watchMu        sync.Mutex
-	accessToken    func(context.Context) (string, error)
+	accessToken    func(context.Context, string) (string, error)
 	url            string
 	headers        map[string]string
 	client         *http.Client
@@ -130,6 +130,36 @@ func (t *httpTransport) Diagnostics() string {
 	return "\n" + t.lastStatus
 }
 
+// Retry an OAuth rejection once for discovery and initialization. Never replay a tool call.
+func (t *httpTransport) doAuthenticated(req *http.Request, retryUnauthorized bool) (*http.Response, error) {
+	if t.accessToken == nil {
+		return t.client.Do(req)
+	}
+	token, err := t.accessToken(req.Context(), "")
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := t.client.Do(req)
+	if err != nil || !retryUnauthorized || response.StatusCode != http.StatusUnauthorized {
+		return response, err
+	}
+	response.Body.Close()
+	replacement, err := t.accessToken(req.Context(), token)
+	if err != nil {
+		return nil, err
+	}
+	retry := req.Clone(req.Context())
+	if req.GetBody != nil {
+		retry.Body, err = req.GetBody()
+		if err != nil {
+			return nil, err
+		}
+	}
+	retry.Header.Set("Authorization", "Bearer "+replacement)
+	return t.client.Do(retry)
+}
+
 // post 发一条消息并取回 wantID 对应的响应。wantID 为 nil 表示通知，不等回应。
 func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *int64) (rpcResponse, error) {
 	body, err := json.Marshal(message)
@@ -148,20 +178,13 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 	for key, value := range t.headers {
 		request.Header.Set(key, value)
 	}
-	if t.accessToken != nil {
-		token, e := t.accessToken(ctx)
-		if e != nil {
-			return rpcResponse{}, e
-		}
-		request.Header.Set("Authorization", "Bearer "+token)
-	}
 	t.sessionMu.Lock()
 	if t.sessionID != "" {
 		request.Header.Set("Mcp-Session-Id", t.sessionID)
 	}
 	t.sessionMu.Unlock()
 
-	response, err := t.client.Do(request)
+	response, err := t.doAuthenticated(request, message.Method == "initialize" || message.Method == "tools/list")
 	if err != nil {
 		t.setStatus(i18n.D("请求失败：{err}", "err", err))
 		return rpcResponse{}, fmt.Errorf("%s%w", i18n.D("连接 MCP server 失败："), err)
@@ -294,14 +317,7 @@ func (t *httpTransport) startNotifications() {
 			if id != "" {
 				req.Header.Set("Mcp-Session-Id", id)
 			}
-			if t.accessToken != nil {
-				token, e := t.accessToken(ctx)
-				if e != nil {
-					return
-				}
-				req.Header.Set("Authorization", "Bearer "+token)
-			}
-			response, e := t.client.Do(req)
+			response, e := t.doAuthenticated(req, true)
 			if e == nil {
 				if response.StatusCode == http.StatusMethodNotAllowed || response.StatusCode == http.StatusNotFound {
 					response.Body.Close()

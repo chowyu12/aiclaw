@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -147,6 +148,28 @@ func TestUnicodeSearchAndSnippetsShareCaseFolding(t *testing.T) {
 	got, err := s.Search(context.Background(), "STRASSE", 5)
 	if err != nil || len(got) != 1 {
 		t.Fatalf("title fold: %+v %v", got, err)
+	}
+}
+
+func TestSearchFindsAndStreamsSnippetsWithLiteralWhitespace(t *testing.T) {
+	for _, separator := range []string{"  ", "\t", "\n", "\r\n"} {
+		t.Run(fmt.Sprintf("%q", separator), func(t *testing.T) {
+			s := newStore(t)
+			query := "项目" + separator + "名字"
+			body := "检查 " + query + " 是否正确"
+			save(t, s, "match", "unrelated", [2]string{"assistant", body})
+			save(t, s, "collapsed", "unrelated", [2]string{"assistant", "检查 项目 名字 是否正确"})
+			var streamed []Summary
+			found, err := s.SearchStream(t.Context(), query, 10, func(batch []Summary) {
+				streamed = append(streamed, batch...)
+			})
+			if err != nil || len(found) != 1 || found[0].ID != "match" || found[0].Snippet != body {
+				t.Fatalf("search returned %+v, %v", found, err)
+			}
+			if len(streamed) != 1 || streamed[0].ID != "match" || streamed[0].Snippet != body {
+				t.Fatalf("streamed %+v", streamed)
+			}
+		})
 	}
 }
 

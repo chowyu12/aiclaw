@@ -524,7 +524,7 @@ func (s *Server) sessionOptions(id string) []agent.Option {
 		return options
 	}
 	// 子 agent 同理只给用户自己的会话：外部的人不该能借助手在用户电脑上开一群 agent。
-	options = append(options, agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s}), agent.WithMCPAuth(s.oauth.AccessToken), agent.WithChildModels(s.childModelChoices))
+	options = append(options, agent.WithCollaboration(s.collab), agent.WithThreads(threadSource{server: s}), agent.WithMCPAuth(s.oauth.Token), agent.WithChildModels(s.childModelChoices))
 	if s.plugins != nil {
 		options = append(options, agent.WithMailbox(s.plugins.EmailAccount))
 	}
@@ -807,9 +807,11 @@ func (s *Server) handleMCPProbe(ctx context.Context, f frame) {
 	probeCtx, cancel := context.WithTimeout(ctx, mcpProbeTimeout)
 	defer cancel()
 
-	var token func(context.Context) (string, error)
+	var token func(context.Context, string) (string, error)
 	if params.Server.OAuth {
-		token = func(ctx context.Context) (string, error) { return s.oauth.AccessToken(ctx, params.Server.URL) }
+		token = func(ctx context.Context, rejected string) (string, error) {
+			return s.oauth.Token(ctx, params.Server.URL, rejected)
+		}
 	}
 	client, err := mcpclient.Start(probeCtx, mcpclient.Config{
 		AccessToken:    token,

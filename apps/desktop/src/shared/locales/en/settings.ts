@@ -1,5 +1,6 @@
 /** 英文词典：settings 这一组界面（中文原文 → 英文）。 */
 export const settings: Record<string, string> = {
+  "MCP 服务名称冲突：{names}。请在设置中重命名或停用同名服务。": "Conflicting MCP server names: {names}. Rename or disable a conflicting server in Settings.",
  "雾蓝浅紫": "Misty blue & lavender",
  "薄荷青绿": "Mint green",
   "关于": "About",

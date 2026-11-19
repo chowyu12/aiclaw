@@ -53,13 +53,20 @@ type oauthAttempt struct {
 	timer  *time.Timer
 	status OAuthStatus
 }
+type oauthRefresh struct {
+	done  chan struct{}
+	token string
+	err   error
+}
 type OAuthManager struct {
-	mu       sync.Mutex
-	cipher   *secrets.Cipher
-	path     string
-	records  map[string]oauthRecord
-	attempts map[string]*oauthAttempt
-	http     *http.Client
+	mu        sync.Mutex
+	cipher    *secrets.Cipher
+	path      string
+	records   map[string]oauthRecord
+	attempts  map[string]*oauthAttempt
+	refreshes map[string]*oauthRefresh
+	closed    bool
+	http      *http.Client
 }
 
 func NewOAuthManager(dir string) (*OAuthManager, error) {
@@ -67,7 +74,7 @@ func NewOAuthManager(dir string) (*OAuthManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := &OAuthManager{cipher: cipher, path: filepath.Join(dir, "mcp-oauth.enc"), records: map[string]oauthRecord{}, attempts: map[string]*oauthAttempt{}, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
+	m := &OAuthManager{cipher: cipher, path: filepath.Join(dir, "mcp-oauth.enc"), records: map[string]oauthRecord{}, attempts: map[string]*oauthAttempt{}, refreshes: map[string]*oauthRefresh{}, http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	body, err := os.ReadFile(m.path)
 	if os.IsNotExist(err) {
 		return m, nil
@@ -238,6 +245,9 @@ func (m *OAuthManager) Begin(ctx context.Context, input OAuthInput) (OAuthStatus
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.closed {
+		return OAuthStatus{}, errors.New("MCP OAuth manager closed")
+	}
 	if a := m.attempts[resource]; a != nil && a.status.State == "authorizing" {
 		return OAuthStatus{}, errors.New("OAuth login is already in progress")
 	}
@@ -306,6 +316,7 @@ func (m *OAuthManager) Begin(ctx context.Context, input OAuthInput) (OAuthStatus
 	mux := http.NewServeMux()
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	a.server = server
+	delete(m.refreshes, resource)
 	m.attempts[resource] = a
 	mux.HandleFunc("/oauth/callback", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
@@ -441,37 +452,83 @@ func (m *OAuthManager) Status(raw string) (OAuthStatus, error) {
 	return OAuthStatus{State: state, ExpiresAt: r.ExpiresAt}, nil
 }
 func (m *OAuthManager) AccessToken(ctx context.Context, raw string) (string, error) {
+	return m.Token(ctx, raw, "")
+}
+
+// Token refreshes an expired or rejected token. A cancelled waiter does not
+// interrupt an exchange that may already have rotated the server credential.
+func (m *OAuthManager) Token(ctx context.Context, raw, rejected string) (string, error) {
 	resource, err := resourceURL(raw)
 	if err != nil {
 		return "", err
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if a := m.attempts[resource]; a != nil && a.status.State == "needs_login" {
-		return "", errors.New("MCP OAuth login required")
+	if err := ctx.Err(); err != nil {
+		m.mu.Unlock()
+		return "", err
 	}
 	r, ok := m.records[resource]
-	if !ok {
+	a := m.attempts[resource]
+	if m.closed || !ok || a != nil && a.status.State == "needs_login" {
+		m.mu.Unlock()
 		return "", errors.New("MCP OAuth login required")
 	}
-	if r.ExpiresAt == 0 || r.ExpiresAt > time.Now().Unix()+30 {
+	refresh := m.refreshes[resource]
+	if refresh == nil && r.AccessToken != rejected && (r.ExpiresAt == 0 || r.ExpiresAt > time.Now().Unix()+30) {
+		m.mu.Unlock()
 		return r.AccessToken, nil
 	}
-	if r.RefreshToken == "" {
-		return "", errors.New("MCP OAuth token expired; log in again")
+	if r.RefreshToken == "" || a != nil && a.status.State == "authorizing" {
+		m.mu.Unlock()
+		return "", errors.New("MCP OAuth token unavailable; complete login")
 	}
-	values := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {r.RefreshToken}, "resource": {resource}}
-	if err = m.exchange(ctx, &r, values); err != nil {
+	if refresh == nil {
+		refresh = &oauthRefresh{done: make(chan struct{})}
+		m.refreshes[resource] = refresh
+		go m.refresh(resource, r, refresh)
+	}
+	m.mu.Unlock()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-refresh.done:
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return refresh.token, refresh.err
+	}
+}
+
+func (m *OAuthManager) refresh(resource string, record oauthRecord, pending *oauthRefresh) {
+	defer close(pending.done)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	values := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {record.RefreshToken}, "resource": {resource}}
+	updated := record
+	err := m.exchange(ctx, &updated, values)
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.refreshes[resource] != pending || m.records[resource] != record {
+		pending.err = errors.New("MCP OAuth credentials changed during refresh")
+		return
+	}
+	delete(m.refreshes, resource)
+	if err != nil {
 		m.attempts[resource] = &oauthAttempt{status: OAuthStatus{State: "needs_login", Error: err.Error()}}
-		return "", err
+		pending.err = err
+		return
 	}
-	m.records[resource] = r
+	m.records[resource] = updated
 	if err = m.save(); err != nil {
+		// Keep the rotated credential in memory. It may already have replaced
+		// the old token at the provider, even though the local write failed.
 		m.attempts[resource] = &oauthAttempt{status: OAuthStatus{State: "needs_login", Error: "Could not save refreshed OAuth credentials"}}
-		return "", err
+		pending.err = err
+		return
 	}
 	delete(m.attempts, resource)
-	return r.AccessToken, nil
+	pending.token = updated.AccessToken
 }
 func (m *OAuthManager) Logout(raw string) error {
 	resource, err := resourceURL(raw)
@@ -497,11 +554,14 @@ func (m *OAuthManager) Logout(raw string) error {
 		}
 		return err
 	}
+	delete(m.refreshes, resource)
 	return nil
 }
 func (m *OAuthManager) Close() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.closed = true
+	clear(m.refreshes)
 	for _, a := range m.attempts {
 		if a.timer != nil {
 			a.timer.Stop()

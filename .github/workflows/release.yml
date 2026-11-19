@@ -154,6 +154,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.sum
+      - name: Test Office replacement with an open Windows reader
+        run: go test -count=1 -run TestWindowsOfficeReplacementPreservesFileWhileReaderHoldsIt ./tools/claw-agent/internal/tools
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}

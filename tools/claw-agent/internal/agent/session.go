@@ -77,7 +77,7 @@ type userInput struct {
 type Session struct {
 	childModels         func(context.Context) ([]protocol.ModelConfig, error)
 	skillLogger         log.Logger
-	mcpAuth             func(context.Context, string) (string, error)
+	mcpAuth             func(context.Context, string, string) (string, error)
 	db                  *store.Store
 	persistMu           sync.Mutex
 	saveMu              sync.Mutex

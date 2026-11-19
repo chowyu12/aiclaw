@@ -102,7 +102,7 @@ func (p *mcpPool) acquire(
 	ctx context.Context,
 	name string,
 	config protocol.MCPServerConfig,
-	auth ...func(context.Context, string) (string, error),
+	auth ...func(context.Context, string, string) (string, error),
 ) (*mcpclient.Client, string, error) {
 	key := fingerprint(name, config)
 
@@ -136,13 +136,13 @@ func (p *mcpPool) acquire(
 	p.entries[key] = entry
 	p.mu.Unlock()
 
-	var token func(context.Context) (string, error)
+	var token func(context.Context, string) (string, error)
 	if config.OAuth {
-		token = func(ctx context.Context) (string, error) {
+		token = func(ctx context.Context, rejected string) (string, error) {
 			if len(auth) == 0 || auth[0] == nil {
 				return "", fmt.Errorf("MCP OAuth login unavailable")
 			}
-			return auth[0](ctx, config.URL)
+			return auth[0](ctx, config.URL, rejected)
 		}
 	}
 	go func() {
@@ -230,7 +230,7 @@ type cachedMCPCatalog struct {
 	at   time.Time
 }
 
-func (p *mcpPool) deferred(name string, config protocol.MCPServerConfig, auth func(context.Context, string) (string, error)) *mcpclient.Client {
+func (p *mcpPool) deferred(name string, config protocol.MCPServerConfig, auth func(context.Context, string, string) (string, error)) *mcpclient.Client {
 	if config.URL != "" || config.Command == "" {
 		return nil
 	}

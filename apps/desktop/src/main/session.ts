@@ -785,27 +785,31 @@ export class SessionManager extends EventEmitter {
   private async buildMcpServers(contributions: PluginContributions): Promise<Record<string, MCPServerConfig>> {
     // 插件带的 server 先进：它们的代码随插件一起被用户装进来并启用了，
     // 但仍是第三方的——不标 trusted，照常走审批。
-    const mcpServers: Record<string, MCPServerConfig> = { ...contributions.mcpServers };
+    const mcpServers = new Map(Object.entries(contributions.mcpServers));
+    const conflicts = new Set(contributions.mcpConflicts);
+    const add = (name: string, config: MCPServerConfig) => {
+      if (mcpServers.has(name)) conflicts.add(name);
+      else mcpServers.set(name, config);
+    };
     // 联网搜索：有启用且配了 Key 的引擎就把内核自带的搜索 server 挂上。
     // 它是我们自己的代码、而且只读，所以标 trusted——不然每查一次都弹一次框。
     if (await this.searchEnabled()) {
-      mcpServers.web_search = {
+      add("web_search", {
         command: this.agentBin,
         args: ["mcp-search", `--app-db=${this.store.appDbPath}`],
         trusted: true,
-      };
+      });
     }
-    // 名字会成为工具名前缀——撞名时内核会在挂载阶段报重复注册，比静默遮蔽好查。
     for (const server of this.store.readMcpServers()) {
       if (!server.enabled) continue;
       // 第三方 server 不标 trusted：来源与副作用都未知，照常走审批
       //（声明了 readOnlyHint 的工具由内核自己放过）。
-      mcpServers[server.label || server.id] =
-        server.transport === "http"
-          ? { url: server.url, headers: server.headers, oauth: server.oauth }
-          : { command: server.command, args: server.args, env: server.env };
+      add(server.label || server.id, server.transport === "http"
+        ? { url: server.url, headers: server.headers, oauth: server.oauth }
+        : { command: server.command, args: server.args, env: server.env });
     }
-    return mcpServers;
+    if (conflicts.size) throw new Error(tr("MCP 服务名称冲突：{names}。请在设置中重命名或停用同名服务。", { names: [...conflicts].sort().join(", ") }));
+    return Object.fromEntries(mcpServers);
   }
 
   /**

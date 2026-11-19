@@ -459,8 +459,10 @@ func (s *Service) Contributions(ctx context.Context) (protocol.PluginContributio
 		} else {
 			config.URL = srv.Endpoint
 		}
-		// 名字就是工具名前缀。与用户自己配的撞名时内核会在挂载阶段报重复，
-		// 比这里静默改名好查。
+		if _, exists := result.MCPServers[srv.Name]; exists {
+			result.MCPConflicts = append(result.MCPConflicts, srv.Name)
+			continue
+		}
 		result.MCPServers[srv.Name] = config
 	}
 	return result, nil

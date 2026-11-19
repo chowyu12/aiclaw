@@ -1,11 +1,14 @@
 package mcpclient
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -57,6 +60,10 @@ func TestOAuthLoginRefreshEncryptedRestartAndLogout(t *testing.T) {
 			}
 		case "/mcp":
 			if r.Method == "GET" {
+				if r.Header.Get("Authorization") == "Bearer rotated-access" {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
 				w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+endpoint+`/.well-known/oauth-protected-resource/mcp"`)
 				w.WriteHeader(401)
 				return
@@ -157,7 +164,9 @@ func TestOAuthLoginRefreshEncryptedRestartAndLogout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	client, err := Start(ctx, Config{URL: endpoint + "/mcp", AccessToken: func(ctx context.Context) (string, error) { return restarted.AccessToken(ctx, endpoint+"/mcp") }})
+	client, err := Start(ctx, Config{URL: endpoint + "/mcp", AccessToken: func(ctx context.Context, rejected string) (string, error) {
+		return restarted.Token(ctx, endpoint+"/mcp", rejected)
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,5 +264,189 @@ func TestOAuthRefreshFailureRequiresLoginAndDoesNotExposeSecret(t *testing.T) {
 				t.Fatalf("failure not visible: %+v %v", status, err)
 			}
 		})
+	}
+}
+
+func TestOAuthRefreshAcrossCancellationLogoutAndRelogin(t *testing.T) {
+	for _, action := range []string{"refresh", "logout", "relogin"} {
+		t.Run(action, func(t *testing.T) {
+			started, release := make(chan struct{}), make(chan struct{})
+			var releaseOnce sync.Once
+			unblock := func() { releaseOnce.Do(func() { close(release) }) }
+			var exchanges atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				issuer := "http://" + r.Host
+				switch r.URL.Path {
+				case "/mcp":
+					w.WriteHeader(http.StatusUnauthorized)
+					return
+				case "/.well-known/oauth-protected-resource/mcp":
+					fmt.Fprintf(w, `{"resource":%q,"authorization_servers":[%q]}`, issuer+"/mcp", issuer)
+					return
+				case "/.well-known/oauth-authorization-server":
+					fmt.Fprintf(w, `{"issuer":%q,"authorization_endpoint":%q,"token_endpoint":%q,"code_challenge_methods_supported":["S256"]}`, issuer, issuer+"/auth", issuer+"/token")
+					return
+				}
+				if r.FormValue("grant_type") == "authorization_code" {
+					fmt.Fprint(w, `{"access_token":"new-login","refresh_token":"new-refresh","token_type":"Bearer","expires_in":3600}`)
+					return
+				}
+				if exchanges.Add(1) == 1 {
+					close(started)
+				}
+				<-release
+				fmt.Fprint(w, `{"access_token":"replacement","refresh_token":"rotated","token_type":"Bearer","expires_in":3600}`)
+			}))
+			defer upstream.Close()
+			defer unblock()
+			dir := t.TempDir()
+			manager, err := NewOAuthManager(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer manager.Close()
+			resource := upstream.URL + "/mcp"
+			manager.records[resource] = oauthRecord{Resource: resource, TokenEndpoint: upstream.URL, AccessToken: "expired", RefreshToken: "original", ExpiresAt: time.Now().Unix() - 1}
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			caller, stop := context.WithCancel(ctx)
+			defer stop()
+			result := make(chan error, 1)
+			go func() { _, err := manager.AccessToken(caller, resource); result <- err }()
+			select {
+			case <-started:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			manager.mu.Lock()
+			refresh := manager.refreshes[resource]
+			manager.mu.Unlock()
+			stop()
+			select {
+			case err := <-result:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("cancelled caller: %v", err)
+				}
+			case <-ctx.Done():
+				t.Fatal("cancelled caller waited for token exchange")
+			}
+			switch action {
+			case "logout":
+				if err := manager.Logout(resource); err != nil {
+					t.Fatal(err)
+				}
+			case "relogin":
+				login, err := manager.Begin(ctx, OAuthInput{URL: resource, ClientID: "client"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				auth, err := url.Parse(login.AuthorizationURL)
+				if err != nil {
+					t.Fatal(err)
+				}
+				query := auth.Query()
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, query.Get("redirect_uri")+"?"+url.Values{"state": {query.Get("state")}, "code": {"new-code"}}.Encode(), nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reply, err := http.DefaultClient.Do(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reply.Body.Close()
+				if reply.StatusCode != http.StatusOK {
+					t.Fatalf("relogin callback returned %d", reply.StatusCode)
+				}
+			}
+			tokens := make(chan string, 2)
+			if action == "refresh" {
+				for range 2 {
+					go func() { token, _ := manager.Token(ctx, resource, "expired"); tokens <- token }()
+				}
+			}
+			unblock()
+			select {
+			case <-refresh.done:
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			if action == "refresh" {
+				for range 2 {
+					select {
+					case token := <-tokens:
+						if token != "replacement" {
+							t.Fatalf("shared refresh returned %q", token)
+						}
+					case <-ctx.Done():
+						t.Fatal(ctx.Err())
+					}
+				}
+			}
+			if exchanges.Load() != 1 {
+				t.Fatalf("exchanges = %d", exchanges.Load())
+			}
+			reopened, err := NewOAuthManager(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reopened.Close()
+			record, exists := reopened.records[resource]
+			if action == "logout" && exists {
+				t.Fatal("refresh resurrected logged-out credentials")
+			}
+			if action == "relogin" && (!exists || record.AccessToken != "new-login" || record.RefreshToken != "new-refresh") {
+				t.Fatal("stale refresh overwrote a new login")
+			}
+			if action == "refresh" && (!exists || record.AccessToken != "replacement" || record.RefreshToken != "rotated") {
+				t.Fatal("rotated credentials were not persisted")
+			}
+		})
+	}
+}
+
+func TestOAuthHTTPRetriesUnauthorizedOnlyOnceWithTheSameRequest(t *testing.T) {
+	var requests atomic.Int32
+	var initialBody []byte
+	var mu sync.Mutex
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		switch requests.Add(1) {
+		case 1:
+			initialBody = body
+			if r.Header.Get("Authorization") != "Bearer rejected" {
+				t.Error("first token missing")
+			}
+		case 2:
+			if !bytes.Equal(initialBody, body) || r.Header.Get("Authorization") != "Bearer replacement" {
+				t.Error("retry changed the request or did not use its replacement token")
+			}
+		default:
+			t.Error("401 retried more than once")
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer upstream.Close()
+	transport, err := startHTTP(Config{URL: upstream.URL, AccessToken: func(_ context.Context, rejected string) (string, error) {
+		switch rejected {
+		case "":
+			return "rejected", nil
+		case "rejected":
+			return "replacement", nil
+		default:
+			return "", fmt.Errorf("unexpected rejected token %q", rejected)
+		}
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transport.Close()
+	if _, err := transport.Call(t.Context(), "tools/list", nil); err == nil || !strings.Contains(err.Error(), "401") || requests.Load() != 2 {
+		t.Fatalf("expected bounded 401 retry, got %d requests: %v", requests.Load(), err)
 	}
 }

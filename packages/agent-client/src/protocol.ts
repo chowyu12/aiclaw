@@ -343,6 +343,7 @@ export interface PluginConfigField {
 /** 启用中的插件合起来贡献给会话的东西，开会话时并进 SessionStartParams。 */
 export interface PluginContributions {
   mcpServers: Record<string, MCPServerConfig>;
+  mcpConflicts?: string[];
   skills: PluginSkill[];
   computerUse: boolean;
   /** 启用了邮件插件。 */
