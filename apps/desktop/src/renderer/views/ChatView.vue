@@ -214,6 +214,11 @@ function insertAtCursor(text: string): void {
 
 const bindings = computed({ get: () => draftFor(store.sessionId).bindings, set: value => { draftFor(store.sessionId).bindings = value; } });
 const slash = ref<ReturnType<typeof skillQuery>>(null);
+const addOpen = ref(false);
+const addButton = ref<HTMLButtonElement | null>(null);
+const addOptions = ref<HTMLElement | null>(null);
+const addSearch = ref<HTMLInputElement | null>(null);
+const addPicker = ref<{ kind: "skill" | "session"; start: number; end: number } | null>(null);
 const skillIndex = ref(0);
 const skillMenu = ref<HTMLElement | null>(null);
 const skillCatalog = ref<SkillView[]>([]);
@@ -226,8 +231,8 @@ const skillList = computed(() => skillCandidates(slash.value?.query ?? "", skill
 const presetsOpen = ref(false), presetDraft = ref("");
 const slashList = computed(() => [
   ...skillList.value.map(skill => ({kind:"skill" as const, id:skill.id, name:skill.name, description:skill.description, skill})),
-  ...presetCandidates(slash.value?.query ?? "", store.config?.presets ?? []).map(preset => ({kind:"preset" as const, id:`preset-${preset.slot}`, name:`/preset${preset.slot} · ${preset.title}`, description:preset.text, preset})),
-  ...(!slash.value?.query || "presets".includes(slash.value.query.toLowerCase()) ? [{kind:"manage" as const,id:"presets",name:"/presets",description:t("管理常用提示词")}] : []),
+  ...(addPicker.value ? [] : presetCandidates(slash.value?.query ?? "", store.config?.presets ?? []).map(preset => ({kind:"preset" as const, id:`preset-${preset.slot}`, name:`/preset${preset.slot} · ${preset.title}`, description:preset.text, preset}))),
+  ...(!addPicker.value && (!slash.value?.query || "presets".includes(slash.value.query.toLowerCase())) ? [{kind:"manage" as const,id:"presets",name:"/presets",description:t("管理常用提示词")}] : []),
 ]);
 function pickSuggestion(index: number): void {
   const choice = slashList.value[index];
@@ -257,10 +262,13 @@ async function loadSkillCatalog(): Promise<void> {
 }
 
 function closeSuggestions(): void {
-  slash.value = null; mention.value = null; skillRequest++;
+  slash.value = null; mention.value = null; addPicker.value = null; skillRequest++;
+  clearTimeout(mentionSearch);
 }
 
 function updateSuggestions(): void {
+  addOpen.value = false;
+  if (addPicker.value) closeSuggestions();
   const found = input.value ? skillQuery(draft.value, input.value.selectionStart ?? draft.value.length) : null;
   if (found?.query !== slash.value?.query || found?.start !== slash.value?.start) skillIndex.value = 0;
   if (found && !slash.value) void loadSkillCatalog();
@@ -271,7 +279,8 @@ function updateSuggestions(): void {
 function pickSkill(skill: SkillView): void {
   const element = input.value;
   if (!element || !slash.value) return;
-  const next = applySkill(draft.value, slash.value.start, element.selectionStart ?? draft.value.length, skill.name);
+  const { text, start, end } = insertionRange(slash.value.start, element);
+  const next = applySkill(text, start, end, skill.name);
   draft.value = next.text;
   closeSuggestions();
   void nextTick(() => { element.focus(); element.setSelectionRange(next.caret, next.caret); });
@@ -292,7 +301,7 @@ function onSkillKey(event: KeyboardEvent): boolean {
   return true;
 }
 
-watch(() => store.sessionId, () => {closeSuggestions();presetsOpen.value=false;});
+watch(() => store.sessionId, () => { closeSuggestions(); addOpen.value = false; presetsOpen.value = false; });
 onUnmounted(() => { skillRequest++; clearTimeout(mentionSearch); });
 const mention = ref<{ start: number; query: string } | null>(null);
 const mentionIndex = ref(0);
@@ -306,7 +315,10 @@ const mentionList = computed(() =>
 /** 光标动了（打字、点击、方向键）就重新看一次是不是在打 @。 */
 function updateMention(): void {
   const element = input.value;
-  const found = element ? mentionQuery(draft.value, element.selectionStart ?? draft.value.length) : null;
+  setMention(element ? mentionQuery(draft.value, element.selectionStart ?? draft.value.length) : null);
+}
+
+function setMention(found: typeof mention.value): void {
   const changed = found?.query !== mention.value?.query || found?.start !== mention.value?.start;
   mention.value = found;
   if (!changed) return;
@@ -331,10 +343,11 @@ function pickMention(session: SessionSummaryView): void {
   const current = mention.value;
   if (!element || !current) return;
   const title = mentionTitle(session.title);
-  const next = applyMention(draft.value, current.start, element.selectionStart ?? draft.value.length, title);
+  const { text, start, end } = insertionRange(current.start, element);
+  const next = applyMention(text, start, end, title);
   draft.value = next.text;
   bindings.value = [...bindings.value, { id: session.id, title }];
-  mention.value = null;
+  closeSuggestions();
   void nextTick(() => {
     element.focus();
     element.setSelectionRange(next.caret, next.caret);
@@ -343,7 +356,9 @@ function pickMention(session: SessionSummaryView): void {
 
 /** 输入框的键盘：列表开着时 ↑↓ / Enter / Tab / Esc 归它，不然照常。 */
 function onMentionKey(event: KeyboardEvent): boolean {
-  if (!mention.value || mentionList.value.length === 0 || event.isComposing) return false;
+  if (!mention.value || event.isComposing) return false;
+  if (event.key === "Escape") { event.preventDefault(); closeSuggestions(); return true; }
+  if (!mentionList.value.length) return false;
   if (event.key === "ArrowDown" || event.key === "ArrowUp") {
     event.preventDefault();
     const count = mentionList.value.length;
@@ -355,12 +370,57 @@ function onMentionKey(event: KeyboardEvent): boolean {
     pickMention(mentionList.value[mentionIndex.value]!);
     return true;
   }
+  return false;
+}
+
+function toggleAddMenu(): void {
+  closeSuggestions();
+  addOpen.value = !addOpen.value;
+  if (addOpen.value) void nextTick(() => addOptions.value?.querySelector("button")?.focus());
+}
+
+function addFiles(): void {
+  addOpen.value = false;
+  picker.value?.click();
+}
+
+function openAddPicker(kind: "skill" | "session"): void {
+  const element = input.value;
+  if (!element) return;
+  addOpen.value = false;
+  addPicker.value = { kind, start: element.selectionStart, end: element.selectionEnd };
+  updateAddSearch("");
+  if (kind === "skill") void loadSkillCatalog();
+  void nextTick(() => addSearch.value?.focus());
+}
+
+function updateAddSearch(query: string): void {
+  const picker = addPicker.value;
+  if (!picker) return;
+  if (picker.kind === "session") setMention({ start: picker.start, query });
+  else {
+    skillIndex.value = 0;
+    slash.value = { start: picker.start, query };
+  }
+}
+
+function insertionRange(start: number, element: HTMLTextAreaElement) {
+  const range = addPicker.value;
+  if (!range) return { text: draft.value, start, end: element.selectionStart ?? draft.value.length };
+  const before = draft.value.slice(0, range.start);
+  if (!before || /\s$/.test(before)) return { text: draft.value, start: range.start, end: range.end };
+  return { text: before + " " + draft.value.slice(range.start), start: range.start + 1, end: range.end + 1 };
+}
+
+function onAddPickerKey(event: KeyboardEvent): void {
+  if (event.isComposing) return;
   if (event.key === "Escape") {
     event.preventDefault();
-    mention.value = null;
-    return true;
+    closeSuggestions();
+    void nextTick(() => input.value?.focus());
+    return;
   }
-  return false;
+  if (!onSkillKey(event) && !onMentionKey(event) && event.key === "Enter") event.preventDefault();
 }
 
 // ---------- 附件 ----------
@@ -940,9 +1000,9 @@ const forking = ref(false);
           <!-- 透明背板：点菜单以外的任何地方都关掉它。没有它的话菜单开了
                就只能再点一次原按钮才关得掉，用户会以为界面卡住了。 -->
           <div
-            v-if="modelOpen || policyOpen || workspaceOpen"
+            v-if="modelOpen || policyOpen || workspaceOpen || addOpen || addPicker"
             class="backdrop"
-            @click="modelOpen = policyOpen = workspaceOpen = false"
+            @click="modelOpen = policyOpen = workspaceOpen = addOpen = false; closeSuggestions()"
           />
 
           <!-- 模型在等你回答的问题（ask_user）。在输入框上方而不是弹窗：上面模型做到
@@ -1003,7 +1063,8 @@ const forking = ref(false);
             </p>
 
             <div v-if="slash" id="composer-skills" ref="skillMenu" class="mention-menu skill-menu" role="listbox" :aria-label="t('选择技能')">
-              <div class="mention-head">{{ t('技能与常用提示词 · ↑↓ 选择，Enter / Tab 插入，Esc 关闭') }}</div>
+              <input v-if="addPicker" ref="addSearch" class="menu-search" :placeholder="t('搜索技能')" :aria-label="t('搜索技能')" @input="updateAddSearch(($event.target as HTMLInputElement).value)" @keydown="onAddPickerKey" />
+              <div v-else class="mention-head">{{ t('技能与常用提示词 · ↑↓ 选择，Enter / Tab 插入，Esc 关闭') }}</div>
               <p v-if="skillsLoading" class="mention-head" role="status">{{ t('正在读取技能…') }}</p>
               <p v-else-if="skillsError" class="attach-error" role="alert">{{ skillsError }}</p>
               <p v-else-if="!slashList.length" class="mention-head" role="status">{{ t('没有匹配的已启用技能') }}</p>
@@ -1013,8 +1074,10 @@ const forking = ref(false);
               </button>
             </div>
             <!-- @ 引用会话的候选列表：浮在输入框上面。 -->
-            <div v-if="mention && mentionList.length > 0" class="mention-menu" role="listbox">
-              <div class="mention-head">{{ t("引用会话：模型会先读它，再回答你") }}</div>
+            <div v-if="mention && (addPicker || mentionList.length)" id="composer-sessions" class="mention-menu" role="listbox" :aria-label="t('引用会话')">
+              <input v-if="addPicker" ref="addSearch" class="menu-search" :placeholder="t('搜索会话')" :aria-label="t('搜索会话')" @input="updateAddSearch(($event.target as HTMLInputElement).value)" @keydown="onAddPickerKey" />
+              <div v-else class="mention-head">{{ t("引用会话：模型会先读它，再回答你") }}</div>
+              <p v-if="!mentionList.length" class="mention-head" role="status">{{ t("没有匹配的会话") }}</p>
               <button
                 v-for="(session, index) in mentionList"
                 :key="session.id"
@@ -1022,7 +1085,8 @@ const forking = ref(false);
                 :class="{ on: index === mentionIndex }"
                 role="option"
                 :aria-selected="index === mentionIndex"
-                @mousedown.prevent="pickMention(session)"
+                @mousedown.prevent
+                @click="pickMention(session)"
                 @mouseenter="mentionIndex = index"
               >
                 <span class="mention-title">{{ session.title || t("未命名会话") }}</span>
@@ -1036,15 +1100,15 @@ const forking = ref(false);
               @input="updateSuggestions"
               @click="updateSuggestions"
               @keyup="(event: KeyboardEvent) => { if (!['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) updateSuggestions(); }"
-              @blur="closeSuggestions"
+              @blur="!addPicker && closeSuggestions()"
               aria-autocomplete="list"
-              :aria-controls="slash ? 'composer-skills' : undefined"
+              :aria-controls="slash ? 'composer-skills' : mention ? 'composer-sessions' : undefined"
               :aria-activedescendant="slash && slashList[skillIndex] ? `composer-skill-${skillIndex}` : undefined"
               @paste="onPaste"
               :placeholder="
                 store.busy
                   ? t(`正在执行，发送后排队；可在队列中选择立即引导`)
-                  : t(`随心输入…… Enter 发送，Shift+Enter 换行`)
+                  : t(`随心输入…… / 引用技能，@ 引用会话`)
               "
               @keydown="onKeydown"
             />
@@ -1058,10 +1122,25 @@ const forking = ref(false);
 
             <div class="bar">
               <div class="bar-left">
-                <button class="chip" :disabled="parsingAttachments" :title="t(`添加图片、音频、文档或压缩包，也可粘贴或拖入`)" @click="picker?.click()">
-                  <span class="chip-icon">+</span>
-                  {{ t("附件") }}
+                <button ref="addButton" class="chip add-chip" :title="t('添加到消息')" :aria-label="t('添加到消息')" :aria-expanded="addOpen" aria-controls="composer-add" @click="toggleAddMenu">
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 5v10M5 10h10" /></svg>
                 </button>
+                <div v-if="addOpen" id="composer-add" ref="addOptions" class="menu add-menu" :aria-label="t('添加到消息')" @keydown.esc.stop.prevent="addOpen = false; addButton?.focus()">
+                  <button class="menu-item" :disabled="parsingAttachments" @click="addFiles">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M12.9 6.3 7.4 11.8a1.65 1.65 0 0 0 2.3 2.3l6-6a3.25 3.25 0 0 0-4.6-4.6l-6 6a4.9 4.9 0 0 0 6.9 6.9l5.2-5.2" /></svg>
+                    <span>{{ t("添加文件") }}</span>
+                  </button>
+                  <button class="menu-item" @click="openAddPicker('skill')">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M9 3l1.8 4.2L15 9l-4.2 1.8L9 15l-1.8-4.2L3 9l4.2-1.8L9 3ZM15.5 12.5v5m-2.5-2.5h5" /></svg>
+                    <span>{{ t("引用技能") }}</span>
+                    <kbd aria-hidden="true">/</kbd>
+                  </button>
+                  <button class="menu-item" @click="openAddPicker('session')">
+                    <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4h10a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H8l-5 3V6a2 2 0 0 1 2-2Zm2 4h6m-6 3h4" /></svg>
+                    <span>{{ t("引用会话") }}</span>
+                    <kbd aria-hidden="true">@</kbd>
+                  </button>
+                </div>
 
                 <!-- 工作区按会话设。摆在这里而不是配置页：它是「这次要在哪儿
                      干活」，属于会话，而且随时会改。 -->
@@ -2010,6 +2089,71 @@ const forking = ref(false);
 
 .bar-left .menu {
   left: 0;
+}
+
+.bar-left .add-menu {
+  min-width: 200px;
+  gap: 2px;
+  padding: 5px;
+}
+
+.add-chip {
+  width: 26px;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  border-radius: var(--r-sm);
+}
+
+.add-chip[aria-expanded="true"] {
+  background: var(--active);
+  color: var(--accent);
+}
+
+.add-menu .menu-item {
+  min-height: 34px;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+.add-chip svg,
+.add-menu svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.add-menu svg { color: var(--muted); }
+
+.add-menu kbd {
+  min-width: 21px;
+  margin-left: auto;
+  padding: 1px 4px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.add-menu .menu-item:focus-visible {
+  background: var(--hover);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.add-menu .menu-item:disabled {
+  opacity: 0.5;
+  background: none;
+  cursor: default;
 }
 
 .model-menu {
