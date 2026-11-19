@@ -9,7 +9,6 @@ import {
   mkdtemp,
   rm,
   rename,
-  access,
 } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,7 +25,7 @@ export async function stageComputerRuntime({
     manifest.assets[platform === "darwin" ? platform : `${platform}-${arch}`];
   if (!asset) throw Error(`Unsupported Cua Driver target: ${platform}-${arch}`);
   const root = join(repo, "build/cua-driver", asset.sha256);
-  try {
+  async function verifyCache() {
     const cached = JSON.parse(
       await readFile(join(root, "runtime.json"), "utf8"),
     );
@@ -44,13 +43,16 @@ export async function stageComputerRuntime({
         .digest("hex");
       if (digest !== expected) throw Error(`Damaged Cua cache: ${name}`);
     }
+  }
+  try {
+    await verifyCache();
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
     await mkdir(dirname(root), { recursive: true });
     const temporary = await mkdtemp(join(dirname(root), "stage-"));
     try {
       const archive = join(temporary, asset.name);
-      // Bounded retries and timeout; never fetch an unpinned latest release.
+      // Give slow transfers time to finish, but retry stalled connections early.
       execFileSync(
         "curl",
         [
@@ -58,8 +60,16 @@ export async function stageComputerRuntime({
           "--location",
           "--retry",
           "3",
+          "--retry-max-time",
+          "1200",
+          "--connect-timeout",
+          "30",
+          "--speed-limit",
+          "1",
+          "--speed-time",
+          "60",
           "--max-time",
-          "300",
+          "900",
           "--output",
           archive,
           `https://github.com/${manifest.repository}/releases/download/${manifest.tag}/${asset.name}`,
@@ -110,7 +120,13 @@ export async function stageComputerRuntime({
           files,
         }),
       );
-      await rename(join(temporary, "runtime"), root);
+      try {
+        await rename(join(temporary, "runtime"), root);
+      } catch (error) {
+        if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY") throw error;
+        // Another process may have published the same pinned runtime first.
+        await verifyCache();
+      }
     } finally {
       await rm(temporary, { recursive: true, force: true });
     }

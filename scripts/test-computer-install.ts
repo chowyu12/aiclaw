@@ -9,6 +9,7 @@ import {
   readdir,
   copyFile,
   chmod,
+  rename,
   stat,
 } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -168,6 +169,45 @@ test("a corrupted cached Driver or SDK is rejected before packaging", async () =
     );
   } finally {
     await rm(f.repo, { recursive: true, force: true });
+  }
+});
+test("a concurrent cache publisher is reused only if its files pass verification", { skip: process.platform === "win32" }, async () => {
+  const originalPath = process.env.PATH ?? "";
+  for (const corrupt of [false, true]) {
+    const f = await fixture("darwin", "arm64");
+    try {
+      const winner = join(f.repo, "winner"), archive = join(f.repo, "driver.tar.gz");
+      await rename(f.root, winner);
+      const cached = JSON.parse(await readFile(join(winner, "runtime.json"), "utf8"));
+      await rm(join(winner, "runtime.json"));
+      execFileSync("tar", ["-czf", archive, "-C", winner, "."]);
+      const sha256 = createHash("sha256").update(await readFile(archive)).digest("hex");
+      const pin = { ...manifest, assets: { darwin: { name: "driver.tar.gz", sha256 } } };
+      await writeFile(join(f.repo, "tools/cua-driver/runtime.json"), JSON.stringify(pin));
+      await writeFile(join(winner, "runtime.json"), JSON.stringify({ ...cached, sha256 }));
+      if (corrupt) await writeFile(join(winner, f.binary), "tampered");
+
+      // Publish the other process's cache after the initial miss, before rename.
+      const curl = join(f.repo, "curl");
+      await writeFile(curl, `#!/bin/sh
+set -eu
+repo=$(dirname "$0")
+while [ "$1" != --output ]; do shift; done
+cp "$repo/driver.tar.gz" "$2"
+mv "$repo/winner" "$repo/build/cua-driver/${sha256}"
+`, { mode: 0o755 });
+      process.env.PATH = `${f.repo}:${originalPath}`;
+      const staged = stageComputerRuntime({ ...f, platform: "darwin", arch: "arm64" });
+      if (corrupt) {
+        await assert.rejects(staged, /Damaged Cua cache/);
+      } else {
+        await staged;
+        assert.equal(await readFile(join(f.destination, "cua-driver", f.binary), "utf8"), f.binary);
+      }
+    } finally {
+      process.env.PATH = originalPath;
+      await rm(f.repo, { recursive: true, force: true });
+    }
   }
 });
 test("packaging includes SDK JS and its exact resolver dependencies", async () => {
