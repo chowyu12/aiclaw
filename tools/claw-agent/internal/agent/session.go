@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -1152,7 +1153,11 @@ func (s *Session) prepareScratchLocked() error {
 	if s.scratchDir != "" {
 		return nil
 	}
-	dir, err := os.MkdirTemp("", "aiclaw-session-")
+	root := ""
+	if runtime.GOOS != "windows" {
+		root = "/tmp"
+	}
+	dir, err := os.MkdirTemp(root, "aiclaw-session-")
 	if err != nil {
 		return err
 	}

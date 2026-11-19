@@ -18,10 +18,22 @@ func TestSessionScratchFilesStayInExecutionHistoryOnly(t *testing.T) {
 	model := &fakeModel{}
 	session := newTestSession(t, model, protocol.ApprovalOnWrite)
 	db := persistTestSession(t, session)
+	expectedRoot := os.TempDir()
+	if runtime.GOOS != "windows" {
+		t.Setenv("TMPDIR", t.TempDir())
+		expectedRoot = "/tmp"
+	}
+	expectedRoot, err := filepath.EvalSymlinks(expectedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := session.prepareScratchLocked(); err != nil {
 		t.Fatal(err)
 	}
 	scratch := session.scratchDir
+	if filepath.Dir(scratch) != expectedRoot {
+		t.Fatalf("scratch directory %q is not under %q", scratch, expectedRoot)
+	}
 	script := filepath.Join(scratch, "helper.py")
 	existing := filepath.Join(session.Workspace(), "existing.txt")
 	if err := os.WriteFile(existing, []byte("before"), 0o600); err != nil {
@@ -105,6 +117,9 @@ func TestSessionScratchFilesStayInExecutionHistoryOnly(t *testing.T) {
 	if err := other.prepareScratchLocked(); err != nil {
 		t.Fatal(err)
 	}
+	if other.scratchDir == scratch {
+		t.Fatal("sessions share a scratch directory")
+	}
 	if _, inside, err := other.turnEnv("other", emitter).ResolveWrite(script); err != nil || inside {
 		t.Fatalf("one session must not treat another session's scratch files as its own: inside=%v err=%v", inside, err)
 	}
@@ -126,5 +141,8 @@ func TestSessionScratchFilesStayInExecutionHistoryOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(existing); err != nil {
 		t.Fatalf("project file removed at close: %v", err)
+	}
+	if _, err := os.Stat(other.scratchDir); err != nil {
+		t.Fatalf("another session's scratch directory removed at close: %v", err)
 	}
 }

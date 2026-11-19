@@ -37,7 +37,7 @@ Codex 的 `submission_loop → SessionTask → run_turn → run_sampling_request
 
 ### 会话临时文件
 
-会话首次执行时在系统临时目录下创建独立子目录，同一会话的后续执行可复用。Agent 的一次性命令和常驻 shell 都收到 `AICLAW_TMPDIR`、`TMPDIR`、`TMP`、`TEMP`，命令默认工作目录仍是项目。
+会话首次执行时创建独立的 `aiclaw-session-*` 目录。macOS 和 Linux 使用 `/tmp`，Windows 使用系统临时目录。同一会话的后续执行可复用该目录。Agent 的一次性命令和常驻 shell 都收到 `AICLAW_TMPDIR`、`TMPDIR`、`TMP`、`TEMP`，命令默认工作目录仍是项目。
 
 只为执行服务的脚本和中间文件应写入该目录。文件工具按实际解析后的路径判断：临时文件路径留在执行记录里，但不建立项目变更快照，也不作为正式产物列出。正式交付物和项目改动照常保留。关闭会话会清理其临时目录，历史执行记录仍在；恢复会话时会分配新的临时目录。
 
