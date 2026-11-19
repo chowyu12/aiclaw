@@ -95,22 +95,11 @@ func TestSkillEventsObserveActualToolsAndResetEachTurn(t *testing.T) {
 }
 
 func TestSkillMentionRequiresExactBoundaries(t *testing.T) {
-	s := newTestSession(t, &fakeModel{}, protocol.ApprovalOnWrite)
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("---\nname: report\n---\nbody"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	s.loadSkills([]string{dir})
-	provider := sdklog.NewLoggerProvider()
-	defer provider.Shutdown(context.Background())
-	s.skillLogger = provider.Logger("test")
 	for _, input := range []struct {
 		text     string
 		explicit bool
 	}{{"use $report", true}, {"($report)", true}, {"$reporting", false}, {"\\$report", false}, {"other$report", false}, {"x$report$report", false}, {"$reporting $report", true}} {
-		u := s.newSkillUsage("turn")
-		u.markExplicit(input.text)
-		if u.explicit["report"] != input.explicit {
+		if mentionsSkill(input.text, "report") != input.explicit {
 			t.Fatalf("wrong classification for %q", input.text)
 		}
 	}

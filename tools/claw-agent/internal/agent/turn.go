@@ -57,6 +57,9 @@ func (s *Session) RunTurn(
 	requestID, _ := parent.Value(inputRequestKey{}).(string)
 	ctx, cancel := context.WithCancel(parent)
 	ctx = context.WithValue(ctx, skillUsageKey{}, s.newSkillUsage(turnID))
+	if len(s.skills) > 0 {
+		ctx = context.WithValue(ctx, turnSkillPromptsKey{}, &turnSkillPrompts{selected: make(map[string]bool)})
+	}
 	ctx = context.WithValue(ctx, computerBackgroundOnlyKey{}, computerBackgroundOnly(text))
 	ctx = context.WithValue(ctx, computerActivityKey{}, &atomic.Bool{})
 	ctx = context.WithValue(ctx, computerRememberAllowedKey{}, computerRememberAllowed(text))
@@ -240,9 +243,7 @@ func (s *Session) acceptUserInput(ctx context.Context, turnID, text, transcript 
 		message.Shown = &llm.Shown{Text: text, Images: images, References: toLLMRefs(refs)}
 	}
 	s.appendMessage(message)
-	if usage, _ := ctx.Value(skillUsageKey{}).(*skillUsage); usage != nil {
-		usage.markExplicit(text)
-	}
+	s.selectTurnSkills(ctx, userID, text)
 	s.mu.Lock()
 	if s.Title == "" {
 		s.Title = firstLine(text, 40)
@@ -608,7 +609,12 @@ func (s *Session) sample(
 		if err != nil {
 			return llm.Response{}, err
 		}
-		if attempt == 1 && s.needsCompaction() {
+		selection, _ := ctx.Value(turnSkillPromptsKey{}).(*turnSkillPrompts)
+		extraTokens := 0
+		if selection != nil {
+			extraTokens = approxTokens(selection.prompt.String())
+		}
+		if attempt == 1 && s.needsCompaction(extraTokens) {
 			if err := s.compact(ctx, turnID, emitter); err != nil {
 				return llm.Response{}, err
 			}
@@ -775,7 +781,8 @@ func (s *Session) callModel(
 		temperature = &value
 	}
 
-	messages := s.audioMessages(model)
+	selection, _ := ctx.Value(turnSkillPromptsKey{}).(*turnSkillPrompts)
+	messages := selection.include(s.audioMessages(model))
 	response, err := client.Stream(ctx, llm.Request{
 		Model:               model.Model,
 		Messages:            messages,

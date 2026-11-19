@@ -54,7 +54,7 @@ const interruptMarker = `The user interrupted the previous turn on purpose. Any 
 // needsCompaction 报告当前历史是否已经逼近上下文窗口。
 //
 // 窗口未配置时返回 false：这时只能等上游报错再被动压缩，见 sample。
-func (s *Session) needsCompaction() bool {
+func (s *Session) needsCompaction(extraTokens int) bool {
 	s.mu.Lock()
 	window, used := s.config.Model.ContextWindow, s.lastInputTokens
 	s.mu.Unlock()
@@ -63,9 +63,8 @@ func (s *Session) needsCompaction() bool {
 	}
 	// Reported usage describes the previous request, not the current history:
 	// tool results and new user input may have been appended since then.
-	if estimated, _ := contextEstimate(s.snapshotMessages(), s.llmTools()); estimated > used {
-		used = estimated
-	}
+	estimated, _ := contextEstimate(s.snapshotMessages(), s.llmTools())
+	used = max(used, estimated+extraTokens)
 	return used > 0 && used >= window*autoCompactPercent/100
 }
 
@@ -83,7 +82,13 @@ func (s *Session) compact(ctx context.Context, turnID string, emitter Emitter) e
 
 	request := make([]llm.Message, 0, len(history)+1)
 	request = append(request, history...)
-	request = append(request, llm.Message{Role: llm.RoleUser, Content: summarizationPrompt})
+	selection, _ := ctx.Value(turnSkillPromptsKey{}).(*turnSkillPrompts)
+	request = selection.include(request)
+	instructions := summarizationPrompt
+	if selection != nil && selection.prompt.Len() > 0 {
+		instructions += " Summarize task progress without copying the separately supplied skill instructions."
+	}
+	request = append(request, llm.Message{Role: llm.RoleUser, Content: instructions})
 
 	// 压缩这一次不给工具：要的是一段文字，给了工具反而可能又去读文件。
 	model, client, err := s.samplingClient()

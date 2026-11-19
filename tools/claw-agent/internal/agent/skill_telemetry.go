@@ -45,30 +45,10 @@ func (s *Session) newSkillUsage(turnID string) *skillUsage {
 	return u
 }
 
-func (u *skillUsage) markExplicit(text string) {
-	if u == nil {
-		return
-	}
+func (u *skillUsage) markExplicit(name string) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	for _, skill := range u.session.skills {
-		needle := "$" + skill.Name
-		for offset := 0; offset < len(text); {
-			index := strings.Index(text[offset:], needle)
-			if index < 0 {
-				break
-			}
-			index += offset
-			before, after := text[:index], text[index+len(needle):]
-			// Avoid matching $foo inside $foobar, identifiers or escaped literals.
-			left, right := []rune(before), []rune(after)
-			if (len(left) == 0 || mentionBoundary(left[len(left)-1])) && (len(right) == 0 || mentionBoundary(right[0])) {
-				u.explicit[skill.Name] = true
-				break
-			}
-			offset = index + len(needle)
-		}
-	}
+	u.explicit[name] = true
 }
 
 func mentionBoundary(r rune) bool {

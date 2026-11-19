@@ -26,7 +26,7 @@ func TestContextUsageSurvivesResumeAndFork(t *testing.T) {
 	defer restored.Close()
 	before, _ := s.ContextStatus()
 	after, _ := restored.ContextStatus()
-	t.Logf("before save input=%d compact=%v; after cold resume input=%d compact=%v", before.LastInputTokens, s.needsCompaction(), after.LastInputTokens, restored.needsCompaction())
+	t.Logf("before save input=%d compact=%v; after cold resume input=%d compact=%v", before.LastInputTokens, s.needsCompaction(0), after.LastInputTokens, restored.needsCompaction(0))
 	if after.LastInputTokens != before.LastInputTokens {
 		t.Errorf("cold resume lost provider usage")
 	}
@@ -36,7 +36,7 @@ func TestContextUsageSurvivesResumeAndFork(t *testing.T) {
 	}
 	defer child.Close()
 	forked, _ := child.ContextStatus()
-	if forked.LastInputTokens != 0 || child.needsCompaction() {
+	if forked.LastInputTokens != 0 || child.needsCompaction(0) {
 		t.Fatal("fork reused provider usage for a different history")
 	}
 }
@@ -68,7 +68,7 @@ func TestLegacyContextAndForkUseEstimatesWithoutInventingProviderUsage(t *testin
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	if restored.lastInputTokens != 0 || !restored.needsCompaction() {
+	if restored.lastInputTokens != 0 || !restored.needsCompaction(0) {
 		t.Fatal("legacy history should use a local estimate, not fabricated provider input")
 	}
 	child, err := s.ForkAt(context.Background(), "long-fork", "", nil)
@@ -76,7 +76,7 @@ func TestLegacyContextAndForkUseEstimatesWithoutInventingProviderUsage(t *testin
 		t.Fatal(err)
 	}
 	defer child.Close()
-	if child.lastInputTokens != 0 || !child.needsCompaction() {
+	if child.lastInputTokens != 0 || !child.needsCompaction(0) {
 		t.Fatal("large fork did not evaluate copied context")
 	}
 }
@@ -86,7 +86,7 @@ func TestCompactionAccountsForNewHistoryAfterReportedUsage(t *testing.T) {
 	s.config.Model.ContextWindow = 10000
 	s.lastInputTokens = 100
 	s.messages = append(s.messages, llm.Message{Role: llm.RoleUser, Content: strings.Repeat("long history ", 6000)})
-	if !s.needsCompaction() {
+	if !s.needsCompaction(0) {
 		t.Fatal("new history must be estimated even when older provider usage exists")
 	}
 	status, err := s.ContextStatus()
@@ -101,7 +101,7 @@ func TestMissingUsageFallsBackToEstimateAfterTurn(t *testing.T) {
 	s.config.Model.ContextWindow = 100000
 	s.RunTurn(context.Background(), "missing-usage", strings.Repeat("long history ", 6000), nil, nil, &recordingEmitter{approve: true})
 	s.config.Model.ContextWindow = 10000
-	if s.lastInputTokens != 0 || !s.estimateCompaction || !s.needsCompaction() {
+	if s.lastInputTokens != 0 || !s.estimateCompaction || !s.needsCompaction(0) {
 		t.Fatalf("missing usage disabled estimation: input=%d estimate=%v", s.lastInputTokens, s.estimateCompaction)
 	}
 }

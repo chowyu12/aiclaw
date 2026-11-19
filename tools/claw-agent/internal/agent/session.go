@@ -391,23 +391,14 @@ func (s *Session) loadSkills(dirs []string) {
 	if len(s.skills) == 0 {
 		return
 	}
-	// 与 MCP 工具同理：技能名与说明每轮都进系统提示词，说一声占了多少。
-	// 自动发现之后技能会突然变多（Claude Code、Codex 那边本来就装了一堆），
-	// 不说的话用户不会知道上下文是被这个吃掉的。
-	promptBytes := 0
-	for _, skill := range s.skills {
-		promptBytes += len(skill.Name) + len([]rune(skill.Description)) + 8
-	}
-	s.mcpStatus[i18n.D("技能")] = i18n.D(
-		"已加载 {n} 个（提示词约占 {tokens}）", "n", len(s.skills), "tokens", formatTokens(promptBytes*10/32),
-	)
+	s.mcpStatus[i18n.D("技能")] = i18n.D("已加载 {n} 个（提示词约占 {tokens}）", "n", len(s.skills),
+		"tokens", formatTokens(approxTokens(renderSkillCatalog(s.skills, s.config.Model.ContextWindow))))
 	if err := s.registry.Register(tools.Tool{
-		Name: "load_skill",
-		Description: "Load the full instructions of a skill. The system prompt lists the available skills " +
-			"with a short description of each; when a skill applies, call this tool to fetch its body, then follow it.",
+		Name:        "load_skill",
+		Description: "Load a skill by exact name when applicable instructions are not already supplied. Use a name from the system catalog or an explicit user selection.",
 		// 只读本机已有文件，不需要审批。
 		Effect: tools.EffectRead,
-		Schema: skillToolSchema(s.skills),
+		Schema: skillToolSchema(),
 		Handler: func(ctx context.Context, args json.RawMessage, env *tools.Env) (string, error) {
 			var input struct {
 				Name string `json:"name"`
@@ -426,7 +417,7 @@ func (s *Session) loadSkills(dirs []string) {
 						skill.Name, skill.Dir, skill.Body), nil
 				}
 			}
-			return "", i18n.E("没有名为 {name} 的技能；可用技能：{skills}", "name", fmt.Sprintf("%q", input.Name), "skills", s.skillNames())
+			return "", i18n.E("没有名为 {name} 的技能", "name", fmt.Sprintf("%q", input.Name))
 		},
 	}); err != nil {
 		s.mcpStatus[i18n.D("技能")] = i18n.D("注册失败：{err}", "err", err)
@@ -603,14 +594,6 @@ func (s *Session) loadMemoryFile(path, label string) string {
 	return strings.TrimSpace(text)
 }
 
-func (s *Session) skillNames() string {
-	names := make([]string, 0, len(s.skills))
-	for _, skill := range s.skills {
-		names = append(names, skill.Name)
-	}
-	return strings.Join(names, i18n.D("、"))
-}
-
 // Skills 返回本次会话挂上的技能名，起会话时回给宿主展示。
 func (s *Session) Skills() []string {
 	names := make([]string, 0, len(s.skills))
@@ -620,21 +603,14 @@ func (s *Session) Skills() []string {
 	return names
 }
 
-// skillToolSchema 把技能名做成枚举。
-//
-// 枚举而不是自由字符串：模型照着提示词里的名字抄，偶尔会抄错大小写或多个空格，
-// 枚举能让它在生成阶段就对齐。
-func skillToolSchema(list []skills.Skill) json.RawMessage {
-	names := make([]string, 0, len(list))
-	for _, skill := range list {
-		names = append(names, skill.Name)
-	}
+// Keep the schema independent of the catalog so omitted skills remain callable.
+func skillToolSchema() json.RawMessage {
 	encoded, err := json.Marshal(map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"name": map[string]any{
-				"type": "string", "enum": names,
-				"description": "Skill name, from the list of available skills in the system prompt",
+				"type":        "string",
+				"description": "Exact skill name from the catalog or the user’s explicit selection",
 			},
 		},
 		"required":             []string{"name"},
@@ -993,18 +969,7 @@ func buildSystemPrompt(
 			)
 		}
 	}
-	// 技能只列名字与用途，正文等 load_skill 取——十几个技能的正文加起来
-	// 能有几万 token，每轮都带着走会把上下文挤没。
-	if len(available) > 0 {
-		builder.WriteString("\nAvailable skills (when one applies, first call load_skill to get its full instructions, then follow them):\n")
-		for _, skill := range available {
-			// 说明截断。技能现在是从 Claude Code、Codex、npm 等处一并发现的，
-			// 一台机器上二十来个很正常，而有些技能的 description 写了七八百字——
-			// 原样铺进提示词就是几千 token，每一轮都在付。判断「用不用得上」
-			// 不需要那么多字，真要用的时候 load_skill 会给出全文。
-			fmt.Fprintf(&builder, "- %s: %s\n", skill.Name, truncateRunes(skill.Description, 200))
-		}
-	}
+	builder.WriteString(renderSkillCatalog(available, config.Model.ContextWindow))
 
 	// 长期记忆原样进提示词。它是用户攒下来的事实，不做摘要也不做裁剪——
 	// 会话上下文撑满时压缩的是对话历史，不动这一段。

@@ -74,9 +74,9 @@ func init() {
 		"已挂载 {n} 个工具（约占 {tokens} 上下文）": "Mounted {n} tools (about {tokens} of context)",
 
 		// ---------- 会话：工具与记忆 ----------
-		"创建工作区失败：":                      "Failed to create the workspace: ",
-		"参数不是合法 JSON 对象":                "Arguments are not a valid JSON object",
-		"没有名为 {name} 的技能；可用技能：{skills}": "No skill named {name}. Available skills: {skills}",
+		"创建工作区失败：":        "Failed to create the workspace: ",
+		"参数不是合法 JSON 对象":  "Arguments are not a valid JSON object",
+		"没有名为 {name} 的技能": "No skill named {name}",
 		"这个会话没有设置工作区，没有地方放工作区记忆；跟项目无关的话用 scope=global": "This chat has no workspace, so there is nowhere to keep workspace memory. For things unrelated to the project, use scope=global.",
 		"写入工作区记忆":                                  "Save to workspace memory",
 		"记在 {path}":                                "Will be saved to {path}",
