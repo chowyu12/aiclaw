@@ -58,6 +58,11 @@ build-client: deps ## 编译 agent-client（TS）
 
 build-go: $(AGENT_BIN) ## 编译 claw-agent
 
+.PHONY: build-cli
+CLI_VERSION = $(shell node -p "(process.env.GITHUB_REF_NAME || '').match(/^v([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?)$$/)?.[1] || require('./package.json').version")
+build-cli: ## 构建可独立运行的 AIClaw CLI
+	CGO_ENABLED=0 go build -trimpath -ldflags '-X main.version=$(CLI_VERSION)' -o build/cli/aiclaw$(shell go env GOEXE) ./tools/claw-agent
+
 # CGO_ENABLED=0 是硬要求，不是优化：开了 cgo 就没法交叉编译（一台 Linux 上
 # 出四个平台的包），还要求每台构建机装好 C 工具链。两个 SQLite 库都是纯 Go
 # 实现，正是为此选的。make nocgo 守着这条。
@@ -179,7 +184,7 @@ doctor: ## 检查本机环境与构建产物
 
 define cross_build
 	mkdir -p build/bin/$(1)-$(2)
-	CGO_ENABLED=0 GOOS=$(3) GOARCH=$(4) go build -trimpath -ldflags "-s -w" \
+	CGO_ENABLED=0 GOOS=$(3) GOARCH=$(4) go build -trimpath -ldflags "-s -w -X main.version=$(CLI_VERSION)" \
 		-o build/bin/$(1)-$(2)/claw-agent$(5) ./tools/claw-agent
 	node scripts/package-app.mjs --platform=$(1) --arch=$(2)
 endef

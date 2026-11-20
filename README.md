@@ -194,6 +194,35 @@ scripts/                Smoke tests, packaging, icons, one-line installer
 docs/                   Design docs; read docs/agent-loop.md before touching the loop
 ```
 
+## Terminal CLI
+
+Download an `AIClaw-CLI-v<version>-<platform>.zip` from [GitHub Releases](https://github.com/chowyu12/aiclaw/releases). Pick `darwin-arm64` for Apple Silicon, `darwin-x64` for Intel Macs, `windows-x64` for Windows, or `linux-x64` for Linux. Verify the ZIP against `SHA256SUMS.txt`, extract it, and place `aiclaw` (`aiclaw.exe` on Windows) in a directory on your PATH. Run `aiclaw --version` to check the installation. To build from source, run `make build-cli` and find the executable in `build/cli/`.
+
+CLI model providers, default model, and session history are independent of the desktop app. Set `AICLAW_LLM_KEY` to your API key, then register a provider and use its ID to select a model.
+
+```bash
+aiclaw providers add my-provider --base-url https://api.example.com/v1 --models my-model
+aiclaw providers list
+aiclaw models list
+aiclaw models use --provider 1 --model my-model
+```
+
+```bash
+aiclaw
+aiclaw exec "Summarize the current project" --json
+printf '%s\n' 'Summarize this project' | aiclaw exec --json -
+aiclaw resume --last
+aiclaw resume SESSION_ID
+aiclaw sessions list
+aiclaw config show
+```
+
+`--cwd` selects the workspace. `--last` looks in that workspace only. CLI sessions
+and configuration are stored in `~/.aiclaw/cli`. `--data-home` selects a separate CLI profile. To reuse existing desktop model services for a run, pass `--app-db ~/.aiclaw/aiclaw.db`. To supply a model directly for a run, set `AICLAW_BASE_URL`, `AICLAW_MODEL`, and `AICLAW_LLM_KEY`. For `exec --json`, stdout contains one JSON
+event per line. Interactive runs ask before approved operations. `exec` exits
+with an error when the agent needs human approval or input. Ctrl+C interrupts the
+active turn.
+
 ## Managed Python and Node.js
 
 On macOS (Apple Silicon/Intel), Windows x64, and Linux x64, the desktop app prepares its own Node.js 24.22.2 (including npm/npx) and Python 3.12.16 environments in the background. The first preparation needs network access to nodejs.org and the public python-build-standalone GitHub release. Downloads use pinned SHA256 checksums; completed installations are reused offline.
@@ -271,8 +300,7 @@ Pushing a `v*` tag triggers GitHub Actions:
 1. tests,
 2. packaging, then building the NSIS installer on a Windows runner and checking installation,
    file replacement, uninstallation and user-data retention,
-3. creating the Release. The tag annotation becomes the release notes; ZIPs, the Windows
-   Setup.exe and SHA256SUMS are attached.
+3. creating the Release with desktop and standalone CLI ZIPs, the Windows Setup.exe, and SHA256SUMS. The tag annotation becomes the release notes.
 
 To build the installer locally, run `make package-win` followed by `npm run package:win-installer`.
 Use Windows for native installation acceptance checks.

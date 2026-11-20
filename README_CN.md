@@ -117,6 +117,33 @@ Apple Silicon 与 Intel 都认；已经手动下好 zip 的话 `install-mac.sh -
 由用户确认覆盖安装（取消时可重新打开旧版本）。只有 ZIP 的旧 Release 仍下载到「下载」目录。
 Linux 保持下载 ZIP 的方式。Windows 安装包目前未签名，系统可能提示发布者未知；SHA256 校验不等同于发布者签名。
 
+## 终端 CLI
+
+在 [GitHub Releases](https://github.com/chowyu12/aiclaw/releases) 下载 `AIClaw-CLI-v<版本>-<平台>.zip`。Apple Silicon Mac 选 `darwin-arm64`，Intel Mac 选 `darwin-x64`，Windows 选 `windows-x64`，Linux 选 `linux-x64`。用 `SHA256SUMS.txt` 校验下载包，解压后把 `aiclaw`（Windows 为 `aiclaw.exe`）放到 PATH 中的目录，再运行 `aiclaw --version` 检查安装。从源码构建可用 `make build-cli`，产物在 `build/cli/`。
+
+CLI 的供应商、默认模型和会话历史独立于桌面版。先将 API Key 设置到环境变量 `AICLAW_LLM_KEY`，再添加供应商，用返回的供应商 ID 选择模型。
+
+```bash
+aiclaw providers add my-provider --base-url https://api.example.com/v1 --models my-model
+aiclaw providers list
+aiclaw models list
+aiclaw models use --provider 1 --model my-model
+```
+
+```bash
+aiclaw
+aiclaw exec "总结当前项目" --json
+printf '%s\n' '总结当前项目' | aiclaw exec --json -
+aiclaw resume --last
+aiclaw resume SESSION_ID
+aiclaw sessions list
+aiclaw config show
+```
+
+`--cwd` 可指定工作目录，`--last` 只查这个目录的最近会话。CLI 的配置和会话保存在
+`~/.aiclaw/cli`，可用 `--data-home` 建立不同的 CLI 配置目录。单次运行也可用 `--app-db ~/.aiclaw/aiclaw.db` 复用桌面版的供应商，或用 `AICLAW_BASE_URL`、`AICLAW_MODEL` 和 `AICLAW_LLM_KEY` 直接指定模型。
+`exec --json` 的标准输出每行一个 JSON 事件。交互模式支持工具审批，`exec` 遇到需要用户审批或回答时会以错误退出。按 Ctrl+C 可中断当前轮次。
+
 ## 目录
 
 ```text
@@ -177,7 +204,7 @@ make help     # 其余 target
 `make package` 用 `@electron/packager` 在一台机器上出四个包（macOS arm64 / x64、
 Windows x64、Linux x64），内核 `CGO_ENABLED=0` 交叉编译。推 `v*` tag 触发
 GitHub Actions：测试 → 打包 → Windows runner 生成 NSIS 安装包并验证安装/覆盖/卸载和数据保留 →
-建 Release（tag 注释作发布说明，附 ZIP、Windows Setup.exe 和 SHA256SUMS）。
+建 Release（tag 注释作发布说明，附桌面和 CLI ZIP、Windows Setup.exe 和 SHA256SUMS）。
 本地可在 `make package-win` 后运行 `npm run package:win-installer`；推荐在 Windows 上构建和验收安装器。
 
 macOS 包未签名：用上面的安装脚本装不用管；手动解压的话第一次打开要右键「打开」，

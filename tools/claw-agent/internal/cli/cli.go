@@ -1,0 +1,242 @@
+// Package cli is the terminal host for the same local kernel used by AIClaw desktop.
+package cli
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/server"
+)
+
+var ErrInterrupted = errors.New("interrupted")
+
+const usage = `AIClaw terminal agent
+
+Usage:
+  aiclaw [--cwd DIR] [PROMPT]
+  aiclaw exec [--json] [--cwd DIR] PROMPT
+  aiclaw exec --json -          Read the prompt from stdin
+  aiclaw resume <SESSION_ID>
+  aiclaw resume --last          Resume the most recent CLI session in this directory
+  aiclaw sessions list          List CLI session IDs
+  aiclaw config show            Show the CLI paths and saved model selection
+  aiclaw providers list
+  aiclaw providers add NAME --base-url URL --models MODEL[,MODEL...]  (key: AICLAW_LLM_KEY)
+  aiclaw models list
+  aiclaw models use --provider ID --model MODEL
+  aiclaw --version
+
+Options:
+  --model ID                    Use a configured model
+  --provider ID                 Choose a configured model service
+  --data-home DIR               CLI session directory (default ~/.aiclaw/cli)
+  --app-db FILE                 Model database (default ~/.aiclaw/cli/aiclaw.db)
+  --config FILE                 Config JSON (default ~/.aiclaw/cli/config.json)
+
+Interactive commands: /exit, /quit. Ctrl+C interrupts the active turn.
+Standalone model selection: AICLAW_BASE_URL, AICLAW_MODEL and AICLAW_LLM_KEY.
+`
+
+func Run(ctx context.Context, args []string, version string, in io.Reader, out, stderr io.Writer, interrupts <-chan os.Signal) (runErr error) {
+	opts, err := parse(args)
+	if errors.Is(err, flag.ErrHelp) {
+		_, err = io.WriteString(out, usage)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	output := &renderer{out: out, stderr: stderr}
+	if opts.json {
+		output.json = json.NewEncoder(out)
+		defer func() {
+			if runErr != nil {
+				_ = output.emit(event{Type: "error", Error: runErr.Error()})
+			}
+		}()
+	}
+	prompt := strings.Join(opts.args, " ")
+	if opts.mode == "exec" {
+		if prompt == "-" {
+			raw, err := readPrompt(ctx, in, interrupts)
+			if err != nil {
+				return err
+			}
+			prompt = raw
+		}
+		if strings.TrimSpace(prompt) == "" {
+			return errors.New("exec requires a prompt; use - to read stdin")
+		}
+	}
+	protected, err := opts.paths()
+	if err != nil {
+		return err
+	}
+	unlock, err := lockDataHome(ctx, opts.dataHome)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	apiKey := strings.TrimSpace(os.Getenv("AICLAW_LLM_KEY"))
+	c, err := connect(server.Options{Version: version, DataHome: opts.dataHome, AppDB: opts.appDB, APIKey: apiKey, ModelsOnly: true})
+	if err != nil {
+		return err
+	}
+	defer c.close()
+	if opts.mode != "chat" && opts.mode != "exec" && opts.mode != "resume" {
+		return runSettings(ctx, c, opts, apiKey, out)
+	}
+
+	var session protocol.SessionStartResult
+	if opts.mode == "resume" {
+		var id string
+		if opts.last {
+			id, err = recentSession(ctx, c, opts.cwd)
+		} else {
+			id = opts.args[0]
+		}
+		if err != nil {
+			return err
+		}
+		err = c.call(ctx, protocol.MethodSessionResume, protocol.SessionResumeParams{
+			SessionID: id, Refresh: &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalAlways},
+		}, &session)
+		if err != nil {
+			return err
+		}
+		prompt = ""
+	} else {
+		model, err := chooseModel(ctx, c, opts, apiKey)
+		if err != nil {
+			return err
+		}
+		err = c.call(ctx, protocol.MethodSessionStart, protocol.SessionStartParams{
+			Model: model, Workdir: opts.cwd, ProtectedPaths: protected,
+			ApprovalPolicy: protocol.ApprovalAlways,
+		}, &session)
+		if err != nil {
+			return err
+		}
+	}
+	if opts.mode == "exec" {
+		if err := output.emit(event{Type: "session.started", SessionID: session.SessionID, Model: session.Model}); err != nil {
+			return err
+		}
+		return runTurn(ctx, c, session.SessionID, prompt, output, nil, interrupts)
+	}
+
+	lineCtx, stopInput := context.WithCancel(ctx)
+	defer stopInput()
+	input := newTerminalInput(lineCtx, in)
+	fmt.Fprintf(stderr, "AIClaw · %s · %s\nSession %s\n", terminalText(session.Model), terminalText(session.Workspace), session.SessionID)
+	if opts.mode == "resume" {
+		var history protocol.SessionHistoryResult
+		if err := c.call(ctx, protocol.MethodSessionHistory, protocol.SessionIDParams{SessionID: session.SessionID}, &history); err != nil {
+			return err
+		}
+		for _, item := range history.Items {
+			if item.Kind == protocol.ItemUserMessage {
+				fmt.Fprintf(out, "You: %s\n", terminalText(item.Text))
+			}
+			if item.Kind == protocol.ItemAgentMessage {
+				fmt.Fprintf(out, "AIClaw: %s\n", terminalText(item.Text))
+			}
+		}
+	}
+	for {
+		if strings.TrimSpace(prompt) != "" {
+			err := runTurn(ctx, c, session.SessionID, prompt, output, input, interrupts)
+			if err != nil {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				fmt.Fprintln(stderr, terminalText(err.Error()))
+			}
+		}
+		fmt.Fprint(stderr, "\n> ")
+		prompt, err = input.read(ctx, interrupts)
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		command := strings.TrimSpace(prompt)
+		if command == "/exit" || command == "/quit" {
+			return nil
+		}
+	}
+}
+
+func readPrompt(ctx context.Context, in io.Reader, interrupts <-chan os.Signal) (string, error) {
+	type result struct {
+		text string
+		err  error
+	}
+	ready := make(chan result, 1)
+	go func() {
+		const limit = 16 * 1024 * 1024
+		raw, err := io.ReadAll(io.LimitReader(in, limit+1))
+		if err == nil && len(raw) > limit {
+			err = errors.New("stdin exceeds the kernel's 16 MiB frame limit")
+		}
+		ready <- result{string(raw), err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-interrupts:
+		return "", ErrInterrupted
+	case value := <-ready:
+		return value.text, value.err
+	}
+}
+
+type terminalInput struct {
+	lines chan string
+	err   error
+}
+
+func newTerminalInput(ctx context.Context, in io.Reader) *terminalInput {
+	t := &terminalInput{lines: make(chan string)}
+	go func() {
+		defer close(t.lines)
+		scanner := bufio.NewScanner(in)
+		scanner.Buffer(make([]byte, 64*1024), 16*1024*1024)
+		for scanner.Scan() {
+			select {
+			case t.lines <- scanner.Text():
+			case <-ctx.Done():
+				return
+			}
+		}
+		t.err = scanner.Err()
+	}()
+	return t
+}
+
+func (t *terminalInput) read(ctx context.Context, interrupts <-chan os.Signal) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-interrupts:
+		return "", ErrInterrupted
+	case line, ok := <-t.lines:
+		if ok {
+			return line, nil
+		}
+		if t.err != nil {
+			return "", t.err
+		}
+		return "", io.EOF
+	}
+}

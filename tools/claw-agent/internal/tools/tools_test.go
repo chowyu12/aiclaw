@@ -289,6 +289,19 @@ func TestSearchFilesSkipsNoiseDirs(t *testing.T) {
 // 默认档位下**普通命令不再逐条审批**：每次 ls、go test 都弹框，只会把用户
 // 训练成闭眼点「允许」，那比少问一次危险。危险的仍然硬拒，看着危险的仍然问。
 
+func TestToolShellExcludesKernelCredentials(t *testing.T) {
+	t.Setenv("AICLAW_LLM_KEY", "model-fixture")
+	t.Setenv("AICLAW_MASTER_KEY", "encryption-fixture")
+	t.Setenv("AICLAW_TEST_TOOL_ENV", "available")
+	env := strings.Join(shellCommand(t.Context(), "echo ok").Environ(), "\n")
+	if strings.Contains(env, "AICLAW_LLM_KEY=") || strings.Contains(env, "AICLAW_MASTER_KEY=") {
+		t.Error("kernel credentials were inherited by a tool subprocess")
+	}
+	if !strings.Contains(env, "AICLAW_TEST_TOOL_ENV=available") {
+		t.Error("ordinary tool environment was lost")
+	}
+}
+
 func TestOrdinaryCommandsRunWithoutAsking(t *testing.T) {
 	env, asked := newEnv(t, protocol.ApprovalOnWrite, true)
 	registry := fullRegistry(t)

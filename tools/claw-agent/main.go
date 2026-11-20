@@ -20,6 +20,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/chowyu12/aiclaw/internal/i18n"
 	"github.com/chowyu12/aiclaw/internal/telemetry"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/cli"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/codemode"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/searchmcp"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/server"
@@ -40,6 +42,9 @@ var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		if errors.Is(err, cli.ErrInterrupted) {
+			os.Exit(130)
+		}
 		fmt.Fprintf(os.Stderr, "claw-agent: %v\n", err)
 		os.Exit(1)
 	}
@@ -51,25 +56,27 @@ func run(args []string) error {
 	if locale := os.Getenv("AICLAW_LOCALE"); locale != "" {
 		i18n.SetDefault(locale)
 	}
-	if len(args) == 0 {
-		return usageError()
+	if len(args) > 0 {
+		switch args[0] {
+		case "code-mode-worker":
+			return codemode.ServeWorker(os.Stdin, os.Stdout)
+		case "serve":
+			return runServe(args[1:])
+		case "mcp-search":
+			return runSearchMCP(args[1:])
+		case "version", "--version", "-v":
+			fmt.Println(version)
+			return nil
+		case "help", "--help", "-h":
+			args = []string{"--help"}
+		}
 	}
-	switch args[0] {
-	case "code-mode-worker":
-		return codemode.ServeWorker(os.Stdin, os.Stdout)
-	case "serve":
-		return runServe(args[1:])
-	case "mcp-search":
-		return runSearchMCP(args[1:])
-	case "version", "--version", "-v":
-		fmt.Println(version)
-		return nil
-	case "help", "--help", "-h":
-		printUsage(os.Stdout)
-		return nil
-	default:
-		return usageError()
-	}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
+	defer stop()
+	interrupts := make(chan os.Signal, 1)
+	signal.Notify(interrupts, os.Interrupt)
+	defer signal.Stop(interrupts)
+	return cli.Run(ctx, args, version, os.Stdin, os.Stdout, os.Stderr, interrupts)
 }
 
 func runServe(args []string) error {
@@ -134,24 +141,4 @@ func runSearchMCP(args []string) error {
 		return i18n.E("mcp-search 需要 --app-db")
 	}
 	return searchmcp.Serve(*appDB, version)
-}
-
-func usageError() error {
-	var builder strings.Builder
-	printUsage(&builder)
-	return fmt.Errorf("%s", strings.TrimRight(builder.String(), "\n"))
-}
-
-func printUsage(w interface{ Write([]byte) (int, error) }) {
-	fmt.Fprintf(w, `claw-agent — the AIClaw agent kernel
-
-Usage:
-  claw-agent serve [--data-home=<dir>] [--app-db=<aiclaw.db>]
-  claw-agent mcp-search [--app-db=<aiclaw.db>]
-  claw-agent version
-
-Environment:
-  AICLAW_LLM_KEY   fallback model key (used when a session names no provider)
-  AICLAW_LOCALE    UI language for messages: en or zh-CN
-`)
 }

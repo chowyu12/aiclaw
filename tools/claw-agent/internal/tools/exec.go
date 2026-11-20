@@ -348,7 +348,17 @@ Agent 这边没有终端，等下去不会有人回答，只会把一轮卡死�
 func prepare(cmd *exec.Cmd) *exec.Cmd {
 	configureProcessGroup(cmd)
 	cmd.WaitDelay = waitDelay
-	cmd.Env = append(cmd.Environ(),
+	env := cmd.Environ()
+	filtered := env[:0]
+	for _, value := range env {
+		name, _, _ := strings.Cut(value, "=")
+		switch strings.ToUpper(name) {
+		case "AICLAW_LLM_KEY", "AICLAW_MASTER_KEY":
+			continue // Kernel credentials do not belong in tool subprocesses.
+		}
+		filtered = append(filtered, value)
+	}
+	cmd.Env = append(filtered,
 		// git 不要弹凭据提示，直接失败。
 		"GIT_TERMINAL_PROMPT=0",
 		// ssh 同理：agent 里的密钥照常能用，只是不再等人输密码。

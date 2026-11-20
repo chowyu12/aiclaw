@@ -54,6 +54,8 @@ type Options struct {
 	// 空表示不开：那时 provider/* 与 plugin/* 都报错，会话只能走环境变量的 Key。
 	// 插件文件放在它所在目录下的 plugins/。
 	AppDB string
+	// ModelsOnly opens the shared model store without starting desktop plugins or channels.
+	ModelsOnly bool
 	// ProtectedPaths 是宿主追加的敏感路径，给通道会话用（桌面会话由宿主按会话传）。
 	ProtectedPaths []string
 	Logf           func(format string, args ...any)
@@ -129,13 +131,13 @@ func New(options Options, out io.Writer) (*Server, error) {
 		shutdown:        make(chan struct{}),
 		db:              db,
 	}
-	if os.Getenv("AICLAW_SYSTEM_PROXY") == "1" {
+	if !options.ModelsOnly && os.Getenv("AICLAW_SYSTEM_PROXY") == "1" {
 		transport := http.DefaultTransport.(*http.Transport).Clone()
 		transport.Proxy = server.systemProxy
 		http.DefaultTransport = transport
 	}
 	oauthDir := options.DataHome
-	if options.AppDB != "" {
+	if options.AppDB != "" && !options.ModelsOnly {
 		oauthDir = filepath.Dir(options.AppDB)
 	}
 	server.oauth, err = mcpclient.NewOAuthManager(oauthDir)
@@ -152,6 +154,9 @@ func New(options Options, out io.Writer) (*Server, error) {
 		}
 		server.providers = providers.New(server.appDB)
 		server.search = searchengines.New(server.appDB)
+		if options.ModelsOnly {
+			return server, nil
+		}
 		// 插件系统与通道。通道收到消息经 channelGateway 变成一轮，见 channel.go。
 		server.plugins, err = pluginhost.New(context.Background(), server.appDB,
 			filepath.Dir(options.AppDB), &channelGateway{server: server}, options.Logf)
@@ -201,7 +206,11 @@ func (s *Server) Serve(ctx context.Context, in io.Reader) error {
 		for scanner.Scan() {
 			line := append([]byte(nil), scanner.Bytes()...)
 			if len(line) > 0 {
-				lines <- line
+				select {
+				case lines <- line:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()
