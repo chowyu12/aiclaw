@@ -52,6 +52,7 @@ app.whenReady().then(async()=>{
  const extraSessions=[{id:'other',title:'Other workspace',workdir:'/other/smoke'},{id:'other-child',title:'Other child',workdir:'/other/smoke',parentId:'other'},{id:'general',title:'General chat',workdir:''},{id:'c_channel',title:'Channel chat',workdir:'/tmp/smoke'},{id:'scheduled',title:'Scheduled chat',workdir:'/tmp/smoke'},{id:'child',title:'Child agent',workdir:'/tmp/smoke',parentId:'s'}].map(s=>({...s,model:'test',turnCount:1,createdAt:'2026-01-01T00:00:00Z',updatedAt:'2026-01-01T00:00:00Z'}));
  const list=()=>[{id:'s',title:sessionTitle,model:'test',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),turnCount:1,workdir:sessionWorkspace},...(forked?[{id:'fork',title:'Workflow test (fork)',model:'test',turnCount:1,workdir:'/tmp/smoke',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}]:[]),...extraSessions,...newSessions].filter(s=>!archivedIds.has(s.id));
  const changeReads=[];
+ const childHistoryReads=[];
  let importFixture=null;
  let memoryRevision=1,memoryFails=false,memoryConflict=false,editedGlobal=null;const memoryReads=[],memorySaves=[],editedWorkspaces=new Map();
  let contextFixture={model:"test",window:100000,estimatedTokens:12500,lastInputTokens:12000,hasImages:false,compactions:1,records:[{at:1791850000000,before:95000,after:5000}]};const contextReads=[],browseReads=[],beforeRestoreContextReads=[];let resumeGate=null;
@@ -103,6 +104,10 @@ app.whenReady().then(async()=>{
  handle('appVersion',()=> 'work-smoke');handle('profileList',()=>profiles);
  handle('projectSave',(_e,input)=>{const project={...input,id:input.id||'p_fixture',directories:input.directories.map(path=>path.trim()).filter(Boolean)};const index=groups.groups.findIndex(p=>p.id===project.id);if(index<0)groups.groups.push(project);else groups.groups[index]=project;return groups;});
  handle('groupDelete',(_e,id)=>{groups.groups=groups.groups.filter(p=>p.id!==id);for(const key of Object.keys(groups.assignments))if(groups.assignments[key]===id)delete groups.assignments[key];return groups;});
+ handle('sessionHistory',(_event,id)=>{
+  childHistoryReads.push(id);
+  return id==='details-child' ? [{id:'child-response',kind:'agentMessage',text:'Stored sub-agent result'}] : [];
+ });
  const assignmentCalls=[];let assignmentFails=false;
  handle('sessionAssign',(_e,input)=>{assignmentCalls.push(input);if(assignmentFails)throw Error('fixture project move failed');if(input.groupId)groups.assignments[input.sessionId]=input.groupId;else delete groups.assignments[input.sessionId];return groups;});
  let streamSearch=false;
@@ -1521,6 +1526,46 @@ app.whenReady().then(async()=>{
  check('workspace layout and heatmap adapt to the dark modern theme',await js("getComputedStyle(document.documentElement).colorScheme==='dark' && document.querySelector('.sidebar').contains(document.querySelector('.activity-rail'))"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-workspace-home-dark.png',(await win.webContents.capturePage()).toPNG());
+
+ welcomeMode=false;
+ extraSessions.push({id:'details-child',title:'↳ fixture review',parentId:'s',workdir:'/tmp/smoke',agentStatus:'completed',turnCount:1,updatedAt:'2026-01-01T00:00:00Z',createdAt:'2026-01-01T00:00:00Z'});
+ await win.reload();await wait("!!document.querySelector('.composer textarea')");
+ win.webContents.send(IPC.onOpenSession,'s');
+ const childRow="[...document.querySelectorAll('.agent-row')].find(row=>row.textContent.includes('fixture review'))";
+ await wait(`!!(${childRow})`);
+ const childResumes=resumeCalls.filter(id=>id==='details-child').length;
+ await js(`(${childRow}).click()`);
+ check('the details panel reads a child transcript without switching or resuming it',await wait(`(${childRow})?.textContent.includes('已完成') && document.querySelector('.agent-transcript')?.textContent.includes('Stored sub-agent result')`)&&childHistoryReads.at(-1)==='details-child'&&resumeCalls.filter(id=>id==='details-child').length===childResumes);
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'details-child',turnId:'child-live'}});
+ check('child-agent status follows live turns in the details panel',await wait(`(${childRow})?.textContent.includes('正在执行')`));
+ win.webContents.send(IPC.onAgentEvent,{method:'turn/completed',params:{sessionId:'details-child',turnId:'child-live',error:'Interrupted'}});
+ check('a stopped child remains in the read-only panel',await wait(`(${childRow})?.textContent.includes('已中断') && !!document.querySelector('.agent-transcript')`));
+
+ await draft('原始草稿');
+ await js("(()=>{const el=document.querySelector('.composer textarea');el.dispatchEvent(new InputEvent('beforeinput',{inputType:'insertFromPaste',bubbles:true,cancelable:true}));el.value+=' 大段粘贴'.repeat(100);el.dispatchEvent(new InputEvent('input',{inputType:'insertFromPaste',bubbles:true}));})()");
+ await draftKey('z',{metaKey:true});
+ check('composer undo removes a large paste as a single edit',await wait("document.querySelector('.composer textarea').value==='原始草稿'"));
+ await draftKey('z',{metaKey:true,shiftKey:true});
+ check('composer redo restores the entire large paste',await wait("document.querySelector('.composer textarea').value==='原始草稿'+' 大段粘贴'.repeat(100)"));
+ await draft('保留这份草稿');await openAdd();await chooseAdd(2);
+ await wait("!!document.querySelector('.mention-menu .menu-search')");await searchAdd('General chat');await addKey('Enter');
+ check('composer reference insertion saves the binding together with the text',await wait("document.querySelector('.composer textarea').value.includes('@') && JSON.parse(localStorage.getItem('aiclaw:chat-draft:s')).bindings.some(binding=>binding.id==='general')"));
+ await draftKey('z',{ctrlKey:true});
+ check('composer undo restores reference text and binding together',await wait("document.querySelector('.composer textarea').value==='保留这份草稿' && JSON.parse(localStorage.getItem('aiclaw:chat-draft:s')).bindings.length===0"));
+ await draftKey('y',{ctrlKey:true});
+ await js("(()=>{const dt=new DataTransfer();dt.items.add(new File(['Draft attachment'],'draft.txt',{type:'text/plain'}));const picker=document.querySelector('.composer input[type=file]');picker.files=dt.files;picker.dispatchEvent(new Event('change',{bubbles:true}));})()");
+ await wait("document.querySelector('.composer .attach-name')?.textContent==='draft.txt'");
+ await js("document.querySelector('.composer .attach-x').click()");
+ await draftKey('z',{metaKey:true});
+ check('undo restores a removed attachment without disturbing the draft',await wait("document.querySelector('.composer .attach-name')?.textContent==='draft.txt' && document.querySelector('.composer textarea').value.includes('@')"));
+ await draftKey('z',{metaKey:true,shiftKey:true});
+ check('redo removes the previously restored attachment',await wait("!document.querySelector('.composer .attach-name')"));
+ await draftKey('z',{metaKey:true});
+ win.webContents.send(IPC.onOpenSession,'general');
+ check('drafts do not cross session boundaries',await wait("document.querySelector('.chat-session-title')?.textContent==='General chat' && !document.querySelector('.composer textarea').value.includes('保留这份草稿')"));
+ await win.reload();await wait("!!document.querySelector('.composer textarea')");
+ win.webContents.send(IPC.onOpenSession,'s');
+ check('renderer reload restores draft text, session references and staged files',await wait("document.querySelector('.composer textarea').value.includes('保留这份草稿') && document.querySelector('.composer .attach-name')?.textContent==='draft.txt' && JSON.parse(localStorage.getItem('aiclaw:chat-draft:s')).bindings[0]?.id==='general'"));
  }catch(e){check(String(e.stack||e),false);}
  console.log(`${checks.filter(c=>c.ok).length}/${checks.length} work UI checks passed`);
  app.exit(checks.every(c=>c.ok)?0:1);

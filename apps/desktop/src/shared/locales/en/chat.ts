@@ -1,6 +1,16 @@
 /** 英文词典：chat 这一组界面（中文原文 → 英文）。 */
 export const chat: Record<string, string> = {
   "会话详情": "Chat details",
+  "子 Agent": "Sub-agents",
+  "子 Agent 执行记录": "Sub-agent transcript",
+  "已有执行记录": "History available",
+  "等待执行": "Waiting to run",
+  "正在准备": "Preparing",
+  "执行失败": "Failed",
+  "已中断": "Interrupted",
+  "无法加载执行记录": "Unable to load transcript",
+  "正在加载执行记录…": "Loading transcript…",
+  "暂无执行记录": "No transcript yet",
   "关闭会话详情": "Close chat details",
   "无法保存附件原件": "Unable to save the original attachment",
   "改动较多": "Large change",

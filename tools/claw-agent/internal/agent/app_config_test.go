@@ -49,12 +49,12 @@ func TestConfigurationToolsAreOptInAndAbsentForChildren(t *testing.T) {
 }
 func TestConfigurationUsesHostCardEvenUnderBypass(t *testing.T) {
 	model := &fakeModel{script: []string{
-		sseToolCalls([3]string{"c1", "app_configure", `{"sessionId":"forged","action":"list","category":"search","operation":"save","values":{"provider":"tavily"}}`}), sseText("Done"),
+		sseToolCalls([3]string{"c1", "app_configure", `{"sessionId":"forged","turnId":"forged","action":"list","category":"search","operation":"save","values":{"provider":"tavily"}}`}), sseText("Done"),
 	}}
 	s := configurationSession(t, model, true, "")
 	e := &configurationEmitter{}
 	s.RunTurn(context.Background(), "turn", "Configure search", nil, nil, e)
-	if len(e.requests) != 1 || e.requests[0].Action != "configure" || e.requests[0].SessionID != "desktop" {
+	if len(e.requests) != 1 || e.requests[0].Action != "configure" || e.requests[0].SessionID != "desktop" || e.requests[0].TurnID != "turn" {
 		t.Fatalf("bad request: %+v", e.requests)
 	}
 	if !e.find(protocol.NotifyItemCompleted, "User saved configuration") {

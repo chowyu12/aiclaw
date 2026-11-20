@@ -339,6 +339,11 @@ func (s *Server) dispatch(ctx context.Context, f frame) {
 		if summaries == nil {
 			summaries = []agent.Summary{}
 		}
+		for i := range summaries {
+			if summaries[i].ParentID != "" {
+				summaries[i].AgentStatus = s.collab.sessionStatus(summaries[i].ID)
+			}
+		}
 		s.writeResult(f.ID, map[string]any{"sessions": summaries})
 	case protocol.MethodSessionRename:
 		s.handleSessionRename(ctx, f)

@@ -8,6 +8,7 @@ import { filename } from "../file-card";
 import { fileDiff } from "../file-diff";
 import { reportedFilePaths } from "../markdown";
 import { groupTurns, turnSources } from "../turns";
+import SessionAgents from "./SessionAgents.vue";
 
 const props = defineProps<{ sessionId: string }>();
 const emit = defineEmits<{ close: [] }>();
@@ -192,6 +193,8 @@ function openSource(source: typeof sources.value[number]): void {
         </details>
       </section>
 
+      <SessionAgents :session-id="sessionId" />
+
       <section v-if="outputs.length">
         <details class="file-outputs" open>
           <summary>{{ t("输出内容") }} <small>{{ outputs.length }}</small></summary>
@@ -219,7 +222,7 @@ function openSource(source: typeof sources.value[number]): void {
 
       <p v-if="loading" role="status">{{ t("正在加载会话详情…") }}</p>
       <p v-else-if="failed" role="alert">{{ t("部分会话详情加载失败") }} <button class="show-all" @click="retry++">{{ t("重试") }}</button></p>
-      <p v-else-if="!tasks.length && !workspace && !project && !changeRows.length && !outputs.length && !sources.length">{{ t("当前会话暂无详情") }}</p>
+      <p v-else-if="!tasks.length && !workspace && !project && !changeRows.length && !outputs.length && !sources.length && !store.sessions.some(session => session.parentId === sessionId)">{{ t("当前会话暂无详情") }}</p>
     </div>
   </aside>
 </template>

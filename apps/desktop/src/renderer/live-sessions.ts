@@ -83,6 +83,7 @@ export interface LiveSession {
   /** 有一轮在跑。发送那一刻置真，turn/completed 或出错置假。 */
   busy: boolean;
   turnId?: string;
+  turnStatus?: "complete" | "failed" | "interrupted";
   /** A turn finished while this conversation was not visible. */
   unread?: boolean;
 }
@@ -375,6 +376,7 @@ export function applyAgentEvent(
     case "turn/started":
       record.turnId = String(params.turnId ?? "");
       record.busy = true;
+      record.turnStatus = undefined;
       return applied;
     case "turn/completed": {
       if (record.turnId && params.turnId && record.turnId !== params.turnId) return applied;
@@ -386,6 +388,7 @@ export function applyAgentEvent(
         else if (entry.kind === "step" && entry.state === "running") entry.state = "done";
       }
       const error = params.error;
+      record.turnStatus = !error ? "complete" : INTERRUPTED.has(String(error)) ? "interrupted" : "failed";
       // 「已中断」是用户自己点的停止，不算错误，不弹红条。内核按界面语言给出这句话，
       // 两种语言都认（英文是 "Interrupted"）。
       if (typeof error === "string" && error && !INTERRUPTED.has(error)) applied.error = error;
@@ -393,6 +396,7 @@ export function applyAgentEvent(
     }
     case "error":
       record.busy = false;
+      record.turnStatus = "failed";
       applied.error = String(params.message ?? tr("运行出错"));
       return applied;
     default:

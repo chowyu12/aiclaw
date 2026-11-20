@@ -461,6 +461,7 @@ export interface SessionSummary {
   snippet?: string;
   /** 子 agent 的父会话 id；普通会话没有。 */
   parentId?: string;
+  agentStatus?: string;
   /** 归档的时刻（ISO）；没归档的没有。 */
   archivedAt?: string;
 }
@@ -793,6 +794,7 @@ export interface ContextStatus { apiProtocol?:string; protocolSource?:string; se
 /** Application configuration is a desktop-only host capability. Values never carry credentials. */
 export interface AppConfigRequest {
   sessionId: string;
+  turnId?: string;
   action: "list" | "configure";
   category: "email" | "search" | "mcp" | "plugin" | "schedule";
   operation?: string;

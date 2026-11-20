@@ -44,7 +44,7 @@ func (s *Session) registerAppConfigTools() error {
 				if err := json.Unmarshal(raw, &request); err != nil {
 					return "", err
 				}
-				request.Action, request.SessionID = action, env.SessionID
+				request.Action, request.SessionID, request.TurnID = action, env.SessionID, env.TurnID
 				emitter, ok := s.currentEmitter().(appConfigEmitter)
 				if !ok {
 					return "", errors.New("application configuration requires the interactive desktop host")

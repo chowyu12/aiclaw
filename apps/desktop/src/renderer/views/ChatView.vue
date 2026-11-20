@@ -7,7 +7,7 @@ import { applyPreset, presetCandidates } from "../../shared/presets";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
-import { draftFor } from "../drafts";
+import { checkpointDraft, draftFor, resetDraftHistory, stepDraft } from "../drafts";
 import { t } from "../i18n";
 import {
   classifyFile,
@@ -155,6 +155,7 @@ async function finishVoice(): Promise<void> {
     if (store.sessionId === sessionId) insertAtCursor(text);
     else {
       const target = draftFor(sessionId);
+      checkpointDraft(target);
       target.text += (target.text ? "\n" : "") + text;
     }
   } catch (error) {
@@ -198,6 +199,7 @@ function insertAtCursor(text: string): void {
   const before = value.slice(0, start);
   const after = value.slice(end);
   const glue = before && !/\s$/.test(before) && /^[A-Za-z0-9]/.test(text) ? " " : "";
+  rememberDraftEdit();
   draft.value = before + glue + text + after;
   void nextTick(() => {
     if (!element) return;
@@ -246,6 +248,7 @@ function pickSuggestion(index: number): void {
     presetsOpen.value = true; closeSuggestions(); return;
   }
   const next = applyPreset(draft.value,slash.value.start,caret,choice.preset);
+  rememberDraftEdit();
   draft.value = next.text;closeSuggestions();
   void nextTick(() => {element.focus();element.setSelectionRange(next.caret,next.caret);});
 }
@@ -281,6 +284,7 @@ function pickSkill(skill: SkillView): void {
   if (!element || !slash.value) return;
   const { text, start, end } = insertionRange(slash.value.start, element);
   const next = applySkill(text, start, end, skill.name);
+  rememberDraftEdit();
   draft.value = next.text;
   closeSuggestions();
   void nextTick(() => { element.focus(); element.setSelectionRange(next.caret, next.caret); });
@@ -345,6 +349,7 @@ function pickMention(session: SessionSummaryView): void {
   const title = mentionTitle(session.title);
   const { text, start, end } = insertionRange(current.start, element);
   const next = applyMention(text, start, end, title);
+  rememberDraftEdit();
   draft.value = next.text;
   bindings.value = [...bindings.value, { id: session.id, title }];
   closeSuggestions();
@@ -381,6 +386,7 @@ function toggleAddMenu(): void {
 
 function addFiles(): void {
   addOpen.value = false;
+  input.value?.focus();
   picker.value?.click();
 }
 
@@ -446,18 +452,20 @@ async function accept(files: FileList | File[] | null | undefined): Promise<void
   if (target.pendingAttachments) return;
   target.pendingAttachments++;
   target.attachmentError = "";
+  const added: Attachment[] = [];
   try {
     for (const file of Array.from(files ?? [])) {
-      const images = target.attachments.filter((item) => item.kind === "image").length;
-      const audio = target.attachments.filter((item) => item.kind === "audio").length;
+      const current = [...target.attachments, ...added];
+      const images = current.filter((item) => item.kind === "image").length;
+      const audio = current.filter((item) => item.kind === "audio").length;
       const verdict = classifyFile(file, images, audio);
       try {
-        if (verdict.accept === "image") target.attachments.push(await readImage(file));
-        else if (verdict.accept === "audio") target.attachments.push(await readAudio(file));
+        if (verdict.accept === "image") added.push(await readImage(file));
+        else if (verdict.accept === "audio") added.push(await readAudio(file));
         else if (verdict.accept === "document" || verdict.accept === "text") {
-          if (target.attachments.filter(item => item.kind === "document").length >= MAX_DOCUMENT_ATTACHMENTS) throw Error(t("每条消息最多附加 32 个文件"));
+          if (current.filter(item => item.kind === "document").length >= MAX_DOCUMENT_ATTACHMENTS) throw Error(t("每条消息最多附加 32 个文件"));
           const staged = await window.aiclaw.files.stageAttachment(file.name, new Uint8Array(await file.arrayBuffer()), sessionId);
-          target.attachments.push({ kind: "document", name: staged.name, file: staged });
+          added.push({ kind: "document", name: staged.name, file: staged });
         }
         // 拒绝的要说出来。默默忽略的话，用户以为模型看过了那份文件。
         else target.attachmentError = verdict.reason;
@@ -466,6 +474,11 @@ async function accept(files: FileList | File[] | null | undefined): Promise<void
       }
     }
   } finally { target.pendingAttachments--; }
+  if (added.length) {
+    if (sessionId === store.sessionId) rememberDraftEdit();
+    else checkpointDraft(target);
+    target.attachments.push(...added);
+  }
 }
 
 function onPaste(event: ClipboardEvent): void {
@@ -512,7 +525,34 @@ async function clearWorkspace(): Promise<void> {
 }
 
 function removeAttachment(index: number): void {
+  rememberDraftEdit();
   attachments.value.splice(index, 1);
+  input.value?.focus();
+}
+
+function rememberDraftEdit(): void {
+  checkpointDraft(draftFor(store.sessionId), input.value?.selectionStart, input.value?.selectionEnd);
+}
+
+function undoDraftEdit(redo: boolean): void {
+  const element = input.value;
+  if (!element) return;
+  const sessionId = store.sessionId;
+  const selection = stepDraft(draftFor(sessionId), redo, element.selectionStart, element.selectionEnd);
+  if (!selection) return;
+  closeSuggestions();
+  void nextTick(() => {
+    if (store.sessionId === sessionId && input.value === element) element.setSelectionRange(selection.start, selection.end);
+  });
+}
+
+function beforeDraftInput(event: InputEvent): void {
+  if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
+    event.preventDefault();
+    undoDraftEdit(event.inputType === "historyRedo");
+  } else if (!event.isComposing && event.inputType !== "insertCompositionText") {
+    rememberDraftEdit();
+  }
 }
 
 /** 附件上那行字。音频标出大小——转写按时长收费，用户该知道自己发了多大一段。 */
@@ -547,6 +587,7 @@ async function submit(): Promise<void> {
     .map((item) => ({ name: item.name, data: item.data }));
   if (!text.trim() && images.length === 0 && audio.length === 0) return;
   const references = activeReferences(text, bindings.value);
+  resetDraftHistory(target);
   draft.value = "";
   attachments.value = [];
   attachError.value = "";
@@ -569,6 +610,12 @@ async function submit(): Promise<void> {
 // Enter 发送、Shift+Enter 换行。中文输入法组字期间的 Enter 不能当发送，
 // 否则选词就把半句话发出去了。
 function onKeydown(event: KeyboardEvent): void {
+  const key = event.key.toLowerCase();
+  if (!event.isComposing && !event.altKey && (event.metaKey || event.ctrlKey) && (key === "z" || key === "y")) {
+    event.preventDefault();
+    undoDraftEdit(key === "y" || event.shiftKey);
+    return;
+  }
   if (onSkillKey(event)) return;
   if (onMentionKey(event)) return;
   if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
@@ -1097,6 +1144,8 @@ const forking = ref(false);
               ref="input"
               v-model="draft"
               rows="2"
+              @beforeinput="beforeDraftInput"
+              @compositionstart="rememberDraftEdit"
               @input="updateSuggestions"
               @click="updateSuggestions"
               @keyup="(event: KeyboardEvent) => { if (!['ArrowUp', 'ArrowDown', 'Enter', 'Tab', 'Escape'].includes(event.key)) updateSuggestions(); }"

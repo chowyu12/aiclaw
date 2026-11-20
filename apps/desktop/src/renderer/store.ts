@@ -1,4 +1,5 @@
 import { imageDataURL } from "./attachments";
+import { forgetDraft } from "./drafts";
 import type { ComputerControlState, ComputerControlAction } from "../shared/computer-control";
 import type { ConfigurationCard, ConfigurationReply, ConfigurationOutcome } from "../shared/app-config";
 import { reactive, readonly } from "vue";
@@ -715,7 +716,7 @@ export const actions = {
   async deleteSession(sessionId: string): Promise<void> {
     const removed = ((await window.aiclaw.session.remove(sessionId)) as string[] | undefined) ?? [sessionId];
     state.sideSessionIds = state.sideSessionIds.filter(id => !removed.includes(id));
-    for (const id of removed) { delete state.live[id]; sideReady.delete(id); }
+    for (const id of removed) { delete state.live[id]; sideReady.delete(id); forgetDraft(id); }
     if (removed.includes(state.sideSessionId)) actions.closeSideSession();
     persistSideSessions();
     if (removed.includes(state.sessionId)) {

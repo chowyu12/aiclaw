@@ -749,7 +749,7 @@ sessions.on("event", (method, params) => {
   }
   if (method === "turn/completed") {
     const done = params as { sessionId?: string; turnId?: string; error?: string } | undefined;
-    if (done?.sessionId) configuration.clear(done.sessionId);
+    if (done?.sessionId) configuration.clear(done.sessionId, done.turnId);
     if (done?.sessionId) scheduler.onTurnCompleted(done.sessionId, done.error, done.turnId);
   }
   // 一轮结束（完成、失败、中断）时，它还没回应的审批就作废了：内核那边已经

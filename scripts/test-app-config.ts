@@ -38,8 +38,8 @@ function fixture(t: import("node:test").TestContext) {
   const scheduler = new Scheduler(dir,{runTask:async()=>"s",notify:()=>{}});
   const assistant = new ConfigurationAssistant(sessions,{readMcpServers:()=>structuredClone(servers),writeMcpServers:value=>{servers=structuredClone(value);return value;}},scheduler,value=>{cards=value;});
   const results:string[] = [], failures:string[] = [];
-  const request = async (category:AppConfigRequest["category"], operation?:string, targetId?:string, values?:Record<string,unknown>, sessionId="s") => {
-    const action:PendingAppConfigAction = {request:{sessionId,action:operation?"configure":"list",category,operation,targetId,values},respond:r=>results.push(r.text),fail:error=>failures.push(error)};
+  const request = async (category:AppConfigRequest["category"], operation?:string, targetId?:string, values?:Record<string,unknown>, sessionId="s", turnId?:string) => {
+    const action:PendingAppConfigAction = {request:{sessionId,turnId,action:operation?"configure":"list",category,operation,targetId,values},respond:r=>results.push(r.text),fail:error=>failures.push(error)};
     await assistant.request(action);
     return cards.at(-1);
   };
@@ -89,6 +89,22 @@ test("cancelled and expired requests cannot write, including after reload",async
   await assert.rejects(f.apply({},card));assert.equal(f.calls.length,0);
   await f.request("search","save");f.assistant.clear("s");
   assert.equal(f.cards().length,0);assert.equal(f.calls.length,0);
+});
+
+test("late completion clears only its own configuration cards, including in-flight preparation",async t=>{
+  const f=fixture(t);
+  const old=await f.request("search","save",undefined,undefined,"s","old");
+  const other=await f.request("search","save",undefined,undefined,"other","old");
+  const preparingOld=f.request("email","save",undefined,undefined,"s","old");
+  const preparingNew=f.request("email","save",undefined,undefined,"s","new");
+  f.assistant.clear("s","old");
+  await preparingOld;
+  const current=await preparingNew;
+  assert.deepEqual(f.cards().map(card=>card.id),[other!.id,current!.id]);
+  await assert.rejects(f.apply({},old));
+  f.assistant.clear("s","old");
+  assert.equal(f.cards().at(-1)?.id,current!.id);
+  f.assistant.clear();
 });
 
 test("successful default search selection tests first, then updates enabled engines",async t=>{

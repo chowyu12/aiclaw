@@ -1205,6 +1205,7 @@ type SearchSource struct {
 // AppConfigRequest contains public proposals only; credentials are entered in the host UI.
 type AppConfigRequest struct {
 	SessionID string         `json:"sessionId"`
+	TurnID    string         `json:"turnId,omitempty"`
 	Action    string         `json:"action"`
 	Category  string         `json:"category"`
 	Operation string         `json:"operation,omitempty"`

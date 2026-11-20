@@ -1549,7 +1549,8 @@ type Summary struct {
 	/** 搜索命中的那一小段正文。只有 Search 会填。 */
 	Snippet string `json:"snippet,omitempty"`
 	/** 子 agent 的父会话；普通会话为空。 */
-	ParentID string `json:"parentId,omitempty"`
+	ParentID    string `json:"parentId,omitempty"`
+	AgentStatus string `json:"agentStatus,omitempty"`
 	/** 归档的时刻；没归档时不出现。 */
 	ArchivedAt *time.Time `json:"archivedAt,omitempty"`
 }

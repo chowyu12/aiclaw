@@ -201,7 +201,7 @@ func TestSpawnWaitDeliversChildAnswer(t *testing.T) {
 		}
 		for _, item := range list {
 			if item.ParentID == "s_root" && item.Title == "↳ research" {
-				return true
+				return server.collab.sessionStatus(item.ID) == agent.AgentCompleted
 			}
 		}
 		return false

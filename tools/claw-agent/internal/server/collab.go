@@ -410,6 +410,16 @@ func (h *collabHub) InterruptTree(sessionID string) {
 	}
 }
 
+func (h *collabHub) sessionStatus(id string) string {
+	h.mu.Lock()
+	node := h.nodes[id]
+	h.mu.Unlock()
+	if node == nil {
+		return ""
+	}
+	return h.statusOf(node)
+}
+
 func (h *collabHub) statusOf(node *collabNode) string {
 	if session := h.server.session(node.sessionID); session != nil && session.Busy() {
 		return agent.AgentRunning

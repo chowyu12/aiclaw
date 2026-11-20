@@ -33,9 +33,8 @@ interface Pending {
 /** The model proposes public fields; only this host-owned card can authorize a write. */
 export class ConfigurationAssistant {
   private pending = new Map<string, Pending>();
-  private generation = 0;
   private saving = false;
-  private sessionGenerations = new Map<string, number>();
+  private preparing = new Set<PendingAppConfigAction>();
   private readonly sessions: ConfigSessions;
   private readonly store: ConfigStoreAccess;
   private readonly scheduler: Scheduler;
@@ -45,11 +44,12 @@ export class ConfigurationAssistant {
   }
 
   listPending(): ConfigurationCard[] { return [...this.pending.values()].map(entry => entry.card); }
-  clear(sessionId?: string): void {
-    if (sessionId) this.sessionGenerations.set(sessionId, (this.sessionGenerations.get(sessionId) ?? 0) + 1);
-    else this.generation++;
+  clear(sessionId?: string, turnId?: string): void {
+    const matches = (request: AppConfigRequest) => !sessionId ||
+      (request.sessionId === sessionId && (!turnId || request.turnId === turnId || !request.turnId));
+    for (const action of this.preparing) if (matches(action.request)) this.preparing.delete(action);
     for (const [id, entry] of this.pending) {
-      if (!sessionId || entry.card.sessionId === sessionId) {
+      if (matches(entry.action.request)) {
         clearTimeout(entry.timer);
         this.pending.delete(id);
       }
@@ -58,7 +58,7 @@ export class ConfigurationAssistant {
   }
   async request(action: PendingAppConfigAction): Promise<void> {
     const expiresAt = Date.now() + 29 * 60_000;
-    const generation = this.generation, sessionGeneration = this.sessionGenerations.get(action.request.sessionId) ?? 0;
+    this.preparing.add(action);
     try {
       const request = action.request;
       if (!Object.hasOwn(operations, request.category) || !["list", "configure"].includes(request.action)) throw Error("Unsupported configuration category or action");
@@ -73,7 +73,7 @@ export class ConfigurationAssistant {
         operation: request.operation!, title: `${tr("应用配置")} · ${categoryNames[request.category]} · ${operationNames[request.operation!]}`, fields: [],
         note: tr("密钥只在此卡片填写，不会发送给模型。保存会修改应用配置；工具在当前任务结束后重新挂载生效。")};
       const apply = await this.prepare(request, card);
-      if (generation !== this.generation || sessionGeneration !== (this.sessionGenerations.get(request.sessionId) ?? 0)) { return; }
+      if (!this.preparing.has(action)) return;
       const timer = setTimeout(() => {
         if (!this.pending.has(card.id)) return;
         this.pending.delete(card.id); this.changed(this.listPending());
@@ -83,9 +83,11 @@ export class ConfigurationAssistant {
       this.pending.set(card.id, {card, action, apply, busy:false, expiresAt, timer});
       this.changed(this.listPending());
     } catch {
-      if (generation === this.generation && sessionGeneration === (this.sessionGenerations.get(action.request.sessionId) ?? 0)) {
+      if (this.preparing.has(action)) {
         action.fail("Unable to prepare configuration. Check the category, operation and target ID; credentials must be entered in the desktop card.");
       }
+    } finally {
+      this.preparing.delete(action);
     }
   }
 
