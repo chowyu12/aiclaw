@@ -95,7 +95,9 @@ try {
       const identity=receipt.identity.checks.find(check=>check.name==='bundle_identity');
       assert.equal(identity.status,'pass');
       assert.equal(identity.data.bundle_identifier,'com.github.chowyu12.aiclaw');
-      assert.equal(identity.data.parent_process_id,receipt.status.source.responsible_ppid);
+      // The TCC responsible process can differ from the driver's direct parent.
+      assert.equal(receipt.status.source.parent_pid,child.pid,'Permission probe must run under the launched AIClaw process');
+      assert.equal(identity.data.parent_process_id,child.pid,'Driver identity must match the launched AIClaw process');
     }
     if(process.env.AICLAW_CUA_BACKGROUND_TEST==="1") {
       const {backgroundFixtureChecks}=await import("./cua-background-fixture.mjs");
