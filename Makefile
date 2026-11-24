@@ -88,7 +88,7 @@ dev: build ## 起整个应用，手动测功能
 	@echo "首次启动请在「模型服务」页添加一个端点、填 Key、写上模型名。"
 	@echo "内核二进制：$(AGENT_BIN)"
 	@echo
-	cd $(DESKTOP) && npx electron .
+	cd $(DESKTOP) && node ../../scripts/launch-desktop.mjs
 
 dev-ui: deps build-go build-client build-computer ## 同 dev，但渲染层带热更（改 Vue 立即生效）
 	@cd $(DESKTOP) && npm run build:main && npm run build:preload
@@ -101,7 +101,7 @@ dev-ui: deps build-go build-client build-computer ## 同 dev，但渲染层带�
 		curl -sf http://localhost:$(VITE_PORT) >/dev/null && break; \
 		sleep 0.2; \
 	done; \
-	VITE_DEV_SERVER_URL=http://localhost:$(VITE_PORT) npx electron .
+	VITE_DEV_SERVER_URL=http://localhost:$(VITE_PORT) node ../../scripts/launch-desktop.mjs
 
 # ---------- 验证 ----------
 

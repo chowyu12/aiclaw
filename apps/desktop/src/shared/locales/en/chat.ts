@@ -332,6 +332,7 @@ export const chat: Record<string, string> = {
 
   // ---------- 模型选择 ----------
   "选择模型": "Choose model",
+  "返回模型设置": "Back to model settings",
   "刷新": "Refresh",
   "搜索模型或服务名": "Search models or providers",
   "正在读取模型服务…": "Loading model providers…",
@@ -399,6 +400,12 @@ export const chat: Record<string, string> = {
   "切换推理强度失败：{error}": "Could not change reasoning effort: {error}",
   "推理强度": "Reasoning effort",
   "会话推理强度": "Session reasoning effort",
+  "最小": "Minimal",
+  "低": "Low",
+  "中": "Medium",
+  "高": "High",
+  "极高": "Extra high",
+  "最大": "Max",
   "模型默认": "Model default",
   "从下一次模型请求生效；按模型能力校验。": "Applies to the next model request; validated against model capabilities.",
   "请选择 UTF-8 文本或 Markdown 文件。": "Choose a UTF-8 text or Markdown file.",

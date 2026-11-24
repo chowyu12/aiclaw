@@ -621,18 +621,27 @@ app.whenReady().then(async()=>{
  await draft('/presets');await draftKey('Enter');await wait("!!document.querySelector('.preset-dialog[open]')");
  await js("document.querySelector('.preset-dialog').dispatchEvent(new Event('cancel',{cancelable:true}))");
  check('preset dismissal preserves composer draft',await wait("!document.querySelector('.preset-dialog')")&&await js("document.querySelector('.composer textarea').value==='/presets'"));
+ const activeReasoning="document.querySelector('.reasoning-levels button[aria-pressed=true]')";
+ const clickReasoning=value=>js(`document.querySelector('.reasoning-levels button[value="${value}"]').click()`);
+ const captureModelMenu=async path=>{
+  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+  const rect=await js("(()=>{const r=document.querySelector('.model-menu').getBoundingClientRect();return {x:Math.floor(r.x)-8,y:Math.floor(r.y)-8,width:Math.ceil(r.width)+16,height:Math.ceil(r.height)+16};})()");
+  writeFileSync(path,(await win.webContents.capturePage(rect)).toPNG());
+ };
  let acknowledgeReasoning;reasoningGate=new Promise(resolve=>{acknowledgeReasoning=resolve;});
- await js("document.querySelector('.composer .model-button').click()");await wait("!!document.querySelector('.reasoning-picker select')");
- await js("(()=>{const input=document.querySelector('.reasoning-picker select');input.value='high';input.dispatchEvent(new Event('change',{bubbles:true}));})()");
- check('reasoning changes wait for acknowledgement without sending',await wait("document.querySelector('.reasoning-picker select').disabled&&document.querySelector('.reasoning-picker select').value==='medium'")&&sends.length===0);
+ await js("document.querySelector('.composer .model-button').click()");
+ check('opening the model menu focuses the current model and shows reasoning without the catalog',await wait(`${activeReasoning}?.value==='medium' && document.activeElement===document.querySelector('.model-current') && !document.querySelector('.model-list')`));
+ await captureModelMenu('/tmp/aiclaw-composer-model-compact.png');
+ await clickReasoning('high');
+ check('reasoning changes wait for acknowledgement without sending',await wait(`${activeReasoning}?.disabled && ${activeReasoning}?.value==='medium'`)&&sends.length===0);
  acknowledgeReasoning();reasoningGate=null;
- check('acknowledged reasoning effort is shown for the active session',await wait("!document.querySelector('.reasoning-picker select').disabled&&document.querySelector('.reasoning-picker select').value==='high'")&&reasoningCalls.at(-1)?.sessionId==='s');
- reasoningFails=true;await js("(()=>{const input=document.querySelector('.reasoning-picker select');input.value='low';input.dispatchEvent(new Event('change',{bubbles:true}));})()");
- check('failed reasoning save keeps the previously acknowledged value',await wait("!document.querySelector('.reasoning-picker select').disabled&&document.querySelector('.reasoning-picker select').value==='high'")&&effort==='high');
+ check('acknowledged reasoning effort is shown for the active session',await wait(`!${activeReasoning}?.disabled && ${activeReasoning}?.value==='high'`)&&reasoningCalls.at(-1)?.sessionId==='s');
+ reasoningFails=true;await clickReasoning('low');
+ check('failed reasoning save keeps the previously acknowledged value',await wait(`!${activeReasoning}?.disabled && ${activeReasoning}?.value==='high'`)&&effort==='high');
  win.webContents.send(IPC.onAgentEvent,{method:'session/reasoningUpdated',params:{sessionId:'other-workspace',reasoningEffort:''}});
- check('background reasoning fallback cannot change the active session',await js("document.querySelector('.reasoning-picker select').value==='high'"));
+ check('background reasoning fallback cannot change the active session',await js(`${activeReasoning}?.value==='high'`));
  win.webContents.send(IPC.onAgentEvent,{method:'session/reasoningUpdated',params:{sessionId:'s',reasoningEffort:''}});
- check('provider fallback updates the active reasoning selector',await wait("document.querySelector('.reasoning-picker select').value===''"));
+ check('provider fallback updates the active reasoning selector',await wait(`${activeReasoning}?.value===''`));
  reasoningFails=false;await js("document.querySelector('.composer .model-button').click()");await click('知道了');
  win.webContents.send(IPC.onAgentEvent,{method:'session/toolsUpdated',params:{sessionId:'s',tools:['read_file','remote__new'],mcpStatus:{remote:'已挂载 1 个工具'},foldedTools:[]}});
  check('MCP catalog updates do not restore the removed tool-count control',await js("![...document.querySelectorAll('.composer .chip')].some(b=>/工具\\s*\\d+/.test(b.textContent)) && !document.querySelector('.status-menu')"));
@@ -882,11 +891,37 @@ app.whenReady().then(async()=>{
  check('context details show persisted compaction metadata',await js("document.querySelector('.context-details ol').textContent.includes('95,000') && document.querySelector('.context-details').textContent.includes('压缩记录 · 1')"));
  writeFileSync('/tmp/aiclaw-context-details.png',(await win.webContents.capturePage()).toPNG());
  contextFixture={...contextFixture,window:0,lastInputTokens:0};await js("document.querySelector('.context-details header button').click()");check('unknown context window does not show invented remaining percentage',await wait("document.querySelector('.context-trigger').title.includes('窗口未知') && !document.querySelector('.context-details progress') && document.querySelector('.context-details').textContent.includes('尚未报告')"));contextFixture={...contextFixture,window:100000,lastInputTokens:12000};
+ await js("document.querySelector('.chat-header').click()");
+ check('clicking outside dismisses context details',await wait("!document.querySelector('.context-details') && document.querySelector('.context-trigger').getAttribute('aria-expanded')==='false'"));
+ await js("document.querySelector('.context-trigger').click()");await wait("!!document.querySelector('.context-details')");
  await js("document.querySelector('.context-details button[aria-label=\"关闭上下文详情\"]').click()");
  const readsBeforeModelSwitch=contextReads.length;
- await js("document.querySelector('.model-button').click()");await wait("!!document.querySelector('.model-menu')");await js("[...document.querySelectorAll('.model-menu .menu-item')].find(button=>button.querySelector('.menu-name').textContent==='test2').click()");
+ const openModelList=async()=>{
+  await js("document.querySelector('.composer .model-button').click()");
+  await wait("!!document.querySelector('.model-current,.model-list')");
+  await js("if(!document.querySelector('.model-list'))document.querySelector('.model-current').click()");
+  await wait("document.activeElement===document.querySelector('.model-menu .menu-search')");
+ };
+ await openModelList();
+ const originalModels=providerFixture.models;
+ providerFixture={...providerFixture,models:[...originalModels,...Array.from({length:14},(_,i)=>`fixture-model-${i}`)]};
+ await js("document.querySelector('.model-refresh').click()");
+ await wait("document.querySelectorAll('.model-results .menu-item').length===16");
+ check('model search stays visible while results scroll in the dedicated picker',await js("(()=>{const panel=document.querySelector('.model-menu'),list=panel.querySelector('.model-results'),search=panel.querySelector('.menu-search'),top=search.getBoundingClientRect().top;list.scrollTop=list.scrollHeight;return list.scrollTop>0 && panel.scrollTop===0 && search.getBoundingClientRect().top===top && !panel.querySelector('.reasoning-picker,.model-current') && !!panel.querySelector('.menu-item[aria-pressed=true] .model-check');})()"));
+ await js("document.querySelector('.model-results').scrollTop=0");
+ await captureModelMenu('/tmp/aiclaw-composer-model-menu.png');
+ providerFixture={...providerFixture,models:originalModels};
+ await js("document.querySelector('.model-refresh').click()");
+ await wait("document.querySelectorAll('.model-results .menu-item').length===2");
+ await js("document.querySelector('.model-back').click()");
+ check('back returns from the catalog to model settings and restores focus',await wait("!document.querySelector('.model-list') && !!document.querySelector('.reasoning-picker') && document.activeElement===document.querySelector('.model-current')"));
+ await js("document.querySelector('.model-current').click()");
+ await wait("document.activeElement===document.querySelector('.model-menu .menu-search')");
+ await js("document.querySelector('.model-menu .menu-search').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}))");
+ check('closing the model menu with Escape restores trigger focus',await wait("!document.querySelector('.model-menu') && document.activeElement===document.querySelector('.model-button')"));
+ await openModelList();await js("[...document.querySelectorAll('.model-menu .menu-item')].find(button=>button.querySelector('.menu-name').textContent==='test2').click()");
  check('context automatically reloads after successful model switch',await wait("document.querySelector('.model-button').textContent.includes('test2') && document.querySelector('.context-trigger').title.includes('窗口未知')")&&contextReads.length>readsBeforeModelSwitch&&contextFixture.lastInputTokens===0);
- await js("document.querySelector('.model-button').click()");await wait("!!document.querySelector('.model-menu')");await js("[...document.querySelectorAll('.model-menu .menu-item')].find(button=>button.querySelector('.menu-name').textContent==='test').click()");await wait("document.querySelector('.model-button').textContent.trim()==='test'");
+ await openModelList();await js("[...document.querySelectorAll('.model-menu .menu-item')].find(button=>button.querySelector('.menu-name').textContent==='test').click()");await wait("document.querySelector('.model-button').textContent.trim()==='test'");
 
 
  check('conflicting edit offers no undo',await js("[...document.querySelectorAll('.work-panel article')].find(a=>a.textContent.includes('other.txt')).querySelectorAll('button').length===1"));
@@ -1238,7 +1273,7 @@ app.whenReady().then(async()=>{
 
  resumeGate=null;
  const selectChat=async title=>{await openSessions();await js(`[...document.querySelectorAll('.sidebar .item')].find(e=>e.querySelector('.title')?.textContent.trim()===${JSON.stringify(title)}).click()`);};
- const selectModel=async name=>{await js("document.querySelector('.composer .model-button').click()");await wait("!!document.querySelector('.model-menu')");await js(`[...document.querySelectorAll('.model-menu .menu-item')].find(e=>e.querySelector('.menu-name')?.textContent===${JSON.stringify(name)}).click()`);};
+ const selectModel=async name=>{await openModelList();await js(`[...document.querySelectorAll('.model-menu .menu-item')].find(e=>e.querySelector('.menu-name')?.textContent===${JSON.stringify(name)}).click()`);};
  const settleModel=async()=>{await js("document.querySelector('.composer .model-button').click()");await wait("!!document.querySelector('.reasoning-picker select') && !document.querySelector('.reasoning-picker select').disabled");await js("document.querySelector('.composer .model-button').click()");};
  await selectChat('General chat');await wait("document.querySelector('.model-button')?.childNodes[0].textContent.trim()==='test'");
  let finishConfigure;configureFails=true;configureGate=new Promise(resolve=>{finishConfigure=resolve;});

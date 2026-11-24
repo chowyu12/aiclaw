@@ -4,6 +4,7 @@ import type { ContextStatus } from "@aiclaw/agent-client";
 import { store } from "../store";
 import { t } from "../i18n";
 const status=ref<ContextStatus|null>(null),opened=ref(false);
+const control = ref<HTMLElement | null>(null);
 let generation=0,timer:ReturnType<typeof setTimeout>|undefined;
 async function load():Promise<void>{
  // 会话 ID 先切换，恢复信息稍后才到；所有刷新入口都等当前会话恢复成功。
@@ -12,6 +13,14 @@ async function load():Promise<void>{
  catch{if(ticket===generation)status.value=null;}
 }
 watch(()=>[store.sessionId,store.sessionInfo],()=>{clearTimeout(timer);status.value=null;opened.value=false;void load();},{immediate:true});
+watch(opened, (visible, _previous, onCleanup) => {
+  if (!visible) return;
+  const dismissOutside = (event: MouseEvent) => {
+    if (control.value && !event.composedPath().includes(control.value)) opened.value = false;
+  };
+  document.addEventListener("click", dismissOutside, true);
+  onCleanup(() => document.removeEventListener("click", dismissOutside, true));
+});
 const unsubscribe=window.aiclaw.on.agentEvent((raw:unknown)=>{
  const event=raw as {method?:string;params?:{sessionId?:string}};
  if(event.params?.sessionId===store.sessionId&&["item/completed","turn/completed"].includes(event.method??"")){clearTimeout(timer);timer=setTimeout(()=>void load(),200);}
@@ -23,7 +32,7 @@ const label=computed(()=>`${t('上下文')} · ${status.value ? (percent.value==
 const number=(value:number)=>value.toLocaleString();
 </script>
 <template>
- <div class="context-control" @keydown.esc="opened=false">
+ <div ref="control" class="context-control" @keydown.esc="opened=false">
   <button class="context-trigger" :aria-expanded="opened" :aria-label="label" :title="`${label} · ${t('查看上下文用量和压缩记录')}`" @click="opened=!opened">
    <svg viewBox="0 0 20 20" aria-hidden="true">
     <circle class="context-track" cx="10" cy="10" r="7" />

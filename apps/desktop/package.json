@@ -1,6 +1,6 @@
 {
   "name": "@aiclaw/desktop",
-  "version": "3.12.16",
+  "version": "3.12.17",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
   "type": "module",
@@ -11,7 +11,7 @@
     "build:main": "tsc -p tsconfig.main.json && esbuild src/main/document-worker.ts --bundle --platform=node --target=node22 --format=cjs --define:import.meta.filename=__filename --external:unpdf --external:7z-wasm --external:pdfjs-dist --outfile=dist/main/document-worker.cjs",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer",
     "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.preload.json && vue-tsc -p tsconfig.renderer.json --noEmit",
-    "start": "npm run build && electron .",
+    "start": "npm run build && node ../../scripts/launch-desktop.mjs",
     "build:preload": "esbuild src/preload/index.cts src/preload/computer-overlay.cts --bundle --platform=node --target=node20 --format=cjs --external:electron --outdir=dist/preload --out-extension:.js=.cjs"
   },
   "dependencies": {

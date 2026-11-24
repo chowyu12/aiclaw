@@ -441,6 +441,18 @@ const reasoningOptions = computed(() => {
  return caps?.reasoningEfforts ? caps.reasoningEfforts.split(",") : ["low","medium","high"];
 });
 
+const reasoningLabels: Record<string, string> = {
+  "": "默认",
+  none: "无",
+  minimal: "最小",
+  low: "低",
+  medium: "中",
+  high: "高",
+  xhigh: "极高",
+  max: "最大",
+};
+const reasoningEffort = computed(() => store.sessionInfo?.reasoningEffort ?? "");
+
 const attachments = computed({ get: () => draftFor(store.sessionId).attachments, set: value => { draftFor(store.sessionId).attachments = value; } });
 const attachError = computed({ get: () => draftFor(store.sessionId).attachmentError, set: value => { draftFor(store.sessionId).attachmentError = value; } });
 const parsingAttachments = computed(() => draftFor(store.sessionId).pendingAttachments > 0);
@@ -631,16 +643,29 @@ const allChoices = computed(() => modelChoices(store.providers));
 /** 搜索关键词。一个服务能列出上百个模型，翻找不现实。 */
 const modelSearch = ref("");
 const choices = computed(() => filterChoices(allChoices.value, modelSearch.value));
+const modelListOpen = ref(false);
 const searchBox = ref<HTMLInputElement | null>(null);
+const modelButton = ref<HTMLButtonElement | null>(null);
+const modelListButton = ref<HTMLButtonElement | null>(null);
 
 function openModelMenu(): void {
   modelOpen.value = !modelOpen.value;
   if (!modelOpen.value) return;
+  modelListOpen.value = !store.model;
   if (store.providers.length === 0 && !store.providersLoading) {
     void actions.loadProviders();
   }
-  // 打开就能直接打字。上一次的关键词留着：连着换两个同系列的模型时省一次输入。
-  void nextTick(() => searchBox.value?.select());
+  void nextTick(() => modelListOpen.value ? searchBox.value?.select() : modelListButton.value?.focus());
+}
+
+function toggleModelList(): void {
+  modelListOpen.value = !modelListOpen.value;
+  void nextTick(() => modelListOpen.value ? searchBox.value?.select() : modelListButton.value?.focus());
+}
+
+function closeModelMenu(): void {
+  modelOpen.value = false;
+  modelButton.value?.focus();
 }
 
 async function pickModel(choice: { providerId: number; model: string; context: number }): Promise<void> {
@@ -1206,53 +1231,75 @@ const forking = ref(false);
               <div class="bar-right">
                 <ContextIndicator v-if="store.sessionId" />
                 <div class="model">
-                  <button class="model-button" @click="openModelMenu()">
+                  <button ref="modelButton" class="model-button" :aria-expanded="modelOpen" :aria-controls="modelOpen ? 'composer-model-picker' : undefined" @click="openModelMenu()">
                     {{ store.model || t("选择模型") }}
-                    <span class="caret-down">⌄</span>
                   </button>
-                  <div v-if="modelOpen" class="menu model-menu" @click.stop>
-                    <label v-if="store.sessionId && !store.sessionId.startsWith('c_')" class="reasoning-picker">
-                      <span>{{ t('推理强度') }}</span>
-                      <select :value="store.sessionInfo?.reasoningEffort ?? ''" :disabled="store.modelChanging" :aria-label="t('会话推理强度')" @change="actions.switchReasoning(($event.target as HTMLSelectElement).value)">
-                        <option value="">{{ t('模型默认') }}</option><option v-for="effort in reasoningOptions" :key="effort" :value="effort">{{ effort }}</option>
-                      </select>
-                      <small>{{ t('从下一次模型请求生效；按模型能力校验。') }}</small>
-                    </label>
-                    <div class="menu-head">
-                      <span>{{ t("模型") }}<em v-if="modelSearch">{{ choices.length }} / {{ allChoices.length }}</em></span>
-                      <button class="link" @click="actions.loadProviders()">{{ t("刷新") }}</button>
-                    </div>
-                    <input
-                      ref="searchBox"
-                      v-model="modelSearch"
-                      class="menu-search"
-                      :placeholder="t(`搜索模型或服务名`)"
-                      @keydown.enter="choices[0] && pickModel(choices[0])"
-                      @keydown.esc="modelOpen = false"
-                    />
-                    <p v-if="store.providersLoading" class="menu-note pad">{{ t("正在读取模型服务…") }}</p>
-                    <p v-else-if="store.providersError" class="menu-note pad warn">
-                      {{ store.providersError }}
-                    </p>
-                    <p v-else-if="allChoices.length === 0" class="menu-note pad">
-                      {{ t("还没有能用的模型。到「模型服务」页添加端点、填 Key、写上模型名。") }}
-                    </p>
-                    <p v-else-if="choices.length === 0" class="menu-note pad">
-                      {{ t("没有匹配「{query}」的模型。", { query: modelSearch }) }}
-                    </p>
+                  <div v-if="modelOpen" id="composer-model-picker" class="menu model-menu" @click.stop @keydown.esc.stop.prevent="closeModelMenu">
                     <button
-                      v-for="choice in choices"
-                      :key="`${choice.providerId}/${choice.model}`"
-                      class="menu-item"
-                      :class="{ picked: choice.providerId === store.providerId && choice.model === store.model }"
-                      :disabled="store.modelChanging"
-                      @click="pickModel(choice)"
+                      v-if="!modelListOpen"
+                      ref="modelListButton"
+                      class="model-current"
+                      :title="t('选择模型')"
+                      @click="toggleModelList"
                     >
-                      <span class="menu-name">{{ choice.model }}</span>
-                      <span class="menu-note">
-                        {{ choice.providerName }}<template v-if="choice.context"> · {{ formatWindow(choice.context) }}</template>
-                      </span>
+                      <span>{{ store.model || t('选择模型') }}</span>
+                      <span class="model-disclosure" aria-hidden="true">›</span>
                     </button>
+                    <div v-if="!modelListOpen && store.sessionId && !store.sessionId.startsWith('c_') && reasoningOptions.length" class="reasoning-picker">
+                      <span>{{ t('推理强度') }}</span>
+                      <div class="reasoning-levels" role="group" :aria-label="t('会话推理强度')" :title="t('从下一次模型请求生效；按模型能力校验。')">
+                        <button
+                          v-for="effort in ['', ...reasoningOptions]"
+                          :key="effort"
+                          :value="effort"
+                          :aria-pressed="reasoningEffort === effort"
+                          :disabled="store.modelChanging"
+                          @click="actions.switchReasoning(effort)"
+                        >{{ t(reasoningLabels[effort] ?? effort) }}</button>
+                      </div>
+                    </div>
+                    <div v-if="modelListOpen" class="model-list">
+                      <header class="model-list-header">
+                        <button class="model-back" :aria-label="t('返回模型设置')" :title="t('返回模型设置')" @click="toggleModelList">
+                          <span aria-hidden="true">‹</span>
+                        </button>
+                        <strong>{{ t('选择模型') }}</strong>
+                      </header>
+                      <div class="model-search-row">
+                        <input
+                          ref="searchBox"
+                          v-model="modelSearch"
+                          class="menu-search"
+                          :placeholder="t('搜索模型或服务名')"
+                          :aria-label="t('搜索模型或服务名')"
+                          @keydown.enter="choices[0] && !store.modelChanging && pickModel(choices[0])"
+                        />
+                        <button class="model-refresh" :disabled="store.providersLoading" @click="actions.loadProviders()">{{ t("刷新") }}</button>
+                      </div>
+                      <div class="model-results">
+                        <p v-if="store.providersLoading" class="menu-note model-status" role="status">{{ t("正在读取模型服务…") }}</p>
+                        <p v-else-if="store.providersError" class="menu-note model-status warn" role="status">{{ store.providersError }}</p>
+                        <p v-else-if="allChoices.length === 0" class="menu-note model-status">{{ t("还没有能用的模型。到「模型服务」页添加端点、填 Key、写上模型名。") }}</p>
+                        <p v-else-if="choices.length === 0" class="menu-note model-status" role="status">{{ t("没有匹配「{query}」的模型。", { query: modelSearch }) }}</p>
+                        <button
+                          v-for="choice in choices"
+                          :key="`${choice.providerId}/${choice.model}`"
+                          class="menu-item"
+                          :class="{ picked: choice.providerId === store.providerId && choice.model === store.model }"
+                          :aria-pressed="choice.providerId === store.providerId && choice.model === store.model"
+                          :disabled="store.modelChanging"
+                          @click="pickModel(choice)"
+                        >
+                          <span class="model-caption">
+                            <span class="menu-name" :title="choice.model">{{ choice.model }}</span>
+                            <span class="menu-note">
+                              {{ choice.providerName }}<template v-if="choice.context"> · {{ formatWindow(choice.context) }}</template>
+                            </span>
+                          </span>
+                          <span v-if="choice.providerId === store.providerId && choice.model === store.model" class="model-check" aria-hidden="true">✓</span>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1949,9 +1996,7 @@ const forking = ref(false);
 }
 
 .model-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
+  display: block;
   padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -1968,11 +2013,6 @@ const forking = ref(false);
 .model-button:hover {
   border-color: var(--rule);
   color: inherit;
-}
-
-.caret-down {
-  font-size: 11px;
-  line-height: 1;
 }
 
 .send,
@@ -2176,7 +2216,216 @@ const forking = ref(false);
 
 .model-menu {
   right: 0;
-  min-width: 300px;
+  width: min(280px, calc(100vw - 32px));
+  min-width: 0;
+  max-height: min(360px, 60vh);
+  padding: 6px;
+  overflow: hidden;
+}
+
+.model-menu:has(.model-list) {
+  width: min(320px, calc(100vw - 32px));
+}
+
+.model-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 32px;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+
+.model-current:hover {
+  background: var(--hover);
+}
+
+.model-current span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-disclosure {
+  flex: none;
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.model-list-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 4px;
+  font-size: 13px;
+}
+
+.model-back {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.model-back:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.model-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 8px;
+}
+
+.model-search-row .menu-search {
+  position: static;
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  background: var(--surface-2);
+}
+
+.model-refresh {
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.model-refresh:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.model-refresh:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.reasoning-picker {
+  display: grid;
+  gap: 5px;
+  padding: 4px 2px 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.reasoning-levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.reasoning-levels button {
+  flex: 1 0 auto;
+  min-height: 26px;
+  padding: 3px 5px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.reasoning-levels button:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.reasoning-levels button[aria-pressed="true"] {
+  border-color: var(--rule);
+  background: var(--surface);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.reasoning-levels button:disabled {
+  cursor: default;
+}
+
+.model-results {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--rule);
+  padding: 4px 2px 2px;
+}
+
+.model-results .menu-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 43px;
+  padding: 6px 8px;
+}
+
+.model-results .menu-item.picked {
+  background: var(--hover);
+}
+
+.model-results .picked .menu-name {
+  font-weight: 600;
+}
+
+.model-caption {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.model-caption > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-check {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.model-status {
+  margin: 0;
+  padding: 8px;
 }
 
 /* 搜索框不跟着列表滚：菜单里一滚就找不到输入框在哪儿了。 */
@@ -2192,20 +2441,6 @@ const forking = ref(false);
   background: var(--surface);
   color: inherit;
   font-size: 12.5px;
-}
-
-.menu-head em {
-  font-style: normal;
-  margin-left: 6px;
-}
-
-.menu-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 6px 10px 4px;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .link {
@@ -2341,7 +2576,4 @@ const forking = ref(false);
   background: var(--accent-soft);
 }
 
-.reasoning-picker { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:12px 14px; border-bottom:1px solid var(--rule); font-size:12px; }
-.reasoning-picker select { margin-left:auto; padding:4px 8px; color:var(--ink); background:var(--surface); border:1px solid var(--rule); border-radius:6px; }
-.reasoning-picker small { width:100%; color:var(--muted); }
 </style>
