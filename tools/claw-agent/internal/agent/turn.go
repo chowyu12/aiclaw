@@ -186,6 +186,10 @@ func (s *Session) RunTurn(
 		completed.Error = s.persistenceErr.Error()
 	}
 	s.mu.Unlock()
+	var apiErr *llm.Error
+	if errors.As(err, &apiErr) && completed.Error == err.Error() {
+		completed.ErrorCode = apiErr.SpendLimitCode()
+	}
 	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: saveItem})
 	emitter.Notify(protocol.NotifyTurnCompleted, completed)
 }

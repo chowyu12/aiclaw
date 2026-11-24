@@ -26,10 +26,29 @@ type Error struct {
 }
 
 func (e *Error) Error() string {
+	switch e.SpendLimitCode() {
+	case "api_key_spend_limit_exceeded":
+		return i18n.D("API Key 已达到费用上限，请检查供应商的 API Key 额度设置。")
+	case "project_spend_limit_exceeded":
+		return i18n.D("API 项目已达到费用上限，请检查供应商的项目额度设置。")
+	case "organization_spend_limit_exceeded":
+		return i18n.D("API 组织已达到费用上限，请检查供应商的组织额度设置。")
+	}
 	if e.Status == 0 {
 		return e.Message
 	}
 	return i18n.D("模型返回错误（HTTP {status}）：{message}", "status", e.Status, "message", e.Message)
+}
+
+// SpendLimitCode reports a specific scope only when the provider supplies its code.
+func (e *Error) SpendLimitCode() string {
+	for _, code := range strings.Fields(strings.ToLower(e.Code)) {
+		switch code {
+		case "api_key_spend_limit_exceeded", "project_spend_limit_exceeded", "organization_spend_limit_exceeded":
+			return code
+		}
+	}
+	return ""
 }
 
 func (e *Error) Unwrap() error { return e.Err }
@@ -102,6 +121,9 @@ var quotaMarkers = []string{
 
 // QuotaExhausted 报告这次失败是不是额度用完或欠费（重试没用）。
 func (e *Error) QuotaExhausted() bool {
+	if e.SpendLimitCode() != "" {
+		return true
+	}
 	lowered := strings.ToLower(e.Code + " " + e.Message)
 	for _, marker := range quotaMarkers {
 		if strings.Contains(lowered, marker) {

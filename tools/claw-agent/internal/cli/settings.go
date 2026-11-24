@@ -34,8 +34,15 @@ func runSettings(ctx context.Context, c *connection, o options, apiKey string, o
 			"provider_id": preferred.ProviderID, "model": preferred.Model,
 		})
 	case "sessions":
-		if action != "list" {
-			return errors.New("use aiclaw sessions list")
+		if len(o.args) == 2 && o.args[0] == "show" {
+			return printHistory(ctx, c, o.args[1], out)
+		}
+		var query string
+		if len(o.args) > 1 && o.args[0] == "search" {
+			query = strings.ToLower(strings.TrimSpace(strings.Join(o.args[1:], " ")))
+		}
+		if action != "list" && query == "" {
+			return errors.New("use aiclaw sessions list, sessions search QUERY or sessions show ID")
 		}
 		var result struct {
 			Sessions []struct{ ID, Title, Workdir string }
@@ -44,6 +51,10 @@ func runSettings(ctx context.Context, c *connection, o options, apiKey string, o
 			return err
 		}
 		for _, session := range result.Sessions {
+			if query != "" && !strings.Contains(strings.ToLower(session.Title), query) &&
+				!strings.Contains(strings.ToLower(session.Workdir), query) && !strings.Contains(strings.ToLower(session.ID), query) {
+				continue
+			}
 			fmt.Fprintf(out, "%s\t%s\t%s\n", session.ID, terminalText(session.Title), terminalText(session.Workdir))
 		}
 		return nil
@@ -117,6 +128,22 @@ func runSettings(ctx context.Context, c *connection, o options, apiKey string, o
 	default:
 		return errors.New("use aiclaw providers list, providers add, models list or models use")
 	}
+}
+
+func printHistory(ctx context.Context, c *connection, id string, out io.Writer) error {
+	var history protocol.SessionHistoryResult
+	if err := c.call(ctx, protocol.MethodSessionHistory, protocol.SessionIDParams{SessionID: id}, &history); err != nil {
+		return err
+	}
+	for _, item := range history.Items {
+		switch item.Kind {
+		case protocol.ItemUserMessage:
+			fmt.Fprintf(out, "You: %s\n", terminalText(item.Text))
+		case protocol.ItemAgentMessage:
+			fmt.Fprintf(out, "AIClaw: %s\n", terminalText(item.Text))
+		}
+	}
+	return nil
 }
 
 func saveModel(path string, provider int64, modelID string) error {

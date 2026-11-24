@@ -639,6 +639,7 @@ export interface TurnNotification {
   turnId: string;
   usage?: Usage;
   error?: string;
+  errorCode?: "api_key_spend_limit_exceeded" | "project_spend_limit_exceeded" | "organization_spend_limit_exceeded";
 }
 
 export type ApprovalKind = "exec" | "write" | "tool";

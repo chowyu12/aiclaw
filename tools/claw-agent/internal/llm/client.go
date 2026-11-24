@@ -178,8 +178,9 @@ func readErrorBody(resp *http.Response) *Error {
 		Message string `json:"message"`
 		Code    any    `json:"code"`
 	}
+	var code string
 	if json.Unmarshal(raw, &envelope) == nil {
-		code := strings.TrimSpace(fmt.Sprint(firstNonNil(envelope.Error.Code, envelope.Code)) + " " + envelope.Error.Type)
+		code = strings.TrimSpace(fmt.Sprint(firstNonNil(envelope.Error.Code, envelope.Code)) + " " + envelope.Error.Type)
 		if envelope.Error.Message != "" {
 			return &Error{Status: resp.StatusCode, Message: envelope.Error.Message, Code: code, RetryAfter: retryAfter}
 		}
@@ -191,7 +192,7 @@ func readErrorBody(resp *http.Response) *Error {
 	if len(snippet) > 400 {
 		snippet = snippet[:400] + "…"
 	}
-	return &Error{Status: resp.StatusCode, Message: snippet, RetryAfter: retryAfter}
+	return &Error{Status: resp.StatusCode, Message: snippet, Code: code, RetryAfter: retryAfter}
 }
 
 func firstNonNil(values ...any) any {

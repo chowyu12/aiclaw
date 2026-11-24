@@ -136,13 +136,20 @@ aiclaw exec "总结当前项目" --json
 printf '%s\n' '总结当前项目' | aiclaw exec --json -
 aiclaw resume --last
 aiclaw resume SESSION_ID
+aiclaw exec resume SESSION_ID --json "继续总结"
+aiclaw exec resume --last --json "继续总结"
 aiclaw sessions list
+aiclaw sessions search "项目名称"
+aiclaw sessions show SESSION_ID
 aiclaw config show
 ```
 
-`--cwd` 可指定工作目录，`--last` 只查这个目录的最近会话。CLI 的配置和会话保存在
+`--cwd` 可指定新会话的工作目录，或配合 `--last` 查找该目录的最近会话。按 ID 恢复会使用已保存的工作目录和模型。
+`sessions search` 支持按标题、目录或 ID 搜索，`sessions show` 可只读查看已保存的消息。
+`exec resume` 接收提示词，也可用 `-` 从标准输入读取。CLI 的配置和会话保存在
 `~/.aiclaw/cli`，可用 `--data-home` 建立不同的 CLI 配置目录。单次运行也可用 `--app-db ~/.aiclaw/aiclaw.db` 复用桌面版的供应商，或用 `AICLAW_BASE_URL`、`AICLAW_MODEL` 和 `AICLAW_LLM_KEY` 直接指定模型。
-`exec --json` 的标准输出每行一个 JSON 事件。交互模式支持工具审批，`exec` 遇到需要用户审批或回答时会以错误退出。按 Ctrl+C 可中断当前轮次。
+`exec --json` 的标准输出每行一个 JSON 事件。供应商返回明确的费用上限范围时，错误事件携带 `error_code`。
+交互模式支持工具审批，`exec` 遇到需要用户审批或回答时会以错误退出。按 Ctrl+C 可中断当前轮次。
 
 ## 目录
 

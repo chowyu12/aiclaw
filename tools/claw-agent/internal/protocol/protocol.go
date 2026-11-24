@@ -1118,7 +1118,8 @@ type TurnNotification struct {
 	/** 仅 turn/completed。 */
 	Usage *Usage `json:"usage,omitempty"`
 	/** 仅 turn/completed；异常结束时带原因。 */
-	Error string `json:"error,omitempty"`
+	Error     string `json:"error,omitempty"`
+	ErrorCode string `json:"errorCode,omitempty"`
 }
 
 type Usage struct {

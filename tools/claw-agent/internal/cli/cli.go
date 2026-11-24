@@ -24,9 +24,13 @@ Usage:
   aiclaw [--cwd DIR] [PROMPT]
   aiclaw exec [--json] [--cwd DIR] PROMPT
   aiclaw exec --json -          Read the prompt from stdin
+  aiclaw exec resume SESSION_ID [--json] PROMPT
+  aiclaw exec resume --last [--cwd DIR] [--json] PROMPT
   aiclaw resume <SESSION_ID>
   aiclaw resume --last          Resume the most recent CLI session in this directory
   aiclaw sessions list          List CLI session IDs
+  aiclaw sessions search QUERY  Find sessions by title, directory, or ID
+  aiclaw sessions show ID       Read a saved transcript without resuming it
   aiclaw config show            Show the CLI paths and saved model selection
   aiclaw providers list
   aiclaw providers add NAME --base-url URL --models MODEL[,MODEL...]  (key: AICLAW_LLM_KEY)
@@ -59,9 +63,18 @@ func Run(ctx context.Context, args []string, version string, in io.Reader, out, 
 		output.json = json.NewEncoder(out)
 		defer func() {
 			if runErr != nil {
-				_ = output.emit(event{Type: "error", Error: runErr.Error()})
+				failure := event{Type: "error", Error: runErr.Error()}
+				var turnErr *turnFailure
+				if errors.As(runErr, &turnErr) {
+					failure.ErrorCode = turnErr.code
+				}
+				_ = output.emit(failure)
 			}
 		}()
+	}
+	var sessionID string
+	if opts.resume && !opts.last {
+		sessionID, opts.args = opts.args[0], opts.args[1:]
 	}
 	prompt := strings.Join(opts.args, " ")
 	if opts.mode == "exec" {
@@ -97,23 +110,19 @@ func Run(ctx context.Context, args []string, version string, in io.Reader, out, 
 	}
 
 	var session protocol.SessionStartResult
-	if opts.mode == "resume" {
-		var id string
+	if opts.resume {
 		if opts.last {
-			id, err = recentSession(ctx, c, opts.cwd)
-		} else {
-			id = opts.args[0]
+			sessionID, err = recentSession(ctx, c, opts.cwd)
 		}
 		if err != nil {
 			return err
 		}
 		err = c.call(ctx, protocol.MethodSessionResume, protocol.SessionResumeParams{
-			SessionID: id, Refresh: &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalAlways},
+			SessionID: sessionID, Refresh: &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalAlways},
 		}, &session)
 		if err != nil {
 			return err
 		}
-		prompt = ""
 	} else {
 		model, err := chooseModel(ctx, c, opts, apiKey)
 		if err != nil {
@@ -139,17 +148,8 @@ func Run(ctx context.Context, args []string, version string, in io.Reader, out, 
 	input := newTerminalInput(lineCtx, in)
 	fmt.Fprintf(stderr, "AIClaw · %s · %s\nSession %s\n", terminalText(session.Model), terminalText(session.Workspace), session.SessionID)
 	if opts.mode == "resume" {
-		var history protocol.SessionHistoryResult
-		if err := c.call(ctx, protocol.MethodSessionHistory, protocol.SessionIDParams{SessionID: session.SessionID}, &history); err != nil {
+		if err := printHistory(ctx, c, session.SessionID, out); err != nil {
 			return err
-		}
-		for _, item := range history.Items {
-			if item.Kind == protocol.ItemUserMessage {
-				fmt.Fprintf(out, "You: %s\n", terminalText(item.Text))
-			}
-			if item.Kind == protocol.ItemAgentMessage {
-				fmt.Fprintf(out, "AIClaw: %s\n", terminalText(item.Text))
-			}
 		}
 	}
 	for {

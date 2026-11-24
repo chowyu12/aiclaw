@@ -21,6 +21,7 @@ type options struct {
 	mode                                       string
 	args                                       []string
 	json, last                                 bool
+	resume, cwdSet                             bool
 	cwd, dataHome, appDB, config, model        string
 	provider                                   int64
 	appDBSet                                   bool
@@ -35,6 +36,10 @@ func parse(args []string) (options, error) {
 		case "exec", "resume", "config", "providers", "models", "sessions":
 			o.mode, args = args[0], args[1:]
 		}
+	}
+	o.resume = o.mode == "resume" || (o.mode == "exec" && len(args) > 0 && args[0] == "resume")
+	if o.resume && o.mode == "exec" {
+		args = args[1:]
 	}
 	flags := flag.NewFlagSet("aiclaw "+o.mode, flag.ContinueOnError)
 	flags.SetOutput(io.Discard)
@@ -88,19 +93,28 @@ func parse(args []string) (options, error) {
 		return o, errors.New("--json requires exec")
 	}
 	flags.Visit(func(f *flag.Flag) {
-		if f.Name == "app-db" {
+		switch f.Name {
+		case "app-db":
 			o.appDBSet = true
+		case "cwd":
+			o.cwdSet = true
 		}
 	})
-	if o.last && o.mode != "resume" {
+	if o.last && !o.resume {
 		return o, errors.New("--last requires resume")
 	}
 	if o.provider < 0 {
 		return o, errors.New("--provider must be a positive ID")
 	}
-	if o.mode == "resume" {
-		if (!o.last && len(o.args) != 1) || (o.last && len(o.args) != 0) {
+	if o.resume {
+		if o.mode == "resume" && ((!o.last && len(o.args) != 1) || (o.last && len(o.args) != 0)) {
 			return o, errors.New("use aiclaw resume <session-id> or aiclaw resume --last")
+		}
+		if o.mode == "exec" && (len(o.args) == 0 || (!o.last && len(o.args) < 2)) {
+			return o, errors.New("use aiclaw exec resume <session-id> PROMPT or aiclaw exec resume --last PROMPT")
+		}
+		if !o.last && o.cwdSet {
+			return o, errors.New("--cwd is only supported with --last when resuming; an explicit session ID uses its saved directory")
 		}
 		if o.model != "" || o.provider != 0 {
 			return o, errors.New("resume uses the session's saved model")
@@ -137,7 +151,7 @@ func (o *options) paths() ([]string, error) {
 		configDir = ""
 	}
 	for _, p := range []*string{&o.cwd, &o.dataHome, &o.appDB, &o.config} {
-		if *p == "" && p != &o.cwd {
+		if *p == "" && (p != &o.cwd || (o.resume && !o.last)) {
 			continue
 		}
 		*p, err = filepath.Abs(*p)
@@ -145,13 +159,15 @@ func (o *options) paths() ([]string, error) {
 			return nil, err
 		}
 	}
-	o.cwd, err = filepath.EvalSymlinks(o.cwd)
-	if err != nil {
-		return nil, fmt.Errorf("workspace: %w", err)
-	}
-	info, err := os.Stat(o.cwd)
-	if err != nil || !info.IsDir() {
-		return nil, fmt.Errorf("workspace is not a directory: %s", o.cwd)
+	if !o.resume || o.last {
+		o.cwd, err = filepath.EvalSymlinks(o.cwd)
+		if err != nil {
+			return nil, fmt.Errorf("workspace: %w", err)
+		}
+		info, err := os.Stat(o.cwd)
+		if err != nil || !info.IsDir() {
+			return nil, fmt.Errorf("workspace is not a directory: %s", o.cwd)
+		}
 	}
 	if configDir != "" && sameDirectory(o.dataHome, filepath.Join(configDir, "agent-home")) {
 		return nil, errors.New("choose a CLI session directory separate from the desktop session store")

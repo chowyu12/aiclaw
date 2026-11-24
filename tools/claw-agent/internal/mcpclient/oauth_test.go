@@ -50,7 +50,8 @@ func TestOAuthLoginRefreshEncryptedRestartAndLogout(t *testing.T) {
 				if base64.RawURLEncoding.EncodeToString(hash[:]) != challenge || r.Form.Get("redirect_uri") != redirect || r.Form.Get("code") != "code" {
 					t.Error("PKCE/callback binding mismatch")
 				}
-				fmt.Fprint(w, `{"access_token":"secret-access","refresh_token":"secret-refresh","token_type":"Bearer","expires_in":1}`)
+				// Keep status connected while still inside the 30-second refresh window.
+				fmt.Fprint(w, `{"access_token":"secret-access","refresh_token":"secret-refresh","token_type":"Bearer","expires_in":25}`)
 			} else {
 				if r.Form.Get("refresh_token") != "secret-refresh" {
 					t.Error("refresh credential lost")

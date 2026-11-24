@@ -213,13 +213,21 @@ aiclaw exec "Summarize the current project" --json
 printf '%s\n' 'Summarize this project' | aiclaw exec --json -
 aiclaw resume --last
 aiclaw resume SESSION_ID
+aiclaw exec resume SESSION_ID --json "Continue the summary"
+aiclaw exec resume --last --json "Continue the summary"
 aiclaw sessions list
+aiclaw sessions search "project name"
+aiclaw sessions show SESSION_ID
 aiclaw config show
 ```
 
-`--cwd` selects the workspace. `--last` looks in that workspace only. CLI sessions
+`--cwd` selects the workspace for a new session or filters `--last` to that workspace.
+Resuming by ID uses the saved workspace and model. Use `sessions search` to find an ID
+by title, directory, or ID, and `sessions show` to read saved messages without resuming.
+`exec resume` accepts a prompt or `-` to read from stdin. CLI sessions
 and configuration are stored in `~/.aiclaw/cli`. `--data-home` selects a separate CLI profile. To reuse existing desktop model services for a run, pass `--app-db ~/.aiclaw/aiclaw.db`. To supply a model directly for a run, set `AICLAW_BASE_URL`, `AICLAW_MODEL`, and `AICLAW_LLM_KEY`. For `exec --json`, stdout contains one JSON
-event per line. Interactive runs ask before approved operations. `exec` exits
+event per line. Provider spending limits include a scoped `error_code` when supplied by the provider.
+Interactive runs ask before approved operations. `exec` exits
 with an error when the agent needs human approval or input. Ctrl+C interrupts the
 active turn.
 

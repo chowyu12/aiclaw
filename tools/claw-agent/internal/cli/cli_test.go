@@ -18,6 +18,7 @@ import (
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/appdb"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/protocol"
 	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/providers"
+	"github.com/chowyu12/aiclaw/tools/claw-agent/internal/store"
 )
 
 const textReply = `data: {"choices":[{"delta":{"content":"Hello "}}]}
@@ -134,8 +135,68 @@ func TestExecJSONAndResumeUseDesktopModelAndPersistConversation(t *testing.T) {
 		t.Fatalf("resumed across directories: %v %s %s", err, out, stderr)
 	}
 	_, _, err = runCLI(t, append(append([]string{"resume", events[0].SessionID}, flags...), "--cwd", other), "/exit\n", nil)
-	if err != nil {
+	if err == nil || !strings.Contains(err.Error(), "--cwd is only supported with --last") {
+		t.Fatalf("ignored --cwd on resume by ID: %v", err)
+	}
+	profile := flags[:len(flags)-2]
+	_, stderr, err = runCLI(t, append([]string{"resume", events[0].SessionID}, profile...), "/exit\n", nil)
+	if err != nil || !strings.Contains(stderr, flags[len(flags)-1]) {
 		t.Fatalf("resume by ID: %v", err)
+	}
+
+	out, stderr, err = runCLI(t, append([]string{"exec", "resume", events[0].SessionID, "--json", "-"}, profile...), "headless follow-up", nil)
+	resumed := eventsFrom(t, out)
+	if err != nil || stderr != "" || resumed[0].SessionID != events[0].SessionID || resumed[len(resumed)-1].Type != "turn.completed" {
+		t.Fatalf("headless resume: %v\n%s\n%s", err, out, stderr)
+	}
+	if got := <-previousHistory; !strings.Contains(got, "first input from stdin") || !strings.Contains(got, "headless follow-up") {
+		t.Fatal("headless follow-up lost history or stdin")
+	}
+	out, _, err = runCLI(t, append([]string{"exec", "resume", "--last", "--json", "continue by directory"}, flags...), "", nil)
+	if err != nil || eventsFrom(t, out)[0].SessionID != events[0].SessionID {
+		t.Fatalf("headless resume by directory: %v\n%s", err, out)
+	}
+	if got := <-previousHistory; !strings.Contains(got, "headless follow-up") || !strings.Contains(got, "continue by directory") {
+		t.Fatal("headless follow-up did not persist")
+	}
+	for _, query := range []string{"FIRST INPUT", filepath.Base(flags[len(flags)-1]), events[0].SessionID} {
+		out, _, err := runCLI(t, append([]string{"sessions", "search", query}, profile...), "", nil)
+		if err != nil || !strings.HasPrefix(out, events[0].SessionID+"\t") {
+			t.Fatalf("search %q: %v\n%s", query, err, out)
+		}
+	}
+	out, _, err = runCLI(t, append([]string{"sessions", "search", "no matching title or path"}, profile...), "", nil)
+	if err != nil || out != "" {
+		t.Fatalf("unexpected search result: %v %q", err, out)
+	}
+	out, stderr, err = runCLI(t, append([]string{"sessions", "show", events[0].SessionID}, profile...), "", nil)
+	if err != nil || stderr != "" || !strings.Contains(out, "You: headless follow-up") || !strings.Contains(out, "AIClaw: Hello CLI") {
+		t.Fatalf("read-only transcript: %v\n%s\n%s", err, out, stderr)
+	}
+	db, err := store.Open(flags[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, _ := json.Marshal(map[string]string{"parentId": events[0].SessionID})
+	err = db.Save(t.Context(), store.Session{
+		ID: "child-review", Title: "Review worker", Workdir: flags[len(flags)-1],
+		CreatedAt: time.Now(), UpdatedAt: time.Now(), Config: parent,
+		Messages: json.RawMessage(`[{"role":"assistant","content":"Saved child review"}]`),
+	})
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = runCLI(t, append([]string{"sessions", "search", "review worker"}, profile...), "", nil)
+	if err != nil || !strings.HasPrefix(out, "child-review\t") {
+		t.Fatalf("child search: %v\n%s", err, out)
+	}
+	out, _, err = runCLI(t, append([]string{"sessions", "show", "child-review"}, profile...), "", nil)
+	if err != nil || !strings.Contains(out, "Saved child review") {
+		t.Fatalf("child transcript: %v\n%s", err, out)
+	}
+	if len(previousHistory) != 0 {
+		t.Fatal("session search or history called the model")
 	}
 }
 
@@ -143,6 +204,10 @@ func TestCLIApprovalRequiresTerminalConfirmation(t *testing.T) {
 	flags := workspaceFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		w.Header().Set("Content-Type", "text/event-stream")
+		if bytes.Contains(body, []byte(`"content":"Try again"`)) {
+			_, _ = io.WriteString(w, strings.Replace(writeReply, "fixture_write", "fixture_resume_write", 1))
+			return
+		}
 		if bytes.Contains(body, []byte(`"role":"tool"`)) {
 			_, _ = io.WriteString(w, textReply)
 			return
@@ -161,11 +226,53 @@ func TestCLIApprovalRequiresTerminalConfirmation(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("headless run changed the file: %v", err)
 	}
+	profile := flags[:len(flags)-2]
+	out, stderr, err = runCLI(t, append([]string{"exec", "resume", events[0].SessionID, "--json", "Try again"}, profile...), "yes\n", nil)
+	if err == nil || !strings.Contains(err.Error(), "requires interactive approval") || strings.Contains(stderr, "Allow once") {
+		t.Fatalf("headless resume approval: %v\n%s\n%s", err, out, stderr)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("headless resume changed the file: %v", err)
+	}
 
 	out, stderr, err = runCLI(t, flags, "Write the file\nyes\n/exit\n", nil)
 	got, readErr := os.ReadFile(path)
 	if err != nil || readErr != nil || string(got) != "approved" || !strings.Contains(stderr, "Allow once? [y/N]") || !strings.Contains(out, "Hello CLI") {
 		t.Fatalf("interactive approval: %v / %v\n%s\n%s", err, readErr, out, stderr)
+	}
+}
+
+func TestCLIReportsProviderSpendLimitCode(t *testing.T) {
+	for _, fixture := range []struct {
+		code   string
+		status int
+	}{
+		{"api_key_spend_limit_exceeded", http.StatusTooManyRequests},
+		{"project_spend_limit_exceeded", http.StatusTooManyRequests},
+		{"organization_spend_limit_exceeded", http.StatusOK},
+	} {
+		t.Run(fixture.code, func(t *testing.T) {
+			calls := make(chan struct{}, 8)
+			flags := workspaceFixture(t, func(w http.ResponseWriter, r *http.Request) {
+				calls <- struct{}{}
+				payload := fmt.Sprintf(`{"error":{"type":"insufficient_quota","code":%q}}`, fixture.code)
+				w.Header().Set("Retry-After", "4")
+				if fixture.status == http.StatusOK {
+					w.Header().Set("Content-Type", "text/event-stream")
+					fmt.Fprintf(w, "data: %s\n\n", payload)
+				} else {
+					w.WriteHeader(fixture.status)
+					fmt.Fprint(w, payload)
+				}
+			})
+			out, _, err := runCLI(t, append([]string{"exec", "--json", "Test limit"}, flags...), "", nil)
+			events := eventsFrom(t, out)
+			if err == nil || len(calls) != 1 || len(events) < 2 ||
+				events[len(events)-2].Type != "turn.completed" || events[len(events)-2].ErrorCode != fixture.code ||
+				events[len(events)-1].Type != "error" || events[len(events)-1].ErrorCode != fixture.code {
+				t.Fatalf("unexpected spend limit result: %v, %d calls\n%s", err, len(calls), out)
+			}
+		})
 	}
 }
 

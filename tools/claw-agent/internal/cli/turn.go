@@ -24,8 +24,13 @@ type event struct {
 	Tool      string          `json:"tool,omitempty"`
 	Failed    bool            `json:"failed,omitempty"`
 	Error     string          `json:"error,omitempty"`
+	ErrorCode string          `json:"error_code,omitempty"`
 	Usage     *protocol.Usage `json:"usage,omitempty"`
 }
+
+type turnFailure struct{ message, code string }
+
+func (e *turnFailure) Error() string { return e.message }
 
 type renderer struct {
 	out, stderr io.Writer
@@ -168,14 +173,14 @@ func runTurn(ctx context.Context, c *connection, session, prompt string, output 
 					}
 					continue
 				}
-				if err := output.emit(event{Type: "turn.completed", SessionID: session, TurnID: turnID, Usage: params.Usage, Error: params.Error}); err != nil {
+				if err := output.emit(event{Type: "turn.completed", SessionID: session, TurnID: turnID, Usage: params.Usage, Error: params.Error, ErrorCode: params.ErrorCode}); err != nil {
 					return err
 				}
 				if stopping != nil {
 					return stopping
 				}
 				if params.Error != "" {
-					return errors.New(params.Error)
+					return &turnFailure{message: params.Error, code: params.ErrorCode}
 				}
 				return nil
 			case protocol.NotifyItemStarted, protocol.NotifyItemCompleted:

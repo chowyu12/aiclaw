@@ -496,9 +496,8 @@ function onDrop(event: DragEvent): void {
 }
 
 const dragging = ref(false);
-const workspaceOpen = ref(false);
 
-/** 工具条上只放最后一段目录名，全路径在 title 和菜单里。 */
+/** 工作区标签只显示最后一段目录名。 */
 const workspaceLabel = computed(() => {
   const path = store.sessionInfo?.workspace ?? "";
   if (!path) return t("未设工作区");
@@ -511,17 +510,11 @@ const sessionTitle = computed(() => store.sessions.find(session => session.id ==
 const workspaceTitle = computed(() =>
   store.sessionInfo?.workspace
     ? t("会话工作区：{path}", { path: store.sessionInfo.workspace })
-    : t("这个会话没有设置工作区，点一下可以指定"),
+    : workspaceLabel.value,
 );
 
 async function chooseWorkspace(): Promise<void> {
-  workspaceOpen.value = false;
   await actions.pickWorkspace();
-}
-
-async function clearWorkspace(): Promise<void> {
-  workspaceOpen.value = false;
-  await actions.setWorkspace("");
 }
 
 function removeAttachment(index: number): void {
@@ -1047,9 +1040,9 @@ const forking = ref(false);
           <!-- 透明背板：点菜单以外的任何地方都关掉它。没有它的话菜单开了
                就只能再点一次原按钮才关得掉，用户会以为界面卡住了。 -->
           <div
-            v-if="modelOpen || policyOpen || workspaceOpen || addOpen || addPicker"
+            v-if="modelOpen || policyOpen || addOpen || addPicker"
             class="backdrop"
-            @click="modelOpen = policyOpen = workspaceOpen = addOpen = false; closeSuggestions()"
+            @click="modelOpen = policyOpen = addOpen = false; closeSuggestions()"
           />
 
           <!-- 模型在等你回答的问题（ask_user）。在输入框上方而不是弹窗：上面模型做到
@@ -1191,30 +1184,6 @@ const forking = ref(false);
                   </button>
                 </div>
 
-                <!-- 工作区按会话设。摆在这里而不是配置页：它是「这次要在哪儿
-                     干活」，属于会话，而且随时会改。 -->
-                <button class="chip workspace-chip" :title="workspaceTitle" @click="workspaceOpen = !workspaceOpen">
-                  <span class="chip-icon">▣</span>
-                  {{ workspaceLabel }}
-                </button>
-                <div v-if="workspaceOpen" class="menu" @click.stop>
-                  <div class="menu-head"><span>{{ t("会话工作区") }}</span></div>
-                  <div class="menu-note pad">
-                    {{
-                      store.sessionInfo?.workspace
-                        ? store.sessionInfo.workspace
-                        : t("没有设置。相对路径按主目录解析，任何写入都会先问你一次。")
-                    }}
-                  </div>
-                  <button class="menu-item" @click="chooseWorkspace()">{{ t("选择目录…") }}</button>
-                  <button
-                    v-if="store.sessionInfo?.workspace"
-                    class="menu-item"
-                    @click="clearWorkspace()"
-                  >
-                    {{ t("恢复默认目录") }}
-                  </button>
-                </div>
                 <button class="chip" :disabled="store.policyChanging" :data-policy="store.config?.profile" @click="policyOpen = !policyOpen">
                   <span class="chip-icon">!</span>
                   {{ policy?.label ?? t("审批") }}
@@ -2277,10 +2246,6 @@ const forking = ref(false);
   color: var(--muted);
   font-size: 11px;
   line-height: 1.5;
-}
-
-.menu-note.pad {
-  padding: 8px 10px;
 }
 
 .menu-note.warn {

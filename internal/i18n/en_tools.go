@@ -184,5 +184,9 @@ func init() {
 		"语音数据解不开":                 "Couldn't decode the audio data",
 		"语音服务既没给数据也没给地址":          "The speech service returned neither data nor a URL",
 		"百炼的返回看不懂":                "Couldn't parse the DashScope response",
+
+		"API Key 已达到费用上限，请检查供应商的 API Key 额度设置。": "The API key reached its spending limit. Check the key's limit with your provider.",
+		"API 项目已达到费用上限，请检查供应商的项目额度设置。":          "The API project reached its spending limit. Check the project's limit with your provider.",
+		"API 组织已达到费用上限，请检查供应商的组织额度设置。":          "The API organization reached its spending limit. Check the organization's limit with your provider.",
 	})
 }

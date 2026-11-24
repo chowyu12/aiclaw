@@ -482,12 +482,7 @@ app.whenReady().then(async()=>{
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-approval-profiles.png',(await win.webContents.capturePage()).toPNG());
  await js("document.querySelector('.composer .chip[data-policy]').click()");
- await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('smoke')).click()");
- await click('恢复默认目录');
- check('resetting workspace moves the chat to the home aiclaw directory',await wait("document.querySelector('[data-bucket-id=\"workspace:/fixture/home/aiclaw\"] .item.active')"));
- await js("[...document.querySelectorAll('.composer .chip')].find(b=>b.textContent.includes('aiclaw')).click()");
- await click('选择目录…');
- check('choosing workspace immediately restores the matching workspace bucket',await wait("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count')?.textContent==='3'"));
+ check('the workspace stays in the chat header without a composer picker',await wait("document.querySelector('.chat-workspace')?.textContent.includes('smoke') && !document.querySelector('.composer .workspace-chip')"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-workspace-sidebar.png',(await win.webContents.capturePage()).toPNG());
  mediaReads.length=0;
@@ -1511,7 +1506,7 @@ app.whenReady().then(async()=>{
  await win.reload();
  check('empty chats show the workspace welcome card with 365 actual calendar days',await wait("!!document.querySelector('.workspace-welcome') && document.querySelectorAll('.calendar-day:not(.outside)').length===365"));
  check('one sidebar contains projects and all primary settings entries',await js("document.querySelector('.sidebar').contains(document.querySelector('.activity-rail')) && document.querySelector('.pane').getBoundingClientRect().left===document.querySelector('.sidebar').getBoundingClientRect().right && parseFloat(getComputedStyle(document.querySelector('.pane')).borderTopLeftRadius)>=12"));
- check('workspace stays inside the input card without a tool-count control',await js("(()=>{const composer=document.querySelector('.composer'),box=composer.getBoundingClientRect(),workspace=composer.querySelector('.bar-left .workspace-chip');if(!workspace)return false;const rect=workspace.getBoundingClientRect();return !document.querySelector('.composer-context,.status-menu')&&![...composer.querySelectorAll('.chip')].some(b=>/工具\\s*\\d+/.test(b.textContent))&&rect.left>=box.left&&rect.right<=box.right&&rect.top>=box.top&&rect.bottom<=box.bottom;})()"));
+ check('the input card has no workspace picker or tool-count control',await js("(()=>{const composer=document.querySelector('.composer');return !composer.querySelector('.workspace-chip')&&!document.querySelector('.composer-context,.status-menu')&&![...composer.querySelectorAll('.chip')].some(b=>/工具\\s*\\d+/.test(b.textContent));})()"));
  check('welcome does not prefetch usage or invent credits',usageReads.length===0&&await js("!document.querySelector('.activity-card').textContent.includes('Credits') && !!document.querySelector('.calendar-day[data-level=\"4\"]')"));
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-workspace-home.png',(await win.webContents.capturePage()).toPNG());
