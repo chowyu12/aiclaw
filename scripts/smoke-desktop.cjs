@@ -236,12 +236,15 @@ app.whenReady().then(async () => {
     // Exercise real turn/driver lifecycle with an isolated bridge, never the user's browser.
     const calls = [];
     let nextTab = 100;
-    let unblock;
-    const gate = new Promise(resolve => { unblock = resolve; });
+    const { promise: started, resolve: markStarted } = Promise.withResolvers();
+    const { promise: gate, resolve: unblock } = Promise.withResolvers();
     const bridge = { async request(op, args) {
       calls.push({ op, ...args });
       if (op === "tabs.create") {
-        if (args.url.endsWith("/slow")) await gate;
+        if (args.url.endsWith("/slow")) {
+          markStarted();
+          await gate;
+        }
         if (args.url.endsWith("/fail")) throw new Error("fixture navigation failure");
         return { tabId: nextTab++ };
       }
@@ -265,12 +268,20 @@ app.whenReady().then(async () => {
     check("浏览器：已结束的轮次不能再打开页面", inactive);
     turns.start("test", "slow");
     const pending = request("slow", "navigate", { url: "https://example.test/slow" });
+    // The turn queue starts on a microtask. Wait until the bridge is handling the request.
+    await Promise.race([started, pending.then(() => { throw new Error("Slow fixture did not reach tabs.create"); })]);
+    const queuedURL = "https://example.test/queued";
+    const cancelled = request("slow", "navigate", { url: queuedURL }).then(
+      () => false,
+      error => error?.name === "AbortError",
+    );
     const finishing = turns.finish("test", "slow");
     check("浏览器：中断时等待尚未返回的新建页面再清理", calls.filter(c => c.op === "tabs.cleanup").length === 1);
     unblock();
     await pending;
     await finishing;
     check("浏览器：未完成的打开操作返回后仍会清理", calls.filter(c => c.op === "tabs.cleanup").length === 2);
+    check("浏览器：轮次中断时取消尚未发往扩展的打开请求", await cancelled && !calls.some(c => c.url === queuedURL));
     turns.start("test", "failed");
     try { await request("failed", "navigate", { url: "https://example.test/fail" }); } catch {}
     await turns.finish("test", "failed");
