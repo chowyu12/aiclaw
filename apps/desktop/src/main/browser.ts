@@ -36,44 +36,74 @@ import {
  *   - 只放 http / https / data:。file: 能读本机文件，about: 之外的内部页也不该由模型打开。
  */
 
-export type BrowserAction =
-  | "navigate"
-  | "snapshot"
-  | "click"
-  | "type"
-  | "select"
-  | "scroll"
-  | "back"
-  | "key"
-  | "extract"
-  | "screenshot"
-  | "tabs"
-  | "use_tab";
+export type { BrowserResult } from "@aiclaw/agent-client";
+import type { BrowserCondition, BrowserRequestParams, BrowserResult, BrowserStep } from "@aiclaw/agent-client";
 
-export interface BrowserRequest {
-  action: BrowserAction;
-  url?: string;
-  index?: number;
-  text?: string;
-  submit?: boolean;
-  value?: string;
-  dy?: number;
-  keys?: string;
-  /** use_tab 的标签页编号，来自 tabs。 */
-  tabId?: number;
-}
-
-export interface BrowserResult {
-  text: string;
-  imageBase64?: string;
-  width?: number;
-  height?: number;
-}
+export type BrowserAction = BrowserRequestParams["action"];
+export type BrowserRequest = Omit<BrowserRequestParams, "sessionId" | "turnId">;
 
 /** 等一次加载最多等多久。慢站点十几秒是常态，再久多半是挂了。 */
 const LOAD_TIMEOUT_MS = 30_000;
-/** 点击 / 提交之后等页面稳定的时间：给单页应用一点反应时间，又不至于每步都慢。 */
-const SETTLE_MS = 400;
+const CONDITION_POLL_MS = 75;
+const DEFAULT_CONDITION_MS = 3000;
+const DEFAULT_OBSERVATION_MS = 1000;
+const MAX_CONDITION_MS = 8000;
+const MAX_BATCH_STEPS = 8;
+const FORM_NAVIGATION_GRACE_MS = 150;
+
+type ConditionMatch = { evidence: string };
+
+const ELEMENT_READY = `el => {
+  if (!el || !el.isConnected || !el.getClientRects().length) return false;
+  const style = getComputedStyle(el);
+  return style.visibility === "visible" && Number(style.opacity) > 0;
+}`;
+const ELEMENT_ENABLED = `el => !el.matches(":disabled") && !el.closest("[aria-disabled=true], [inert]")`;
+
+function elementLookup(index: number, scope?: string): string {
+  if (!scope) return `const el = document.querySelector('[data-aiclaw-i="${index}"]');`;
+  return `
+    const snapshot = globalThis.__aiclawSnapshot;
+    if (snapshot?.id !== ${JSON.stringify(scope)} || snapshot.url !== location.href) return "stale";
+    const el = snapshot.targets.get(${index});
+    if (!el?.isConnected) return "stale";`;
+}
+
+function validateBatch(steps: BrowserStep[]): void {
+  if (!Array.isArray(steps) || steps.length < 1 || steps.length > MAX_BATCH_STEPS) throw new Error("Browser batch requires 1–8 steps");
+  for (const step of steps) {
+    if (!step || !Number.isInteger(step.index) || step.index < 1 || step.index > 150) throw new Error("Invalid browser batch index");
+    if (step.action === "click" && step.text === undefined && step.value === undefined) continue;
+    if (step.action === "type" && typeof step.text === "string" && [...step.text].length <= 2048 && step.value === undefined) continue;
+    if (step.action === "select" && typeof step.value === "string" && step.value.trim() && [...step.value].length <= 256 && step.text === undefined) continue;
+    throw new Error("Invalid browser batch step");
+  }
+}
+
+function conditionExpression(condition: BrowserCondition): string {
+  const { kind, selector = "", value = "", timeout_ms: timeout = DEFAULT_CONDITION_MS } = condition;
+  if (!Number.isInteger(timeout) || timeout < 100 || timeout > MAX_CONDITION_MS ||
+    typeof selector !== "string" || [...selector].length > 300 ||
+    typeof value !== "string" || [...value].length > 500) throw new Error("Invalid browser condition bounds");
+  if (kind === "url_contains" && !selector && value.trim()) {
+    return `location.href.includes(${JSON.stringify(value)}) && ({ evidence: location.href.slice(0, 600) })`;
+  }
+  if (!((kind === "text_contains" && value.trim()) ||
+    ((kind === "visible" || kind === "enabled") && selector.trim() && !value))) throw new Error("Invalid browser condition");
+  return `(() => {
+    let el;
+    try {
+      el = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : "document.body"};
+    } catch { return "invalid-selector"; }
+    if (!(${ELEMENT_READY})(el)) return false;
+    ${kind === "text_contains" ? `
+      const text = (el.innerText || "").replace(/\\s+/g, " ").trim();
+      const wanted = ${JSON.stringify(value.replace(/\s+/g, " ").trim())};
+      const at = text.indexOf(wanted);
+      return at >= 0 && { evidence: text.slice(Math.max(0, at - 60), at + wanted.length + 60) };`
+      : `return ${kind === "enabled" ? `(${ELEMENT_ENABLED})(el) && ` : ""}{ evidence: (el.innerText || "").trim().slice(0, 400) };`}
+  })()`;
+}
 
 /** 浏览器工具在哪儿干活。 */
 export type BrowserBackend = "builtin" | "extension";
@@ -94,13 +124,13 @@ interface PageDriver {
   /** 后退。没有可以后退的页面返回 false。 */
   back(): Promise<boolean>;
   /** 点击 / 提交后等页面稳定。 */
-  settle(): Promise<void>;
+  settle(graceMs?: number): Promise<void>;
   screenshot(): Promise<{ base64: string; width: number; height: number }>;
 }
 
 /** Each running turn owns its pages; completion waits for in-flight operations before cleanup. */
 export class TurnBrowsers {
-  private readonly turns = new Map<string, { browser: AgentBrowser; pending: Set<Promise<BrowserResult>> }>();
+  private readonly turns = new Map<string, { browser: AgentBrowser; tail: Promise<unknown>; abort: AbortController }>();
 
   constructor(private readonly backend: () => BrowserBackend, private readonly bridge: ExtensionBridge) {}
 
@@ -109,19 +139,18 @@ export class TurnBrowsers {
   }
 
   start(sessionId: string, turnId: string): void {
-    this.turns.set(this.key(sessionId, turnId), { browser: new AgentBrowser(this.backend, this.bridge), pending: new Set() });
+    this.turns.set(this.key(sessionId, turnId), { browser: new AgentBrowser(this.backend, this.bridge), tail: Promise.resolve(), abort: new AbortController() });
   }
 
   async perform(request: BrowserRequest & { sessionId: string; turnId: string }): Promise<BrowserResult> {
     const turn = this.turns.get(this.key(request.sessionId, request.turnId));
     if (!turn) throw new Error("Browser operation belongs to an inactive turn");
-    const pending = turn.browser.perform(request);
-    turn.pending.add(pending);
-    try {
-      return await pending;
-    } finally {
-      turn.pending.delete(pending);
-    }
+    const pending = turn.tail.then(() => {
+      turn.abort.signal.throwIfAborted();
+      return turn.browser.perform(request, turn.abort.signal);
+    });
+    turn.tail = pending.catch(() => {});
+    return pending;
   }
 
   async finish(sessionId: string, turnId: string): Promise<void> {
@@ -129,7 +158,8 @@ export class TurnBrowsers {
     const turn = this.turns.get(key);
     if (!turn) return;
     this.turns.delete(key);
-    await Promise.allSettled(turn.pending);
+    turn.abort.abort();
+    await turn.tail;
     await turn.browser.close();
   }
 
@@ -145,6 +175,7 @@ export class AgentBrowser {
   private readonly window = new WindowDriver();
   private readonly tab: ExtensionDriver;
   private readonly backend: () => BrowserBackend;
+  private readonly snapshots = new WeakMap<PageDriver, string>();
 
   /**
    * @param backend 现查用哪个后端：用户在设置页里换了，下一步就生效。
@@ -160,12 +191,22 @@ export class AgentBrowser {
   }
 
   /** 执行一步。 */
-  async perform(request: BrowserRequest): Promise<BrowserResult> {
+  async perform(request: BrowserRequest, signal?: AbortSignal): Promise<BrowserResult> {
     switch (request.action) {
       case "navigate":
         return this.navigate(request.url ?? "");
       case "snapshot":
         return this.snapshot();
+      case "batch":
+        return this.batch(request.steps ?? [], request.condition, signal);
+      case "wait":
+      case "verify": {
+        if (!request.condition) throw new Error("Browser condition is required");
+        const driver = await this.current();
+        const match = await this.waitFor(driver, request.condition, DEFAULT_OBSERVATION_MS, signal);
+        const prefix = request.action === "verify" ? "Verification" : "Wait";
+        return this.workflowSnapshot(driver, match ? `${prefix} matched.` : `${prefix} timed out: expected page state was not observed.`, !match, match?.evidence);
+      }
       case "click":
         return this.click(request.index ?? -1);
       case "type":
@@ -216,46 +257,72 @@ export class AgentBrowser {
     }
     const driver = this.driver();
     await driver.load(url);
-    await sleep(SETTLE_MS);
-    return this.snapshot(tr("已打开。"));
+    return this.snapshotFrom(driver, tr("已打开。"));
   }
 
   private async snapshot(note = ""): Promise<BrowserResult> {
     const driver = await this.current();
-    const raw = await driver.evaluate<RawSnapshot>(INDEX_SCRIPT);
-    return { text: formatSnapshot(raw, note) };
+    return this.snapshotFrom(driver, note);
+  }
+
+  private async snapshotFrom(driver: PageDriver, note = "", includeText = false, evidence?: string): Promise<BrowserResult> {
+    const raw = await driver.evaluate<RawSnapshot>(`${INDEX_SCRIPT}(${includeText})`);
+    if (raw.snapshotId) this.snapshots.set(driver, raw.snapshotId);
+    return { text: formatSnapshot(raw, note, evidence) };
   }
 
   private async click(index: number): Promise<BrowserResult> {
     const driver = await this.current();
+    const note = await this.clickElement(driver, index);
+    await driver.settle();
+    return this.snapshotFrom(driver, note, true);
+  }
+
+  private async clickElement(driver: PageDriver, index: number, scope?: string, last = true): Promise<string> {
     const outcome = await driver.evaluate<string>(
       `(() => {
-        const el = document.querySelector('[data-aiclaw-i="${index}"]');
+        ${elementLookup(index, scope)}
         if (!el) return "missing";
+        if (${Boolean(scope)} && (!(${ELEMENT_READY})(el) || !(${ELEMENT_ENABLED})(el))) return "stale";
+        if (!${last} && (el.closest("a[href]") || (el.form && el.type === "submit"))) return "navigation";
+
         el.scrollIntoView({ block: "center", inline: "nearest" });
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return "hidden";
         el.focus && el.focus();
+        if (${Boolean(scope)} && (!el.isConnected || globalThis.__aiclawSnapshot?.url !== location.href)) return "stale";
         el.click();
         return "ok";
       })()`,
     );
+    if (outcome === "stale") throw new Error("The page or original target changed");
+    if (outcome === "navigation") throw new Error("Put a link or form submission click last in the batch");
     if (outcome === "missing") {
       throw new Error(tr("没有 {index} 号元素：编号来自上一次快照，页面可能已经变了，先 browser_snapshot。", { index }));
     }
     if (outcome === "hidden") throw new Error(tr("{index} 号元素现在不可见，先滚动或展开它所在的区域。", { index }));
-    await driver.settle();
-    return this.snapshot(tr("已点击 {index} 号。", { index }));
+    return tr("已点击 {index} 号。", { index });
   }
 
   private async type(index: number, text: string, submit: boolean): Promise<BrowserResult> {
     const driver = await this.current();
+    const note = await this.typeElement(driver, index, text, submit);
+    await driver.settle();
+    return this.snapshotFrom(driver, note);
+  }
+
+  private async typeElement(driver: PageDriver, index: number, text: string, submit: boolean, scope?: string): Promise<string> {
     const outcome = await driver.evaluate<string>(
       `(() => {
-        const el = document.querySelector('[data-aiclaw-i="${index}"]');
+        ${elementLookup(index, scope)}
         if (!el) return "missing";
+        if (${Boolean(scope)}) {
+          if (!(${ELEMENT_READY})(el) || !(${ELEMENT_ENABLED})(el)) return "stale";
+          if (el.matches("[readonly]") || (!el.isContentEditable && !el.matches("textarea, input:not([type]), input[type=text], input[type=search], input[type=email], input[type=url], input[type=tel], input[type=password], input[type=number]"))) return "not-input";
+        }
         el.scrollIntoView({ block: "center", inline: "nearest" });
         el.focus();
+        if (${Boolean(scope)} && (!el.isConnected || globalThis.__aiclawSnapshot?.url !== location.href)) return "stale";
         if (el.isContentEditable) {
           document.execCommand("selectAll", false, null);
           document.execCommand("insertText", false, ${JSON.stringify(text)});
@@ -274,38 +341,139 @@ export class AgentBrowser {
         return "ok";
       })()`,
     );
+    if (outcome === "stale") throw new Error("The page or original target changed");
     if (outcome === "missing") throw new Error(tr("没有 {index} 号元素：先 browser_snapshot 拿最新编号。", { index }));
     if (outcome === "not-input") throw new Error(tr("{index} 号不是输入框。", { index }));
     if (submit) await driver.pressKey("Enter");
-    await driver.settle();
-    return this.snapshot(submit ? tr("已填入并提交 {index} 号。", { index }) : tr("已填入 {index} 号。", { index }));
+    return submit ? tr("已填入并提交 {index} 号。", { index }) : tr("已填入 {index} 号。", { index });
   }
 
   private async select(index: number, value: string): Promise<BrowserResult> {
     const driver = await this.current();
+    const mayNavigate = await this.selectElement(driver, index, value);
+    await driver.settle(mayNavigate ? FORM_NAVIGATION_GRACE_MS : undefined);
+    return this.snapshotFrom(driver, tr("已在 {index} 号里选了「{value}」。", { index, value }));
+  }
+
+  private async selectElement(driver: PageDriver, index: number, value: string, scope?: string): Promise<boolean> {
     const outcome = await driver.evaluate<string>(
       `(() => {
-        const el = document.querySelector('[data-aiclaw-i="${index}"]');
+        ${elementLookup(index, scope)}
         if (!el) return "missing";
+        if (${Boolean(scope)}) {
+          if (!(${ELEMENT_READY})(el) || !(${ELEMENT_ENABLED})(el)) return "stale";
+        }
         if (el.tagName.toLowerCase() !== "select") return "not-select";
         const want = ${JSON.stringify(value)}.trim().toLowerCase();
         const option = Array.from(el.options).find((o) =>
           o.value.toLowerCase() === want || (o.textContent || "").trim().toLowerCase() === want)
-          || Array.from(el.options).find((o) => (o.textContent || "").toLowerCase().includes(want));
-        if (!option) return "no-option:" + Array.from(el.options).map((o) => (o.textContent || "").trim()).slice(0, 20).join(" | ");
+          || (!${Boolean(scope)} && Array.from(el.options).find((o) => (o.textContent || "").toLowerCase().includes(want)));
+        if (!option || (${Boolean(scope)} && (option.disabled || option.parentElement?.matches("optgroup:disabled")))) return "no-option:" + Array.from(el.options).map((o) => (o.textContent || "").trim()).slice(0, 20).join(" | ");
+        const mayNavigate = Boolean(el.form && (el.hasAttribute("onchange") || el.hasAttribute("oninput")));
         el.value = option.value;
         el.dispatchEvent(new Event("input", { bubbles: true }));
         el.dispatchEvent(new Event("change", { bubbles: true }));
-        return "ok";
+        return mayNavigate ? "form-update" : "ok";
       })()`,
     );
+    if (outcome === "stale") throw new Error("The page or original target changed");
     if (outcome === "missing") throw new Error(tr("没有 {index} 号元素：先 browser_snapshot 拿最新编号。", { index }));
     if (outcome === "not-select") throw new Error(tr("{index} 号不是下拉框。", { index }));
     if (outcome.startsWith("no-option:")) {
       throw new Error(tr("下拉框里没有「{value}」，可选：{options}", { value, options: outcome.slice(10) }));
     }
-    await driver.settle();
-    return this.snapshot(tr("已在 {index} 号里选了「{value}」。", { index, value }));
+    return outcome === "form-update";
+  }
+
+  private async workflowSnapshot(driver: PageDriver, note: string, failed = false, evidence?: string): Promise<BrowserResult> {
+    try {
+      return { ...await this.snapshotFrom(driver, note, true, evidence), failed };
+    } catch {
+      this.snapshots.delete(driver);
+      return { text: `${note} Browser snapshot unavailable; observe again before acting.`, failed: true };
+    }
+  }
+
+  private async batch(steps: BrowserStep[], expect: BrowserCondition | undefined, signal?: AbortSignal): Promise<BrowserResult> {
+    validateBatch(steps);
+    const driver = await this.current();
+    if (expect) {
+      conditionExpression(expect);
+      if (expect.selector && !await driver.evaluate<boolean>(`(() => {
+        try { document.querySelector(${JSON.stringify(expect.selector)}); return true; }
+        catch { return false; }
+      })()`)) throw new Error("Invalid CSS selector");
+    }
+    const scope = this.snapshots.get(driver);
+    if (!scope) throw new Error("Take a browser snapshot before running a batch");
+    let completed = 0;
+    try {
+      for (const [offset, step] of steps.entries()) {
+        signal?.throwIfAborted();
+        if (offset > 0) await driver.settle();
+        const ready = await this.poll(driver, `(() => {
+          ${elementLookup(step.index, scope)}
+          return (${ELEMENT_READY})(el) && (${ELEMENT_ENABLED})(el);
+        })()`, 1200, signal);
+        if (!ready) throw new Error("The original target did not become ready");
+        signal?.throwIfAborted();
+        switch (step.action) {
+          case "type":
+            await this.typeElement(driver, step.index, step.text!, false, scope);
+            break;
+          case "select":
+            if (await this.selectElement(driver, step.index, step.value!, scope)) {
+              await driver.settle(FORM_NAVIGATION_GRACE_MS);
+            }
+            break;
+          case "click":
+            await this.clickElement(driver, step.index, scope, offset === steps.length - 1);
+            break;
+        }
+        completed++;
+      }
+      const match = expect && await this.waitFor(driver, expect, DEFAULT_CONDITION_MS, signal);
+      if (expect && !match) {
+        return this.workflowSnapshot(driver, `Completed ${completed}/${steps.length} actions; verification failed. Do not replay the batch.`, true);
+      }
+      if (!expect) await driver.settle();
+      signal?.throwIfAborted();
+      const note = `Completed ${completed}/${steps.length} actions.${match ? " Verification matched. Use this result directly if it answers the task." : ""}`;
+      return this.workflowSnapshot(driver, note, false, match?.evidence);
+    } catch (error) {
+      signal?.throwIfAborted();
+      const reason = error instanceof Error ? error.message : "Browser operation failed";
+      return this.workflowSnapshot(driver, `Batch stopped after ${completed}/${steps.length} completed actions. Do not replay earlier actions. ${reason}`, true);
+    }
+  }
+
+  private async waitFor(driver: PageDriver, condition: BrowserCondition, fallback: number, signal?: AbortSignal): Promise<ConditionMatch | undefined> {
+    return this.poll<ConditionMatch>(driver, conditionExpression(condition), condition.timeout_ms ?? fallback, signal);
+  }
+
+  private async poll<T extends true | ConditionMatch = true>(
+    driver: PageDriver, expression: string, timeout: number, signal?: AbortSignal,
+  ): Promise<T | undefined> {
+    const deadline = performance.now() + timeout;
+    do {
+      signal?.throwIfAborted();
+      try {
+        const result = await withTimeout(driver.evaluate<T | false | "stale" | "invalid-selector">(expression),
+          Math.max(1, deadline - performance.now()), "Browser condition timed out");
+        signal?.throwIfAborted();
+        if (result === "invalid-selector") throw new SyntaxError("Invalid CSS selector");
+        if (result === "stale") throw new ReferenceError("The page or original target changed");
+        if (result) return result;
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (error instanceof SyntaxError || error instanceof ReferenceError) throw error;
+        // A navigation can temporarily destroy its JS context; check the condition again.
+      }
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) return undefined;
+      await sleep(Math.min(CONDITION_POLL_MS, remaining));
+    } while (performance.now() < deadline);
+    return undefined;
   }
 
   private async scroll(dy: number, index: number): Promise<BrowserResult> {
@@ -318,15 +486,15 @@ export class AgentBrowser {
     } else {
       await driver.evaluate(`window.scrollBy(0, ${Math.trunc(dy)})`);
     }
-    await sleep(SETTLE_MS / 2);
+    await driver.settle();
     return this.snapshot(tr("已滚动。"));
   }
 
   private async back(): Promise<BrowserResult> {
     const driver = await this.current();
     if (!(await driver.back())) throw new Error(tr("没有可以后退的页面。"));
-    await sleep(SETTLE_MS);
-    return this.snapshot(tr("已后退。"));
+    await driver.settle();
+    return this.snapshotFrom(driver, tr("已后退。"));
   }
 
   private async key(name: string): Promise<BrowserResult> {
@@ -466,13 +634,23 @@ class WindowDriver implements PageDriver {
     return true;
   }
 
-  /** 有导航就等加载完，没有就等一小会儿。 */
-  async settle(): Promise<void> {
+  /** 导航时等待浏览器加载，站内异步更新由条件等待处理。 */
+  async settle(graceMs = 0): Promise<void> {
     const window = this.ensure();
-    await sleep(SETTLE_MS);
-    if (window.webContents.isLoading()) {
+    if (graceMs && !window.webContents.isLoadingMainFrame()) {
+      // An inline form handler can submit before Chromium reports the navigation to the host.
+      await new Promise<void>(resolve => {
+        const finish = () => {
+          clearTimeout(timer);
+          window.webContents.off("did-start-loading", finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, graceMs);
+        window.webContents.once("did-start-loading", finish);
+      });
+    }
+    if (window.webContents.isLoadingMainFrame()) {
       await withTimeout(onceLoaded(window), LOAD_TIMEOUT_MS, tr("页面加载超时（30 秒）")).catch(() => undefined);
-      await sleep(SETTLE_MS / 2);
     }
   }
 
@@ -611,13 +789,18 @@ class ExtensionDriver implements PageDriver {
     return true;
   }
 
-  async settle(): Promise<void> {
-    await sleep(SETTLE_MS);
+  async settle(graceMs = 0): Promise<void> {
     const deadline = Date.now() + LOAD_TIMEOUT_MS;
+    const graceDeadline = Date.now() + graceMs;
     while (Date.now() < deadline) {
       const tab = await this.connection().request<{ status?: string }>("tabs.get", { tabId: this.tabId });
-      if (tab.status !== "loading") break;
-      await sleep(200);
+      if (tab.status === "loading") {
+        await sleep(200);
+        continue;
+      }
+      const remaining = graceDeadline - Date.now();
+      if (remaining <= 0) break;
+      await sleep(Math.min(remaining, 50));
     }
   }
 

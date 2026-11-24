@@ -526,6 +526,9 @@ export interface BrowserRequestParams {
   action:
     | "navigate"
     | "snapshot"
+    | "batch"
+    | "wait"
+    | "verify"
     | "click"
     | "type"
     | "select"
@@ -545,9 +548,25 @@ export interface BrowserRequestParams {
   keys?: string;
   /** use_tab 的标签页编号，来自 tabs。 */
   tabId?: number;
+  steps?: BrowserStep[];
+  condition?: BrowserCondition;
+}
+
+export interface BrowserStep {
+  action: "click" | "type" | "select";
+  index: number;
+  text?: string;
+  value?: string;
+}
+export interface BrowserCondition {
+  kind: "visible" | "enabled" | "text_contains" | "url_contains";
+  selector?: string;
+  value?: string;
+  timeout_ms?: number;
 }
 
 export interface BrowserResult {
+  failed?: boolean;
   text: string;
   imageBase64?: string;
   width?: number;

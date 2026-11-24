@@ -1,28 +1,28 @@
 {
-  "version": "0.53.1",
+  "version": "0.61.3",
   "repository": "trycua/cua",
-  "tag": "cua-driver-rs-v0.53.1",
+  "tag": "cua-driver-rs-v0.61.3",
   "license": "MIT",
   "assets": {
     "darwin": {
-      "name": "cua-driver-rs-0.53.1-darwin-universal.tar.gz",
-      "sha256": "11fd9601cb20c915ee21c823c4631e8209e2c2e7043e32aec215494079b97798"
+      "name": "cua-driver-rs-0.61.3-darwin-universal.tar.gz",
+      "sha256": "329fd3e582658cc22b15bf847fb691c93ce292b5dd34e8387f438833301bd641"
     },
     "linux-x64": {
-      "name": "cua-driver-rs-0.53.1-linux-x86_64.tar.gz",
-      "sha256": "ab3944c55dc9fe0a8a68db51f0b03ddb88370ba61c70ab13f38fd2a2884c69a0"
+      "name": "cua-driver-rs-0.61.3-linux-x86_64.tar.gz",
+      "sha256": "32a7ac2235fe41d64d203be52103680a891bdacb5c8d77683eeca8924723168c"
     },
     "linux-arm64": {
-      "name": "cua-driver-rs-0.53.1-linux-arm64.tar.gz",
-      "sha256": "a4036f40530108195569910abfacc725b013f32f6e083d4a75f1bdee9f6a4ade"
+      "name": "cua-driver-rs-0.61.3-linux-arm64.tar.gz",
+      "sha256": "cbeeb3629a47acf38f744a582396202e10a569426f029de374a785557aa60c16"
     },
     "win32-x64": {
-      "name": "cua-driver-rs-0.53.1-windows-x86_64.zip",
-      "sha256": "77d218ca8b423d2cf8178b65d3745967500961479b9b1c18037b4ae6da32b9db"
+      "name": "cua-driver-rs-0.61.3-windows-x86_64.zip",
+      "sha256": "1a9004892b7d8129750c6ae8dbc628f0f724e4d835f1ac1f47e34c292d639f83"
     },
     "win32-arm64": {
-      "name": "cua-driver-rs-0.53.1-windows-arm64.zip",
-      "sha256": "a3ef2fdfd5d1cdb25fda81f0efaccdaf17c332b2f9317ece6d0718d15beea63e"
+      "name": "cua-driver-rs-0.61.3-windows-arm64.zip",
+      "sha256": "88a1a429d228fc196158469b2ef43710b98e242df896ff129eb88412773068c3"
     }
   }
 }

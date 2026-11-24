@@ -13,8 +13,10 @@ import { tr } from "../shared/i18n.js";
 
 /** 页面里跑出来的原始快照。 */
 export interface RawSnapshot {
+  snapshotId?: string;
   url: string;
   title: string;
+  visibleText?: string;
   /** 已滚过的高度、视口高度、整页高度。 */
   scrollY: number;
   viewportHeight: number;
@@ -51,7 +53,7 @@ export const MAX_ELEMENTS = 150;
  * 所以编号只在两次快照之间有效——模型拿旧编号点新页面会点错，描述里说了。
  */
 export const INDEX_SCRIPT = String.raw`
-(() => {
+(includeText => {
   const MAX = ${MAX_ELEMENTS};
   const SELECTOR = [
     "a[href]", "button", "input", "select", "textarea", "summary",
@@ -96,6 +98,7 @@ export const INDEX_SCRIPT = String.raw`
   document.querySelectorAll("[data-aiclaw-i]").forEach((el) => el.removeAttribute("data-aiclaw-i"));
   const all = Array.from(document.querySelectorAll(SELECTOR)).filter((el) => !el.disabled && visible(el));
   const elements = [];
+  const targets = new Map();
   let index = 0;
   for (const el of all) {
     // 嵌套的可交互元素（a 里套 button）只留里面那个，外面的点了也是同一个动作。
@@ -103,6 +106,7 @@ export const INDEX_SCRIPT = String.raw`
     index += 1;
     el.setAttribute("data-aiclaw-i", String(index));
     if (elements.length >= MAX) continue;
+    targets.set(index, el);
     const rect = el.getBoundingClientRect();
     const item = {
       index,
@@ -119,16 +123,22 @@ export const INDEX_SCRIPT = String.raw`
     if (item.role === "checkbox" || item.role === "radio") item.checked = Boolean(el.checked);
     elements.push(item);
   }
+  const snapshotId = performance.timeOrigin + ":" + Math.random();
+  globalThis.__aiclawSnapshot = { id: snapshotId, url: location.href, targets };
   return {
+    snapshotId,
     url: location.href,
     title: document.title,
+    visibleText: includeText
+      ? ((document.querySelector("main, article, [role=main]") || document.body)?.innerText || "").trim().slice(0, 1200)
+      : undefined,
     scrollY: Math.round(window.scrollY),
     viewportHeight: window.innerHeight,
     pageHeight: Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0),
     elements,
     total: index,
   };
-})()
+})
 `;
 
 /** 抽正文的脚本：优先 main / article，退回 body。 */
@@ -151,7 +161,7 @@ export const UNTRUSTED_OPEN =
 export const UNTRUSTED_CLOSE = "[Web content ends]";
 
 /** 把原始快照排成给模型看的文本。 */
-export function formatSnapshot(raw: RawSnapshot, note = ""): string {
+export function formatSnapshot(raw: RawSnapshot, note = "", matched?: string): string {
   const lines: string[] = [];
   if (note) lines.push(note);
   lines.push(tr("页面：{title}", { title: raw.title || tr("（无标题）") }));
@@ -167,6 +177,8 @@ export function formatSnapshot(raw: RawSnapshot, note = ""): string {
     );
   }
   lines.push("");
+  if (matched) lines.push("Matched evidence:", UNTRUSTED_OPEN, matched, UNTRUSTED_CLOSE, "");
+  if (raw.visibleText) lines.push("Visible page text (first 1200 characters):", UNTRUSTED_OPEN, raw.visibleText, UNTRUSTED_CLOSE, "");
   if (raw.elements.length === 0) {
     lines.push(tr("（没有找到可交互的元素）"));
   } else {
@@ -188,7 +200,7 @@ export function formatSnapshot(raw: RawSnapshot, note = ""): string {
     lines.push(UNTRUSTED_CLOSE);
   }
   lines.push("");
-  lines.push("Numbers are only valid for this snapshot: if the page changes, take a fresh browser_snapshot before acting.");
+  lines.push("Numbers are only valid for this snapshot. Reuse the snapshot returned by an action; take a new one only if the page has since changed.");
   return lines.join("\n");
 }
 

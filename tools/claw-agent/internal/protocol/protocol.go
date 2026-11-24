@@ -173,6 +173,9 @@ type BrowserAction string
 const (
 	BrowserNavigate   BrowserAction = "navigate"
 	BrowserSnapshot   BrowserAction = "snapshot"
+	BrowserBatch      BrowserAction = "batch"
+	BrowserWait       BrowserAction = "wait"
+	BrowserVerify     BrowserAction = "verify"
 	BrowserClick      BrowserAction = "click"
 	BrowserType       BrowserAction = "type"
 	BrowserSelect     BrowserAction = "select"
@@ -206,10 +209,27 @@ type BrowserRequestParams struct {
 	/** key 的按键名。 */
 	Keys string `json:"keys,omitempty"`
 	/** use_tab 的标签页编号，来自 tabs。 */
-	TabID int `json:"tabId,omitempty"`
+	TabID     int               `json:"tabId,omitempty"`
+	Steps     []BrowserStep     `json:"steps,omitempty"`
+	Condition *BrowserCondition `json:"condition,omitempty"`
+}
+
+type BrowserStep struct {
+	Action BrowserAction `json:"action"`
+	Index  int           `json:"index"`
+	Text   *string       `json:"text,omitempty"`
+	Value  string        `json:"value,omitempty"`
+}
+
+type BrowserCondition struct {
+	Kind      string `json:"kind"`
+	Selector  string `json:"selector,omitempty"`
+	Value     string `json:"value,omitempty"`
+	TimeoutMS int    `json:"timeout_ms,omitempty"`
 }
 
 type BrowserResult struct {
+	Failed bool `json:"failed,omitempty"`
 	/** 给模型看的文本：页面状态、编号列表或正文。 */
 	Text string `json:"text"`
 	/** 截图时的 PNG，base64。 */

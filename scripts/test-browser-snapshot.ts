@@ -84,6 +84,13 @@ test("没有可交互元素时也要说一句，不能是空白", () => {
   assert.doesNotMatch(text, /滚动位置/, "一屏以内不显示滚动位置");
 });
 
+test("验证证据和可见正文分别包在不可信边界内", () => {
+  const text = formatSnapshot({ ...page, visibleText: "first paragraph" }, "Verification matched.", "matched paragraph");
+  assert.ok(text.includes(`Matched evidence:\n${UNTRUSTED_OPEN}\nmatched paragraph\n${UNTRUSTED_CLOSE}`));
+  assert.ok(text.includes(`Visible page text (first 1200 characters):\n${UNTRUSTED_OPEN}\nfirst paragraph\n${UNTRUSTED_CLOSE}`));
+  assert.match(text, /Reuse the snapshot returned by an action/);
+});
+
 test("正文抽取带边界并截断", () => {
   const long = "字".repeat(MAX_EXTRACT_CHARS + 500);
   const text = formatExtract("https://example.com/a", long);

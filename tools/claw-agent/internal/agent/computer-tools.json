@@ -25,7 +25,7 @@
       "additionalProperties": false,
       "properties": {
         "app": {
-          "description": "Only windows of apps whose name contains this text (case-insensitive), or whose bundle id equals it. Prefer this or `pid` over an unfiltered call, which returns every window on the host.",
+          "description": "Only windows of apps with a name that contains this text (case-insensitive), or whose bundle id equals it. On macOS an app answers to its shown, possibly localized name and to its bundle's own name, so `Calculator` matches on every system language. Prefer this or `pid` over an unfiltered call, which returns every window on the host.",
           "type": "string"
         },
         "on_screen_only": {
@@ -113,7 +113,7 @@
           "type": "integer"
         },
         "since": {
-          "description": "A `snapshot_id` from an earlier get_window_state of the same window, or \"latest\" for this window's most recent read with the same query/max_elements/max_depth. Use it on every re-read after acting. Returns only what changed against that snapshot: `+` added rows, `~` changed rows, `-` removed rows (removed ids are the old snapshot's), or `no change`. Falls back to a full read when the snapshot is unknown, expired, belongs to another window, or was read with a different query/max_elements/max_depth; `since_status` says which. The response still carries a NEW snapshot_id and its element_tokens; rows not listed keep their previous [N] unless a `reindexed:` line says otherwise.",
+          "description": "A `snapshot_id` from an earlier get_window_state of the same window, or \"latest\" for this window's most recent read with the same query/max_elements/max_depth. Use it on every re-read after acting. Returns only what changed against that snapshot: `+` added rows, `~` changed rows, `-` removed rows (removed ids are the old snapshot's), or `no change`. Falls back to a full read when the snapshot is unknown, expired, belongs to another window, or was read with a different query/max_elements/max_depth; `since_status` says which. The response still carries a NEW snapshot_id and its element_tokens; rows not listed keep their previous [N] unless a `reindexed:` line says otherwise. Every tree read also returns the window's `ui_tree_revision`: it stays the same while reads of the same view see the same rows, and grows when they change. Pass it as `ui_tree_revision` on an action to have the action refused with `stale_revision`, before any input, when a later read saw the tree change.",
           "type": "string"
         },
         "timeout_ms": {
@@ -209,7 +209,7 @@
       "additionalProperties": false,
       "properties": {
         "action": {
-          "description": "AX action: press (default), show_menu, pick, confirm, cancel, open, show_alternate_ui, show_default_ui. show_alternate_ui reveals hover-only controls on an element that lists it, without the pointer.",
+          "description": "AX action: press (default), show_menu, pick, confirm, cancel, open, show_alternate_ui, show_default_ui; or an element's published custom_actions name or raw envelope. show_alternate_ui reveals hover-only controls on an element that lists it, without the pointer.",
           "type": "string"
         },
         "button": {
@@ -257,6 +257,11 @@
             "none"
           ],
           "type": "string"
+        },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
         },
         "window_id": {
           "description": "Target window ID. Omit with element_token.",
@@ -310,6 +315,11 @@
             "none"
           ],
           "type": "string"
+        },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
         },
         "window_id": {
           "description": "CGWindowID. Omit when element_token is supplied (the token carries it).",
@@ -370,6 +380,11 @@
             "none"
           ],
           "type": "string"
+        },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
         },
         "window_id": {
           "description": "CGWindowID. Omit when element_token is supplied (the token carries it).",
@@ -433,6 +448,11 @@
         "text": {
           "description": "Text to insert.",
           "type": "string"
+        },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
         },
         "window_id": {
           "description": "Window ID. Omit with element_token.",
@@ -499,6 +519,11 @@
           ],
           "type": "string"
         },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
+        },
         "window_id": {
           "description": "Target window; required for foreground. Does not raise by itself.",
           "type": "integer",
@@ -531,7 +556,7 @@
     "name": "computer_hotkey",
     "action": "hotkey",
     "readOnly": false,
-    "description": "Press a key combination — e.g. `[\"cmd\", \"c\"]` for Copy, `[\"cmd\", \"shift\", \"4\"]` for screenshot selection. Follows the same `delivery_mode` ladder as click/type_text — it does NOT raise the window by default:\n• `background` (default): post the combo to the target pid WITHOUT fronting or raising it — uses the macOS 14+ auth-message envelope so Chromium/Electron accept it as trusted live input. With an AX target, focus that exact element first. No top-level focus steal. `window_id` here only targets the combo; it does not raise. Background key events never reach a native app's menus, so when the combo is a menu item's key equivalent (cmd+s, cmd+w, ...) and the app is not in front, that menu item runs through accessibility instead (a disabled Save is saved through the app's scripting interface using Apple Events and verified on disk; this requires per-app Automation consent and may show macOS’s first-use consent prompt; denied permission refuses the save); a menu item macOS keeps disabled in the background is refused with `background_unavailable`. With serve --no-automation-prompts, scripting without granted consent refuses with `automation_consent_required`, without keyboard fallback.\n• `foreground`: briefly front the window (NSMenu path, < 1 ms via SLPSSetFrontProcessWithOptions) so native menu key-equivalents (Cmd+Z, Cmd+W) dispatch, then restore the prior frontmost — the explicit escalation for menu-bar shortcuts on non-Chromium apps that ignore a background combo. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
+    "description": "Press a key combination — e.g. `[\"cmd\", \"c\"]` for Copy, `[\"cmd\", \"shift\", \"4\"]` for screenshot selection. Follows the same `delivery_mode` ladder as click/type_text — it does NOT raise the window by default:\n• `background` (default): post the combo to the target pid WITHOUT fronting or raising it — uses the macOS 14+ auth-message envelope. Chromium/Electron renderers often drop it anyway; an unverifiable result for one carries `escalation.recommended: \"foreground\"`. With an AX target, focus that exact element first. No top-level focus steal. `window_id` here only targets the combo; it does not raise. Background key events never reach a native app's menus, so when the combo is a menu item's key equivalent (cmd+s, cmd+w, ...) and the app is not in front, that menu item runs through accessibility instead (a disabled Save is saved through the app's scripting interface using Apple Events and verified on disk; this requires per-app Automation consent and may show macOS’s first-use consent prompt; denied permission refuses the save); a menu item macOS keeps disabled in the background is refused with `background_unavailable`. With serve --no-automation-prompts, scripting without granted consent refuses with `automation_consent_required`, without keyboard fallback.\n• `foreground`: briefly front the window (NSMenu path, < 1 ms via SLPSSetFrontProcessWithOptions) so native menu key-equivalents (Cmd+Z, Cmd+W) dispatch, then restore the prior frontmost — the explicit escalation for menu-bar shortcuts on non-Chromium apps that ignore a background combo. Background preferred; the host can temporarily use foreground after an explicit background refusal. Use exact pid and window_id from computer_list_windows. Prefer computer_run_steps for known sequential actions with one final observe; verify semantic effects, never replay uncertain input.",
     "schema": {
       "additionalProperties": false,
       "properties": {
@@ -560,6 +585,11 @@
             "none"
           ],
           "type": "string"
+        },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
         },
         "window_id": {
           "description": "Target window. Required for delivery_mode:\"foreground\" (the NSMenu activation needs a window). Does NOT itself raise the window — raising is gated on delivery_mode.",
@@ -614,6 +644,11 @@
             "none"
           ],
           "type": "string"
+        },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
         },
         "value": {
           "description": "New value, coerced to the element's type.",
@@ -688,6 +723,11 @@
             "none"
           ],
           "type": "string"
+        },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
         },
         "window_id": {
           "description": "Window ID. Required with x/y; optional with element_token.",
@@ -785,6 +825,11 @@
         "to_y": {
           "description": "Drag-end Y in window-local screenshot pixels.",
           "type": "number"
+        },
+        "ui_tree_revision": {
+          "description": "The `ui_tree_revision` of the get_window_state read this action was planned from. The action is refused with `stale_revision`, before any input is delivered, when a later read of the same window saw the tree change or the driver has no revision for the window. It covers changes a read has observed: the driver does not watch the window between reads.",
+          "minimum": 0,
+          "type": "integer"
         },
         "window_id": {
           "description": "CGWindowID for the window the pixel coordinates were measured against. Optional only when pid owns exactly one eligible top-level window; otherwise the action refuses with ambiguous_window_target.",

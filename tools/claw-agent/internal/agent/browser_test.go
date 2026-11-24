@@ -129,3 +129,59 @@ func TestUseTabAsksButListingTabsDoesNot(t *testing.T) {
 		t.Errorf("两步都应到宿主，并带上 tabId：%+v", emitter.browser)
 	}
 }
+
+func TestBrowserWorkflowValidation(t *testing.T) {
+	for _, raw := range []string{
+		`{"steps":[]}`,
+		`{"steps":[{"action":"navigate","index":1}]}`,
+		`{"steps":[{"action":"click","index":151}]}`,
+		`{"steps":[{"action":"type","index":1}]}`,
+		`{"steps":[{"action":"type","index":1,"text":"value","submit":true}]}`,
+		`{"steps":[{"action":"select","index":1,"value":"  "}]}`,
+		`{"steps":[{"action":"click","index":1}],"expect":{"kind":"text_contains"}}`,
+	} {
+		if _, err := buildBrowserBatch(json.RawMessage(raw)); err == nil {
+			t.Errorf("accepted invalid batch: %s", raw)
+		}
+	}
+	for _, raw := range []string{
+		`{"kind":"enabled"}`,
+		`{"kind":"url_contains","selector":"a","value":"example.com"}`,
+		`{"kind":"visible","selector":"main","timeout_ms":9000}`,
+	} {
+		if _, err := buildBrowserCondition(protocol.BrowserWait)(json.RawMessage(raw)); err == nil {
+			t.Errorf("accepted invalid condition: %s", raw)
+		}
+	}
+}
+
+func TestBrowserBatchApprovalAndVerificationFailure(t *testing.T) {
+	for _, approved := range []bool{false, true} {
+		model := &fakeModel{script: []string{
+			sseToolCalls([3]string{"b1", "browser_batch", `{"steps":[{"action":"type","index":2,"text":"asyncio"},{"action":"click","index":3}],"expect":{"kind":"url_contains","value":"search"}}`}),
+			sseText("done"),
+		}}
+		session := browserSession(t, model, protocol.ApprovalAlways, true)
+		emitter := &recordingEmitter{
+			approve: approved, browserOK: true,
+			browserResult: protocol.BrowserResult{Text: "Completed 2/2 actions; verification failed.", Failed: true},
+		}
+		session.RunTurn(context.Background(), "turn", "Search with the browser", nil, nil, emitter)
+		if len(emitter.approvals) != 1 || !strings.Contains(emitter.approvals[0].Detail, "asyncio") || !strings.Contains(emitter.approvals[0].Detail, "3") {
+			t.Fatalf("batch approval did not disclose both steps: %+v", emitter.approvals)
+		}
+		if !approved {
+			if len(emitter.browser) != 0 {
+				t.Fatal("denied batch reached the browser")
+			}
+			continue
+		}
+		if len(emitter.browser) != 1 || emitter.browser[0].Action != protocol.BrowserBatch ||
+			len(emitter.browser[0].Steps) != 2 || emitter.browser[0].Condition.Value != "search" {
+			t.Fatalf("missing workflow request: %+v", emitter.browser)
+		}
+		if !emitter.find(protocol.NotifyItemCompleted, "verification failed") {
+			t.Fatal("verification failure not returned to the model")
+		}
+	}
+}

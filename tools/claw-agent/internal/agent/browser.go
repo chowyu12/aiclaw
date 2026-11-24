@@ -35,20 +35,21 @@ import (
 // 训练成闭眼点允许。它们标成 EffectWrite（会改变页面状态）：on-write 档位放过、
 // 严格档位（always）逐个问。快照、抽正文、截图只是看，任何档位都不问。
 
+type browserToolSpec struct {
+	name        string
+	description string
+	schema      json.RawMessage
+	effect      tools.Effect
+	build       func(json.RawMessage) (protocol.BrowserRequestParams, error)
+}
+
 // registerBrowserTools 挂上浏览器工具。
 func (s *Session) registerBrowserTools() error {
 	if !s.config.EnableBrowser {
 		return nil
 	}
 
-	type spec struct {
-		name        string
-		description string
-		schema      json.RawMessage
-		effect      tools.Effect
-		build       func(json.RawMessage) (protocol.BrowserRequestParams, error)
-	}
-	specs := []spec{
+	specs := []browserToolSpec{
 		{
 			name: "browser_navigate",
 			description: "Open a URL (http/https) in the browser. Once it loads, returns the page title and a numbered list of interactive elements; " +
@@ -74,8 +75,8 @@ func (s *Session) registerBrowserTools() error {
 		},
 		{
 			name: "browser_snapshot",
-			description: "Re-read the current page: title, URL, scroll position, and the numbered list of interactive elements " +
-				"(links, buttons, inputs, selects). After the page changes (a click, a scroll, finished loading), take a fresh snapshot before acting again.",
+			description: "Re-read the current page: title, URL, scroll position, and numbered interactive elements. " +
+				"Reuse the snapshot from the latest action unless the page has since changed or no snapshot was returned.",
 			schema: emptySchema(),
 			effect: tools.EffectRead,
 			build: func(json.RawMessage) (protocol.BrowserRequestParams, error) {
@@ -84,7 +85,7 @@ func (s *Session) registerBrowserTools() error {
 		},
 		{
 			name:        "browser_click",
-			description: "Click an element from the numbered list. Returns the page state after the click.",
+			description: "Click one element from the numbered list. Returns the updated snapshot with visible page text. If it answers the task, reply directly.",
 			schema:      indexSchema(),
 			effect:      tools.EffectWrite,
 			build:       indexAction(protocol.BrowserClick),
@@ -117,7 +118,7 @@ func (s *Session) registerBrowserTools() error {
 		},
 		{
 			name:        "browser_select",
-			description: "Choose an option in a select (by number), matched by option text or value.",
+			description: "Choose an option in a select (by number), matched by option text or value. Returns the updated snapshot, including after navigation. Use its new controls directly.",
 			schema: schemaOf(map[string]any{
 				"index": map[string]any{"type": "integer", "description": "Number of the select"},
 				"value": map[string]any{"type": "string", "description": "Text or value of the option to choose"},
@@ -246,6 +247,7 @@ func (s *Session) registerBrowserTools() error {
 		},
 	}
 
+	specs = append(specs, browserWorkflowTools()...)
 	for _, item := range specs {
 		item := item
 		if err := s.registry.Register(tools.Tool{
@@ -291,6 +293,9 @@ func (s *Session) runBrowserAction(
 	if err != nil {
 		return "", err
 	}
+	if result.Failed {
+		return "", fmt.Errorf("%s", result.Text)
+	}
 	if result.ImageBase64 != "" {
 		image, err := base64.StdEncoding.DecodeString(result.ImageBase64)
 		if err != nil {
@@ -313,6 +318,16 @@ func browserApprovalReason(request protocol.BrowserRequestParams) string {
 
 func describeBrowserAction(request protocol.BrowserRequestParams) string {
 	switch request.Action {
+	case protocol.BrowserBatch:
+		details := make([]string, 0, len(request.Steps))
+		for _, step := range request.Steps {
+			action := protocol.BrowserRequestParams{Action: step.Action, Index: step.Index, Value: step.Value}
+			if step.Text != nil {
+				action.Text = *step.Text
+			}
+			details = append(details, describeBrowserAction(action))
+		}
+		return strings.Join(details, "\n")
 	case protocol.BrowserNavigate:
 		return i18n.D("打开 {url}", "url", request.URL)
 	case protocol.BrowserClick:

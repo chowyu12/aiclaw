@@ -12,7 +12,7 @@ import type {
   ComputerTool,
   ComputerToolResult,
 } from "./computer-runtime.js";
-export const CUA_VERSION = "0.53.1";
+export const CUA_VERSION = "0.61.3";
 const source = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../cua-driver",
