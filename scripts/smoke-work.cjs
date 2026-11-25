@@ -208,6 +208,8 @@ app.whenReady().then(async()=>{
  writeFileSync('/tmp/aiclaw-side-conversation.png',(await win.webContents.capturePage()).toPNG());
  await win.loadFile(join(desktop,'dist/renderer/index.html'));
  check('renderer restart restores side tab list and active conversation',await wait("document.querySelectorAll('.side-tabs > div').length===2 && document.querySelector('.side-conversation header select')?.value==='other' && !document.querySelector('.side-conversation textarea').disabled"));
+ await js("(()=>{const select=document.querySelector('.side-conversation header select');select.value='c_channel';select.dispatchEvent(new Event('change',{bubbles:true}));})()");
+ check('side channel chat shows history without a composer',await wait("document.querySelector('.side-conversation select')?.value==='c_channel' && document.querySelector('.side-history')?.textContent.includes('original answer') && !document.querySelector('.side-conversation footer')"));
  await js("document.querySelector('.side-conversation button[aria-label=\"关闭并排会话\"]').click()");
  check('closing side chat restores the main pane without stopping it',await wait("!document.querySelector('.side-conversation') && !!document.querySelector('.composer')"));
  for(const [view,label] of [['providers','模型服务'],['skills','技能'],['schedules','定时任务']]){
@@ -445,6 +447,10 @@ app.whenReady().then(async()=>{
  check('sidebar uses only workspaces and general chats even with an old grouping preference',await js("!document.querySelector('.grouping') && !document.querySelector('.head button[title=\"新建分组\"]') && !document.querySelector('.item-actions button[title=\"移动到分组\"]') && [...document.querySelectorAll('.bucket-name')].map(b=>b.textContent.trim()).join('|')==='smoke|smoke|普通会话' && document.querySelectorAll('.bucket-detail').length===2"));
  check('channel and scheduled chats join their workspace with source labels and child agents stay nested',await js("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count').textContent==='3' && [...document.querySelectorAll('.source-label')].map(b=>b.textContent).sort().join('|')==='定时任务|渠道会话' && !!document.querySelector('.agents-toggle')"));
  check('old custom group data is preserved',groups.groups[0].name==='原有分组' && groups.assignments.s==='g_saved' && groups.assignments.c_channel==='g_saved');
+ await js("[...document.querySelectorAll('.sidebar .item')].find(row=>row.textContent.includes('Channel chat')).click()");
+ check('channel chat shows its history without a composer',await wait("document.querySelector('.chat-header')?.textContent.includes('Channel chat') && document.querySelector('.stream')?.textContent.includes('original answer') && !document.querySelector('.composer-wrap')"));
+ await js("[...document.querySelectorAll('.sidebar .item')].find(row=>row.textContent.includes('Workflow test')).click()");
+ check('returning to a regular chat restores its composer',await wait("document.querySelector('.chat-header')?.textContent.includes('Workflow test') && !!document.querySelector('.composer textarea:not(:disabled)')"));
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
  await wait("document.querySelector('.sidebar .head .new').textContent.includes('返回对话')");
  await js("document.querySelector('.sidebar .head .new').click()");

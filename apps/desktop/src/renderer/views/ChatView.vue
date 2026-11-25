@@ -7,6 +7,7 @@ import { applyPreset, presetCandidates } from "../../shared/presets";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { actions, filterChoices, modelChoices, store } from "../store";
 import { describeError } from "../errors";
+import { isChannelSession } from "../live-sessions";
 import { checkpointDraft, draftFor, resetDraftHistory, stepDraft } from "../drafts";
 import { t } from "../i18n";
 import {
@@ -1059,7 +1060,7 @@ const forking = ref(false);
           </template>
         </div>
 
-        <footer class="composer-wrap">
+        <footer v-if="!isChannelSession(store.sessionId)" class="composer-wrap">
           <!-- 一个圆角容器裹住输入框与工具条，工具条在里面而不是外面：
                视觉上它们是一件东西，用户的注意力不用在两个框之间跳。 -->
           <!-- 透明背板：点菜单以外的任何地方都关掉它。没有它的话菜单开了
@@ -1245,7 +1246,7 @@ const forking = ref(false);
                       <span>{{ store.model || t('选择模型') }}</span>
                       <span class="model-disclosure" aria-hidden="true">›</span>
                     </button>
-                    <div v-if="!modelListOpen && store.sessionId && !store.sessionId.startsWith('c_') && reasoningOptions.length" class="reasoning-picker">
+                    <div v-if="!modelListOpen && store.sessionId && reasoningOptions.length" class="reasoning-picker">
                       <span>{{ t('推理强度') }}</span>
                       <div class="reasoning-levels" role="group" :aria-label="t('会话推理强度')" :title="t('从下一次模型请求生效；按模型能力校验。')">
                         <button

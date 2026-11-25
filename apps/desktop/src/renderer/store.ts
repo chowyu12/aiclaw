@@ -10,6 +10,7 @@ import { defaultModelChoice, modelChoices, usable, type ModelChoice } from "./mo
 import {
   applyAgentEvent,
   ensureLive,
+  isChannelSession,
   newLive,
   restoreHistory,
   restoreSessionHistory,
@@ -1472,6 +1473,7 @@ export const actions = {
     }
     // 记住发出去的是哪个会话：下面有几次 await，期间用户可能已经切走了。
     const sessionId = targetSessionId || state.sessionId;
+    if (isChannelSession(sessionId)) return false;
     const record = ensureLive(state.live, sessionId);
     const optimisticId = `user-${crypto.randomUUID()}`;
     const wasBusy = record.busy;

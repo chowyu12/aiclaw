@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store } from "../store";
 import { draftFor } from "../drafts";
+import { isChannelSession } from "../live-sessions";
 import { renderMarkdown } from "../markdown";
 import { attachmentDisplayText } from "../attachments";
 import { t } from "../i18n";
@@ -68,7 +69,7 @@ onUnmounted(() => { end(); observer.disconnect(); });
     <header>
       <select :value="id" :aria-label="t('并排会话')" @change="change"><option v-for="session in choices" :key="session.id" :value="session.id">{{ session.title || t('未命名会话') }}</option></select>
       <button :title="t('在主区域打开')" @click="actions.openSession(id)">↗</button>
-      <button :title="t('聚焦输入框')" @click="input?.focus()">⌨</button>
+      <button v-if="!isChannelSession(id)" :title="t('聚焦输入框')" @click="input?.focus()">⌨</button>
       <button :aria-label="t('关闭并排会话')" @click="actions.closeSideSession()">×</button>
     </header>
     <nav class="side-tabs" :aria-label="t('并排会话')">
@@ -86,7 +87,7 @@ onUnmounted(() => { end(); observer.disconnect(); });
         <details v-else class="side-step" :class="entry.state"><summary>{{ entry.title }}</summary><pre>{{ entry.detail }}</pre></details>
       </template>
     </div>
-    <footer>
+    <footer v-if="!isChannelSession(id)">
       <textarea ref="input" v-model="draft.text" :placeholder="t('发送消息…')" :disabled="!store.sideSessionReady || store.sideLoading" @keydown="keySend"></textarea>
       <div><span v-if="record?.busy" role="status">{{ t('正在处理…') }}</span><button v-if="record?.busy" @click="actions.interrupt(id)">{{ t('停止') }}</button><button :disabled="!store.sideSessionReady || store.sideLoading || !draft.text.trim()" @click="send">{{ record?.busy ? t('排队发送') : t('发送') }}</button></div>
     </footer>

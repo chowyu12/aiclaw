@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { actions, store } from "../store";
 import { locale, t } from "../i18n";
 import { describeError } from "../errors";
+import { isChannelSession } from "../live-sessions";
 import { workspaceName, projectBuckets } from "../workspace-buckets";
 import ProjectEditor from "./ProjectEditor.vue";
 import BrandLogo from "./BrandLogo.vue";
@@ -253,12 +254,8 @@ const UNGROUPED = "__ungrouped__";
 const SCHEDULED = "__scheduled__";
 
 function sourceLabel(session: SessionSummaryView): string {
-  if (isChannelSession(session)) return t("渠道会话");
+  if (isChannelSession(session.id)) return t("渠道会话");
   return store.groups.assignments[session.id] === SCHEDULED ? t("定时任务") : "";
-}
-
-function isChannelSession(session: SessionSummaryView): boolean {
-  return session.id.startsWith("c_");
 }
 
 /**

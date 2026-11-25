@@ -15,6 +15,10 @@ import { imageDataURL } from "./attachments";
 import { tr } from "../shared/i18n.js";
 import type { AgentEventPayload, HistoryItemView, SearchSource } from "../shared/types";
 
+export function isChannelSession(sessionId: string): boolean {
+  return sessionId.startsWith("c_");
+}
+
 /** 用户点停止之后 turn/completed 带的 error：内核按界面语言给出，两种都认。 */
 const INTERRUPTED = new Set(["已中断", "Interrupted"]);
 
