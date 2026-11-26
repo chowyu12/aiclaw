@@ -22,6 +22,13 @@ type ConnectionRow = PluginRow["connections"][number];
 
 const props = defineProps<{ connectionsOnly?: boolean }>();
 const visiblePlugins = computed(() => store.plugins.filter(plugin => isChannel(plugin) === Boolean(props.connectionsOnly)));
+const CHANNEL_MARKS: Record<string, string> = {
+  "aiclaw.telegram": "TG",
+  "aiclaw.wecom": "企",
+  "aiclaw.wechat": "微",
+  "aiclaw.dingtalk": "钉",
+  "aiclaw.feishu": "飞",
+};
 const CONNECTION_GUIDES: Record<string, { url: string; hint: string }> = {
   "aiclaw.feishu": { url: "https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-", hint: "启用自建应用的机器人能力，选择长连接并订阅 im.message.receive_v1。" },
   "aiclaw.dingtalk": { url: "https://opensource.dingtalk.com/developerpedia/docs/learn/stream/overview", hint: "启用应用的机器人能力，将消息接收模式设为 Stream。" },
@@ -437,42 +444,58 @@ async function pollWeChat(): Promise<void> {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page" :class="{ 'connections-page': connectionsOnly }">
     <section>
       <header>
         <h2>{{ t(connectionsOnly ? "连接" : "插件") }}</h2>
+        <button v-if="connectionsOnly" class="ghost refresh-connections" @click="actions.loadPlugins()">{{ t("刷新") }}</button>
         <p v-if="!connectionsOnly" class="sub">
           {{ t("安装和管理提供技能、MCP 或宿主能力的插件。") }}
         </p>
       </header>
 
-      <div class="add">
-        <button v-if="!connectionsOnly" class="ghost" @click="actions.installPluginFromDirectory()">{{ t("+ 从目录安装") }}</button>
+      <div v-if="!connectionsOnly" class="add">
+        <button class="ghost" @click="actions.installPluginFromDirectory()">{{ t("+ 从目录安装") }}</button>
         <button class="ghost" @click="actions.loadPlugins()">{{ t("刷新") }}</button>
       </div>
 
       <p v-if="store.pluginsError" class="note warn">{{ store.pluginsError }}</p>
 
+      <div class="plugin-list">
       <article
         v-for="plugin in visiblePlugins"
         :key="plugin.uuid"
         class="card"
-        :class="{ off: !plugin.enabled }"
+        :data-provider="connectionsOnly ? plugin.pluginId : undefined"
+        :class="{ off: !plugin.enabled, 'is-expanded': expanded === plugin.uuid }"
       >
         <div class="card-head">
           <button class="disclose" :aria-expanded="expanded === plugin.uuid" @click="toggleExpand(plugin)">
-            <span class="chevron">{{ expanded === plugin.uuid ? "▾" : "▸" }}</span>
-            <span class="name">{{ manifestText(plugin, plugin.name) }}</span>
-            <span class="badge">{{ plugin.source === "builtin" ? t("内置") : t("本地") }}</span>
-            <span class="state" :class="{ bad: plugin.missingConfig.length > 0 }">{{ summary(plugin) }}</span>
+            <template v-if="connectionsOnly">
+              <span class="channel-mark" aria-hidden="true">{{ CHANNEL_MARKS[plugin.pluginId ?? ""] ?? plugin.name.slice(0, 1) }}</span>
+              <span class="channel-label">
+                <strong class="name">{{ manifestText(plugin, plugin.name) }}</strong>
+                <span class="state channel-summary" :class="{ connected: plugin.enabled && channelsOf(plugin).some(channel => channel.state === 'running') }">{{ summary(plugin) }}</span>
+              </span>
+              <span class="channel-chevron" aria-hidden="true"></span>
+            </template>
+            <template v-else>
+              <span class="chevron">{{ expanded === plugin.uuid ? "▾" : "▸" }}</span>
+              <span class="name">{{ manifestText(plugin, plugin.name) }}</span>
+              <span class="badge">{{ plugin.source === "builtin" ? t("内置") : t("本地") }}</span>
+              <span class="state" :class="{ bad: plugin.missingConfig.length > 0 }">{{ summary(plugin) }}</span>
+            </template>
           </button>
           <label class="toggle">
             <input
               type="checkbox"
+              :role="connectionsOnly ? 'switch' : undefined"
+              :aria-label="connectionsOnly ? t('启用 {name}', { name: manifestText(plugin, plugin.name) }) : undefined"
               :checked="plugin.enabled"
               @change="onToggle(plugin, $event)"
             />
-            {{ t("启用") }}
+            <span v-if="connectionsOnly" class="switch-track" aria-hidden="true"></span>
+            <span>{{ t("启用") }}</span>
           </label>
           <!-- 内置的只能停用：删了下次启动又会回来。 -->
           <button v-if="plugin.source !== 'builtin'" class="icon" :title="t(`删除`)" @click="remove(plugin)">×</button>
@@ -696,6 +719,7 @@ async function pollWeChat(): Promise<void> {
           </div>
         </template>
       </article>
+      </div>
 
       <p v-if="saving || store.pluginsLoading" class="note">{{ saving ? t("保存中…") : t("读取中…") }}</p>
     </section>
@@ -739,6 +763,10 @@ h2 {
 .add {
   display: flex;
   gap: 8px;
+}
+
+.plugin-list {
+  display: contents;
 }
 
 .card {
@@ -832,6 +860,199 @@ h2 {
 
 .toggle input {
   width: auto;
+}
+
+.connections-page header {
+  min-height: 38px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.connections-page h2 {
+  font-size: 18px;
+}
+
+.refresh-connections {
+  padding-inline: 14px;
+}
+
+.connections-page .plugin-list {
+  display: block;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.connections-page .card {
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  opacity: 1;
+}
+
+.connections-page .card + .card {
+  border-top: 1px solid var(--rule);
+}
+
+.connections-page .card-head {
+  gap: 0;
+  padding-inline-end: 16px;
+}
+
+.connections-page .card:first-child .card-head {
+  border-start-start-radius: var(--r-lg);
+  border-start-end-radius: var(--r-lg);
+}
+
+.connections-page .card:last-child:not(.is-expanded) .card-head {
+  border-end-start-radius: var(--r-lg);
+  border-end-end-radius: var(--r-lg);
+}
+
+.connections-page .card-head:hover,
+.connections-page .is-expanded .card-head {
+  background: var(--surface-2);
+}
+
+.connections-page .disclose {
+  align-items: center;
+  min-height: 66px;
+  gap: 12px;
+  padding: 10px 12px 10px 16px;
+  border-radius: var(--r-md);
+}
+
+.channel-mark {
+  --channel-tone: var(--accent);
+  flex: 0 0 auto;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--channel-tone) 13%, var(--surface));
+  color: color-mix(in srgb, var(--channel-tone) 55%, var(--ink));
+  font-size: 13px;
+  font-weight: 700;
+}
+
+[data-provider="aiclaw.telegram"] .channel-mark { --channel-tone: #2586b0; }
+[data-provider="aiclaw.wecom"] .channel-mark { --channel-tone: #426bc2; }
+[data-provider="aiclaw.wechat"] .channel-mark { --channel-tone: #369d59; }
+[data-provider="aiclaw.dingtalk"] .channel-mark { --channel-tone: #2b7cdd; }
+[data-provider="aiclaw.feishu"] .channel-mark { --channel-tone: #4b8a80; }
+
+.channel-label {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: 4px;
+}
+
+.channel-label .name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 650;
+}
+
+.channel-summary {
+  display: block;
+  line-height: 1.35;
+}
+
+.channel-summary.connected {
+  color: var(--ok);
+}
+
+.channel-chevron {
+  flex: 0 0 6px;
+  height: 6px;
+  margin-inline: 3px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(-45deg);
+}
+
+.is-expanded .channel-chevron {
+  transform: translateY(-2px) rotate(45deg);
+}
+
+.connections-page .toggle {
+  position: relative;
+  gap: 7px;
+  min-height: 32px;
+  color: var(--muted);
+}
+
+.connections-page .toggle input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.switch-track {
+  display: flex;
+  align-items: center;
+  width: 30px;
+  height: 17px;
+  padding: 2px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+}
+
+.switch-track::before {
+  content: "";
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.toggle input:checked + .switch-track {
+  justify-content: flex-end;
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.toggle input:checked + .switch-track::before {
+  background: #fff;
+}
+
+.toggle input:focus-visible + .switch-track {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.connections-page .card > :not(.card-head) {
+  margin-inline: 16px;
+}
+
+.connections-page .card > :last-child:not(.card-head) {
+  margin-bottom: 16px;
+}
+
+.connections-page .block-head .actions,
+.connections-page .conn-head .actions {
+  flex-wrap: wrap;
+}
+
+.connections-page .binding .ext {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .connections-page {
+    padding-inline: 16px;
+  }
 }
 
 .icon {

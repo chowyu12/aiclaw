@@ -120,6 +120,7 @@ export const plugins: Record<string, string> = {
 
   // ---------- 插件页：连接 ----------
   "连接": "Connections",
+  "启用 {name}": "Enable {name}",
   "邮件、computer use，以及从目录装的插件": "Email, computer use, and locally installed plugins",
   "管理消息渠道和会话授权": "Manage messaging channels and chat authorization",
   "安装和管理提供技能、MCP 或宿主能力的插件。": "Install and manage plugins that provide skills, MCP servers, or desktop capabilities.",

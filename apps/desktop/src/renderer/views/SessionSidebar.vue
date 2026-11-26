@@ -395,8 +395,8 @@ function when(iso: string): string {
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7M10 14l1-4L19 2l3 3-8 8Z"/></svg>{{ t("新对话") }}
         </button>
       </template>
-      <button v-else class="new" @click="actions.setView('chat')">
-        <span class="plus">‹</span> {{ t("返回对话") }}
+      <button v-else class="new back-to-chat" @click="actions.setView('chat')">
+        <span class="back-arrow" aria-hidden="true"></span>{{ t("返回对话") }}
       </button>
     </div>
 
@@ -450,11 +450,11 @@ function when(iso: string): string {
           <button
             class="fold"
             :title="isCollapsed(bucket) ? t(`展开`) : t(`折叠`)"
+            :aria-label="isCollapsed(bucket) ? t(`展开`) : t(`折叠`)"
             :aria-expanded="!isCollapsed(bucket)"
             @click="toggleBucket(bucket)"
           >
             <svg class="folder-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 5V3.5a1 1 0 0 1 1-1h3l1.5 2h6.5a1 1 0 0 1 1 1V7M1.5 6h12a1 1 0 0 1 1 1l-1.5 5a1 1 0 0 1-1 .7h-10a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Z" /></svg>
-            <span class="folder-arrow" aria-hidden="true">{{ isCollapsed(bucket) ? "▸" : "▾" }}</span>
           </button>
             <span
               class="bucket-name"
@@ -465,7 +465,7 @@ function when(iso: string): string {
             </span>
             <span v-if="bucket.path && pinned.includes(bucket.path)" class="workspace-pin" :title="t('已置顶')"><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 2 5 5-2 1-2 3-2-2-4 4 M8 9 5 6l3-2Z" /></svg></span>
             <span class="count">{{ bucket.sessions.length }}</span>
-            <div v-if="bucket.path || bucket.projectId" class="workspace-actions" :class="{ open: workspaceMenu?.id === bucket.id }">
+            <div v-if="bucket.path || bucket.projectId" class="workspace-actions">
               <button class="icon tiny" :title="t('工作区更多操作')" :aria-label="t('工作区更多操作')" :aria-expanded="workspaceMenu?.id === bucket.id" @click.stop="openWorkspaceMenu(bucket, $event)">⋯</button>
               <button class="icon tiny" :title="t('在此工作区新建会话')" :aria-label="t('在此工作区新建会话')" :disabled="store.runtime.state !== 'ready' || !!creatingWorkspace || !!archivingWorkspace" @click.stop="newWorkspaceChat(bucket)">
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 2.5h-5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-5 M8 8l5-5-1.5-1.5-5 5-.5 2Z" /></svg>
@@ -656,9 +656,48 @@ function when(iso: string): string {
   cursor: not-allowed;
 }
 
-.plus {
-  font-size: 15px;
-  line-height: 1;
+.back-to-chat {
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  font-weight: 500;
+}
+
+.back-to-chat:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.back-arrow {
+  position: relative;
+  flex: 0 0 16px;
+  height: 16px;
+  color: var(--ink-2);
+}
+
+.back-arrow::before,
+.back-arrow::after {
+  position: absolute;
+  content: "";
+}
+
+.back-arrow::before {
+  top: 5px;
+  left: 3px;
+  width: 6px;
+  height: 6px;
+  border-left: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg);
+}
+
+.back-arrow::after {
+  top: 7.5px;
+  left: 3px;
+  width: 10px;
+  border-top: 1.5px solid currentColor;
 }
 
 .icon {
@@ -690,8 +729,7 @@ function when(iso: string): string {
 
 .project-create { margin-left: auto; }
 
-.workspace-actions { display: flex; gap: 2px; opacity: 0; pointer-events: none; }
-.bucket-head:hover .workspace-actions, .bucket-head:focus-within .workspace-actions, .workspace-actions.open { opacity: 1; pointer-events: auto; }
+.workspace-actions { display: flex; gap: 2px; }
 .workspace-pin { color: var(--muted); font-size: 13px; }
 .workspace-menu-backdrop { position: fixed; inset: 0; z-index: 50; }
 .workspace-menu { position: fixed; z-index: 51; width: 192px; max-height: calc(100dvh - 16px); overflow-y: auto; padding: 5px; border: 1px solid var(--rule); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-3); }
@@ -752,9 +790,7 @@ function when(iso: string): string {
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
-  opacity: 0;
 }
-.bucket-head:hover .count, .bucket-head:focus-within .count { opacity: 1; }
 
 .bucket .item { min-height: 32px; padding: 5px 10px 5px 33px; align-items: center; }
 .bucket .item-main { display:flex; align-items:center; gap:6px; }
@@ -870,10 +906,7 @@ function when(iso: string): string {
   font-size: 11px;
   cursor: pointer;
 }
-.folder-icon { grid-area: 1 / 1; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; }
-.folder-arrow { grid-area: 1 / 1; opacity: 0; }
-.bucket-head:hover .folder-icon, .fold:focus-visible .folder-icon { opacity: 0; }
-.bucket-head:hover .folder-arrow, .fold:focus-visible .folder-arrow { opacity: 1; }
+.folder-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.1; stroke-linecap: round; stroke-linejoin: round; }
 
 .bucket-name {
   cursor: pointer;

@@ -387,7 +387,7 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.workspace-toolbar [aria-controls=\"session-sidebar\"]').click()");
  await wait("document.querySelector('.sidebar').getClientRects().length===0");
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
- await wait("document.querySelector('.sidebar .head .new').textContent.includes('返回对话')");
+ check('settings renders a full-width return button with a decorative arrow',await wait("(()=>{const button=document.querySelector('.sidebar .back-to-chat');return button?.textContent.trim()==='返回对话' && button.querySelector('.back-arrow')?.getAttribute('aria-hidden')==='true' && button.getBoundingClientRect().width>180})()"));
  await js("document.querySelector('.sidebar .head .new').click()");
  check('returning from settings preserves a manually collapsed conversation sidebar',await wait("document.querySelector('.sidebar').classList.contains('is-chat') && document.querySelector('.sidebar').getClientRects().length===0"));
  const chatBeforeDrawer=await js("document.querySelector('.chat').getBoundingClientRect().width");
@@ -446,6 +446,13 @@ app.whenReady().then(async()=>{
  check('child-agent counts stay on one line and retain accessible labels',await js("(()=>{const toggle=document.querySelector('.agents-toggle');return toggle.getAttribute('aria-label').includes('个子 agent') && toggle.closest('.item').getBoundingClientRect().height<=36})()"));
  check('sidebar uses only workspaces and general chats even with an old grouping preference',await js("!document.querySelector('.grouping') && !document.querySelector('.head button[title=\"新建分组\"]') && !document.querySelector('.item-actions button[title=\"移动到分组\"]') && [...document.querySelectorAll('.bucket-name')].map(b=>b.textContent.trim()).join('|')==='smoke|smoke|普通会话' && document.querySelectorAll('.bucket-detail').length===2"));
  check('channel and scheduled chats join their workspace with source labels and child agents stay nested',await js("document.querySelector('[data-bucket-id=\"workspace:/tmp/smoke\"] .count').textContent==='3' && [...document.querySelectorAll('.source-label')].map(b=>b.textContent).sort().join('|')==='定时任务|渠道会话' && !!document.querySelector('.agents-toggle')"));
+ const workspaceRow='[data-bucket-id="workspace:/tmp/smoke"] .bucket-head';
+ const workspaceMarkings=`(()=>{const row=document.querySelector(${JSON.stringify(workspaceRow)});return ['.folder-icon','.count','.workspace-actions'].map(selector=>getComputedStyle(row.querySelector(selector)).opacity).join(',')})()`;
+ win.webContents.sendInputEvent({type:'mouseMove',x:500,y:65});
+ const restingMarkings=await js(workspaceMarkings);
+ const workspacePoint=await js(`(()=>{const r=document.querySelector(${JSON.stringify(workspaceRow)}+' .bucket-name').getBoundingClientRect();return {x:Math.round(r.left+r.width/2),y:Math.round(r.top+r.height/2)}})()`);
+ win.webContents.sendInputEvent({type:'mouseMove',...workspacePoint});
+ check('project headers keep their icon, count and actions visible on hover',restingMarkings==='1,1,1'&&await wait(`document.querySelector(${JSON.stringify(workspaceRow)}).matches(':hover') && ${workspaceMarkings}==='1,1,1'`));
  check('old custom group data is preserved',groups.groups[0].name==='原有分组' && groups.assignments.s==='g_saved' && groups.assignments.c_channel==='g_saved');
  await js("[...document.querySelectorAll('.sidebar .item')].find(row=>row.textContent.includes('Channel chat')).click()");
  check('channel chat shows its history without a composer',await wait("document.querySelector('.chat-header')?.textContent.includes('Channel chat') && document.querySelector('.stream')?.textContent.includes('original answer') && !document.querySelector('.composer-wrap')"));
@@ -1154,7 +1161,7 @@ app.whenReady().then(async()=>{
  check('failed launch does not replace the selected browser instructions',await wait("document.querySelector('.error-bar')?.textContent.includes('browser launch failed')")&&await js("[...document.querySelectorAll('.backend .guide-lead')].some(e=>e.textContent.includes('Microsoft Edge 的扩展页'))"));
  browserOpenFails=false;await js("document.querySelector('.error-bar button')?.click()");await click('取消，改回自带窗口');
  await js("[...document.querySelectorAll('label.switch')].find(e=>e.textContent.includes('浏览器：')).querySelector('input').click()");
- await click('‹ 返回对话');
+ await click('返回对话');
  pluginFixtures=[{uuid:'wecom-fixture',pluginId:'aiclaw.wecom',name:'企业微信',source:'builtin',enabled:true,permissions:['filesystem.write','shell.exec'],missingConfig:[],channels:1,tools:0,skills:0,mcp:0,connections:[{uuid:'conn-fixture',name:'示例机器人',missingConfig:[]}]}];
  pluginFixtures.push(...[['feishu','飞书',1],['dingtalk','钉钉',1],['telegram','Telegram',1],['email','邮件',0]].map(([id,name,channels])=>({uuid:id,pluginId:'aiclaw.'+id,name,source:'builtin',enabled:false,permissions:[],missingConfig:[],channels,tools:0,skills:0,mcp:0,connections:[]})));
  bindingFixtures=['external-one','external-two'].map((key,index)=>({pluginUuid:'wecom-fixture',channelId:'wecom',connectionId:'conn-fixture',externalKey:key,displayName:'示例会话 '+(index+1),providerId:1,model:'test',allowed:true,allowedTools:['run_command']}));
@@ -1164,6 +1171,11 @@ app.whenReady().then(async()=>{
  await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent.trim()==='连接')");
  await js("[...document.querySelectorAll('.sidebar .item .title')].find(e=>e.textContent.trim()==='连接').closest('.item').click()");
  check('connections settings lists the new bot providers and existing channels',await wait("document.querySelector('.page h2')?.textContent==='连接' && [...document.querySelectorAll('.card .name')].map(e=>e.textContent).join('|')==='企业微信|飞书|钉钉|Telegram'"));
+ check('connection rows show neutral setup status and accessible switches',await js("(()=>{const page=document.querySelector('.connections-page'),rows=[...page.querySelectorAll('.card')];return page.querySelector('header .refresh-connections') && rows.every(row=>row.querySelector('.channel-mark') && row.querySelector('input[role=switch][aria-label]') && !row.querySelector('.card-head .badge')) && rows[0].querySelector('input[role=switch]').checked && rows.slice(1).every(row=>!row.querySelector('input[role=switch]').checked && !row.querySelector('.channel-summary').classList.contains('bad') && getComputedStyle(row).opacity==='1')})()"));
+ const connectionWindowSize=win.getSize();
+ win.setSize(720,900);
+ check('connection rows fit a narrow desktop window',await wait("innerWidth<=720 && (()=>{const list=document.querySelector('.connections-page .plugin-list');return list.scrollWidth<=list.clientWidth+1 && [...list.querySelectorAll('.card-head')].every(row=>row.querySelector('.toggle').getBoundingClientRect().right<=row.getBoundingClientRect().right)})()"));
+ win.setSize(...connectionWindowSize);
  await wait("document.querySelector('.card .disclose')");await js("document.querySelector('.card .disclose').click()");
  check('channel authorization replaces tool checkboxes with two approval modes and defaults old bindings to unattended',await wait("document.querySelectorAll('.binding .approval-mode').length===2")&&await js("[...document.querySelectorAll('.binding .approval-mode')].every(s=>s.value==='never'&&s.options.length===2)&&!document.querySelector('.binding input[type=checkbox]')"));
  await js("window.confirm=()=>false;(()=>{const select=document.querySelector('.binding .approval-mode');select.value='bypass';select.dispatchEvent(new Event('change',{bubbles:true}));})()");
@@ -1178,7 +1190,7 @@ app.whenReady().then(async()=>{
  await js("document.querySelector('.error-bar button')?.click()");
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-channel-approval-modes.png',(await win.webContents.capturePage()).toPNG());
- await click('‹ 返回对话');
+ await click('返回对话');
  await wait("!!document.querySelector('.composer')");
  const stepEvent=(method,item)=>win.webContents.send(IPC.onAgentEvent,{method,params:{sessionId:'s',turnId:'operation-titles',item}});
  win.webContents.send(IPC.onAgentEvent,{method:'turn/started',params:{sessionId:'s',turnId:'operation-titles'}});
