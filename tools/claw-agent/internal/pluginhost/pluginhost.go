@@ -24,6 +24,9 @@ import (
 	"github.com/chowyu12/aiclaw/internal/model"
 	pluginpkg "github.com/chowyu12/aiclaw/internal/plugin"
 	"github.com/chowyu12/aiclaw/internal/plugins/bundled"
+	"github.com/chowyu12/aiclaw/internal/plugins/dingtalk"
+	"github.com/chowyu12/aiclaw/internal/plugins/feishu"
+	"github.com/chowyu12/aiclaw/internal/plugins/telegram"
 	"github.com/chowyu12/aiclaw/internal/plugins/wechat"
 	"github.com/chowyu12/aiclaw/internal/plugins/wecom"
 	"github.com/chowyu12/aiclaw/internal/store/gormstore"
@@ -63,8 +66,11 @@ func New(ctx context.Context, db *gormstore.GormStore, root string, gateway plug
 	}
 	config := pluginpkg.NewConfigService(db)
 	host, err := pluginpkg.NewHost(gateway, config, map[string]pluginpkg.ChannelFactory{
-		wecom.ProviderName:  wecom.New,
-		wechat.ProviderName: wechat.New,
+		dingtalk.ProviderName: dingtalk.New,
+		feishu.ProviderName:   feishu.New,
+		telegram.ProviderName: telegram.New,
+		wecom.ProviderName:    wecom.New,
+		wechat.ProviderName:   wechat.New,
 	}, pluginpkg.WithHostLogger(func(format string, args ...any) {
 		logf("[plugin] "+format, args...)
 	}))

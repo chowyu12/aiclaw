@@ -1156,10 +1156,14 @@ app.whenReady().then(async()=>{
  await js("[...document.querySelectorAll('label.switch')].find(e=>e.textContent.includes('浏览器：')).querySelector('input').click()");
  await click('‹ 返回对话');
  pluginFixtures=[{uuid:'wecom-fixture',pluginId:'aiclaw.wecom',name:'企业微信',source:'builtin',enabled:true,permissions:['filesystem.write','shell.exec'],missingConfig:[],channels:1,tools:0,skills:0,mcp:0,connections:[{uuid:'conn-fixture',name:'示例机器人',missingConfig:[]}]}];
+ pluginFixtures.push(...[['feishu','飞书',1],['dingtalk','钉钉',1],['telegram','Telegram',1],['email','邮件',0]].map(([id,name,channels])=>({uuid:id,pluginId:'aiclaw.'+id,name,source:'builtin',enabled:false,permissions:[],missingConfig:[],channels,tools:0,skills:0,mcp:0,connections:[]})));
  bindingFixtures=['external-one','external-two'].map((key,index)=>({pluginUuid:'wecom-fixture',channelId:'wecom',connectionId:'conn-fixture',externalKey:key,displayName:'示例会话 '+(index+1),providerId:1,model:'test',allowed:true,allowedTools:['run_command']}));
  await js("document.querySelector('.activity-rail [data-view=settings]').click()");
- await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent.trim()==='插件')");
  await js("[...document.querySelectorAll('.sidebar .item .title')].find(e=>e.textContent.trim()==='插件').closest('.item').click()");
+ check('plugins and messaging connections are separate settings views',await wait("document.querySelector('.page h2')?.textContent==='插件' && [...document.querySelectorAll('.card .name')].map(e=>e.textContent).join('|')==='邮件'"));
+ await wait("[...document.querySelectorAll('.sidebar .item .title')].some(e=>e.textContent.trim()==='连接')");
+ await js("[...document.querySelectorAll('.sidebar .item .title')].find(e=>e.textContent.trim()==='连接').closest('.item').click()");
+ check('connections settings lists the new bot providers and existing channels',await wait("document.querySelector('.page h2')?.textContent==='连接' && [...document.querySelectorAll('.card .name')].map(e=>e.textContent).join('|')==='企业微信|飞书|钉钉|Telegram'"));
  await wait("document.querySelector('.card .disclose')");await js("document.querySelector('.card .disclose').click()");
  check('channel authorization replaces tool checkboxes with two approval modes and defaults old bindings to unattended',await wait("document.querySelectorAll('.binding .approval-mode').length===2")&&await js("[...document.querySelectorAll('.binding .approval-mode')].every(s=>s.value==='never'&&s.options.length===2)&&!document.querySelector('.binding input[type=checkbox]')"));
  await js("window.confirm=()=>false;(()=>{const select=document.querySelector('.binding .approval-mode');select.value='bypass';select.dispatchEvent(new Event('change',{bubbles:true}));})()");

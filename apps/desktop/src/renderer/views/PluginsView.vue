@@ -20,6 +20,18 @@ type PluginRow = (typeof store.plugins)[number];
 type BindingRow = (typeof store.bindings)[number];
 type ConnectionRow = PluginRow["connections"][number];
 
+const props = defineProps<{ connectionsOnly?: boolean }>();
+const visiblePlugins = computed(() => store.plugins.filter(plugin => isChannel(plugin) === Boolean(props.connectionsOnly)));
+const CONNECTION_GUIDES: Record<string, { url: string; hint: string }> = {
+  "aiclaw.feishu": { url: "https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-", hint: "启用自建应用的机器人能力，选择长连接并订阅 im.message.receive_v1。" },
+  "aiclaw.dingtalk": { url: "https://opensource.dingtalk.com/developerpedia/docs/learn/stream/overview", hint: "启用应用的机器人能力，将消息接收模式设为 Stream。" },
+  "aiclaw.telegram": { url: "https://core.telegram.org/bots/tutorial", hint: "用 BotFather 创建机器人并获取 Token。此连接使用长轮询，机器人需停用已有的 Webhook。" },
+};
+
+function connectionGuide(plugin: PluginRow) {
+  return CONNECTION_GUIDES[plugin.pluginId ?? ""];
+}
+
 /** 权限名给人看的说法。表在内核那边（internal/skills 的常量），这里只做翻译。 */
 const PERMISSION_LABELS: Record<string, () => string> = {
   "computer.control": () => t("操作屏幕（截屏、鼠标、键盘）"),
@@ -428,21 +440,21 @@ async function pollWeChat(): Promise<void> {
   <div class="page">
     <section>
       <header>
-        <h2>{{ t("插件") }}</h2>
-        <p class="sub">
-          {{ t("一个插件是一个带") }} <code>plugin.json</code> {{ t("的目录，声明它要的权限、配置项，以及它带来的东西：技能、MCP server、宿主能力（computer use）、通道（微信、企业微信）。装好是停用的——") }}<strong>{{ t("启用那一步才把声明的权限交出去") }}</strong>{{ t("。") }}
+        <h2>{{ t(connectionsOnly ? "连接" : "插件") }}</h2>
+        <p v-if="!connectionsOnly" class="sub">
+          {{ t("安装和管理提供技能、MCP 或宿主能力的插件。") }}
         </p>
       </header>
 
       <div class="add">
-        <button class="ghost" @click="actions.installPluginFromDirectory()">{{ t("+ 从目录安装") }}</button>
+        <button v-if="!connectionsOnly" class="ghost" @click="actions.installPluginFromDirectory()">{{ t("+ 从目录安装") }}</button>
         <button class="ghost" @click="actions.loadPlugins()">{{ t("刷新") }}</button>
       </div>
 
       <p v-if="store.pluginsError" class="note warn">{{ store.pluginsError }}</p>
 
       <article
-        v-for="plugin in store.plugins"
+        v-for="plugin in visiblePlugins"
         :key="plugin.uuid"
         class="card"
         :class="{ off: !plugin.enabled }"
@@ -554,6 +566,10 @@ async function pollWeChat(): Promise<void> {
 
           <!-- 渠道插件：一个连接（一个微信号、一个企微机器人）一张卡片。 -->
           <div v-if="isChannel(plugin)" class="block">
+            <p v-if="connectionGuide(plugin)" class="hint">
+              {{ t(connectionGuide(plugin)?.hint ?? "") }}
+              <a :href="connectionGuide(plugin)?.url" target="_blank" rel="noopener noreferrer">{{ t("官方设置指南") }}</a>
+            </p>
             <div class="block-head">
               <span class="block-title">{{ t("连接") }}</span>
               <span class="actions">
@@ -576,7 +592,7 @@ async function pollWeChat(): Promise<void> {
             <p v-else-if="wechatStatus && isWeChat(plugin) && !wechatQR" class="hint">{{ wechatStatus }}</p>
 
             <p v-if="plugin.connections.length === 0" class="hint">
-              {{ isWeChat(plugin) ? t("还没有连接。点「添加微信号」用微信扫码登录。") : t("还没有连接。点「添加机器人」填入企业微信智能机器人的 bot_id 与 secret。") }}
+              {{ isWeChat(plugin) ? t("还没有连接。点「添加微信号」用微信扫码登录。") : t("还没有连接。点「添加机器人」填写凭据。") }}
             </p>
 
             <div v-for="connection in plugin.connections" :key="connection.uuid" class="connection">

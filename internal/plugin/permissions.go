@@ -25,8 +25,16 @@ type Provider struct {
 	Requires []string
 }
 
+var textChannelProvider = Provider{Requires: []string{
+	skills.PermissionNetworkAccess, skills.PermissionChannelReceive,
+	skills.PermissionChannelSend, skills.PermissionSecretsRead,
+}}
+
 // providers is the registry of declared bundled providers.
 var providers = map[string]Provider{
+	"builtin:dingtalk":     textChannelProvider,
+	"builtin:feishu":       textChannelProvider,
+	"builtin:telegram":     textChannelProvider,
 	"builtin:computer_use": {Requires: []string{skills.PermissionComputerControl, skills.PermissionFilesystemWrite}},
 	"builtin:email": {Requires: []string{
 		skills.PermissionNetworkAccess, skills.PermissionSecretsRead,

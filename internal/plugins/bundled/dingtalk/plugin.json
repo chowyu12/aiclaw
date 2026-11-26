@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "aiclaw.dingtalk",
+  "name": "钉钉",
+  "version": "0.1.0",
+  "description": "通过 Stream 模式收发钉钉机器人的文本消息。",
+  "author": "aiclaw",
+  "permissions": [
+    "network.access",
+    "channel.receive",
+    "channel.send",
+    "secrets.read"
+  ],
+  "config": {
+    "client_id": {
+      "type": "string",
+      "required": true,
+      "description": "钉钉应用的 Client ID（AppKey）"
+    },
+    "client_secret": {
+      "type": "string",
+      "required": true,
+      "description": "钉钉应用的 Client Secret（AppSecret）",
+      "secret": true
+    }
+  },
+  "contributes": {
+    "channels": [
+      {
+        "id": "dingtalk",
+        "provider": "builtin:dingtalk",
+        "display_name": "钉钉"
+      }
+    ]
+  }
+}

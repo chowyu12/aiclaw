@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "aiclaw.telegram",
+  "name": "Telegram",
+  "version": "0.1.0",
+  "description": "通过 Bot API 长轮询收发 Telegram 机器人的文本消息。",
+  "author": "aiclaw",
+  "permissions": [
+    "network.access",
+    "channel.receive",
+    "channel.send",
+    "secrets.read"
+  ],
+  "config": {
+    "bot_token": {
+      "type": "string",
+      "required": true,
+      "description": "从 BotFather 获取的机器人 Token",
+      "secret": true
+    }
+  },
+  "contributes": {
+    "channels": [
+      {
+        "id": "telegram",
+        "provider": "builtin:telegram",
+        "display_name": "Telegram"
+      }
+    ]
+  }
+}

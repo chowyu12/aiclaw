@@ -132,7 +132,7 @@ func (c *Channel) serve(ctx context.Context, deps pluginpkg.ChannelDeps, remote 
 	text := ""
 	switch {
 	case errors.Is(err, pluginpkg.ErrBindingNotAllowed):
-		text = i18n.D("这个会话还没有被授权访问助手，请在桌面端的插件设置里放行后再试。")
+		text = i18n.D("这个会话还没有被授权访问助手，请在桌面端的连接设置里放行后再试。")
 	case err != nil:
 		deps.Log("wechat turn failed for %s: %v", message.FromUserID, err)
 		// The error may name internal paths or configuration; the sender gets

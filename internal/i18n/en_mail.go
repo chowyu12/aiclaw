@@ -169,7 +169,7 @@ func init() {
 		"图片解不开：{error}":                "Couldn't decode the image: {error}",
 		// 内置渠道插件（微信、企业微信）回给对方的话，与插件配置校验
 		"当前正在处理其他会话，请稍后再发一次。":              "Busy with another conversation right now. Please send your message again in a moment.",
-		"这个会话还没有被授权访问助手，请在桌面端的插件设置里放行后再试。": "This conversation isn't allowed to use the assistant yet. Approve it in the plugin settings on the desktop app, then try again.",
+		"这个会话还没有被授权访问助手，请在桌面端的连接设置里放行后再试。": "This conversation isn't allowed to use the assistant yet. Approve it in Connections settings on the desktop app, then try again.",
 		"处理这条消息时出错了，请稍后再试。":                "Something went wrong while handling this message. Please try again later.",
 		"这次没有得到可用的回复，请换个说法再试一次。":           "No usable reply this time. Please rephrase and try again.",
 		"企业微信群 {id}": "WeCom group {id}",

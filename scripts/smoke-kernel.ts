@@ -45,7 +45,7 @@ async function main(): Promise<number> {
     const ids = plugins.map((p) => p.pluginId).sort();
     record(
       "内置插件同步进库且默认停用",
-      ids.join(",") === "aiclaw.computer-use,aiclaw.email,aiclaw.wechat,aiclaw.wecom" && plugins.every((p) => !p.enabled),
+      ids.join(",") === "aiclaw.computer-use,aiclaw.dingtalk,aiclaw.email,aiclaw.feishu,aiclaw.telegram,aiclaw.wechat,aiclaw.wecom" && plugins.every((p) => !p.enabled),
       ids.join(", "),
     );
     record("插件文件落在 <root>/plugins", existsSync(join(root, "plugins", "wechat", "plugin.json")));

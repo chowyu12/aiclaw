@@ -28,7 +28,7 @@ const ArchivedView = defineAsyncComponent(() => import("./ArchivedView.vue"));
   <ThemeView v-else-if="store.view === 'theme'" />
   <ProvidersView v-else-if="store.view === 'providers'" />
   <SearchEnginesView v-else-if="store.view === 'search'" />
-  <PluginsView v-else-if="store.view === 'plugins'" />
+  <PluginsView v-else-if="store.view === 'plugins' || store.view === 'connections'" :key="store.view" :connections-only="store.view === 'connections'" />
   <McpView v-else-if="store.view === 'mcp'" />
   <SkillsView v-else-if="store.view === 'skills'" />
   <MemoryView v-else-if="store.view === 'memory'" />

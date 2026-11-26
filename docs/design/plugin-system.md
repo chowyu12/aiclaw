@@ -6,7 +6,11 @@
 
 - 主二进制只保留最小内核工具集（读写文件、检索、执行、计划、记忆、子代理）。
 - 重量级 / 高权限 / 强依赖外部服务的能力（computer use、浏览器自动化、IM 连接器）以插件形式交付，默认不启用。
-- 默认随包内置微信、企业微信两个连接器插件，开箱即可绑定，但同样需要用户显式启用与配置。
+- 默认随包内置微信、企业微信、飞书、钉钉和 Telegram 连接器。在设置的「连接」中配置并启用，每个外部会话单独放行并选择模型。
+
+飞书使用自建应用的 App ID、App Secret 和长连接事件 `im.message.receive_v1`。需要启用机器人，并为单聊或群聊 @ 消息开通相应权限以及机器人发消息权限。钉钉使用应用的 Client ID、Client Secret 和 Stream 模式。Telegram 使用 BotFather 的机器人 Token 和 Bot API 长轮询，需停用已有的 Webhook。
+
+这三个连接器收发文本，支持单聊和发送给机器人的群聊消息。Telegram 群聊可用 @ 或回复机器人消息，具体取决于 Telegram 向机器人投递的消息。回传最终答复，桌面会话可查看历史。
 
 参考 Codex 的插件模型（bundle 目录 + manifest + 贡献点 + 逐项权限确认），但适配 AiClaw 现有的
 `Plugin` / `Skill` / `MCPServer` 数据模型和 `ToolRegistry` / `protocol` 运行时。

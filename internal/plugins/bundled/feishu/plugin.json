@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "id": "aiclaw.feishu",
+  "name": "飞书",
+  "version": "0.1.0",
+  "description": "通过长连接收发飞书自建应用机器人的文本消息。",
+  "author": "aiclaw",
+  "permissions": [
+    "network.access",
+    "channel.receive",
+    "channel.send",
+    "secrets.read"
+  ],
+  "config": {
+    "app_id": {
+      "type": "string",
+      "required": true,
+      "description": "飞书应用的 App ID"
+    },
+    "app_secret": {
+      "type": "string",
+      "required": true,
+      "description": "飞书应用的 App Secret",
+      "secret": true
+    }
+  },
+  "contributes": {
+    "channels": [
+      {
+        "id": "feishu",
+        "provider": "builtin:feishu",
+        "display_name": "飞书"
+      }
+    ]
+  }
+}
