@@ -33,6 +33,7 @@ export type {
   ItemKind,
   ItemNotification,
   MCPProbeResult,
+  MCPStartup,
   MCPServerConfig,
   MCPToolInfo,
   ModelConfig,

@@ -104,6 +104,16 @@ func (p *mcpPool) acquire(
 	config protocol.MCPServerConfig,
 	auth ...func(context.Context, string, string) (string, error),
 ) (*mcpclient.Client, string, error) {
+	client, key, _, err := p.acquireWithReuse(ctx, name, config, auth...)
+	return client, key, err
+}
+
+func (p *mcpPool) acquireWithReuse(
+	ctx context.Context,
+	name string,
+	config protocol.MCPServerConfig,
+	auth ...func(context.Context, string, string) (string, error),
+) (*mcpclient.Client, string, bool, error) {
 	key := fingerprint(name, config)
 
 	p.mu.Lock()
@@ -118,13 +128,13 @@ func (p *mcpPool) acquire(
 			case <-entry.ready:
 			case <-ctx.Done():
 				p.releaseEntry(key, entry)
-				return nil, "", ctx.Err()
+				return nil, "", true, ctx.Err()
 			}
 			if entry.err != nil {
 				p.releaseEntry(key, entry)
-				return nil, "", entry.err
+				return nil, "", true, entry.err
 			}
-			return entry.client, key, nil
+			return entry.client, key, true, nil
 		}
 		// 过期且没人用：关掉重起，让新增的 API 能被带出来。
 		delete(p.entries, key)
@@ -181,12 +191,12 @@ func (p *mcpPool) acquire(
 	case <-entry.ready:
 		if entry.err != nil {
 			p.releaseEntry(key, entry)
-			return nil, "", entry.err
+			return nil, "", false, entry.err
 		}
-		return entry.client, key, nil
+		return entry.client, key, false, nil
 	case <-ctx.Done():
 		p.releaseEntry(key, entry)
-		return nil, "", ctx.Err()
+		return nil, "", false, ctx.Err()
 	}
 }
 

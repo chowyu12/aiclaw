@@ -169,6 +169,11 @@ func renderHistory(messages []llm.Message, modelName string) []protocol.Item {
 					last.ID = saved.ID
 					last.StartedAt = saved.StartedAt
 					last.DurationMS = saved.DurationMS
+					if saved.ApprovalOutcome != "" {
+						last.ApprovalOutcome = saved.ApprovalOutcome
+						last.ToolResult = saved.ToolResult
+						last.ToolFailed = true
+					}
 				}
 			}
 		}

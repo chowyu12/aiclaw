@@ -56,10 +56,11 @@ const EMPTY_TIMELINE: TimelineEntry[] = [];
 
 export interface FilePreviewState {
   request: number; sessionId: string; path: string; content: string; language: string;
-  loading: boolean; error: string; notice?: string; referencePath?: string; change?: FileChange;
+  loading: boolean; error: string; notice?: string; referencePath?: string; change?: FileChange; version?: string;
   reading?: { mode: string; layout: string; positions: Record<string, { top: number; left: number }> };
 }
 let previewRequest = 0;
+let checkingPreviews = false;
 let sessionRestoreRequest = 0;
 let sideRestoreRequest = 0;
 const sideReady = new Set<string>();
@@ -875,6 +876,25 @@ export const actions = {
     if (preview && !preview.loading && preview.sessionId === state.sessionId) await actions.openFile(preview.path, true);
   },
 
+  async checkFilePreviews(): Promise<void> {
+    if (checkingPreviews || !state.filePreview || state.view !== "chat") return;
+    checkingPreviews = true;
+    try {
+      await Promise.all(state.filePreviews.map(async tab => {
+        if (tab.loading || tab.change || tab.version === undefined || tab.sessionId !== state.sessionId) return;
+        const current = () => state.sessionId === tab.sessionId && state.filePreviews.includes(tab);
+        try {
+          const result = await window.aiclaw.files.preview(tab.referencePath ?? tab.path, tab.sessionId, tab.version) as TextFilePreview | null | false;
+          if (!current() || result === false) return;
+          if (result === null) throw new Error(t("这不是一个文件"));
+          putFilePreview({ ...tab, ...result, error: "" }, false);
+        } catch (error) {
+          if (current()) { tab.error = describeError(error); tab.version = ""; }
+        }
+      }));
+    } finally { checkingPreviews = false; }
+  },
+
   async openFile(path: string, refresh = false, targetSessionId?: string): Promise<void> {
     if (targetSessionId && targetSessionId !== state.sessionId) return actions.openSystemFile(path, targetSessionId);
     state.fileBrowser = false;
@@ -891,7 +911,7 @@ export const actions = {
       putFilePreview({ ...tab, ...result, loading: false }, false);
     } catch (error) {
       const tab = state.filePreviews.find(tab => tab.request === request);
-      if (tab && sessionId === state.sessionId) { tab.error = describeError(error); tab.loading = false; }
+      if (tab && sessionId === state.sessionId) { tab.error = describeError(error); tab.loading = false; tab.version = ""; }
     }
   },
 

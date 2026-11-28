@@ -128,6 +128,17 @@ function summary(server: ServerRow): string {
   return t("{n} 个工具", { n: probed.result.tools?.length ?? 0 });
 }
 
+function startupSummary(server: ServerRow): string {
+  if (!server.enabled) return "";
+  const startup = store.sessionInfo?.mcpStartup?.find(item => item.name === (server.label || server.id));
+  if (!startup) return "";
+  if (startup.state === "cached") return t("已用缓存工具清单，首次调用时连接");
+  if (startup.state === "reused") return t("已复用 MCP 连接");
+  const timing = startup.durationMs === undefined ? "" : t("启动耗时 {ms} ms", { ms: startup.durationMs });
+  if (startup.state === "failed") return [t("启动失败：{reason}", { reason: startup.reason ?? "" }), timing].filter(Boolean).join(" · ");
+  return timing;
+}
+
 /** 参数按空格切。带空格的参数要用引号括起来。 */
 function parseArgs(raw: string): string[] {
   return (raw.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((part) =>
@@ -197,7 +208,8 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
             <span
               class="state"
               :class="{ bad: probes[server.id]?.result?.ok === false }"
-            >{{ summary(server) }}</span>
+              :title="startupSummary(server) || summary(server)"
+            >{{ startupSummary(server) || summary(server) }}</span>
           </button>
           <label class="toggle">
             <input
@@ -225,6 +237,7 @@ function formatPairs(pairs: Record<string, string> | undefined): string {
               </button>
             </div>
 
+            <p v-if="probes[server.id]?.result?.durationMs !== undefined" class="hint">{{ t("本次检测耗时 {ms} ms", { ms: probes[server.id]?.result?.durationMs ?? 0 }) }}</p>
             <p v-if="probes[server.id]?.loading" class="hint">{{ t("正在连接并拉取工具清单…") }}</p>
             <p v-else-if="probes[server.id]?.result?.ok === false" class="note warn">
               {{ t("连不上：{error}", { error: probes[server.id]?.result?.error ?? "" }) }}

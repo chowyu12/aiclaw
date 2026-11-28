@@ -195,8 +195,74 @@ func TestExecJSONAndResumeUseDesktopModelAndPersistConversation(t *testing.T) {
 	if err != nil || !strings.Contains(out, "Saved child review") {
 		t.Fatalf("child transcript: %v\n%s", err, out)
 	}
+	db, err = store.Open(flags[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.SetArchived(t.Context(), []string{"child-review"}, time.Now())
+	db.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _, err = runCLI(t, append([]string{"sessions", "search", "review worker"}, profile...), "", nil)
+	if err != nil || !strings.Contains(out, "aiclaw://sessions/child-review\tarchived") {
+		t.Fatalf("archived search: %v\n%s", err, out)
+	}
+	out, _, err = runCLI(t, append([]string{"sessions", "search", flags[len(flags)-1], "--open"}, profile...), "2\n", nil)
+	if err != nil || !strings.Contains(out, "Saved child review") || !strings.Contains(out, "Parent session: aiclaw://sessions/"+events[0].SessionID) {
+		t.Fatalf("numbered selection: %v\n%s", err, out)
+	}
+	out, _, err = runCLI(t, append([]string{"sessions", "open", "aiclaw://sessions/" + events[0].SessionID}, profile...), "", nil)
+	if err != nil || !strings.Contains(out, "Child agent Review worker: aiclaw://sessions/child-review") {
+		t.Fatalf("child link: %v\n%s", err, out)
+	}
+	out, _, err = runCLI(t, append([]string{"sessions", "open", "aiclaw://sessions/child-review"}, profile...), "", nil)
+	if err != nil || !strings.Contains(out, "Saved child review") {
+		t.Fatalf("opening archive: %v\n%s", err, out)
+	}
+	if _, _, err = runCLI(t, append([]string{"resume", "aiclaw://sessions/child-review"}, profile...), "", nil); err == nil {
+		t.Fatal("link resumed an archived session")
+	}
 	if len(previousHistory) != 0 {
 		t.Fatal("session search or history called the model")
+	}
+}
+
+func TestCLIReportsHTTPMCPStartupFailureOnceOnStderr(t *testing.T) {
+	flags := workspaceFixture(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, textReply)
+	})
+	mcp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("token") != "private-token" {
+			t.Error("MCP fixture did not receive configuration")
+		}
+		http.Error(w, "private-response", http.StatusForbidden)
+	}))
+	defer mcp.Close()
+	configPath := flags[5]
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var config map[string]any
+	if err := json.Unmarshal(raw, &config); err != nil {
+		t.Fatal(err)
+	}
+	config["mcpServers"] = map[string]any{"remote": map[string]string{"url": mcp.URL + "?token=private-token"}}
+	raw, err = json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(configPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := runCLI(t, append([]string{"exec", "--json", "hello"}, flags...), "", nil)
+	if err != nil || strings.Count(stderr, "MCP remote: startup failed (HTTP 403)") != 1 || strings.Contains(out+stderr, "private-") {
+		t.Fatalf("unexpected MCP diagnostic: %v\n%s\n%s", err, stderr, out)
+	}
+	if events := eventsFrom(t, out); events[len(events)-1].Type != "turn.completed" {
+		t.Fatalf("no successful turn: %+v", events)
 	}
 }
 

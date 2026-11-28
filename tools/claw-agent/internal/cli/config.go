@@ -20,7 +20,7 @@ import (
 type options struct {
 	mode                                       string
 	args                                       []string
-	json, last                                 bool
+	json, last, open                           bool
 	resume, cwdSet                             bool
 	cwd, dataHome, appDB, config, model        string
 	provider                                   int64
@@ -51,6 +51,9 @@ func parse(args []string) (options, error) {
 	flags.Int64Var(&o.provider, "provider", 0, "model provider ID")
 	flags.BoolVar(&o.json, "json", false, "emit JSONL events")
 	flags.BoolVar(&o.last, "last", false, "resume the most recent session in this directory")
+	if o.mode == "sessions" {
+		flags.BoolVar(&o.open, "open", false, "choose a search result and read its transcript")
+	}
 	if o.mode == "providers" {
 		flags.StringVar(&o.providerType, "type", "openai-compatible", "provider type")
 		flags.StringVar(&o.baseURL, "base-url", "", "provider endpoint")
@@ -121,6 +124,27 @@ func parse(args []string) (options, error) {
 		}
 	}
 	return o, nil
+}
+
+func cliMCPServers(path string) (map[string]protocol.MCPServerConfig, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var config struct {
+		MCPServers map[string]protocol.MCPServerConfig `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return nil, errors.New("invalid CLI configuration JSON")
+	}
+	for name, server := range config.MCPServers {
+		server.Trusted = false
+		config.MCPServers[name] = server
+	}
+	return config.MCPServers, nil
 }
 
 func (o *options) paths() ([]string, error) {

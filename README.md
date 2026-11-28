@@ -217,16 +217,21 @@ aiclaw exec resume SESSION_ID --json "Continue the summary"
 aiclaw exec resume --last --json "Continue the summary"
 aiclaw sessions list
 aiclaw sessions search "project name"
+aiclaw sessions search "project name" --open
+aiclaw sessions open aiclaw://sessions/SESSION_ID
 aiclaw sessions show SESSION_ID
 aiclaw config show
 ```
 
 `--cwd` selects the workspace for a new session or filters `--last` to that workspace.
 Resuming by ID uses the saved workspace and model. Use `sessions search` to find an ID
-by title, directory, or ID, and `sessions show` to read saved messages without resuming.
+by title, directory, or ID. Add `--open` to select a result and read it in the terminal.
+`sessions open` accepts a session link or ID, including archived sessions and child agents.
+It prints links to related sessions. In an interactive chat, `/open ID_OR_LINK` reads a transcript without switching the active conversation.
 `exec resume` accepts a prompt or `-` to read from stdin. CLI sessions
 and configuration are stored in `~/.aiclaw/cli`. `--data-home` selects a separate CLI profile. To reuse existing desktop model services for a run, pass `--app-db ~/.aiclaw/aiclaw.db`. To supply a model directly for a run, set `AICLAW_BASE_URL`, `AICLAW_MODEL`, and `AICLAW_LLM_KEY`. For `exec --json`, stdout contains one JSON
 event per line. Provider spending limits include a scoped `error_code` when supplied by the provider.
+To attach MCP servers to the CLI, add an `mcpServers` map to its `config.json`, such as `{"mcpServers":{"local":{"url":"http://localhost:3000/mcp"}}}`. HTTP startup failures go to stderr.
 Interactive runs ask before approved operations. `exec` exits
 with an error when the agent needs human approval or input. Ctrl+C interrupts the
 active turn.

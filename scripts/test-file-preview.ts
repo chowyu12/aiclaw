@@ -4,7 +4,7 @@ import { workspaceFiles } from "../apps/desktop/src/main/workspace-files.ts";
 import { textMatches } from "../apps/desktop/src/renderer/file-find.ts";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, renameSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
@@ -40,6 +40,28 @@ test("text preview rejects protected paths including symlink aliases before read
     const aliasRoot=join(dir,'guarded-alias');symlinkSync(guarded,aliasRoot);
     assert.throws(()=>readTextPreview(join(guarded,'key.txt'),{base:dir,protectedPaths:[aliasRoot]}),/凭据|credentials/);
   } finally { rmSync(dir,{recursive:true,force:true}); }
+});
+
+test("preview version follows an atomic save and a temporarily missing file", () => {
+  const base = mkdtempSync(join(tmpdir(), "aiclaw-preview-change-"));
+  const options = { base, protectedPaths: [] };
+  try {
+    const path = join(base, "note.txt"), replacement = join(base, "swap.txt");
+    writeFileSync(path, "before");
+    const first = readTextPreview(path, options)!;
+    assert.equal(readTextPreview(path, options, first.version), false);
+    writeFileSync(replacement, "edited");
+    renameSync(replacement, path);
+    const edited = readTextPreview(path, options, first.version);
+    assert.ok(edited);
+    assert.equal(edited.content, "edited");
+    rmSync(path);
+    assert.throws(() => readTextPreview(path, options, edited.version), { code: "ENOENT" });
+    writeFileSync(path, "restored");
+    const restored = readTextPreview(path, options, "");
+    assert.ok(restored);
+    assert.equal(restored.content, "restored");
+  } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
 test("text preview bounds reads and rejects binary or invalid UTF-8", () => {

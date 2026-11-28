@@ -17,7 +17,7 @@ export function fileLanguage(path: string): string | null {
   const name = path.split(/[\\/]/).pop()?.toLowerCase() ?? "";
   return names[name] ?? (name.includes(".") ? languages[name.slice(name.lastIndexOf(".") + 1)] ?? null : null);
 }
-export interface TextFilePreview { path: string; content: string; language: string; }
+export interface TextFilePreview { path: string; content: string; language: string; version: string; }
 export const MAX_TEXT_PREVIEW_BYTES = 512 * 1024;
 
 export function previewReference(file: string, reference: string): string {

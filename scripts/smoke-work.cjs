@@ -90,7 +90,8 @@ app.whenReady().then(async()=>{
  let previewWindowWidth=null;handle('filePreviewLayout',(_e,open)=>{if(open&&previewWindowWidth===null){previewWindowWidth=win.getBounds().width;win.setSize(previewWindowWidth+730,win.getBounds().height);}else if(!open&&previewWindowWidth!==null){win.setSize(previewWindowWidth,win.getBounds().height);previewWindowWidth=null;}});
  const htmlPreviewFixture='<!doctype html><html lang="zh-CN"><head><style>body{margin:0;background:#f5f6f8;color:#0f172a;font:15px sans-serif}.report-card{background:#eef4ff;padding:24px;margin:20px;border-radius:12px}</style><meta http-equiv="refresh" content="0;url=https://example.com/html-preview-probe-refresh"></head><body><article class="report-card"><h1>HTML 报告预览</h1><p>工作复盘报告</p><table><tr><td>已完成</td></tr></table></article><script>parent.document.body.dataset.htmlPreviewEscaped="yes"</script><img src="https://example.com/html-preview-probe-image" onerror="parent.pwned=1"></body></html>';
  let htmlPreviewNetworkRequests=0;
- handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}if(/\.html?$/i.test(input.path))return {path:input.path,language:'xml',content:htmlPreviewFixture};if(input.path.endsWith('.sql'))return {path:input.path,language:'sql',content:'SELECT id FROM users WHERE active = 9;'};return {path:input.path,language:'markdown',content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">\n\n'+Array.from({length:140},(_,index)=>'Paragraph '+index+'\n\n').join('')+'wide'.repeat(150)};});
+ let previewVersion, previewMissing=false;
+ handle('filePreview',(_e,input)=>{previewReads.push(input);if(deferPreview){deferPreview=false;return new Promise(resolve=>{resolvePreview=resolve;});}if(/\.html?$/i.test(input.path))return {path:input.path,language:'xml',content:htmlPreviewFixture};if(input.path.endsWith('.sql'))return {path:input.path,language:'sql',content:'SELECT id FROM users WHERE active = 9;'};if(previewMissing)throw Error('fixture temporarily missing');if(previewVersion!==undefined&&input.version===previewVersion)return false;return {path:input.path,language:'markdown',version:previewVersion,content:'# 文件预览\n\nSELECT id FROM users;\n\n<img src="https://example.com/private.png">\n\n'+Array.from({length:140},(_,index)=>'Paragraph '+index+'\n\n').join('')+'wide'.repeat(150)+(previewVersion??'')};});
  handle('fileOpen',(_e,path)=>{openedFiles.push(path);return {ok:true,action:'open',detail:''};});
  let configGate=null, configWriteFails=false;
  const commandCalls=[], commandStops=[], codeCopies=[];
@@ -126,7 +127,7 @@ app.whenReady().then(async()=>{
  let browserFixture={listening:false,port:17891,browser:'',browsers:[]};const browserOpens=[];let browserOpenFails=false;
  handle('browserBridgeStatus',()=>browserFixture);
  handle('browserBridgeOpenPage',(_e,id)=>{browserOpens.push(id);if(browserOpenFails)throw Error('browser launch failed');});
- handle('mcpWrite',(_e,input)=>{mcpServers=input;return input;});handle('mcpProbe',()=>({ok:true,tools:[]}));
+ handle('mcpWrite',(_e,input)=>{mcpServers=input;return input;});handle('mcpProbe',()=>({ok:true,tools:[],durationMs:17}));
  handle('mcpOAuthStatus',()=>({state:authState}));handle('mcpOAuthLogin',(_e,input)=>{authCalls.push(input);authState='authorizing';return {state:authState};});handle('mcpOAuthLogout',()=>{authState='needs_login';return {disconnected:true};});
  let effort='medium',reasoningGate=null,reasoningFails=false;const reasoningCalls=[];
  handle('sessionReasoning',async(_e,input)=>{reasoningCalls.push(input);if(reasoningGate)await reasoningGate;if(reasoningFails)throw Error('reasoning save failed');effort=input.effort;return effort;});
@@ -726,6 +727,19 @@ app.whenReady().then(async()=>{
  check('preview actions sit in header and beside file type',await js("document.querySelector('.preview-header-actions').textContent.includes('用系统应用打开') && document.querySelector('.preview-type-actions').textContent.includes('复制内容') && !document.querySelector('.preview-tools')"));
  await click('对比');check('untracked preview reports no recorded changes',await wait("document.querySelector('.file-preview').textContent.includes('暂无改动记录')")&&changeReads.at(-1)==='s');
  const readsBeforeRefresh=previewReads.length;await click('刷新');check('refresh rereads exact file and clears missing-change notice',await wait("!!document.querySelector('.source-code') && !document.querySelector('.file-preview').textContent.includes('暂无改动记录')")&&previewReads.length===readsBeforeRefresh+1);
+ previewVersion='fixture-file-v1';await click('刷新');await wait("document.querySelector('.source-code')?.textContent.includes('fixture-file-v1')");
+ await js("window.dispatchEvent(new KeyboardEvent('keydown',{key:'f',ctrlKey:true,cancelable:true}))");
+ await wait("!!document.querySelector('.file-find-bar input')");
+ await js("(()=>{const field=document.querySelector('.file-find-bar input');field.value='Paragraph';field.dispatchEvent(new Event('input',{bubbles:true}));})()");
+ await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+ await js("(()=>{const body=document.querySelector('.file-preview .preview-body');body.scrollTop=270;body.dispatchEvent(new Event('scroll'));})()");
+ previewVersion='fixture-file-v2';
+ check('open file preview refreshes without changing its scroll or find query',await wait("document.querySelector('.source-code')?.textContent.includes('fixture-file-v2') && document.querySelector('.preview-body').scrollTop===270 && document.querySelector('.file-find-bar input').value==='Paragraph'"));
+ previewMissing=true;
+ check('file preview shows temporary read failures',await wait("document.querySelector('.file-preview [role=alert]')?.textContent.includes('fixture temporarily missing')"));
+ previewMissing=false;previewVersion='fixture-file-v3';
+ check('file preview recovers with the same reading position after replacement',await wait("document.querySelector('.source-code')?.textContent.includes('fixture-file-v3') && document.querySelector('.preview-body').scrollTop===270 && document.querySelector('.file-find-bar input').value==='Paragraph'"));
+ await js("document.querySelector('.file-find-bar button[aria-label=\"关闭查找\"]').click()");
  await click('用系统应用打开');check('preview system-open action retains exact path',openedFiles.pop()==='/tmp/smoke/generated/2026 AI 行业趋势.md');
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  writeFileSync('/tmp/aiclaw-file-preview-source.png',(await win.webContents.capturePage()).toPNG());
@@ -737,6 +751,7 @@ app.whenReady().then(async()=>{
  await js("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
  await js("document.querySelector('.file-preview button[aria-label=\"关闭文件预览\"]').focus()");
  win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'});check('Escape closes file preview and restores window width',await wait("!document.querySelector('.file-preview')")&&win.getBounds().width===1200);
+ previewVersion=undefined;
  check('studio chat uses a neutral flat background',await js("getComputedStyle(document.querySelector('.chat')).backgroundColor==='rgb(255, 255, 255)' && getComputedStyle(document.body).backgroundImage==='none'"));
 
  writeFileSync('/tmp/aiclaw-inline-files.png',(await win.webContents.capturePage()).toPNG());
@@ -1005,6 +1020,7 @@ app.whenReady().then(async()=>{
  check('canceling the native import picker does not open a preview or write',await js("!document.querySelector('.memory-import')")&&memorySaves.length===afterImports);
  memoryFails=true;await click('刷新');check('memory read failure is visible rather than shown as empty',await wait("document.querySelector('.memory-page [role=alert]')?.textContent.includes('memory read unavailable') && document.querySelectorAll('.memory-document').length===0"));memoryFails=false;
  await nav('MCP');await wait("!!document.querySelector('.card .disclose')");await js("document.querySelector('.card .disclose').click()");
+ check('MCP connection check shows measured duration',await wait("document.querySelector('.tools')?.textContent.includes('本次检测耗时 17 ms')"));
  check('OAuth settings render status and credentials form',await wait("document.querySelector('.oauth')?.textContent.includes('需要登录')"));
  await js("(()=>{const input=document.querySelector('.oauth input[type=password]');input.value='client-secret';input.dispatchEvent(new Event('input',{bubbles:true}));})()");
  await click('登录');await wait("document.querySelector('.oauth').textContent.includes('等待浏览器授权')");

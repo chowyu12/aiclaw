@@ -30,6 +30,15 @@ import (
 // **不支持旧的 HTTP+SSE 传输**（2024-11-05 那版，GET /sse 拿事件、POST 到另一个
 // 端点发消息）。那是另一套握手，半吊子实现出来只会在连不上时给出误导的报错；
 // 遇到只支持旧版的服务端，这里会在握手阶段明确失败。
+type httpStatusError struct {
+	code   int
+	detail string
+}
+
+func (e *httpStatusError) Error() string {
+	return i18n.D("MCP server 返回 HTTP {status}：{detail}", "status", e.code, "detail", e.detail)
+}
+
 type httpTransport struct {
 	onToolsChanged func()
 	watchCancel    context.CancelFunc
@@ -202,7 +211,7 @@ func (t *httpTransport) post(ctx context.Context, message rpcRequest, wantID *in
 		snippet, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
 		detail := strings.TrimSpace(string(snippet))
 		t.setStatus(fmt.Sprintf("HTTP %d %s", response.StatusCode, detail))
-		return rpcResponse{}, i18n.E("MCP server 返回 HTTP {status}：{detail}", "status", response.StatusCode, "detail", detail)
+		return rpcResponse{}, &httpStatusError{code: response.StatusCode, detail: detail}
 	}
 	if wantID == nil {
 		return rpcResponse{}, nil

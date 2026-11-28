@@ -66,7 +66,8 @@ async function jumpLine(): Promise<void> {
 function onFindKey(event:KeyboardEvent):void {
   if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="f"&&!event.altKey){event.preventDefault();void openFind();}
 }
-watch([findOpen,findQuery,mode,layout,()=>props.preview.request,()=>props.preview.content,()=>props.preview.loading],async()=>{await nextTick();highlightFind();if(findOpen.value&&findQuery.value)moveFind(0);},{flush:"post"});
+watch([findOpen,findQuery,mode,layout,()=>props.preview.request,()=>props.preview.content,()=>props.preview.loading,()=>props.preview.error],async()=>{await nextTick();highlightFind();},{flush:"post"});
+watch([findOpen, findQuery], async () => { await nextTick(); if (findOpen.value && findQuery.value) moveFind(0); }, { flush: "post" });
 watch(findQuery,()=>{findIndex.value=0;});
 watch(()=>props.preview.request,()=>{findIndex.value=0;activeLine.value=0;lineError.value="";});
 let restoring = false, restoreTicket = 0;
@@ -81,7 +82,7 @@ function saveReading(scroll = false): void {
   if (scroll && body.value) positions[positionKey()] = { top: body.value.scrollTop, left: body.value.scrollLeft };
   actions.savePreviewReading(props.preview.request, { mode: mode.value, layout: layout.value, positions });
 }
-watch(() => [props.preview.request, props.preview.loading], async () => {
+watch(() => [props.preview.request, props.preview.loading, props.preview.version, props.preview.error], async () => {
   const ticket = ++restoreTicket;
   restoring = true;
   const saved = props.preview.reading;
@@ -132,7 +133,8 @@ async function copy(): Promise<void> {
   catch { actions.showError(t("复制失败")); }
 }
 onMounted(async () => { window.addEventListener("keydown",onFindKey);await nextTick(); closeButton.value?.focus(); });
-onUnmounted(() => { window.removeEventListener("keydown",onFindKey);closeFind();previousFocus?.focus(); });
+const previewCheck = window.setInterval(() => { void actions.checkFilePreviews(); }, 1500);
+onUnmounted(() => { window.clearInterval(previewCheck);window.removeEventListener("keydown",onFindKey);closeFind();previousFocus?.focus(); });
 </script>
 <template>
   <aside class="file-preview" :aria-label="t('文件预览')" @keydown="onKey">

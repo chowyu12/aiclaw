@@ -170,7 +170,7 @@ const api = {
     revealWorkspace: (path: string) => ipcRenderer.invoke(IPC.workspaceReveal, path),
     previewLayout: (open: boolean) => ipcRenderer.invoke(IPC.filePreviewLayout, open),
     existingOutputs: (sessionId: string, paths: string[]): Promise<string[]> => ipcRenderer.invoke(IPC.fileExistingOutputs, sessionId, paths),
-    preview: (path: string, sessionId: string) => ipcRenderer.invoke(IPC.filePreview, { path, sessionId }),
+    preview: (path: string, sessionId: string, version?: string) => ipcRenderer.invoke(IPC.filePreview, { path, sessionId, version }),
     open: (path: string, sessionId?: string) => ipcRenderer.invoke(IPC.fileOpen, path, sessionId),
     /** 读一个图片/音频文件用于内联显示。校验同样在主进程。 */
     media: (path: string, sessionId?: string) => ipcRenderer.invoke(IPC.fileMedia, path, sessionId),

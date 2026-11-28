@@ -23,6 +23,7 @@ import {
   type ApprovalPolicy,
   type Item,
   type MCPProbeResult,
+  type MCPStartup,
   type ChannelAuthorizeParams,
   type ChannelBindingKey,
   type ChannelBindingView,
@@ -104,6 +105,7 @@ export interface SessionInfo {
   sessionId: string;
   tools: string[];
   mcpStatus: Record<string, string>;
+  mcpStartup?: MCPStartup[];
   /** 会话工作区。空串表示没设置。 */
   workspace: string;
   /** 这个会话当前用的模型。恢复旧会话时可能与配置页的默认值不同。 */
@@ -441,6 +443,7 @@ export class SessionManager extends EventEmitter {
       sessionId: result.sessionId,
       tools: result.tools,
       mcpStatus: result.mcpStatus ?? {},
+      mcpStartup: result.mcpStartup,
       workspace: result.workspace ?? "",
       model: params.model.model,
       reasoningEffort: result.reasoningEffort ?? params.model.reasoningEffort,
@@ -540,6 +543,7 @@ export class SessionManager extends EventEmitter {
       turnId: result.turnId,
       tools: result.tools,
       mcpStatus: result.mcpStatus ?? {},
+      mcpStartup: result.mcpStartup,
       workspace: result.workspace ?? "",
       model: result.model ?? this.store.readConfig().model,
       reasoningEffort: result.reasoningEffort ?? "",

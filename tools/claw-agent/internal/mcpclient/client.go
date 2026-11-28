@@ -115,6 +115,33 @@ type rpcResponse struct {
 	Error  *rpcError       `json:"error"`
 }
 
+type startupError struct {
+	phase string
+	err   error
+}
+
+func (e *startupError) Error() string { return e.err.Error() }
+func (e *startupError) Unwrap() error { return e.err }
+
+// StartupFailure describes the failure without copying endpoint URLs, headers or server output.
+func StartupFailure(err error) string {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return i18n.D("MCP 启动超时")
+	}
+	if errors.Is(err, context.Canceled) {
+		return i18n.D("MCP 启动已取消")
+	}
+	var status *httpStatusError
+	if errors.As(err, &status) {
+		return fmt.Sprintf("HTTP %d", status.code)
+	}
+	var startup *startupError
+	if errors.As(err, &startup) {
+		return startup.phase
+	}
+	return i18n.D("无法连接 MCP 服务")
+}
+
 // Start 建立连接并完成握手，返回可用的工具清单。
 func Start(ctx context.Context, config Config) (*Client, error) {
 	timeout := config.StartupTimeout
@@ -146,7 +173,7 @@ func Start(ctx context.Context, config Config) (*Client, error) {
 		return nil, i18n.E("不认识的 MCP 传输方式：{kind}", "kind", kind)
 	}
 	if err != nil {
-		return nil, err
+		return nil, &startupError{phase: i18n.D("无法连接 MCP 服务"), err: err}
 	}
 
 	client.transport = conn
@@ -161,7 +188,7 @@ func Start(ctx context.Context, config Config) (*Client, error) {
 	})
 	if err != nil {
 		client.Close()
-		return nil, fmt.Errorf("%s%w%s", i18n.D("MCP 握手失败："), err, conn.Diagnostics())
+		return nil, &startupError{phase: i18n.D("MCP 握手失败"), err: fmt.Errorf("%s%w%s", i18n.D("MCP 握手失败："), err, conn.Diagnostics())}
 	}
 	conn.Notify("notifications/initialized", nil)
 
@@ -169,7 +196,7 @@ func Start(ctx context.Context, config Config) (*Client, error) {
 	list, err := client.listTools(startCtx)
 	if err != nil {
 		client.Close()
-		return nil, fmt.Errorf("%s%w", i18n.D("拉取工具清单失败："), err)
+		return nil, &startupError{phase: i18n.D("拉取 MCP 工具清单失败"), err: fmt.Errorf("%s%w", i18n.D("拉取工具清单失败："), err)}
 	}
 	client.tools, client.version, client.applied = list, 1, generation
 	var capabilities struct {

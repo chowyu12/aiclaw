@@ -464,3 +464,34 @@ func TestPoolVerifiedStdioCatalogDefersUnusedSessions(t *testing.T) {
 		t.Fatal("HTTP service used stdio cache")
 	}
 }
+
+func TestMCPStartupDiagnosesRealAttemptsAndCachedCatalogs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "starts.log")
+	stdio := protocol.MCPServerConfig{Command: os.Args[0], Args: []string{"-test.run=^TestMCPStdioFixture$"}, Env: map[string]string{"AICLAW_MCP_STDIO_FIXTURE": path}}
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "private-response-body", http.StatusForbidden)
+	}))
+	defer httpServer.Close()
+	first := newTestSession(t, &fakeModel{}, protocol.ApprovalAlways)
+	defer first.Close()
+	first.mountAllMCP(t.Context(), map[string]protocol.MCPServerConfig{"local": stdio, "remote": {URL: httpServer.URL + "?key=private-token"}})
+	byName := map[string]protocol.MCPStartup{}
+	for _, result := range first.MCPStartup() {
+		byName[result.Name] = result
+	}
+	if local := byName["local"]; local.State != "ready" || local.DurationMS == nil {
+		t.Fatalf("missing stdio timing: %+v", local)
+	}
+	if remote := byName["remote"]; remote.State != "failed" || remote.DurationMS == nil || remote.Reason != "HTTP 403" {
+		t.Fatalf("invalid HTTP result: %+v", remote)
+	}
+	if strings.Contains(first.MCPStatus()["remote"], "private-") {
+		t.Fatal("failed status leaked raw server details")
+	}
+	second := newTestSession(t, &fakeModel{}, protocol.ApprovalAlways)
+	defer second.Close()
+	second.mountAllMCP(t.Context(), map[string]protocol.MCPServerConfig{"local": stdio})
+	if cached := second.MCPStartup()[0]; cached.State != "cached" || cached.DurationMS != nil {
+		t.Fatalf("cache hit reported a startup: %+v", cached)
+	}
+}

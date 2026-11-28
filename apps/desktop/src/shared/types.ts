@@ -7,6 +7,8 @@
  * 运行时常量在 ipc.cts 里，那个只给主进程和 preload 用。
  */
 
+import type { MCPStartup } from "@aiclaw/agent-client";
+
 export interface WorkspaceFileEntry { name: string; path: string; absolutePath: string; directory: boolean; }
 export interface WorkspaceFilesView { root: string; entries: WorkspaceFileEntry[]; truncated: boolean; }
 
@@ -46,6 +48,7 @@ export interface SessionStartView {
   sessionId: string;
   tools: string[];
   mcpStatus: Record<string, string>;
+  mcpStartup?: MCPStartup[];
   /** 会话工作区。空串表示没设置——相对路径按主目录解析，写入都要确认。 */
   workspace: string;
   /** 会话当前用的模型。恢复旧会话时可能与配置页的默认值不同。 */
@@ -242,6 +245,7 @@ export interface EmailTestView {
 export interface McpProbeView {
   ok: boolean;
   error?: string;
+  durationMs?: number;
   tools?: { name: string; description?: string; readOnly?: boolean }[];
 }
 

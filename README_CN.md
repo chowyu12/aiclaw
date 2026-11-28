@@ -140,14 +140,17 @@ aiclaw exec resume SESSION_ID --json "继续总结"
 aiclaw exec resume --last --json "继续总结"
 aiclaw sessions list
 aiclaw sessions search "项目名称"
+aiclaw sessions search "项目名称" --open
+aiclaw sessions open aiclaw://sessions/SESSION_ID
 aiclaw sessions show SESSION_ID
 aiclaw config show
 ```
 
 `--cwd` 可指定新会话的工作目录，或配合 `--last` 查找该目录的最近会话。按 ID 恢复会使用已保存的工作目录和模型。
-`sessions search` 支持按标题、目录或 ID 搜索，`sessions show` 可只读查看已保存的消息。
+`sessions search` 支持按标题、目录或 ID 搜索，带 `--open` 可直接选择结果。`sessions open` 接受会话链接或 ID，可查看归档会话和子 Agent，并列出关联会话链接。交互会话中用 `/open ID_OR_LINK` 查看历史。
 `exec resume` 接收提示词，也可用 `-` 从标准输入读取。CLI 的配置和会话保存在
 `~/.aiclaw/cli`，可用 `--data-home` 建立不同的 CLI 配置目录。单次运行也可用 `--app-db ~/.aiclaw/aiclaw.db` 复用桌面版的供应商，或用 `AICLAW_BASE_URL`、`AICLAW_MODEL` 和 `AICLAW_LLM_KEY` 直接指定模型。
+CLI 的 `config.json` 可添加 `mcpServers`，例如 `{"mcpServers":{"local":{"url":"http://localhost:3000/mcp"}}}`。HTTP MCP 启动失败会提示在标准错误流。
 `exec --json` 的标准输出每行一个 JSON 事件。供应商返回明确的费用上限范围时，错误事件携带 `error_code`。
 交互模式支持工具审批，`exec` 遇到需要用户审批或回答时会以错误退出。按 Ctrl+C 可中断当前轮次。
 

@@ -66,6 +66,34 @@ func TestHostApprovalDenialRemainsAValidResponse(t *testing.T) {
 	}
 }
 
+func TestMalformedApprovalIsAHostFailure(t *testing.T) {
+	for _, body := range []string{`{}`, `null`, `{"approved":"yes"}`} {
+		t.Run(body, func(t *testing.T) {
+			writer := &receiptWriter{}
+			s := &Server{out: writer, outboundPending: map[int64]chan frame{}}
+			finished := make(chan error, 1)
+			go func() {
+				_, err := (&emitter{server: s}).RequestApproval(t.Context(), protocol.ApprovalRequestParams{})
+				finished <- err
+			}()
+			var id json.RawMessage
+			eventually(t, "host approval", func() bool {
+				writer.mu.Lock()
+				defer writer.mu.Unlock()
+				if len(writer.frames) == 0 {
+					return false
+				}
+				id = writer.frames[0].ID
+				return true
+			})
+			s.resolveOutbound(frame{ID: id, Result: json.RawMessage(body)})
+			if err := <-finished; err == nil {
+				t.Fatal("malformed response became an ordinary denial")
+			}
+		})
+	}
+}
+
 func TestHostRequestCancellationRemovesPendingResponse(t *testing.T) {
 	writer := &receiptWriter{}
 	s := &Server{out: writer, outboundPending: map[int64]chan frame{}}

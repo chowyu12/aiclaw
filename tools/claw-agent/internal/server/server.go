@@ -580,6 +580,7 @@ func (s *Server) handleSessionStart(ctx context.Context, f frame) {
 		SessionID:       id,
 		Tools:           session.Tools(),
 		MCPStatus:       session.MCPStatus(),
+		MCPStartup:      session.MCPStartup(),
 		Model:           session.Model().Model,
 		ProviderID:      session.Model().ProviderID,
 		ReasoningEffort: session.Model().ReasoningEffort,
@@ -647,7 +648,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 			s.lifecycleMu.Unlock()
 			s.writeResult(f.ID, protocol.SessionStartResult{
 				SessionID: existing.ID, TurnID: activeTurn, Tools: existing.Tools(),
-				MCPStatus: existing.MCPStatus(), Model: existing.Model().Model,
+				MCPStatus: existing.MCPStatus(), MCPStartup: existing.MCPStartup(), Model: existing.Model().Model,
 				ProviderID: existing.Model().ProviderID, ReasoningEffort: existing.Model().ReasoningEffort,
 				Skills: existing.Skills(), FoldedTools: existing.FoldedTools(), Workspace: existing.Workspace(),
 			})
@@ -696,7 +697,7 @@ func (s *Server) handleSessionResume(ctx context.Context, f frame) {
 	s.sessMu.Unlock()
 	s.writeResult(f.ID, protocol.SessionStartResult{
 		SessionID: session.ID, Tools: session.Tools(),
-		MCPStatus: session.MCPStatus(), Model: session.Model().Model,
+		MCPStatus: session.MCPStatus(), MCPStartup: session.MCPStartup(), Model: session.Model().Model,
 		ProviderID: session.Model().ProviderID, ReasoningEffort: session.Model().ReasoningEffort,
 		Skills: session.Skills(), FoldedTools: session.FoldedTools(), Workspace: session.Workspace(),
 	})
@@ -827,6 +828,7 @@ func (s *Server) handleMCPProbe(ctx context.Context, f frame) {
 			return s.oauth.Token(ctx, params.Server.URL, rejected)
 		}
 	}
+	started := time.Now()
 	client, err := mcpclient.Start(probeCtx, mcpclient.Config{
 		AccessToken:    token,
 		Command:        params.Server.Command,
@@ -836,8 +838,9 @@ func (s *Server) handleMCPProbe(ctx context.Context, f frame) {
 		Headers:        params.Server.Headers,
 		StartupTimeout: mcpProbeTimeout,
 	})
+	ms := time.Since(started).Milliseconds()
 	if err != nil {
-		s.writeResult(f.ID, protocol.MCPProbeResult{OK: false, Error: err.Error()})
+		s.writeResult(f.ID, protocol.MCPProbeResult{OK: false, Error: mcpclient.StartupFailure(err), DurationMS: &ms})
 		return
 	}
 	defer client.Close()
@@ -850,7 +853,7 @@ func (s *Server) handleMCPProbe(ctx context.Context, f frame) {
 			ReadOnly:    tool.ReadOnly(),
 		})
 	}
-	s.writeResult(f.ID, protocol.MCPProbeResult{OK: true, Tools: tools})
+	s.writeResult(f.ID, protocol.MCPProbeResult{OK: true, Tools: tools, DurationMS: &ms})
 }
 
 func (s *Server) session(id string) *agent.Session {
@@ -1310,11 +1313,17 @@ func (e *emitter) RequestApproval(
 		}
 		return protocol.ApprovalResponse{}, err
 	}
-	var response protocol.ApprovalResponse
+	var response struct {
+		Approved *bool                  `json:"approved"`
+		Scope    protocol.ApprovalScope `json:"scope"`
+	}
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return protocol.ApprovalResponse{}, fmt.Errorf("%s%w", i18n.D("审批回应格式不对："), err)
 	}
-	return response, nil
+	if response.Approved == nil {
+		return protocol.ApprovalResponse{}, i18n.E("审批回应缺少决定")
+	}
+	return protocol.ApprovalResponse{Approved: *response.Approved, Scope: response.Scope}, nil
 }
 
 // RequestComputer 请宿主代做一次屏幕操作。

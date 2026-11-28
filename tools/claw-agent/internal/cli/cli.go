@@ -29,7 +29,8 @@ Usage:
   aiclaw resume <SESSION_ID>
   aiclaw resume --last          Resume the most recent CLI session in this directory
   aiclaw sessions list          List CLI session IDs
-  aiclaw sessions search QUERY  Find sessions by title, directory, or ID
+  aiclaw sessions search QUERY [--open]  Find sessions and optionally open a match
+  aiclaw sessions open ID_OR_LINK       Read a linked session, including archived sessions
   aiclaw sessions show ID       Read a saved transcript without resuming it
   aiclaw config show            Show the CLI paths and saved model selection
   aiclaw providers list
@@ -45,7 +46,7 @@ Options:
   --app-db FILE                 Model database (default ~/.aiclaw/cli/aiclaw.db)
   --config FILE                 Config JSON (default ~/.aiclaw/cli/config.json)
 
-Interactive commands: /exit, /quit. Ctrl+C interrupts the active turn.
+Interactive commands: /open ID_OR_LINK, /exit, /quit. Ctrl+C interrupts the active turn.
 Standalone model selection: AICLAW_BASE_URL, AICLAW_MODEL and AICLAW_LLM_KEY.
 `
 
@@ -75,6 +76,10 @@ func Run(ctx context.Context, args []string, version string, in io.Reader, out, 
 	var sessionID string
 	if opts.resume && !opts.last {
 		sessionID, opts.args = opts.args[0], opts.args[1:]
+		sessionID, err = sessionTarget(sessionID)
+		if err != nil {
+			return err
+		}
 	}
 	prompt := strings.Join(opts.args, " ")
 	if opts.mode == "exec" {
@@ -105,10 +110,17 @@ func Run(ctx context.Context, args []string, version string, in io.Reader, out, 
 		return err
 	}
 	defer c.close()
+	if opts.mode == "sessions" {
+		return runSessions(ctx, c, opts, in, out, stderr, interrupts)
+	}
 	if opts.mode != "chat" && opts.mode != "exec" && opts.mode != "resume" {
 		return runSettings(ctx, c, opts, apiKey, out)
 	}
 
+	servers, err := cliMCPServers(opts.config)
+	if err != nil {
+		return err
+	}
 	var session protocol.SessionStartResult
 	if opts.resume {
 		if opts.last {
@@ -118,7 +130,7 @@ func Run(ctx context.Context, args []string, version string, in io.Reader, out, 
 			return err
 		}
 		err = c.call(ctx, protocol.MethodSessionResume, protocol.SessionResumeParams{
-			SessionID: sessionID, Refresh: &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalAlways},
+			SessionID: sessionID, Refresh: &protocol.SessionRefresh{ApprovalPolicy: protocol.ApprovalAlways, MCPServers: servers},
 		}, &session)
 		if err != nil {
 			return err
@@ -130,10 +142,15 @@ func Run(ctx context.Context, args []string, version string, in io.Reader, out, 
 		}
 		err = c.call(ctx, protocol.MethodSessionStart, protocol.SessionStartParams{
 			Model: model, Workdir: opts.cwd, ProtectedPaths: protected,
-			ApprovalPolicy: protocol.ApprovalAlways,
+			ApprovalPolicy: protocol.ApprovalAlways, MCPServers: servers,
 		}, &session)
 		if err != nil {
 			return err
+		}
+	}
+	for _, startup := range session.MCPStartup {
+		if startup.Transport == "http" && startup.State == "failed" {
+			fmt.Fprintf(stderr, "MCP %s: startup failed (%s)\n", terminalText(startup.Name), terminalText(startup.Reason))
 		}
 	}
 	if opts.mode == "exec" {
@@ -173,6 +190,12 @@ func Run(ctx context.Context, args []string, version string, in io.Reader, out, 
 		command := strings.TrimSpace(prompt)
 		if command == "/exit" || command == "/quit" {
 			return nil
+		}
+		if target, ok := strings.CutPrefix(command, "/open "); ok {
+			prompt = ""
+			if err := openSessionHistory(ctx, c, strings.TrimSpace(target), out); err != nil {
+				fmt.Fprintln(stderr, terminalText(err.Error()))
+			}
 		}
 	}
 }

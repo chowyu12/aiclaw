@@ -896,9 +896,18 @@ type MCPProbeParams struct {
 // 失败不走 JSON-RPC 错误：这是「那个 server 连不上」，不是「这次调用坏了」，
 // 宿主要把原因原样显示在那一条 server 上，而不是弹一个全局错误条。
 type MCPProbeResult struct {
-	OK    bool          `json:"ok"`
-	Error string        `json:"error,omitempty"`
-	Tools []MCPToolInfo `json:"tools,omitempty"`
+	OK         bool          `json:"ok"`
+	Error      string        `json:"error,omitempty"`
+	Tools      []MCPToolInfo `json:"tools,omitempty"`
+	DurationMS *int64        `json:"durationMs,omitempty"`
+}
+
+type MCPStartup struct {
+	Name       string `json:"name"`
+	Transport  string `json:"transport"`
+	State      string `json:"state"`
+	DurationMS *int64 `json:"durationMs,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 }
 
 // MCPToolInfo 是试连时列出的一个工具。
@@ -915,7 +924,8 @@ type SessionStartResult struct {
 	SessionID       string   `json:"sessionId"`
 	Tools           []string `json:"tools"`
 	/** MCP server 挂载结果，失败的在这里带原因，不让整个会话起不来。 */
-	MCPStatus map[string]string `json:"mcpStatus,omitempty"`
+	MCPStatus  map[string]string `json:"mcpStatus,omitempty"`
+	MCPStartup []MCPStartup      `json:"mcpStartup,omitempty"`
 	/**
 	 * 会话当前用的模型。恢复旧会话时它可能与宿主配置的默认值不同——
 	 * 会话记着自己的模型，顶部要显示的是这个而不是默认值。
@@ -1069,8 +1079,9 @@ type Item struct {
 	ToolName string `json:"toolName,omitempty"`
 	ToolArgs string `json:"toolArgs,omitempty"`
 	/** 工具结果；失败时是错误文案。 */
-	ToolResult string `json:"toolResult,omitempty"`
-	ToolFailed bool   `json:"toolFailed,omitempty"`
+	ToolResult      string          `json:"toolResult,omitempty"`
+	ToolFailed      bool            `json:"toolFailed,omitempty"`
+	ApprovalOutcome ApprovalOutcome `json:"approvalOutcome,omitempty"`
 	/** 给人看的一句话摘要，宿主直接显示，不用自己解析参数。 */
 	Summary string `json:"summary,omitempty"`
 	/**
@@ -1201,6 +1212,14 @@ type ApprovalResponse struct {
 	/** 作用范围。空或 once 表示只这一次。 */
 	Scope ApprovalScope `json:"scope,omitempty"`
 }
+
+type ApprovalOutcome string
+
+const (
+	ApprovalDeclined ApprovalOutcome = "declined"
+	ApprovalCanceled ApprovalOutcome = "canceled"
+	ApprovalFailed   ApprovalOutcome = "failed"
+)
 
 // RawMessage 便于在不解码的情况下转发。
 type RawMessage = json.RawMessage

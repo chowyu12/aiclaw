@@ -948,8 +948,13 @@ func (s *Session) executeOne(
 		}
 		output += toolErrorResult(err.Error())
 	}
-	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: s.historyOutput(ctx, output), Artifacts: item.Artifacts, OutputContent: item.Content, Sources: item.Sources, At: time.Now().UnixMilli(), Sampling: &protocol.Item{ID: item.ID, StartedAt: item.StartedAt, DurationMS: item.DurationMS}}
+	saved := &protocol.Item{ID: item.ID, StartedAt: item.StartedAt, DurationMS: item.DurationMS, ApprovalOutcome: item.ApprovalOutcome}
+	if item.ApprovalOutcome != "" {
+		saved.ToolResult = s.historyOutput(ctx, item.ToolResult)
+	}
+	result := llm.Message{ID: newID("result"), Role: llm.RoleTool, ToolCallID: call.ID, Content: s.historyOutput(ctx, output), Artifacts: item.Artifacts, OutputContent: item.Content, Sources: item.Sources, At: time.Now().UnixMilli(), Sampling: saved}
 	s.journalMessage(result)
+	emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: turnID, Item: item})
 	return result
 }
 
@@ -989,6 +994,10 @@ func (s *Session) executeRecorded(ctx context.Context, call llm.ToolCall, env *t
 	item.ToolResult = output
 	if err != nil {
 		item.ToolFailed = true
+		var approval *tools.ApprovalError
+		if errors.As(err, &approval) {
+			item.ApprovalOutcome = approval.Status
+		}
 		if output != "" {
 			item.ToolResult += "\n"
 		}
@@ -998,8 +1007,6 @@ func (s *Session) executeRecorded(ctx context.Context, call llm.ToolCall, env *t
 	s.recordToolUsage(call.Name, []byte(call.Arguments), started, err != nil, source)
 	if source == "exec" && scope != nil {
 		s.recordCodeTrace(scope.parentCallID, item)
-	}
-	if scope != nil {
 		scope.emitter.Notify(protocol.NotifyItemCompleted, protocol.ItemNotification{SessionID: s.ID, TurnID: scope.turnID, Item: item})
 	}
 	for _, path := range item.Artifacts {

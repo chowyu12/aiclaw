@@ -164,6 +164,15 @@ func (e *Env) requestApprovalScoped(
 	return err
 }
 
+// ApprovalError identifies an operation stopped while waiting for approval.
+type ApprovalError struct {
+	Status protocol.ApprovalOutcome
+	Err    error
+}
+
+func (e *ApprovalError) Error() string { return e.Err.Error() }
+func (e *ApprovalError) Unwrap() error { return e.Err }
+
 // authorize reports whether a human explicitly approved this operation, for command sandboxing.
 func (e *Env) authorize(ctx context.Context, effect Effect, kind protocol.ApprovalKind, title, detail, reason, scopePath string) (bool, error) {
 	if !e.needsApproval(effect) {
@@ -198,11 +207,15 @@ func (e *Env) authorize(ctx context.Context, effect Effect, kind protocol.Approv
 		return false, err
 	}
 	if e.Approve == nil {
-		return false, i18n.E("{title} 需要确认，但当前没有可用的审批通道", "title", title)
+		return false, &ApprovalError{Status: protocol.ApprovalFailed, Err: i18n.E("{title} 需要确认，但当前没有可用的审批通道", "title", title)}
 	}
 	response, err := e.Approve(ctx, request)
 	if err != nil {
-		return false, fmt.Errorf("%s: %w", i18n.D("请求确认失败"), err)
+		status := protocol.ApprovalFailed
+		if errors.Is(err, context.Canceled) {
+			status = protocol.ApprovalCanceled
+		}
+		return false, &ApprovalError{Status: status, Err: fmt.Errorf("%s: %w", i18n.D("请求确认失败"), err)}
 	}
 	if response.Approved && response.Scope == protocol.ApprovalScopeSession &&
 		scopePath != "" && e.Grant != nil {
@@ -210,7 +223,7 @@ func (e *Env) authorize(ctx context.Context, effect Effect, kind protocol.Approv
 	}
 	approved := response.Approved
 	if !approved {
-		return false, i18n.E("用户拒绝了这次操作")
+		return false, &ApprovalError{Status: protocol.ApprovalDeclined, Err: i18n.E("用户拒绝了这次操作")}
 	}
 	return true, nil
 }

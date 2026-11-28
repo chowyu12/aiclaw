@@ -419,6 +419,15 @@ export interface MCPProbeResult {
   ok: boolean;
   error?: string;
   tools?: MCPToolInfo[];
+  durationMs?: number;
+}
+
+export interface MCPStartup {
+  name: string;
+  transport: "stdio" | "http";
+  state: "ready" | "cached" | "reused" | "failed";
+  durationMs?: number;
+  reason?: string;
 }
 
 export interface MCPToolInfo {
@@ -438,6 +447,7 @@ export interface SessionStartResult {
   sessionId: string;
   tools: string[];
   mcpStatus?: Record<string, string>;
+  mcpStartup?: MCPStartup[];
   /**
    * 会话当前用的模型。恢复旧会话时它可能与宿主配置的默认值不同——
    * 会话记着自己的模型，顶部要显示的是这个。
@@ -612,6 +622,7 @@ export interface Item {
   toolArgs?: string;
   toolResult?: string;
   toolFailed?: boolean;
+  approvalOutcome?: "declined" | "canceled" | "failed";
   summary?: string;
 
   /** 这一步在轮次内的序号，从 1 开始。 */

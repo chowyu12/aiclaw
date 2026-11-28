@@ -552,10 +552,20 @@ function registerIpc(): void {
     if (!result.canceled && result.filePath) await writeFile(result.filePath, bytes);
   });
   ipcMain.handle(IPC.attachmentStage, (_event, input: unknown) => sessions.attachments.stage(input));
-  ipcMain.handle(IPC.filePreview, async (_event, input: { path: string; sessionId: string }) => {
-    const session = (await sessions.listSessions()).find(session => session.id === input.sessionId && !session.archivedAt);
+  let previewSessions: ReturnType<typeof sessions.listSessions> | undefined;
+  ipcMain.handle(IPC.filePreview, async (_event, input: { path: string; sessionId: string; version?: string }) => {
+    // Several open previews may check in the same tick. Share the in-flight lookup.
+    previewSessions ??= sessions.listSessions().finally(() => { previewSessions = undefined; });
+    const session = (await previewSessions).find(session => session.id === input.sessionId && !session.archivedAt);
     if (!session) throw new Error(tr("找不到预览文件所属的会话。"));
-    return readTextPreview(input.path, { base: session.workdir, protectedPaths: [store.dataDir] });
+    try {
+      return readTextPreview(input.path, { base: session.workdir, protectedPaths: [store.dataDir] }, input.version);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") throw new Error(tr("找不到预览文件：{path}", { path: input.path }));
+      if (code === "EACCES" || code === "EPERM") throw new Error(tr("无法读取预览文件，请检查权限：{path}", { path: input.path }));
+      throw error;
+    }
   });
   async function fileWorkspace(sessionId?: string): Promise<string> {
     if (!sessionId) return sessions.currentWorkspace();

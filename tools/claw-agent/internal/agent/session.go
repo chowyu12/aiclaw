@@ -674,6 +674,8 @@ func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.M
 		key    string
 		err    error
 		took   time.Duration
+		cached bool
+		reused bool
 	}
 	results := make([]dialed, len(names))
 	var wg sync.WaitGroup
@@ -683,11 +685,11 @@ func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.M
 			defer wg.Done()
 			started := time.Now()
 			if deferred := mcpShared.deferred(name, servers[name], s.mcpAuth); deferred != nil {
-				results[index] = dialed{client: deferred}
+				results[index] = dialed{client: deferred, cached: true}
 				return
 			}
-			client, key, err := mcpShared.acquire(ctx, name, servers[name], s.mcpAuth)
-			results[index] = dialed{client: client, key: key, err: err, took: time.Since(started)}
+			client, key, reused, err := mcpShared.acquireWithReuse(ctx, name, servers[name], s.mcpAuth)
+			results[index] = dialed{client: client, key: key, err: err, took: time.Since(started), reused: reused}
 		}(index, name)
 	}
 	wg.Wait()
@@ -695,9 +697,25 @@ func (s *Session) mountAllMCP(ctx context.Context, servers map[string]protocol.M
 	s.mcpDials = s.mcpDials[:0]
 	for index, name := range names {
 		result := results[index]
-		s.mcpDials = append(s.mcpDials, MCPDial{Name: name, Took: result.took, Failed: result.err != nil})
+		startup := protocol.MCPStartup{Name: name, Transport: "stdio", State: "ready"}
+		if servers[name].URL != "" {
+			startup.Transport = "http"
+		}
+		switch {
+		case result.cached:
+			startup.State = "cached"
+		case result.reused:
+			startup.State = "reused"
+		default:
+			ms := result.took.Milliseconds()
+			startup.DurationMS = &ms
+		}
 		if result.err != nil {
-			s.mcpStatus[name] = i18n.D("挂载失败：{err}", "err", result.err)
+			startup.State, startup.Reason = "failed", mcpclient.StartupFailure(result.err)
+		}
+		s.mcpDials = append(s.mcpDials, MCPDial{Name: name, Took: result.took, Failed: result.err != nil, Startup: startup})
+		if result.err != nil {
+			s.mcpStatus[name] = i18n.D("挂载失败：{err}", "err", startup.Reason)
 			continue
 		}
 		// 慢的那个要在界面上说出来。并发之后总耗时等于最慢的那一个，用户看到
@@ -719,9 +737,18 @@ const slowDial = 2 * time.Second
 
 // MCPDial 是一次挂载里某个 server 花了多久。宿主把它记进日志。
 type MCPDial struct {
-	Name   string
-	Took   time.Duration
-	Failed bool
+	Name    string
+	Took    time.Duration
+	Failed  bool
+	Startup protocol.MCPStartup
+}
+
+func (s *Session) MCPStartup() []protocol.MCPStartup {
+	result := make([]protocol.MCPStartup, 0, len(s.mcpDials))
+	for _, dial := range s.mcpDials {
+		result = append(result, dial.Startup)
+	}
+	return result
 }
 
 // MCPDials 返回这次挂载各个 server 的耗时，按耗时倒序。

@@ -165,6 +165,8 @@ export const chat: Record<string, string> = {
   "文件超过 512 KB，无法在应用内预览。": "File exceeds 512 KB and cannot be previewed in the app.",
   "这个文件不是 UTF-8 文本，无法预览。": "This file is not UTF-8 text and cannot be previewed.",
   "找不到预览文件所属的会话。": "The file's chat could not be found.",
+  "找不到预览文件：{path}": "Preview file not found: {path}",
+  "无法读取预览文件，请检查权限：{path}": "Check permissions for the preview file: {path}",
   "参考来源": "Search sources",
   "参考来源 · {n}": "Search sources · {n}",
   "关闭来源面板": "Close sources panel",
